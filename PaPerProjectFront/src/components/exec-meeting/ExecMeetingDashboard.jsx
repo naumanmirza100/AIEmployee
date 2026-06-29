@@ -22,12 +22,103 @@ import {
   Loader2, LayoutDashboard, CalendarClock, ListChecks, CalendarDays,
   FileText, Bell, Plus, Menu, Clock, AlertTriangle, CheckCircle2,
   RefreshCw, Trash2, MoreHorizontal, ChevronRight, Calendar as CalendarIcon,
+  Download, X, Sparkles,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import execMeetingService from '@/services/execMeetingService';
+
+// ── Markdown → HTML renderer (violet theme, matches this dashboard) ─────────
+function markdownToHtml(md) {
+  if (!md || typeof md !== 'string') return '';
+  const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = (s) => {
+    let out = escape(s);
+    out = out.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-white/10 text-violet-200 text-[0.85em] font-mono">$1</code>');
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-violet-200">$1</strong>');
+    out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em class="italic text-white/85">$2</em>');
+    return out;
+  };
+  const getIndent = (line) => {
+    const m = line.match(/^(\s*)(?:[-*•]|\d+\.)\s+/);
+    if (!m) return -1;
+    return Math.floor(m[1].length / 2);
+  };
+  const lines = md.replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let listDepth = -1;
+  const closeLists = (target) => { while (listDepth > target) { out.push('</ul>'); listDepth--; } };
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const t = line.trim();
+    if (t.startsWith('|') && t.endsWith('|')) {
+      closeLists(-1);
+      const rows = [];
+      let j = i;
+      while (j < lines.length && lines[j].trim().startsWith('|')) {
+        const cells = lines[j].trim().split('|').map((c) => c.trim()).filter(Boolean);
+        if (cells.length && cells.every((c) => /^[-:\s]+$/.test(c))) { j++; continue; }
+        rows.push(cells);
+        j++;
+      }
+      i = j;
+      if (rows.length) {
+        out.push('<div class="my-4 overflow-x-auto rounded-lg border border-white/10">');
+        out.push('<table class="w-full text-sm"><thead><tr class="bg-violet-500/10">');
+        rows[0].forEach((c) => out.push(`<th class="px-3 py-2 text-left font-semibold text-violet-300">${inline(c)}</th>`));
+        out.push('</tr></thead><tbody>');
+        rows.slice(1).forEach((r, idx) => {
+          out.push(`<tr class="${idx % 2 === 0 ? 'bg-white/[0.02]' : ''} hover:bg-white/[0.04]">`);
+          r.forEach((c) => out.push(`<td class="px-3 py-2 border-t border-white/5 text-white/85">${inline(c)}</td>`));
+          out.push('</tr>');
+        });
+        out.push('</tbody></table></div>');
+      }
+      continue;
+    }
+    if (/^---+$/.test(t)) { closeLists(-1); out.push('<hr class="my-5 border-white/20" />'); i++; continue; }
+    if (/^#### /.test(t)) { closeLists(-1); out.push(`<h4 class="text-sm font-semibold mt-3 mb-1.5 text-violet-100/90">${inline(t.slice(5))}</h4>`); i++; continue; }
+    if (/^### /.test(t))  { closeLists(-1); out.push(`<h3 class="text-base font-bold mt-5 mb-2 text-violet-200">${inline(t.slice(4))}</h3>`); i++; continue; }
+    if (/^## /.test(t))   { closeLists(-1); out.push(`<h2 class="text-lg font-bold mt-6 mb-2.5 text-violet-300 border-b border-violet-500/30 pb-1.5">${inline(t.slice(3))}</h2>`); i++; continue; }
+    if (/^# /.test(t))    { closeLists(-1); out.push(`<h1 class="text-2xl font-bold mt-2 mb-4 text-white">${inline(t.slice(2))}</h1>`); i++; continue; }
+    const indent = getIndent(line);
+    if (indent >= 0) {
+      const content = t.replace(/^[\s]*(?:[-*•]|\d+\.)\s+/, '');
+      if (indent > listDepth) {
+        while (listDepth < indent) {
+          const isTop = listDepth === -1;
+          out.push(`<ul class="${isTop ? 'pl-4 my-2 space-y-1.5' : 'pl-5 mt-1 mb-1 space-y-1 border-l border-white/[0.06]'}">`);
+          listDepth++;
+        }
+      } else if (indent < listDepth) {
+        closeLists(indent);
+      }
+      const bullet = indent === 0 ? '•' : '›';
+      const color  = indent === 0 ? 'text-violet-400' : 'text-white/30';
+      const textColor = indent === 0 ? 'text-white/90' : 'text-white/70';
+      out.push(
+        `<li class="text-sm leading-relaxed ${textColor} flex gap-2 ${indent === 0 ? 'pt-1' : ''}">` +
+        `<span class="${color} shrink-0 mt-0.5">${bullet}</span><span>${inline(content)}</span></li>`,
+      );
+      i++; continue;
+    }
+    if (t === '' && listDepth >= 0) {
+      let k = i + 1;
+      while (k < lines.length && lines[k].trim() === '') k++;
+      if (k >= lines.length || getIndent(lines[k]) < 0) closeLists(-1);
+      i++; continue;
+    }
+    if (t === '') { i++; continue; }
+    closeLists(-1);
+    out.push(`<p class="text-sm leading-relaxed text-white/85 my-2.5">${inline(t)}</p>`);
+    i++;
+  }
+  closeLists(-1);
+  return out.join('\n');
+}
 
 const TAB_ITEMS = [
   { value: 'overview',      label: 'Overview',      icon: LayoutDashboard },
@@ -289,11 +380,34 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
-    title: '', description: '', scheduled_at: '', duration_minutes: '60',
-    location: '', meeting_type: 'internal',
+    title: '', description: '', scheduled_at: '', duration_minutes: '60', meeting_link: '',
   });
-
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Participant search state (local to dialog)
+  const [searchQ, setSearchQ] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [participants, setParticipants] = useState([]);
+
+  const searchUsers = async (q) => {
+    setSearchQ(q);
+    if (q.length < 2) { setSearchResults([]); return; }
+    setSearchLoading(true);
+    try {
+      const data = await execMeetingService.searchUsers(q);
+      const addedIds = participants.map(p => p.id);
+      setSearchResults((data.users || []).filter(u => !addedIds.includes(u.id)));
+    } catch { setSearchResults([]); }
+    finally { setSearchLoading(false); }
+  };
+
+  const addUser = (u) => {
+    setParticipants(prev => [...prev, u]);
+    setSearchQ(''); setSearchResults([]);
+  };
+
+  const removeUser = (id) => setParticipants(prev => prev.filter(p => p.id !== id));
 
   const handleSubmit = async () => {
     if (!form.title || !form.scheduled_at) {
@@ -302,19 +416,23 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
     }
     setLoading(true);
     try {
-      const payload = {
+      const res = await execMeetingService.createMeeting({
         title: form.title,
         description: form.description,
         scheduled_at: form.scheduled_at,
         duration_minutes: parseInt(form.duration_minutes) || 60,
-        location: form.location,
-        meeting_type: form.meeting_type,
-      };
-      await execMeetingService.createMeeting(payload);
+        meeting_link: form.meeting_link.trim() || '',
+      });
+      // Add participants if any
+      const meetingId = res.meeting?.id;
+      if (meetingId && participants.length > 0) {
+        await Promise.all(participants.map(p => execMeetingService.addParticipant(meetingId, p.id)));
+      }
       toast({ title: 'Meeting scheduled!' });
       onCreated();
       onClose();
-      setForm({ title: '', description: '', scheduled_at: '', duration_minutes: '60', location: '', meeting_type: 'internal' });
+      setForm({ title: '', description: '', scheduled_at: '', duration_minutes: '60', meeting_link: '' });
+      setParticipants([]); setSearchQ(''); setSearchResults([]);
     } catch (err) {
       toast({ title: 'Failed to schedule meeting', description: err.message, variant: 'destructive' });
     } finally {
@@ -336,42 +454,76 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
           </div>
           <div className="space-y-1">
             <Label>Description</Label>
-            <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Meeting agenda..." className="bg-white/5 border-white/10 text-white" rows={3} />
-          </div>
-          <div className="space-y-1">
-            <Label>Date & Time *</Label>
-            <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} />
-          </div>
-          <div className="space-y-1">
-            <Label>Duration (minutes)</Label>
-            <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
-              <SelectTrigger className="bg-white/5 border-white/10 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {['15','30','45','60','90','120','180'].map(d => (
-                  <SelectItem key={d} value={d}>{d} min</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Meeting agenda..." className="bg-white/5 border-white/10 text-white" rows={2} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Location</Label>
-              <Input value={form.location} onChange={e => set('location', e.target.value)} placeholder="Conference Room A" className="bg-white/5 border-white/10 text-white" />
+              <Label>Date & Time *</Label>
+              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} />
             </div>
             <div className="space-y-1">
-              <Label>Type</Label>
-              <Select value={form.meeting_type} onValueChange={v => set('meeting_type', v)}>
+              <Label>Duration</Label>
+              <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {['internal','external','one_on_one','team','client','board'].map(t => (
-                    <SelectItem key={t} value={t}>{t.replace('_', ' ')}</SelectItem>
+                  {['15','30','45','60','90','120','180'].map(d => (
+                    <SelectItem key={d} value={d}>{d} min</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>Video Call Link <span className="text-white/30 text-xs">(leave blank to auto-generate)</span></Label>
+            <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
+              placeholder="https://meet.google.com/xxx-yyyy-zzz" className="bg-white/5 border-white/10 text-white" />
+          </div>
+
+          {/* Participants */}
+          <div className="space-y-2">
+            <Label>Add Participants</Label>
+            {/* Added chips */}
+            {participants.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {participants.map(p => (
+                  <span key={p.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
+                    {p.full_name}
+                    <button onClick={() => removeUser(p.id)} className="text-violet-300/60 hover:text-white leading-none">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* Search input */}
+            <div className="relative">
+              <Input
+                value={searchQ}
+                onChange={e => searchUsers(e.target.value)}
+                placeholder="Type name or email to add…"
+                autoComplete="off"
+                className="bg-white/5 border-white/10 text-white text-sm"
+              />
+              {searchLoading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
+              {searchResults.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+                  {searchResults.map(u => (
+                    <button key={u.id} onClick={() => addUser(u)}
+                      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
+                      <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
+                        {u.full_name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div>
+                        <p className="text-white text-xs font-medium">{u.full_name}</p>
+                        <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {searchQ.length >= 2 && !searchLoading && searchResults.length === 0 && (
+                <p className="text-white/30 text-xs mt-1">No users found</p>
+              )}
             </div>
           </div>
         </div>
@@ -484,9 +636,33 @@ const ExecMeetingDashboard = () => {
   const [aiDocLoading, setAiDocLoading] = useState(false);
   const [aiDocType, setAiDocType] = useState('agenda');
   const [aiDocInput, setAiDocInput] = useState('');
+  const [aiDocMeetingId, setAiDocMeetingId] = useState('');
+  const [aiDocTopics, setAiDocTopics] = useState('');
+  const [aiDocSummary, setAiDocSummary] = useState('');
   const [savedDocs, setSavedDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
-  const [viewDoc, setViewDoc] = useState(null);   // { id, title, doc_type, content, created_at }
+  const [viewDoc, setViewDoc] = useState(null);
+
+  // Calendar plan
+  const [weekPlan, setWeekPlan] = useState(null);
+  const [weekPlanLoading, setWeekPlanLoading] = useState(false);
+
+  // Participants
+  const [participantsOpenId, setParticipantsOpenId] = useState(null);
+  const [participantsMap, setParticipantsMap] = useState({});  // { [meetingId]: [...] }
+  const [userSearchQ, setUserSearchQ] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
+
+  // Meeting Notetaker
+  const [notesOpenId, setNotesOpenId] = useState(null);
+  const [transcriptInput, setTranscriptInput] = useState('');
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [meetingNotes, setMeetingNotes] = useState({});  // { [meetingId]: notesObj }
+
+  // Task Prioritization
+  const [prioritizeLoading, setPrioritizeLoading] = useState(false);
+  const [prioritizeResult, setPrioritizeResult] = useState(null);
 
   useEffect(() => { loadStats(); }, []);
 
@@ -495,7 +671,7 @@ const ExecMeetingDashboard = () => {
     if (activeTab === 'tasks' && tasks.length === 0) loadTasks();
     if (activeTab === 'notifications') loadNotifications();
     if (activeTab === 'overview' && !digest) loadDigest();
-    if (activeTab === 'documents') loadDocuments();
+    if (activeTab === 'documents') { loadDocuments(); if (meetings.length === 0) loadMeetings(); }
   }, [activeTab]);
 
   const loadStats = async () => {
@@ -573,36 +749,147 @@ const ExecMeetingDashboard = () => {
   };
 
   const generateAiDoc = async () => {
-    if (!aiDocInput.trim()) {
-      toast({ title: 'Enter a meeting title or topic first', variant: 'destructive' });
+    if (!aiDocInput.trim() && !aiDocMeetingId) {
+      toast({ title: 'Select a meeting or enter a topic first', variant: 'destructive' });
       return;
     }
     setAiDocLoading(true);
     try {
-      const res = await execMeetingService.generateDocument({
+      // If a saved meeting is selected, pull its data to enrich the prompt
+      const linkedMeeting = aiDocMeetingId ? meetings.find(m => String(m.id) === String(aiDocMeetingId)) : null;
+      const resolvedTitle = linkedMeeting ? linkedMeeting.title : aiDocInput.trim();
+      const resolvedAttendees = linkedMeeting?.attendees || [];
+      const resolvedDuration = linkedMeeting?.duration_minutes || 60;
+      const resolvedTopics = aiDocTopics.trim()
+        ? aiDocTopics.split(',').map(t => t.trim()).filter(Boolean)
+        : [];
+
+      const payload = {
         action: aiDocType,
-        title: aiDocInput,
-        topics: [],
-        duration_minutes: 60,
-      });
+        title: resolvedTitle,
+        topics: resolvedTopics,
+        duration_minutes: resolvedDuration,
+        attendees: resolvedAttendees,
+      };
+
+      if (linkedMeeting) payload.meeting_id = linkedMeeting.id;
+      if (aiDocType === 'minutes') payload.summary = aiDocSummary.trim();
+      if (aiDocType === 'briefing') payload.topic = resolvedTitle;
+
+      const res = await execMeetingService.generateDocument(payload);
       toast({ title: 'Document generated and saved!' });
       // Reload list so new doc appears
       loadDocuments();
       // Auto-open viewer
+      const linkedMeetingTitle = aiDocMeetingId ? (meetings.find(m => String(m.id) === String(aiDocMeetingId))?.title || aiDocInput) : aiDocInput;
       if (res.document_id) {
         setViewDoc({
           id: res.document_id,
-          title: `${aiDocType.charAt(0).toUpperCase() + aiDocType.slice(1)} — ${aiDocInput}`,
+          title: `${aiDocType.charAt(0).toUpperCase() + aiDocType.slice(1)} — ${linkedMeetingTitle}`,
           doc_type: aiDocType,
           content: res.content || '',
           created_at: new Date().toISOString(),
         });
       }
       setAiDocInput('');
+      setAiDocTopics('');
+      setAiDocSummary('');
+      setAiDocMeetingId('');
     } catch (err) {
       toast({ title: 'AI generation failed', description: err.message, variant: 'destructive' });
     } finally {
       setAiDocLoading(false);
+    }
+  };
+
+  const openParticipants = async (meetingId) => {
+    if (participantsOpenId === meetingId) { setParticipantsOpenId(null); setUserSearchQ(''); setUserSearchResults([]); return; }
+    setParticipantsOpenId(meetingId);
+    setNotesOpenId(null);
+    setUserSearchQ(''); setUserSearchResults([]);
+    if (!participantsMap[meetingId]) {
+      try {
+        const data = await execMeetingService.getParticipants(meetingId);
+        setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
+      } catch { setParticipantsMap(prev => ({ ...prev, [meetingId]: [] })); }
+    }
+  };
+
+  const searchUsers = async (q, meetingId) => {
+    setUserSearchQ(q);
+    if (q.length < 2) { setUserSearchResults([]); return; }
+    setUserSearchLoading(true);
+    try {
+      const data = await execMeetingService.searchUsers(q);
+      const existing = (participantsMap[meetingId] || []).map(p => p.user_id);
+      setUserSearchResults((data.users || []).filter(u => !existing.includes(u.id)));
+    } catch { setUserSearchResults([]); }
+    finally { setUserSearchLoading(false); }
+  };
+
+  const addParticipant = async (meetingId, user) => {
+    try {
+      await execMeetingService.addParticipant(meetingId, user.id);
+      setParticipantsMap(prev => ({
+        ...prev,
+        [meetingId]: [...(prev[meetingId] || []), { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending' }],
+      }));
+      setUserSearchQ(''); setUserSearchResults([]);
+      toast({ title: `${user.full_name} added` });
+    } catch (err) { toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' }); }
+  };
+
+  const removeParticipant = async (meetingId, userId, name) => {
+    try {
+      await execMeetingService.removeParticipant(meetingId, userId);
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.user_id !== userId) }));
+      toast({ title: `${name} removed` });
+    } catch (err) { toast({ title: 'Failed to remove', description: err.message, variant: 'destructive' }); }
+  };
+
+  const openNotes = async (meetingId) => {
+    if (notesOpenId === meetingId) { setNotesOpenId(null); return; }
+    setNotesOpenId(meetingId);
+    setParticipantsOpenId(null);
+    if (meetingNotes[meetingId]) return;
+    try {
+      const data = await execMeetingService.getMeetingNotes(meetingId);
+      if (data.notes) setMeetingNotes(prev => ({ ...prev, [meetingId]: data.notes }));
+    } catch { /* no notes yet */ }
+  };
+
+  const submitTranscript = async (meetingId) => {
+    if (!transcriptInput.trim()) {
+      toast({ title: 'Paste a transcript first', variant: 'destructive' }); return;
+    }
+    setNotesLoading(true);
+    try {
+      const data = await execMeetingService.generateNotes(meetingId, { transcript: transcriptInput });
+      setMeetingNotes(prev => ({ ...prev, [meetingId]: data.notes }));
+      setTranscriptInput('');
+      toast({ title: 'Notes generated!', description: 'Summary, decisions and action items extracted.' });
+    } catch (err) {
+      toast({ title: 'Notetaker failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
+  const runAiPrioritize = async () => {
+    setPrioritizeLoading(true);
+    try {
+      const data = await execMeetingService.prioritizeTasks();
+      setPrioritizeResult(data.tasks || data.prioritized || []);
+      if ((data.tasks || data.prioritized || []).length) {
+        toast({ title: 'Tasks reprioritized by AI!' });
+        loadTasks();
+      } else {
+        toast({ title: 'No prioritization result returned', variant: 'destructive' });
+      }
+    } catch (err) {
+      toast({ title: 'Prioritization failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setPrioritizeLoading(false);
     }
   };
 
@@ -617,30 +904,107 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const downloadDocPdf = (doc) => {
-    // Build a printable HTML page and trigger browser print-to-PDF
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8"/>
-<title>${doc.title}</title>
-<style>
-  body { font-family: Georgia, serif; max-width: 780px; margin: 40px auto; color: #111; line-height: 1.7; }
-  h1,h2,h3 { color: #1a1a2e; } pre { white-space: pre-wrap; }
-  @media print { body { margin: 20mm; } }
-</style>
-</head>
-<body>
-<h1>${doc.title}</h1>
-<p style="color:#666;font-size:0.85em">Generated: ${new Date(doc.created_at).toLocaleString()}</p>
-<hr/>
-<div style="white-space:pre-wrap;font-family:inherit">${doc.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-</body>
-</html>`;
-    const blob = new Blob([html], { type: 'text/html' });
-    const url  = URL.createObjectURL(blob);
-    const win  = window.open(url, '_blank');
-    if (win) { win.onload = () => { win.print(); }; }
+  const downloadDocPdf = async (doc) => {
+    try {
+      const { default: jsPDF } = await import('jspdf');
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 18;
+      const contentW = pageW - margin * 2;
+
+      // Header bar
+      pdf.setFillColor(109, 40, 217);
+      pdf.rect(0, 0, pageW, 12, 'F');
+
+      // Title
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(18);
+      pdf.setTextColor(30, 10, 60);
+      const titleLines = pdf.splitTextToSize(doc.title || 'Document', contentW);
+      pdf.text(titleLines, margin, 24);
+      let y = 24 + titleLines.length * 7;
+
+      // Meta line
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8.5);
+      pdf.setTextColor(120, 100, 160);
+      const metaDate = doc.created_at ? new Date(doc.created_at).toLocaleString() : '';
+      pdf.text(`Generated: ${metaDate}  ·  AI Executive Meeting Assistant`, margin, y);
+      y += 5;
+
+      // Divider
+      pdf.setDrawColor(109, 40, 217);
+      pdf.setLineWidth(0.4);
+      pdf.line(margin, y, pageW - margin, y);
+      y += 6;
+
+      // Render markdown content line by line
+      const lines = (doc.content || '').split('\n');
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+
+        if (y > pageH - 20) {
+          pdf.addPage();
+          y = 18;
+        }
+
+        if (/^######\s/.test(line)) {
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(76, 29, 149);
+          const wrapped = pdf.splitTextToSize(line.replace(/^######\s/, ''), contentW);
+          pdf.text(wrapped, margin, y); y += wrapped.length * 5 + 1;
+        } else if (/^#####\s/.test(line)) {
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); pdf.setTextColor(76, 29, 149);
+          const wrapped = pdf.splitTextToSize(line.replace(/^#####\s/, ''), contentW);
+          pdf.text(wrapped, margin, y); y += wrapped.length * 5.5 + 1;
+        } else if (/^####\s/.test(line)) {
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.setTextColor(76, 29, 149);
+          const wrapped = pdf.splitTextToSize(line.replace(/^####\s/, ''), contentW);
+          pdf.text(wrapped, margin, y); y += wrapped.length * 6 + 2;
+        } else if (/^###\s/.test(line)) {
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(59, 7, 100);
+          const wrapped = pdf.splitTextToSize(line.replace(/^###\s/, ''), contentW);
+          pdf.text(wrapped, margin, y); y += wrapped.length * 6.5 + 2;
+        } else if (/^##\s/.test(line)) {
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(14); pdf.setTextColor(45, 27, 105);
+          const wrapped = pdf.splitTextToSize(line.replace(/^##\s/, ''), contentW);
+          pdf.text(wrapped, margin, y); y += wrapped.length * 7 + 3;
+        } else if (/^#\s/.test(line)) {
+          pdf.setFont('helvetica', 'bold'); pdf.setFontSize(16); pdf.setTextColor(26, 26, 46);
+          const wrapped = pdf.splitTextToSize(line.replace(/^#\s/, ''), contentW);
+          pdf.text(wrapped, margin, y); y += wrapped.length * 8 + 4;
+        } else if (/^---+$/.test(line.trim())) {
+          pdf.setDrawColor(200, 190, 220); pdf.setLineWidth(0.3);
+          pdf.line(margin, y, pageW - margin, y); y += 5;
+        } else if (/^[-*]\s/.test(line)) {
+          pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(40, 30, 60);
+          const bulletText = line.replace(/^[-*]\s/, '');
+          const clean = bulletText.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1');
+          const wrapped = pdf.splitTextToSize(`• ${clean}`, contentW - 4);
+          pdf.text(wrapped, margin + 4, y); y += wrapped.length * 5.5 + 1;
+        } else if (line.trim() === '') {
+          y += 3;
+        } else {
+          pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(40, 30, 60);
+          const clean = line.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/`(.*?)`/g, '$1');
+          const wrapped = pdf.splitTextToSize(clean, contentW);
+          pdf.text(wrapped, margin, y); y += wrapped.length * 5.5 + 1;
+        }
+      }
+
+      // Page numbers
+      const totalPages = pdf.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(7.5); pdf.setTextColor(160, 140, 190);
+        pdf.text(`Page ${i} of ${totalPages}  ·  AI Executive Meeting Assistant`, margin, pageH - 7);
+      }
+
+      const filename = (doc.title || 'document').replace(/[^a-z0-9-_\s]/gi, '_').trim().slice(0, 80) || 'document';
+      pdf.save(`${filename}.pdf`);
+    } catch (err) {
+      toast({ title: 'PDF download failed', description: err?.message || 'Please try again.', variant: 'destructive' });
+    }
   };
 
   const markNotifRead = async (id) => {
@@ -767,24 +1131,168 @@ const ExecMeetingDashboard = () => {
         <EmptyState icon={CalendarClock} label="No meetings scheduled yet" />
       ) : (
         <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
-          {meetings.map(m => (
-            <div key={m.id} className="flex items-center gap-4 px-4 py-3" style={ROW_STYLE}>
-              <div className="rounded-lg p-2 bg-violet-500/20 flex-shrink-0">
-                <CalendarClock className="h-4 w-4 text-violet-400" />
+          {meetings.map(m => {
+            const isNotesOpen = notesOpenId === m.id;
+            const isPartsOpen = participantsOpenId === m.id;
+            const notes = meetingNotes[m.id];
+            const parts = participantsMap[m.id] || [];
+            return (
+              <div key={m.id} style={ROW_STYLE}>
+                {/* Meeting row */}
+                <div className="flex items-center gap-4 px-4 py-3">
+                  <div className="rounded-lg p-2 bg-violet-500/20 flex-shrink-0">
+                    <CalendarClock className="h-4 w-4 text-violet-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{m.title}</p>
+                    <p className="text-white/40 text-xs">
+                      {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : '—'}
+                      {m.duration_minutes ? ` · ${m.duration_minutes}min` : ''}
+                      {m.location ? ` · ${m.location}` : ''}
+                    </p>
+                    {m.meeting_link && (
+                      <a href={m.meeting_link} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 mt-0.5 truncate max-w-xs">
+                        <span>🔗</span> Join Meeting
+                      </a>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {statusBadge(m.status)}
+                    <Button size="sm" variant="ghost"
+                      onClick={() => openParticipants(m.id)}
+                      className={`text-xs gap-1 ${isPartsOpen ? 'text-violet-300' : 'text-white/40 hover:text-violet-300'}`}>
+                      <span className="text-[11px]">👥</span>
+                      People
+                      <ChevronRight className={`h-3 w-3 transition-transform ${isPartsOpen ? 'rotate-90' : ''}`} />
+                    </Button>
+                    <Button size="sm" variant="ghost"
+                      onClick={() => openNotes(m.id)}
+                      className={`text-xs gap-1 ${isNotesOpen ? 'text-violet-300' : 'text-white/40 hover:text-violet-300'}`}>
+                      <FileText className="h-3.5 w-3.5" />
+                      {notes ? 'Notes' : 'Notes'}
+                      <ChevronRight className={`h-3 w-3 transition-transform ${isNotesOpen ? 'rotate-90' : ''}`} />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Participants panel */}
+                {isPartsOpen && (
+                  <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
+                    <p className="text-white/60 text-xs font-semibold">Participants</p>
+
+                    {/* Current participants */}
+                    {parts.length > 0 && (
+                      <div className="space-y-1">
+                        {parts.map(p => (
+                          <div key={p.user_id} className="flex items-center justify-between rounded-lg px-3 py-2 bg-white/5">
+                            <div>
+                              <span className="text-white text-xs font-medium">{p.full_name}</span>
+                              <span className="text-white/40 text-xs ml-2">{p.email}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-white/30 text-[10px]">{p.response}</span>
+                              <button onClick={() => removeParticipant(m.id, p.user_id, p.full_name)}
+                                className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Search + add */}
+                    <div className="relative">
+                      <Input
+                        value={participantsOpenId === m.id ? userSearchQ : ''}
+                        onChange={e => searchUsers(e.target.value, m.id)}
+                        placeholder="Type a name or email to add…"
+                        autoComplete="off"
+                        className="bg-white/5 border-white/10 text-white text-xs h-8"
+                      />
+                      {userSearchLoading && (
+                        <Loader2 className="absolute right-2 top-2 h-4 w-4 animate-spin text-white/40" />
+                      )}
+                      {userSearchResults.length > 0 && (
+                        <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+                          {userSearchResults.map(u => (
+                            <button key={u.id}
+                              onClick={() => addParticipant(m.id, u)}
+                              className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
+                              <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
+                                {u.full_name?.[0]?.toUpperCase() || '?'}
+                              </div>
+                              <div>
+                                <p className="text-white text-xs font-medium">{u.full_name}</p>
+                                <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {userSearchQ.length >= 2 && !userSearchLoading && userSearchResults.length === 0 && (
+                        <p className="text-white/30 text-xs mt-1 px-1">No users found</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Notetaker panel — expands inline */}
+                {isNotesOpen && (
+                  <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
+                    {/* Existing notes */}
+                    {notes && (
+                      <div className="space-y-2">
+                        {notes.ai_summary && (
+                          <div className="rounded-xl p-3 bg-violet-500/10 border border-violet-500/20">
+                            <p className="text-violet-300 text-xs font-semibold mb-1">AI Summary</p>
+                            <p className="text-white/80 text-xs whitespace-pre-wrap">{notes.ai_summary}</p>
+                          </div>
+                        )}
+                        {Array.isArray(notes.key_decisions) && notes.key_decisions.length > 0 && (
+                          <div className="rounded-xl p-3 bg-white/5 border border-white/10">
+                            <p className="text-white/60 text-xs font-semibold mb-1">Key Decisions</p>
+                            {notes.key_decisions.map((d, i) => (
+                              <p key={i} className="text-white/70 text-xs">• {d}</p>
+                            ))}
+                          </div>
+                        )}
+                        {Array.isArray(notes.action_items) && notes.action_items.length > 0 && (
+                          <div className="rounded-xl p-3 bg-white/5 border border-white/10">
+                            <p className="text-white/60 text-xs font-semibold mb-1">Action Items ({notes.action_items.length})</p>
+                            {notes.action_items.map((a, i) => (
+                              <p key={i} className="text-white/70 text-xs">
+                                • {a.title}
+                                {a.assignee_hint ? <span className="text-violet-300/70"> → {a.assignee_hint}</span> : ''}
+                                {a.due_date ? <span className="text-white/40"> · {a.due_date}</span> : ''}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Transcript input */}
+                    <div className="space-y-2">
+                      <Label className="text-white/60 text-xs">
+                        {notes ? 'Update Transcript (re-generate notes)' : 'Paste Meeting Transcript'}
+                      </Label>
+                      <textarea
+                        value={notesOpenId === m.id ? transcriptInput : ''}
+                        onChange={e => setTranscriptInput(e.target.value)}
+                        rows={4}
+                        placeholder="Paste the meeting transcript or key discussion notes here…"
+                        className="w-full rounded-md px-3 py-2 text-xs text-white placeholder:text-white/25 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+                      />
+                      <Button size="sm" onClick={() => submitTranscript(m.id)} disabled={notesLoading}
+                        className="bg-violet-600 hover:bg-violet-700 text-white">
+                        {notesLoading ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Processing…</> : <><FileText className="h-3.5 w-3.5 mr-1.5" />Generate Notes with AI</>}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-medium truncate">{m.title}</p>
-                <p className="text-white/40 text-xs">
-                  {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : '—'}
-                  {m.duration_minutes ? ` · ${m.duration_minutes}min` : ''}
-                  {m.location ? ` · ${m.location}` : ''}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {statusBadge(m.status)}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -794,10 +1302,41 @@ const ExecMeetingDashboard = () => {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-white font-semibold">Tasks</h3>
-        <Button size="sm" onClick={() => setShowTaskDialog(true)}>
-          <Plus className="h-4 w-4 mr-1" /> Add Task
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline"
+            onClick={runAiPrioritize} disabled={prioritizeLoading || tasks.length === 0}
+            className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs gap-1.5">
+            {prioritizeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            AI Prioritize
+          </Button>
+          <Button size="sm" onClick={() => setShowTaskDialog(true)}>
+            <Plus className="h-4 w-4 mr-1" /> Add Task
+          </Button>
+        </div>
       </div>
+
+      {/* AI prioritization result */}
+      {Array.isArray(prioritizeResult) && prioritizeResult.length > 0 && (
+        <div className="rounded-2xl p-4 space-y-2" style={CARD_STYLE}>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-violet-300 text-xs font-semibold flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" /> AI Prioritization Result
+            </p>
+            <button onClick={() => setPrioritizeResult(null)} className="text-white/30 hover:text-white text-xs">✕ Close</button>
+          </div>
+          {prioritizeResult.map((t, i) => (
+            <div key={t.id || i} className="rounded-xl p-3 bg-white/5 border border-white/10 space-y-0.5">
+              <div className="flex items-center gap-2">
+                {priorityBadge(t.priority)}
+                <p className="text-white text-xs font-medium truncate">{t.title}</p>
+              </div>
+              {t.ai_reasoning && <p className="text-white/50 text-xs">{t.ai_reasoning}</p>}
+              {t.suggested_due_date && <p className="text-violet-300/60 text-xs">Suggested deadline: {t.suggested_due_date}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
       {tasksLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
       ) : !Array.isArray(tasks) || tasks.length === 0 ? (
@@ -835,25 +1374,141 @@ const ExecMeetingDashboard = () => {
     </div>
   );
 
+  const WORKLOAD_COLORS = {
+    light:    'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    moderate: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+    heavy:    'bg-red-500/20 text-red-400 border-red-500/30',
+  };
+
   const calendarPanel = () => (
-    <div className="space-y-4">
-      <h3 className="text-white font-semibold">Calendar Planning</h3>
+    <div className="space-y-5">
+      {/* Generate button */}
       <div className="rounded-2xl p-5 space-y-3" style={CARD_STYLE}>
-        <p className="text-white/60 text-sm">
-          Use the AI Calendar Planner to auto-schedule your tasks and find free slots for the week.
-        </p>
-        <Button onClick={async () => {
-          toast({ title: 'Planning week…' });
-          try {
-            const res = await execMeetingService.planWeek();
-            toast({ title: 'Week plan generated', description: res.plan?.schedule_summary || 'Done' });
-          } catch (err) {
-            toast({ title: 'Failed', description: err.message, variant: 'destructive' });
-          }
-        }}>
-          <CalendarDays className="h-4 w-4 mr-2" /> Plan This Week with AI
-        </Button>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-white font-semibold flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-violet-400" /> AI Weekly Planner
+            </h3>
+            <p className="text-white/50 text-xs mt-1">
+              AI analyses your meetings and tasks and builds an optimized schedule for the week.
+            </p>
+          </div>
+          <Button onClick={async () => {
+            setWeekPlanLoading(true);
+            try {
+              const res = await execMeetingService.planWeek();
+              setWeekPlan(res.plan || res);
+              toast({ title: 'Week plan ready!' });
+            } catch (err) {
+              toast({ title: 'Planning failed', description: err.message, variant: 'destructive' });
+            } finally {
+              setWeekPlanLoading(false);
+            }
+          }} disabled={weekPlanLoading}>
+            {weekPlanLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarDays className="h-4 w-4 mr-2" />}
+            {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
+          </Button>
+        </div>
       </div>
+
+      {/* Plan results */}
+      {weekPlan && (
+        <div className="space-y-4">
+          {/* Summary + recommendations */}
+          {(weekPlan.weekly_summary || weekPlan.recommendations?.length > 0) && (
+            <div className="rounded-2xl p-5 space-y-3" style={CARD_STYLE}>
+              {weekPlan.weekly_summary && (
+                <p className="text-white/80 text-sm">{weekPlan.weekly_summary}</p>
+              )}
+              {Array.isArray(weekPlan.conflicts_detected) && weekPlan.conflicts_detected.length > 0 && (
+                <div className="rounded-xl p-3 bg-red-500/10 border border-red-500/20">
+                  <p className="text-red-400 text-xs font-semibold mb-1">Conflicts Detected</p>
+                  {weekPlan.conflicts_detected.map((c, i) => (
+                    <p key={i} className="text-red-300/80 text-xs">• {c}</p>
+                  ))}
+                </div>
+              )}
+              {Array.isArray(weekPlan.recommendations) && weekPlan.recommendations.length > 0 && (
+                <div>
+                  <p className="text-white/50 text-xs uppercase tracking-wide mb-1">Recommendations</p>
+                  {weekPlan.recommendations.map((r, i) => (
+                    <p key={i} className="text-violet-300 text-xs flex gap-1.5"><ChevronRight className="h-3 w-3 mt-0.5 flex-shrink-0" />{r}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Daily plan cards */}
+          {Array.isArray(weekPlan.daily_plans) && weekPlan.daily_plans.map((day, i) => (
+            <div key={i} className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
+              <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg p-2 bg-violet-500/20">
+                    <CalendarDays className="h-4 w-4 text-violet-400" />
+                  </div>
+                  <div>
+                    <p className="text-white font-semibold text-sm">{day.day_name}</p>
+                    <p className="text-white/40 text-xs">{day.date}</p>
+                  </div>
+                </div>
+                {day.workload_level && (
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border ${WORKLOAD_COLORS[day.workload_level] || WORKLOAD_COLORS.moderate}`}>
+                    {day.workload_level}
+                  </span>
+                )}
+              </div>
+              <div className="p-5 space-y-4">
+                {/* Meetings */}
+                {Array.isArray(day.scheduled_meetings) && day.scheduled_meetings.length > 0 && (
+                  <div>
+                    <p className="text-white/40 text-xs uppercase tracking-wide mb-2">Meetings</p>
+                    <div className="space-y-1">
+                      {day.scheduled_meetings.map((m, j) => (
+                        <div key={j} className="flex items-center gap-2 text-sm">
+                          <CalendarClock className="h-3.5 w-3.5 text-sky-400 flex-shrink-0" />
+                          <span className="text-white/80">{typeof m === 'string' ? m : m.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Task slots */}
+                {Array.isArray(day.suggested_task_slots) && day.suggested_task_slots.length > 0 && (
+                  <div>
+                    <p className="text-white/40 text-xs uppercase tracking-wide mb-2">Suggested Task Slots</p>
+                    <div className="space-y-1">
+                      {day.suggested_task_slots.map((slot, j) => (
+                        <div key={j} className="flex items-center gap-2 text-sm">
+                          <Clock className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
+                          <span className="text-violet-300 font-mono text-xs">{slot.time}</span>
+                          <span className="text-white/80">{slot.task}</span>
+                          {slot.duration_minutes && <span className="text-white/30 text-xs ml-auto">{slot.duration_minutes}min</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Focus blocks */}
+                {Array.isArray(day.focus_blocks) && day.focus_blocks.length > 0 && (
+                  <div>
+                    <p className="text-white/40 text-xs uppercase tracking-wide mb-2">Focus Blocks</p>
+                    <div className="space-y-1">
+                      {day.focus_blocks.map((block, j) => (
+                        <div key={j} className="flex items-center gap-2 text-sm">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                          <span className="text-emerald-300 font-mono text-xs">{block.start}–{block.end}</span>
+                          <span className="text-white/80">{block.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -874,10 +1529,12 @@ const ExecMeetingDashboard = () => {
           <FileText className="h-4 w-4 text-violet-400" />
           Generate Document with AI
         </h3>
+
+        {/* Row 1: Doc type + meeting picker */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1">
             <Label className="text-white/70 text-xs">Document Type</Label>
-            <Select value={aiDocType} onValueChange={setAiDocType}>
+            <Select value={aiDocType} onValueChange={v => { setAiDocType(v); setAiDocTopics(''); setAiDocSummary(''); }}>
               <SelectTrigger className="bg-white/5 border-white/10 text-white">
                 <SelectValue />
               </SelectTrigger>
@@ -889,51 +1546,81 @@ const ExecMeetingDashboard = () => {
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-1">
-            <Label className="text-white/70 text-xs">Meeting / Topic</Label>
+            <Label className="text-white/70 text-xs">Link to Saved Meeting <span className="text-white/30">(optional)</span></Label>
+            <Select value={aiDocMeetingId || 'none'} onValueChange={v => { const val = v === 'none' ? '' : v; setAiDocMeetingId(val); if (val) setAiDocInput(''); }}>
+              <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                <SelectValue placeholder="— Select a meeting —" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— None / manual topic —</SelectItem>
+                {Array.isArray(meetings) && meetings.map(m => (
+                  <SelectItem key={m.id} value={String(m.id)}>
+                    {m.title}{m.scheduled_at ? ` · ${new Date(m.scheduled_at).toLocaleDateString()}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {aiDocMeetingId && (() => {
+              const m = meetings.find(x => String(x.id) === String(aiDocMeetingId));
+              return m ? (
+                <p className="text-xs text-violet-300/70 mt-1">
+                  {m.attendees?.length ? `Attendees: ${m.attendees.slice(0,3).join(', ')}${m.attendees.length > 3 ? ` +${m.attendees.length - 3}` : ''}` : ''}
+                  {m.duration_minutes ? `  ·  ${m.duration_minutes} min` : ''}
+                </p>
+              ) : null;
+            })()}
+          </div>
+        </div>
+
+        {/* Manual topic — shown only when no meeting selected */}
+        {!aiDocMeetingId && (
+          <div className="space-y-1">
+            <Label className="text-white/70 text-xs">Meeting / Topic Title</Label>
             <Input
               value={aiDocInput}
               onChange={e => setAiDocInput(e.target.value)}
               placeholder="e.g. Q3 Strategy Review"
               className="bg-white/5 border-white/10 text-white"
-              onKeyDown={e => e.key === 'Enter' && generateAiDoc()}
             />
           </div>
-        </div>
+        )}
+
+        {/* Topics — agenda only */}
+        {aiDocType === 'agenda' && (
+          <div className="space-y-1">
+            <Label className="text-white/70 text-xs">
+              Topics to Cover <span className="text-white/30">(comma-separated)</span>
+            </Label>
+            <Input
+              value={aiDocTopics}
+              onChange={e => setAiDocTopics(e.target.value)}
+              placeholder="e.g. Q3 results, Budget review, Hiring plan"
+              className="bg-white/5 border-white/10 text-white"
+            />
+          </div>
+        )}
+
+        {/* Summary — minutes only */}
+        {aiDocType === 'minutes' && (
+          <div className="space-y-1">
+            <Label className="text-white/70 text-xs">Meeting Summary / Key Discussion Points</Label>
+            <textarea
+              value={aiDocSummary}
+              onChange={e => setAiDocSummary(e.target.value)}
+              rows={3}
+              placeholder="Briefly describe what was discussed, decisions made, outcomes…"
+              className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+            />
+          </div>
+        )}
+
         <Button onClick={generateAiDoc} disabled={aiDocLoading}>
           {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
           {aiDocLoading ? 'Generating…' : 'Generate & Save'}
         </Button>
       </div>
-
-      {/* Document viewer (shown when a doc is open) */}
-      {viewDoc && (
-        <div className="rounded-2xl overflow-hidden" style={{ ...CARD_STYLE, border: '1px solid rgba(167,139,250,0.3)' }}>
-          {/* Viewer toolbar */}
-          <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-            <div className="flex items-center gap-3 min-w-0">
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border flex-shrink-0 ${DOC_TYPE_COLORS[viewDoc.doc_type] || DOC_TYPE_COLORS.other}`}>
-                {DOC_TYPE_LABELS[viewDoc.doc_type] || viewDoc.doc_type}
-              </span>
-              <h4 className="text-white font-medium text-sm truncate">{viewDoc.title}</h4>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Button size="sm" variant="ghost" onClick={() => downloadDocPdf(viewDoc)}
-                className="text-white/60 hover:text-white gap-1.5 text-xs">
-                <span>⬇</span> PDF
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setViewDoc(null)}
-                className="text-white/40 hover:text-white text-xs">
-                ✕ Close
-              </Button>
-            </div>
-          </div>
-          {/* Content */}
-          <div className="p-5 max-h-[520px] overflow-y-auto">
-            <pre className="text-white/80 text-sm whitespace-pre-wrap font-mono leading-relaxed">{viewDoc.content}</pre>
-          </div>
-        </div>
-      )}
 
       {/* Saved documents list */}
       <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
@@ -1121,6 +1808,55 @@ const ExecMeetingDashboard = () => {
         onClose={() => setShowTaskDialog(false)}
         onCreated={() => { loadTasks(); loadStats(); }}
       />
+
+      {/* Document viewer modal */}
+      <Dialog open={!!viewDoc} onOpenChange={open => { if (!open) setViewDoc(null); }}>
+        <DialogContent
+          className="max-w-3xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
+          style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              {viewDoc && (
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border flex-shrink-0 ${{
+                  agenda:   'bg-violet-500/20 text-violet-300 border-violet-500/30',
+                  minutes:  'bg-sky-500/20 text-sky-300 border-sky-500/30',
+                  briefing: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+                  report:   'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+                  other:    'bg-white/10 text-white/50 border-white/10',
+                }[viewDoc.doc_type] || 'bg-white/10 text-white/50 border-white/10'}`}>
+                  {{ agenda:'Agenda', minutes:'Minutes', briefing:'Briefing', report:'Report', other:'Other' }[viewDoc?.doc_type] || viewDoc?.doc_type}
+                </span>
+              )}
+              <h3 className="text-white font-semibold truncate text-sm">{viewDoc?.title}</h3>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+              <Button size="sm" variant="ghost" onClick={() => viewDoc && downloadDocPdf(viewDoc)}
+                className="text-sky-400 hover:text-sky-300 gap-1.5 text-xs">
+                <Download className="h-3.5 w-3.5" /> Download PDF
+              </Button>
+            </div>
+          </div>
+
+          {/* Meta */}
+          {viewDoc?.created_at && (
+            <div className="px-6 py-2 border-b border-white/5 flex-shrink-0">
+              <p className="text-white/30 text-xs">Generated {new Date(viewDoc.created_at).toLocaleString()}</p>
+            </div>
+          )}
+
+          {/* Rendered markdown content */}
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {viewDoc?.content && (
+              <div
+                className="prose prose-invert max-w-none"
+                dangerouslySetInnerHTML={{ __html: markdownToHtml(viewDoc.content) }}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </ErrorBoundary>
   );
 };

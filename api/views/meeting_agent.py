@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 
+from django.db import models
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -239,13 +240,19 @@ def meeting_list(request):
     if not scheduled_at:
         return Response({'status': 'error', 'message': 'Invalid scheduled_at format. Use ISO 8601.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    meeting_link = request.data.get('meeting_link', '').strip()
+    if not meeting_link:
+        import secrets, string
+        slug = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(10))
+        meeting_link = f'https://meet.jit.si/exec-{slug}'
+
     meeting = ExecutiveMeeting.objects.create(
         organizer=company_user,
         title=title,
         description=request.data.get('description', ''),
         agenda=request.data.get('agenda', []),
         location=request.data.get('location', ''),
-        meeting_link=request.data.get('meeting_link', ''),
+        meeting_link=meeting_link,
         scheduled_at=scheduled_at,
         duration_minutes=int(request.data.get('duration_minutes', 60)),
         timezone_name=request.data.get('timezone_name', 'UTC'),
@@ -283,6 +290,65 @@ def meeting_detail(request, meeting_id):
         meeting.status = 'cancelled'
         meeting.save()
         return Response({'status': 'success', 'message': 'Meeting cancelled.'})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def search_company_users(request):
+    """Search company users by name/email for participant autocomplete."""
+    from core.models import CompanyUser
+    company_user = request.user
+    q = request.query_params.get('q', '').strip()
+    if len(q) < 2:
+        return Response({'status': 'success', 'users': []})
+    qs = CompanyUser.objects.filter(
+        company=company_user.company,
+        is_active=True,
+    ).filter(
+        models.Q(full_name__icontains=q) | models.Q(email__icontains=q)
+    ).values('id', 'full_name', 'email', 'role')[:10]
+    return Response({'status': 'success', 'users': list(qs)})
+
+
+@api_view(['GET', 'POST', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def meeting_participants(request, meeting_id):
+    """List, add, or remove participants from a meeting."""
+    from core.models import CompanyUser
+    company_user = request.user
+    meeting = get_object_or_404(ExecutiveMeeting, id=meeting_id, organizer=company_user)
+
+    if request.method == 'GET':
+        parts = meeting.participants.select_related('company_user').all()
+        return Response({'status': 'success', 'participants': [
+            {'id': p.id, 'user_id': p.company_user.id,
+             'full_name': p.company_user.full_name, 'email': p.company_user.email,
+             'role': p.company_user.role, 'response': p.response}
+            for p in parts
+        ]})
+
+    if request.method == 'POST':
+        user_id = request.data.get('user_id')
+        if not user_id:
+            return Response({'status': 'error', 'message': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            target = CompanyUser.objects.get(id=user_id, company=company_user.company, is_active=True)
+        except CompanyUser.DoesNotExist:
+            return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
+        return Response({'status': 'success', 'participant': {
+            'id': p.id, 'user_id': target.id, 'full_name': target.full_name,
+            'email': target.email, 'role': target.role, 'response': p.response,
+        }}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    if request.method == 'DELETE':
+        user_id = request.data.get('user_id')
+        ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user_id=user_id).delete()
+        return Response({'status': 'success'})
 
 
 @api_view(['POST'])
@@ -717,10 +783,13 @@ def document_draft(request):
                     decisions = meeting.note.key_decisions or []
                 except Exception:
                     decisions = []
+            attendees_minutes = request.data.get('attendees', [])
+            if meeting and not attendees_minutes:
+                attendees_minutes = list(meeting.participants.values_list('company_user__full_name', flat=True))
             content = agent.write_minutes(
                 meeting.title if meeting else request.data.get('title', 'Meeting'),
                 request.data.get('date', timezone.now().strftime('%Y-%m-%d')),
-                request.data.get('attendees', []),
+                attendees_minutes,
                 summary, action_items, decisions,
             )
 
