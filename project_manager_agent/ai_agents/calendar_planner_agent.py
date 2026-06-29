@@ -128,46 +128,160 @@ Return ONLY the JSON."""
             return {"success": False, "error": str(e)}
 
     def detect_conflicts(self, tasks: List[Dict]) -> Dict:
-        """Detect scheduling conflicts: overlapping deadlines, overloaded assignees, etc."""
+        """Detect scheduling conflicts: overlapping deadlines, overloaded assignees, etc.
+
+        Each conflict is emitted as a **structured object** instead of a flat
+        string so the UI can show the criterion ("why this is a conflict") and
+        link straight to the affected tasks. Shape:
+
+            {
+              "type":       "workload_overload" | "same_deadline" | "overdue_cluster" | "due_soon",
+              "severity":   "low" | "medium" | "high",
+              "description": "Short, human-readable headline of the conflict",
+              "criterion":   "Plain-language reason this counts as a conflict",
+              "task_ids":   [int, ...]    # tasks involved
+              "task_titles": [str, ...]   # convenience for the UI
+              "metadata":   {...}          # type-specific extras (e.g. shared_date, assignee)
+            }
+
+        Recommendations follow the same structured pattern with a
+        `suggested_action` field.
+        """
         self.log_action("Detecting conflicts", {"tasks_count": len(tasks)})
 
-        conflicts = []
-        recommendations = []
+        conflicts: List[Dict] = []
+        recommendations: List[Dict] = []
+        OVERLOAD_THRESHOLD = 5
 
-        # Group tasks by assignee
-        assignee_tasks = {}
+        # Group tasks by assignee (display name when available, fallback to username)
+        assignee_tasks: Dict[str, List[Dict]] = {}
         for t in tasks:
-            assignee = t.get('assignee_username') or 'Unassigned'
-            if assignee not in assignee_tasks:
-                assignee_tasks[assignee] = []
-            assignee_tasks[assignee].append(t)
+            assignee = (
+                t.get('assignee_name')
+                or t.get('assignee_username')
+                or 'Unassigned'
+            )
+            assignee_tasks.setdefault(assignee, []).append(t)
 
-        # Check for overloaded assignees
+        # ── Workload overload conflicts ──
         for assignee, atasks in assignee_tasks.items():
+            if assignee == 'Unassigned':
+                continue
             active = [t for t in atasks if t.get('status') not in ['done', 'completed']]
-            if len(active) > 5:
-                conflicts.append(f"{assignee} has {len(active)} active tasks - potential overload")
-                recommendations.append(f"Consider redistributing some of {assignee}'s tasks")
+            if len(active) > OVERLOAD_THRESHOLD:
+                conflicts.append({
+                    "type": "workload_overload",
+                    "severity": "high" if len(active) > OVERLOAD_THRESHOLD * 2 else "medium",
+                    "description": f"{assignee} is assigned {len(active)} active tasks",
+                    "criterion": (
+                        f"More than {OVERLOAD_THRESHOLD} active (not-yet-done) tasks on one "
+                        f"person is treated as overload — they're unlikely to finish all on time."
+                    ),
+                    "task_ids": [t.get("id") for t in active if t.get("id") is not None],
+                    "task_titles": [t.get("title", "Untitled") for t in active],
+                    "metadata": {
+                        "assignee": assignee,
+                        "active_count": len(active),
+                        "threshold": OVERLOAD_THRESHOLD,
+                    },
+                })
+                recommendations.append({
+                    "for_conflict_type": "workload_overload",
+                    "description": f"Redistribute some of {assignee}'s tasks",
+                    "suggested_action": (
+                        f"Move {len(active) - OVERLOAD_THRESHOLD} of {assignee}'s lower-priority "
+                        f"tasks to less-busy team members (see the Suggest Delegation action)."
+                    ),
+                    "assignee": assignee,
+                })
 
-        # Check for tasks with same/close deadlines
+        # ── Same-deadline collisions ──
+        # The PDF report explicitly flagged this case: two tasks sharing the
+        # same due date were called out as a conflict but with no reason
+        # given. Now we surface BOTH the shared date and the offending tasks.
+        deadline_groups: Dict[str, List[Dict]] = {}
         today = datetime.now().date()
-        overdue = []
-        due_soon = []
+        overdue: List[Dict] = []
+        due_soon: List[Dict] = []
         for t in tasks:
-            if t.get('due_date') and t.get('status') not in ['done', 'completed']:
-                try:
-                    due = datetime.strptime(str(t['due_date'])[:10], '%Y-%m-%d').date()
-                    if due < today:
-                        overdue.append(t)
-                    elif (due - today).days <= 3:
-                        due_soon.append(t)
-                except (ValueError, TypeError):
-                    pass
+            raw_due = t.get('due_date')
+            if not raw_due or t.get('status') in ['done', 'completed']:
+                continue
+            try:
+                due = datetime.strptime(str(raw_due)[:10], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                continue
+            deadline_groups.setdefault(due.isoformat(), []).append(t)
+            if due < today:
+                overdue.append(t)
+            elif (due - today).days <= 3:
+                due_soon.append(t)
 
+        for date_iso, ts in deadline_groups.items():
+            if len(ts) < 2:
+                continue
+            titles = [t.get('title', 'Untitled') for t in ts]
+            conflicts.append({
+                "type": "same_deadline",
+                "severity": "medium" if len(ts) <= 3 else "high",
+                "description": (
+                    f"{len(ts)} tasks share the same deadline ({date_iso}): "
+                    + ", ".join(f'"{title}"' for title in titles[:3])
+                    + (f" and {len(titles) - 3} more" if len(titles) > 3 else "")
+                ),
+                "criterion": (
+                    "Multiple tasks landing on the same due date cluster the "
+                    "team's review/QA bandwidth into one day and increase the "
+                    "chance of last-minute slippage."
+                ),
+                "task_ids": [t.get("id") for t in ts if t.get("id") is not None],
+                "task_titles": titles,
+                "metadata": {
+                    "shared_date": date_iso,
+                    "task_count": len(ts),
+                },
+            })
+            recommendations.append({
+                "for_conflict_type": "same_deadline",
+                "description": f"Stagger deadlines around {date_iso}",
+                "suggested_action": (
+                    f"Move 1-2 of the {len(ts)} tasks due on {date_iso} earlier or "
+                    f"later so the team has slack on the shared day."
+                ),
+                "shared_date": date_iso,
+            })
+
+        # ── Overdue cluster ──
         if overdue:
-            conflicts.append(f"{len(overdue)} task(s) are overdue")
+            conflicts.append({
+                "type": "overdue_cluster",
+                "severity": "high",
+                "description": f"{len(overdue)} task(s) are overdue",
+                "criterion": "These tasks already passed their due date and are still not marked done/completed.",
+                "task_ids": [t.get("id") for t in overdue if t.get("id") is not None],
+                "task_titles": [t.get("title", "Untitled") for t in overdue],
+                "metadata": {"count": len(overdue)},
+            })
+            recommendations.append({
+                "for_conflict_type": "overdue_cluster",
+                "description": "Triage overdue tasks first",
+                "suggested_action": (
+                    "Either re-baseline these dates with the team, mark abandoned "
+                    "ones as cancelled, or escalate the blocker."
+                ),
+            })
+
+        # ── Due-soon cluster ──
         if due_soon:
-            conflicts.append(f"{len(due_soon)} task(s) due within 3 days")
+            conflicts.append({
+                "type": "due_soon",
+                "severity": "low",
+                "description": f"{len(due_soon)} task(s) due within 3 days",
+                "criterion": "Early-warning signal — tasks within the 3-day horizon that aren't yet done.",
+                "task_ids": [t.get("id") for t in due_soon if t.get("id") is not None],
+                "task_titles": [t.get("title", "Untitled") for t in due_soon],
+                "metadata": {"count": len(due_soon)},
+            })
 
         return {
             "success": True,

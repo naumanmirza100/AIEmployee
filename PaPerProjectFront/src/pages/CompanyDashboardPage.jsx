@@ -61,6 +61,13 @@ const CompanyDashboardPage = () => {
     open: false, title: '', description: '', confirmLabel: 'Confirm', variant: 'default', onConfirm: null, loading: false,
   });
   const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }));
+
+  // Search filters — one per list. Kept as plain string state and applied
+  // client-side; results are already paginated server-side so filtering the
+  // current page is the natural UX. All matching is case-insensitive substring.
+  const [projectSearch, setProjectSearch] = useState('');
+  const [usersSearch, setUsersSearch] = useState('');
+  const [allTasksSearch, setAllTasksSearch] = useState('');
   const [showCreateJobModal, setShowCreateJobModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [selectedJobApplications, setSelectedJobApplications] = useState([]);
@@ -436,6 +443,39 @@ const CompanyDashboardPage = () => {
         variant: 'destructive',
       });
     }
+  };
+
+  const handleDeleteTask = (task) => {
+    setConfirm({
+      open: true,
+      title: `Delete task "${task.title}"?`,
+      description:
+        'This permanently deletes the task and all its subtasks. This cannot be undone.',
+      confirmLabel: 'Delete task',
+      variant: 'danger',
+      loading: false,
+      onConfirm: async () => {
+        setConfirm((c) => ({ ...c, loading: true }));
+        try {
+          const response = await companyProjectsTasksService.deleteTask(task.id);
+          if (response.status === 'success') {
+            toast({ title: 'Task deleted', description: `"${task.title}" was removed.` });
+            fetchProjects();
+            if (activeTab === 'all-tasks') fetchAllUsersTasks();
+            closeConfirm();
+          } else {
+            throw new Error(response.message || 'Failed to delete task');
+          }
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to delete task',
+            variant: 'destructive',
+          });
+          setConfirm((c) => ({ ...c, loading: false }));
+        }
+      },
+    });
   };
 
   const handleDeleteProject = (project) => {
@@ -1149,6 +1189,19 @@ const CompanyDashboardPage = () => {
             </TabsContent>
 
             <TabsContent value="projects" className="space-y-4">
+              {/* Search — filters projects by name AND drills into task titles
+                  so typing a task name also surfaces the project that owns it. */}
+              {projects.length > 0 && !projectsLoading && (
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30 pointer-events-none" />
+                  <Input
+                    value={projectSearch}
+                    onChange={(e) => setProjectSearch(e.target.value)}
+                    placeholder="Search projects or tasks…"
+                    className="pl-10 bg-[#120d22] border border-[#2d2342] text-white placeholder:text-white/30"
+                  />
+                </div>
+              )}
               {projectsLoading ? (
                 <div className="flex justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
@@ -1169,7 +1222,32 @@ const CompanyDashboardPage = () => {
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  {projects.map((project) => {
+                  {(() => {
+                    const q = projectSearch.trim().toLowerCase();
+                    const filtered = !q
+                      ? projects
+                      : projects.filter((p) => {
+                          const inName = (p.name || '').toLowerCase().includes(q);
+                          const inDesc = (p.description || '').toLowerCase().includes(q);
+                          const inTask = (p.tasks || []).some((t) =>
+                            (t.title || '').toLowerCase().includes(q) ||
+                            (t.description || '').toLowerCase().includes(q),
+                          );
+                          return inName || inDesc || inTask;
+                        });
+                    if (filtered.length === 0) {
+                      return (
+                        <Card className="bg-[#120d22] border border-[#2d2342]">
+                          <CardContent className="py-10 text-center">
+                            <Search className="h-8 w-8 mx-auto text-white/20 mb-3" />
+                            <p className="text-sm text-white/55">
+                              No projects or tasks match <span className="text-white/80">"{projectSearch}"</span>.
+                            </p>
+                          </CardContent>
+                        </Card>
+                      );
+                    }
+                    return filtered.map((project) => {
                     const isExpanded = expandedProjects.has(project.id);
                     return (
                       <Card key={project.id} className="cursor-pointer bg-[#120d22] border border-[#2d2342] hover:border-violet-500/30 transition-colors">
@@ -1274,8 +1352,21 @@ const CompanyDashboardPage = () => {
                                                 handleEditTask(task);
                                               }}
                                               className="h-6 w-6 p-0 text-white/40 hover:text-white"
+                                              title="Edit task"
                                             >
                                               <Edit className="h-3 w-3" />
+                                            </Button>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteTask(task);
+                                              }}
+                                              className="h-6 w-6 p-0 text-red-400/70 hover:text-red-300 hover:bg-red-500/10"
+                                              title="Delete task"
+                                            >
+                                              <Trash2 className="h-3 w-3" />
                                             </Button>
                                           </div>
                                           {task.description && (
@@ -1357,7 +1448,8 @@ const CompanyDashboardPage = () => {
                         )}
                       </Card>
                     );
-                  })}
+                    });
+                  })()}
                 </div>
               )}
             </TabsContent>
@@ -1524,6 +1616,17 @@ const CompanyDashboardPage = () => {
             </TabsContent>
             
             <TabsContent value="users" className="space-y-4">
+              {users.length > 0 && !usersLoading && (
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30 pointer-events-none" />
+                  <Input
+                    value={usersSearch}
+                    onChange={(e) => setUsersSearch(e.target.value)}
+                    placeholder="Search users by name, email, or username…"
+                    className="pl-10 bg-[#120d22] border border-[#2d2342] text-white placeholder:text-white/30"
+                  />
+                </div>
+              )}
               {usersLoading ? (
                 <div className="flex justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
@@ -1566,7 +1669,24 @@ const CompanyDashboardPage = () => {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {users.map((user) => (
+                          {(() => {
+                            const q = usersSearch.trim().toLowerCase();
+                            const filteredUsers = !q ? users : users.filter((u) =>
+                              (u.full_name || '').toLowerCase().includes(q) ||
+                              (u.username || '').toLowerCase().includes(q) ||
+                              (u.email || '').toLowerCase().includes(q) ||
+                              (u.role || '').toLowerCase().includes(q),
+                            );
+                            if (filteredUsers.length === 0) {
+                              return (
+                                <TableRow>
+                                  <TableCell colSpan={6} className="text-center py-8 text-white/55">
+                                    No users match "{usersSearch}".
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            }
+                            return filteredUsers.map((user) => (
                             <TableRow key={user.id} className="border-white/[0.06] hover:bg-white/[0.04]">
                               <TableCell className="font-medium text-white">
                                 <div className="flex items-center gap-2">
@@ -1641,7 +1761,8 @@ const CompanyDashboardPage = () => {
                                 </div>
                               </TableCell>
                             </TableRow>
-                          ))}
+                            ));
+                          })()}
                         </TableBody>
                       </Table>
                     </CardContent>
@@ -1682,6 +1803,19 @@ const CompanyDashboardPage = () => {
             </TabsContent>
 
             <TabsContent value="all-tasks" className="space-y-4">
+              {/* Search — title/description substring match, applied
+                  client-side AFTER the status/user/project dropdowns have
+                  already narrowed the server-side page. */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30 pointer-events-none" />
+                <Input
+                  value={allTasksSearch}
+                  onChange={(e) => setAllTasksSearch(e.target.value)}
+                  placeholder="Search tasks by title or description…"
+                  className="pl-10 bg-[#120d22] border border-[#2d2342] text-white placeholder:text-white/30"
+                />
+              </div>
+
               {/* Filters */}
               <div className="flex items-center gap-4 flex-wrap">
                 <SearchableSelect
@@ -1764,7 +1898,23 @@ const CompanyDashboardPage = () => {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {allUsersTasks.map((task) => (
+                          {(() => {
+                            const q = allTasksSearch.trim().toLowerCase();
+                            const filteredTasks = !q ? allUsersTasks : allUsersTasks.filter((t) =>
+                              (t.title || '').toLowerCase().includes(q) ||
+                              (t.description || '').toLowerCase().includes(q) ||
+                              (t.project_name || '').toLowerCase().includes(q),
+                            );
+                            if (filteredTasks.length === 0) {
+                              return (
+                                <TableRow>
+                                  <TableCell colSpan={8} className="text-center py-8 text-white/55">
+                                    No tasks match "{allTasksSearch}".
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            }
+                            return filteredTasks.map((task) => (
                             <TableRow key={task.id} className="border-white/[0.06] hover:bg-white/[0.04]">
                               <TableCell className="w-[250px]">
                                 <div>
@@ -1835,17 +1985,30 @@ const CompanyDashboardPage = () => {
                                 )}
                               </TableCell>
                               <TableCell className="text-right">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleEditTask(task)}
-                                  className="h-8 w-8 p-0 text-white/40 hover:text-white hover:bg-white/10"
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleEditTask(task)}
+                                    className="h-8 w-8 p-0 text-white/40 hover:text-white hover:bg-white/10"
+                                    title="Edit task"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDeleteTask(task)}
+                                    className="h-8 w-8 p-0 text-red-400/70 hover:text-red-300 hover:bg-red-500/10"
+                                    title="Delete task"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
-                          ))}
+                            ));
+                          })()}
                         </TableBody>
                       </Table>
                     </CardContent>

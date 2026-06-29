@@ -206,6 +206,7 @@ urlpatterns = [
     
     # Company User Tasks endpoints
     re_path(r'^company/tasks/(?P<task_id>\d+)/update/?$', company_projects_tasks.update_company_task, name='update_company_task'),
+    re_path(r'^company/tasks/(?P<task_id>\d+)/delete/?$', company_projects_tasks.delete_company_task, name='delete_company_task'),
     re_path(r'^company/users/for-assignment/?$', company_projects_tasks.get_company_users_for_assignment, name='get_company_users_for_assignment'),
 
     # Project Manager AI Agent endpoints (token-auth friendly)
