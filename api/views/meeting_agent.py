@@ -123,6 +123,13 @@ def _serialize_meeting(meeting, include_participants=False):
 
 
 def _serialize_task(task):
+    assignee = None
+    if task.assignee_id:
+        try:
+            cu = task.assignee
+            assignee = {'id': cu.id, 'full_name': cu.full_name, 'email': cu.email}
+        except Exception:
+            pass
     return {
         'id': task.id,
         'title': task.title,
@@ -132,6 +139,8 @@ def _serialize_task(task):
         'due_date': task.due_date if isinstance(task.due_date, str) else (task.due_date.isoformat() if task.due_date else None),
         'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
         'ai_reasoning': task.ai_reasoning,
+        'assignee': assignee,
+        'assignee_id': task.assignee_id,
         'linked_meeting_id': task.linked_meeting_id,
         'created_at': task.created_at.isoformat(),
         'updated_at': task.updated_at.isoformat(),
@@ -297,19 +306,51 @@ def meeting_detail(request, meeting_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([ExecCRUDThrottle])
 def search_company_users(request):
-    """Search company users by name/email for participant autocomplete."""
-    from core.models import CompanyUser
+    """Search company users by name/email for participant autocomplete.
+
+    Returns both CompanyUser records and UserProfile-backed users that belong
+    to the same company, so users added via the admin 'Add User' panel also
+    appear in the results.
+    """
+    from core.models import CompanyUser, UserProfile
     company_user = request.user
     q = request.query_params.get('q', '').strip()
     if len(q) < 2:
         return Response({'status': 'success', 'users': []})
-    qs = CompanyUser.objects.filter(
+
+    # 1. CompanyUser accounts (self-registered via invitation link)
+    cu_qs = CompanyUser.objects.filter(
         company=company_user.company,
         is_active=True,
     ).filter(
         models.Q(full_name__icontains=q) | models.Q(email__icontains=q)
     ).values('id', 'full_name', 'email', 'role')[:10]
-    return Response({'status': 'success', 'users': list(qs)})
+    results = list(cu_qs)
+
+    # 2. UserProfile-backed users created via the admin panel
+    existing_emails = {u['email'] for u in results}
+    up_qs = UserProfile.objects.filter(
+        company=company_user.company,
+    ).filter(
+        models.Q(user__first_name__icontains=q)
+        | models.Q(user__last_name__icontains=q)
+        | models.Q(user__email__icontains=q)
+        | models.Q(user__username__icontains=q)
+    ).select_related('user').exclude(user__email__in=existing_emails)[:10]
+
+    for up in up_qs:
+        u = up.user
+        full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+        results.append({
+            'id': up.id,
+            'full_name': full_name,
+            'email': u.email,
+            'role': up.role or 'team_member',
+            # tag so frontend knows this is a UserProfile, not a CompanyUser
+            'user_type': 'profile',
+        })
+
+    return Response({'status': 'success', 'users': results[:10]})
 
 
 @api_view(['GET', 'POST', 'DELETE'])
@@ -332,13 +373,40 @@ def meeting_participants(request, meeting_id):
         ]})
 
     if request.method == 'POST':
+        from django.contrib.auth.hashers import make_password as _make_password
+        import secrets as _secrets
         user_id = request.data.get('user_id')
+        user_type = request.data.get('user_type', 'company_user')
         if not user_id:
             return Response({'status': 'error', 'message': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            target = CompanyUser.objects.get(id=user_id, company=company_user.company, is_active=True)
-        except CompanyUser.DoesNotExist:
-            return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if user_type == 'profile':
+            # UserProfile-backed user: resolve via UserProfile and create/find a CompanyUser mirror
+            from core.models import UserProfile
+            try:
+                up = UserProfile.objects.select_related('user').get(id=user_id, company=company_user.company)
+            except UserProfile.DoesNotExist:
+                return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+            u = up.user
+            full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+            role = up.role or 'company_user'
+            # Get or create a CompanyUser mirror so we can use it in the participant FK
+            target, _ = CompanyUser.objects.get_or_create(
+                company=company_user.company,
+                email=u.email,
+                defaults={
+                    'full_name': full_name,
+                    'role': role,
+                    'password_hash': _make_password(_secrets.token_urlsafe(16)),
+                    'is_active': True,
+                },
+            )
+        else:
+            try:
+                target = CompanyUser.objects.get(id=user_id, company=company_user.company, is_active=True)
+            except CompanyUser.DoesNotExist:
+                return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
         p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
         return Response({'status': 'success', 'participant': {
             'id': p.id, 'user_id': target.id, 'full_name': target.full_name,
@@ -555,6 +623,31 @@ def task_list(request):
     if not title:
         return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    assignee_id = request.data.get('assignee_id') or None
+    assignee_user_type = request.data.get('assignee_user_type', 'company_user')
+    assignee = None
+    if assignee_id:
+        from core.models import CompanyUser as _CU, UserProfile as _UP
+        import secrets as _sec
+        from django.contrib.auth.hashers import make_password as _mkpw
+        if assignee_user_type == 'profile':
+            try:
+                up = _UP.objects.select_related('user').get(id=assignee_id, company=company_user.company)
+                u = up.user
+                full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+                assignee, _ = _CU.objects.get_or_create(
+                    company=company_user.company, email=u.email,
+                    defaults={'full_name': full_name, 'role': up.role or 'company_user',
+                              'password_hash': _mkpw(_sec.token_urlsafe(16)), 'is_active': True},
+                )
+            except _UP.DoesNotExist:
+                pass
+        else:
+            try:
+                assignee = _CU.objects.get(id=assignee_id, company=company_user.company)
+            except _CU.DoesNotExist:
+                pass
+
     task = ExecutiveTask.objects.create(
         company_user=company_user,
         title=title,
@@ -563,6 +656,7 @@ def task_list(request):
         priority=request.data.get('priority', 'medium'),
         due_date=request.data.get('due_date') or None,
         linked_meeting_id=request.data.get('linked_meeting_id') or None,
+        assignee=assignee,
     )
     return Response({'status': 'success', 'task': _serialize_task(task)}, status=status.HTTP_201_CREATED)
 
@@ -585,6 +679,16 @@ def task_detail(request, task_id):
                 setattr(task, field, request.data[field] or None if field == 'due_date' else request.data[field])
         if 'estimated_hours' in request.data:
             task.estimated_hours = request.data['estimated_hours'] or None
+        if 'assignee_id' in request.data:
+            aid = request.data['assignee_id']
+            if not aid:
+                task.assignee = None
+            else:
+                from core.models import CompanyUser as _CU
+                try:
+                    task.assignee = _CU.objects.get(id=aid, company=company_user.company)
+                except _CU.DoesNotExist:
+                    pass
         task.save()
         return Response({'status': 'success', 'task': _serialize_task(task)})
 

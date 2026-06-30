@@ -195,6 +195,11 @@ class ExecutiveTask(models.Model):
     due_date = models.DateField(null=True, blank=True)
     estimated_hours = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
     ai_reasoning = models.TextField(blank=True, default='', help_text='AI explanation for priority assignment')
+    assignees = models.ManyToManyField(
+        'core.CompanyUser',
+        blank=True,
+        related_name='exec_assigned_tasks',
+    )
     linked_meeting = models.ForeignKey(
         ExecutiveMeeting,
         null=True, blank=True,

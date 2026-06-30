@@ -83,7 +83,7 @@ const execMeetingService = {
   // Participants
   searchUsers:       (q) => companyApi.get(`${BASE}/users/search?q=${encodeURIComponent(q)}`),
   getParticipants:   (meetingId) => companyApi.get(`${BASE}/meetings/${meetingId}/participants`),
-  addParticipant:    (meetingId, userId) => companyApi.post(`${BASE}/meetings/${meetingId}/participants`, { user_id: userId }),
+  addParticipant:    (meetingId, userId, userType) => companyApi.post(`${BASE}/meetings/${meetingId}/participants`, { user_id: userId, user_type: userType || 'company_user' }),
   removeParticipant: (meetingId, userId) => companyApi.delete(`${BASE}/meetings/${meetingId}/participants`, { data: { user_id: userId } }),
 
   // Notifications — returns raw response; callers do res.notifications || []

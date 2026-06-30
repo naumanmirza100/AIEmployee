@@ -396,8 +396,8 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
     setSearchLoading(true);
     try {
       const data = await execMeetingService.searchUsers(q);
-      const addedIds = participants.map(p => p.id);
-      setSearchResults((data.users || []).filter(u => !addedIds.includes(u.id)));
+      const addedKeys = participants.map(p => `${p.user_type || 'company_user'}-${p.id}`);
+      setSearchResults((data.users || []).filter(u => !addedKeys.includes(`${u.user_type || 'company_user'}-${u.id}`)));
     } catch { setSearchResults([]); }
     finally { setSearchLoading(false); }
   };
@@ -426,7 +426,7 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
       // Add participants if any
       const meetingId = res.meeting?.id;
       if (meetingId && participants.length > 0) {
-        await Promise.all(participants.map(p => execMeetingService.addParticipant(meetingId, p.id)));
+        await Promise.all(participants.map(p => execMeetingService.addParticipant(meetingId, p.id, p.user_type)));
       }
       toast({ title: 'Meeting scheduled!' });
       onCreated();
@@ -442,25 +442,32 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg bg-[#0d0b1f] border-white/10 text-white">
+      <DialogContent className="max-w-3xl bg-[#0d0b1f] border-white/10 text-white">
         <DialogHeader>
           <DialogTitle>Schedule Meeting</DialogTitle>
           <DialogDescription className="text-white/50">Fill in the meeting details below.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          <div className="space-y-1">
-            <Label>Title *</Label>
-            <Input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Q3 Strategy Review" className="bg-white/5 border-white/10 text-white" />
-          </div>
-          <div className="space-y-1">
-            <Label>Description</Label>
-            <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Meeting agenda..." className="bg-white/5 border-white/10 text-white" rows={2} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+
+        {/* Two-column layout */}
+        <div className="grid grid-cols-2 gap-6 py-2">
+
+          {/* LEFT column — core meeting fields */}
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label>Title *</Label>
+              <Input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Q3 Strategy Review" className="bg-white/5 border-white/10 text-white" />
+            </div>
+
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Meeting agenda..." className="bg-white/5 border-white/10 text-white" rows={3} />
+            </div>
+
             <div className="space-y-1">
               <Label>Date & Time *</Label>
               <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} />
             </div>
+
             <div className="space-y-1">
               <Label>Duration</Label>
               <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
@@ -474,16 +481,13 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <div className="space-y-1">
-            <Label>Video Call Link <span className="text-white/30 text-xs">(leave blank to auto-generate)</span></Label>
-            <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
-              placeholder="https://meet.google.com/xxx-yyyy-zzz" className="bg-white/5 border-white/10 text-white" />
+
           </div>
 
-          {/* Participants */}
-          <div className="space-y-2">
+          {/* RIGHT column — participants */}
+          <div className="space-y-3 flex flex-col">
             <Label>Add Participants</Label>
+
             {/* Added chips */}
             {participants.length > 0 && (
               <div className="flex flex-wrap gap-2">
@@ -495,6 +499,7 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
                 ))}
               </div>
             )}
+
             {/* Search input */}
             <div className="relative">
               <Input
@@ -508,7 +513,7 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
               {searchResults.length > 0 && (
                 <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
                   {searchResults.map(u => (
-                    <button key={u.id} onClick={() => addUser(u)}
+                    <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => addUser(u)}
                       className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
                       <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
                         {u.full_name?.[0]?.toUpperCase() || '?'}
@@ -525,8 +530,20 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
                 <p className="text-white/30 text-xs mt-1">No users found</p>
               )}
             </div>
+
+            {/* Placeholder when no participants yet */}
+            {participants.length === 0 && (
+              <p className="text-white/20 text-xs mt-2">Search above to add team members.</p>
+            )}
+           <div className="space-y-1">
+              <Label>Video Call Link <span className="text-white/30 text-xs">(leave blank to auto-generate)</span></Label>
+              <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
+                placeholder="https://meet.google.com/xxx-yyyy-zzz" className="bg-white/5 border-white/10 text-white" />
+            </div>
           </div>
+
         </div>
+
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
           <Button onClick={handleSubmit} disabled={loading}>
@@ -546,6 +563,34 @@ const AddTaskDialog = ({ open, onClose, onCreated }) => {
   const [form, setForm] = useState({ title: '', description: '', priority: 'medium', due_date: '' });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  // Assignee search state
+  const [assignee, setAssignee] = useState(null);
+  const [assigneeQ, setAssigneeQ] = useState('');
+  const [assigneeResults, setAssigneeResults] = useState([]);
+  const [assigneeLoading, setAssigneeLoading] = useState(false);
+
+  const searchAssignee = async (q) => {
+    setAssigneeQ(q);
+    if (q.length < 2) { setAssigneeResults([]); return; }
+    setAssigneeLoading(true);
+    try {
+      const data = await execMeetingService.searchUsers(q);
+      setAssigneeResults(data.users || []);
+    } catch { setAssigneeResults([]); }
+    finally { setAssigneeLoading(false); }
+  };
+
+  const selectAssignee = (u) => {
+    setAssignee(u);
+    setAssigneeQ('');
+    setAssigneeResults([]);
+  };
+
+  const reset = () => {
+    setForm({ title: '', description: '', priority: 'medium', due_date: '' });
+    setAssignee(null); setAssigneeQ(''); setAssigneeResults([]);
+  };
+
   const handleSubmit = async () => {
     if (!form.title) {
       toast({ title: 'Title is required', variant: 'destructive' });
@@ -553,11 +598,15 @@ const AddTaskDialog = ({ open, onClose, onCreated }) => {
     }
     setLoading(true);
     try {
-      await execMeetingService.createTask({ ...form });
+      await execMeetingService.createTask({
+        ...form,
+        assignee_id: assignee ? assignee.id : null,
+        assignee_user_type: assignee ? (assignee.user_type || 'company_user') : null,
+      });
       toast({ title: 'Task created!' });
       onCreated();
       onClose();
-      setForm({ title: '', description: '', priority: 'medium', due_date: '' });
+      reset();
     } catch (err) {
       toast({ title: 'Failed to create task', description: err.message, variant: 'destructive' });
     } finally {
@@ -566,8 +615,8 @@ const AddTaskDialog = ({ open, onClose, onCreated }) => {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md bg-[#0d0b1f] border-white/10 text-white">
+    <Dialog open={open} onOpenChange={v => { if (!v) reset(); onClose(); }}>
+      <DialogContent className="max-w-lg bg-[#0d0b1f] border-white/10 text-white">
         <DialogHeader>
           <DialogTitle>Add Task</DialogTitle>
         </DialogHeader>
@@ -580,22 +629,68 @@ const AddTaskDialog = ({ open, onClose, onCreated }) => {
             <Label>Description</Label>
             <Textarea value={form.description} onChange={e => set('description', e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
           </div>
-          <div className="space-y-1">
-            <Label>Priority</Label>
-            <Select value={form.priority} onValueChange={v => set('priority', v)}>
-              <SelectTrigger className="bg-white/5 border-white/10 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {['low','medium','high','critical'].map(p => (
-                  <SelectItem key={p} value={p}>{p}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Priority</Label>
+              <Select value={form.priority} onValueChange={v => set('priority', v)}>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {['low','medium','high','critical'].map(p => (
+                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Due Date</Label>
+              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
+            </div>
           </div>
+
+          {/* Assignee */}
           <div className="space-y-1">
-            <Label>Due Date</Label>
-            <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
+            <Label>Assign To</Label>
+            {assignee ? (
+              <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-violet-500/15 border border-violet-500/30">
+                <div>
+                  <span className="text-white text-sm font-medium">{assignee.full_name}</span>
+                  <span className="text-white/40 text-xs ml-2">{assignee.email}</span>
+                </div>
+                <button onClick={() => setAssignee(null)} className="text-violet-300/60 hover:text-white text-xs leading-none">✕</button>
+              </div>
+            ) : (
+              <div className="relative">
+                <Input
+                  value={assigneeQ}
+                  onChange={e => searchAssignee(e.target.value)}
+                  placeholder="Type name or email to assign…"
+                  autoComplete="off"
+                  className="bg-white/5 border-white/10 text-white text-sm"
+                />
+                {assigneeLoading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
+                {assigneeResults.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+                    {assigneeResults.map(u => (
+                      <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => selectAssignee(u)}
+                        className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
+                        <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
+                          {u.full_name?.[0]?.toUpperCase() || '?'}
+                        </div>
+                        <div>
+                          <p className="text-white text-xs font-medium">{u.full_name}</p>
+                          <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {assigneeQ.length >= 2 && !assigneeLoading && assigneeResults.length === 0 && (
+                  <p className="text-white/30 text-xs mt-1">No users found</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <DialogFooter>
@@ -829,7 +924,7 @@ const ExecMeetingDashboard = () => {
 
   const addParticipant = async (meetingId, user) => {
     try {
-      await execMeetingService.addParticipant(meetingId, user.id);
+      await execMeetingService.addParticipant(meetingId, user.id, user.user_type);
       setParticipantsMap(prev => ({
         ...prev,
         [meetingId]: [...(prev[meetingId] || []), { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending' }],
@@ -1349,6 +1444,7 @@ const ExecMeetingDashboard = () => {
                 <p className="text-white text-sm font-medium truncate">{t.title}</p>
                 <p className="text-white/40 text-xs">
                   {t.due_date ? `Due: ${t.due_date}` : 'No due date'}
+                  {t.assignee ? <span className="ml-2 text-violet-300/70">· {t.assignee.full_name}</span> : ''}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
