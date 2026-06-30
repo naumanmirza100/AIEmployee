@@ -1503,7 +1503,6 @@ const ExecMeetingDashboard = () => {
                     <p className="text-white/40 text-xs">
                       {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : '—'}
                       {m.duration_minutes ? ` · ${m.duration_minutes}min` : ''}
-                      {m.location ? ` · ${m.location}` : ''}
                     </p>
                     {m.meeting_link && (
                       <a href={m.meeting_link} target="_blank" rel="noopener noreferrer"

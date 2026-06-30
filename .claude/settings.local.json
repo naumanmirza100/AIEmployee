@@ -120,7 +120,9 @@
       "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python manage.py migrate ai_sdr_agent 2>&1 | Where-Object { $_ -match \"Applying|OK|error|Error|migrat\" })",
       "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python -c \"from api.views import ai_sdr_agent; print\\('OK'\\)\" 2>&1 | Where-Object { $_ -notmatch \"WARNING|NOTE|Every|Sequence|CELERY|EMAIL|Broker|Backend|Timezone|Scheduled|monitor|automated|ai sdr|redis\" })",
       "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python manage.py check 2>&1 | Where-Object { $_ -match \"System check|error|Error|issue|warning\" } | Select-Object -Last 5)",
-      "Bash(grep -E \"\\\\.py$|\\\\.html$\")"
+      "Bash(grep -E \"\\\\.py$|\\\\.html$\")",
+      "Bash(python manage.py makemigrations meeting_agent --name remove_location_from_executivemeeting)",
+      "Bash(python manage.py migrate meeting_agent)"
     ]
   }
 }

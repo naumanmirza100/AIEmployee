@@ -59,8 +59,8 @@ class ExecutiveMeetingAdmin(admin.ModelAdmin):
         ('Schedule', {
             'fields': ('scheduled_at', 'duration_minutes', 'timezone_name', 'actual_start', 'actual_end'),
         }),
-        ('Location', {
-            'fields': ('location', 'meeting_link'),
+        ('Meeting Link', {
+            'fields': ('meeting_link',),
         }),
         ('Recurrence', {
             'fields': ('recurrence', 'recurrence_end_date', 'parent_meeting'),
