@@ -970,8 +970,9 @@ const ExecMeetingDashboard = () => {
   const [showMeetingDialog, setShowMeetingDialog] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const [expandedTaskId, setExpandedTaskId] = useState(null); // inline-expanded task
-  const [editingTask, setEditingTask] = useState(null);       // task open in edit modal
-  const [editingMeeting, setEditingMeeting] = useState(null); // meeting open in edit modal
+  const [editingTask, setEditingTask] = useState(null);
+  const [editingMeeting, setEditingMeeting] = useState(null);
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState(null);
 
   // AI Documents
   const [aiDocLoading, setAiDocLoading] = useState(false);
@@ -1229,14 +1230,18 @@ const ExecMeetingDashboard = () => {
     }
   };
 
+  const [deletingTaskId, setDeletingTaskId] = useState(null);
+
   const deleteTask = async (id) => {
+    setDeletingTaskId(id);
     try {
       await execMeetingService.deleteTask(id);
       setTasks(prev => prev.filter(t => t.id !== id));
       setExpandedTaskId(null);
       loadStats();
-      toast({ title: 'Task deleted' });
+      toast({ title: 'Task deleted', description: 'Assignees have been notified by email.' });
     } catch { toast({ title: 'Failed to delete task', variant: 'destructive' }); }
+    finally { setDeletingTaskId(null); }
   };
 
   const runAiPrioritize = async () => {
@@ -1815,7 +1820,7 @@ const ExecMeetingDashboard = () => {
                       </Button>
                       <Button size="sm" variant="ghost"
                         className="text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs h-7 px-3"
-                        onClick={e => { e.stopPropagation(); deleteTask(t.id); }}>
+                        onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(t.id); }}>
                         <Trash2 className="h-3 w-3 mr-1" /> Delete
                       </Button>
                     </div>
@@ -2277,6 +2282,44 @@ const ExecMeetingDashboard = () => {
         onClose={() => setEditingMeeting(null)}
         onUpdated={() => { loadMeetings(); loadStats(); }}
       />
+
+      {/* Task delete confirm dialog */}
+      <Dialog open={!!confirmDeleteTaskId} onOpenChange={open => { if (!open) setConfirmDeleteTaskId(null); }}>
+        <DialogContent className="max-w-sm w-full bg-[#0d0b1f] border-white/10 text-white">
+          <div className="flex flex-col items-center gap-4 py-2">
+            <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
+              <Trash2 className="h-7 w-7 text-red-400" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-semibold text-white mb-1">Delete Task?</h3>
+              <p className="text-white/50 text-sm">
+                This task will be permanently deleted and all assignees will be notified by email.
+              </p>
+            </div>
+            <div className="flex gap-3 w-full mt-2">
+              <Button
+                variant="outline"
+                className="flex-1 border-white/10 text-white/60 hover:bg-white/5"
+                disabled={!!deletingTaskId}
+                onClick={() => setConfirmDeleteTaskId(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white"
+                disabled={!!deletingTaskId}
+                onClick={() => { deleteTask(confirmDeleteTaskId); setConfirmDeleteTaskId(null); }}
+              >
+                {deletingTaskId ? (
+                  <><span className="h-4 w-4 mr-2 rounded-full border-2 border-white/30 border-t-white animate-spin inline-block" /> Deleting…</>
+                ) : (
+                  <><Trash2 className="h-4 w-4 mr-1" /> Delete</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Document viewer modal */}
       <Dialog open={!!viewDoc} onOpenChange={open => { if (!open) setViewDoc(null); }}>

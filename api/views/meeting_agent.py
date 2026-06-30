@@ -150,6 +150,8 @@ def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_
               {_email_divider()}
               {_email_detail_row('Duration', f'{meeting.duration_minutes} minutes')}
               {_email_divider()}
+              {_email_detail_row('Status', meeting.status.replace('_', ' ').capitalize())}
+              {_email_divider()}
               {_email_detail_row('Organizer', organizer_name)}
               {(_email_divider() + link_row) if link_row else ''}
             </table>
@@ -221,6 +223,8 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
               {_email_detail_row('Date &amp; Time', scheduled)}
               {_email_divider()}
               {_email_detail_row('Duration', f'{meeting.duration_minutes} minutes')}
+              {_email_divider()}
+              {_email_detail_row('Status', meeting.status.replace('_', ' ').capitalize())}
               {_email_divider()}
               {_email_detail_row('Organizer', organizer_name)}
             </table>
@@ -375,6 +379,48 @@ def _send_task_removal_email(cu, task, removed_by_name):
     """
     html = _email_base_html(content, preview_text=f"You have been removed from task '{task.title}'.")
     _send_email_safe(f"Removed from Task: {task.title}", html, cu.email)
+
+
+def _send_task_deleted_email(cu, task_title, task_priority, deleted_by_name):
+    first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
+    content = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:20px;">
+            <div style="width:56px;height:56px;background:#fef2f2;border-radius:50%;
+                        font-size:26px;line-height:56px;text-align:center;">🗑️</div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        Task Deleted
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Hi {first_name}, a task you were assigned to has been deleted.
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#fff7f7;border:1px solid #fecaca;border-radius:10px;margin-bottom:20px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#ef4444;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Task Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Title', task_title)}
+              {_email_divider()}
+              {_email_detail_row('Priority', task_priority.capitalize())}
+              {_email_divider()}
+              {_email_detail_row('Deleted by', deleted_by_name)}
+            </table>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.6;">
+        This task has been permanently removed from the system.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"Task '{task_title}' has been deleted.")
+    _send_email_safe(f"Task Deleted: {task_title}", html, cu.email)
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +713,7 @@ def meeting_detail(request, meeting_id):
         # Notify existing participants only when calendar-relevant fields change.
         # Run in a background thread with a short delay so any concurrent
         # participant-remove requests finish writing to DB first.
-        calendar_fields = {'date/time', 'duration minutes', 'meeting link', 'title'}
+        calendar_fields = {'date/time', 'duration minutes', 'meeting link', 'title', 'status'}
         if any(f in calendar_fields for f in changed_fields):
             import threading as _threading
             meeting_id_snap = meeting.id
@@ -1100,7 +1146,13 @@ def task_detail(request, task_id):
                     _send_task_removal_email(cu, task, company_user.full_name)
         return Response({'status': 'success', 'task': _serialize_task(task)})
 
+    # Snapshot before delete so we can reference after
+    task_title = task.title
+    task_priority = task.priority
+    assignees_to_notify = [cu for cu in task.assignees.all() if cu.email and cu.id != company_user.id]
     task.delete()
+    for cu in assignees_to_notify:
+        _send_task_deleted_email(cu, task_title, task_priority, company_user.full_name)
     return Response({'status': 'success', 'message': 'Task deleted.'})
 
 
