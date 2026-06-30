@@ -1228,16 +1228,43 @@ def list_interviews(request):
         return JsonResponse({"error": "Unauthorized. Recruitment Agent role required."}, status=403)
     
     try:
+        from django.core.paginator import Paginator
+
         status_filter = request.GET.get('status')
+        search        = request.GET.get('search', '').strip()
+        date_from     = request.GET.get('date_from')
+        date_to       = request.GET.get('date_to')
+
+        try:
+            page_num  = max(1, int(request.GET.get('page', 1)))
+            page_size = min(100, max(1, int(request.GET.get('page_size', 20))))
+        except (ValueError, TypeError):
+            page_num, page_size = 1, 20
+
+        from django.db.models import Q
         interviews = Interview.objects.all()
-        
+
         if status_filter:
             interviews = interviews.filter(status=status_filter)
-        
-        interviews = interviews.order_by('-created_at')[:100]  # Limit to 100 most recent
-        
+
+        if search:
+            interviews = interviews.filter(
+                Q(candidate_name__icontains=search) | Q(candidate_email__icontains=search)
+            )
+
+        if date_from:
+            interviews = interviews.filter(created_at__date__gte=date_from)
+
+        if date_to:
+            interviews = interviews.filter(created_at__date__lte=date_to)
+
+        interviews = interviews.order_by('-created_at')
+
+        paginator = Paginator(interviews, page_size)
+        page_obj  = paginator.get_page(page_num)
+
         interview_list = []
-        for interview in interviews:
+        for interview in page_obj:
             interview_list.append({
                 'id': interview.id,
                 'candidate_name': interview.candidate_name,
@@ -1248,8 +1275,18 @@ def list_interviews(request):
                 'scheduled_datetime': interview.scheduled_datetime.isoformat() if interview.scheduled_datetime else None,
                 'created_at': interview.created_at.isoformat(),
             })
-        
-        return JsonResponse({'interviews': interview_list}, safe=False)
+
+        return JsonResponse({
+            'interviews': interview_list,
+            'pagination': {
+                'total': paginator.count,
+                'page': page_num,
+                'page_size': page_size,
+                'total_pages': paginator.num_pages,
+                'has_next': page_obj.has_next(),
+                'has_previous': page_obj.has_previous(),
+            },
+        }, safe=False)
         
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -1388,8 +1425,10 @@ def get_available_slots_for_interview(request, token):
             if slot_dt_parsed is None:
                 # Try naive parse and make aware
                 slot_dt_naive = datetime.strptime(slot_datetime_normalized, '%Y-%m-%dT%H:%M')
-                import pytz
                 slot_dt_parsed = timezone.make_aware(slot_dt_naive)
+            elif slot_dt_parsed.tzinfo is None:
+                # parse_datetime returned a naive datetime (no tz in string) — make it aware
+                slot_dt_parsed = timezone.make_aware(slot_dt_parsed)
             if slot_dt_parsed < now_aware:
                 continue  # Past slot — skip entirely
         except Exception:

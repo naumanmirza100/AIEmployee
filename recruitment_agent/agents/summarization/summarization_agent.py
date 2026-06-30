@@ -813,7 +813,7 @@ class SummarizationAgent:
             except ValueError:
                 continue
         # If numeric year in text
-        m = re.search(r"(20\\d{2}|19\\d{2})", text)
+        m = re.search(r"(20\d{2}|19\d{2})", text)
         if m:
             try:
                 return datetime.strptime(m.group(1), "%Y")
@@ -882,46 +882,7 @@ class SummarizationAgent:
                 if desc:
                     achievements.append(desc.strip())
         return achievements
-    
-    def _reduce_cv_size(self, parsed_cv: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Reduce CV data size to avoid exceeding token limits.
-        Truncates long descriptions, limits skills, and shortens text fields.
-        """
-        reduced = parsed_cv.copy()
-        
-        # Limit skills to top 30 most relevant
-        if isinstance(reduced.get("skills"), list):
-            reduced["skills"] = reduced["skills"][:30]
-        
-        # Truncate experience descriptions (max 500 chars each)
-        if isinstance(reduced.get("experience"), list):
-            for exp in reduced["experience"]:
-                if isinstance(exp, dict) and exp.get("description"):
-                    desc = str(exp["description"])
-                    if len(desc) > 500:
-                        exp["description"] = desc[:497] + "..."
-        
-        # Truncate summary (max 300 chars)
-        if reduced.get("summary"):
-            summary = str(reduced["summary"])
-            if len(summary) > 300:
-                reduced["summary"] = summary[:297] + "..."
-        
-        # Limit certifications (max 10)
-        if isinstance(reduced.get("certifications"), list):
-            reduced["certifications"] = reduced["certifications"][:10]
-        
-        # Limit education entries (max 5)
-        if isinstance(reduced.get("education"), list):
-            reduced["education"] = reduced["education"][:5]
-        
-        # Limit experience entries (max 10)
-        if isinstance(reduced.get("experience"), list):
-            reduced["experience"] = reduced["experience"][:10]
-        
-        return reduced
-    
+
     def _create_minimal_cv_for_llm(self, parsed_cv: Dict[str, Any], job_keywords: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Create a MINIMAL CV representation with ONLY essential data for LLM scoring.

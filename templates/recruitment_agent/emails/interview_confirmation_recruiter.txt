@@ -7,6 +7,7 @@ Email: {{ candidate_email }}
 Position: {{ job_title }}
 Interview Type: {{ interview_type }}
 Scheduled Date & Time: {{ scheduled_datetime|date:"F d, Y" }} at {{ scheduled_datetime|time:"g:i A" }}
+{% if meeting_link %}Meeting Link: {{ meeting_link }}{% endif %}
 
 Please ensure you are available at this time.
 

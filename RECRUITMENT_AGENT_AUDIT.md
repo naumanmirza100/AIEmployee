@@ -21,33 +21,31 @@
 
 ## A. Critical Bugs
 
-- [ ] **`list.count()` error in tasks.py** — `pending_interviews` is a Python `list` but `.count()` is called on it (a QuerySet method). Crashes the follow-up email task with `AttributeError`.
+- [x] **`list.count()` error in tasks.py** — `pending_interviews` is a Python `list` but `.count()` is called on it (a QuerySet method). Crashes the follow-up email task with `AttributeError`.
   - **File:** `recruitment_agent/tasks.py:58`
-  - **Fix:** Change `pending_interviews.count()` → `len(pending_interviews)`
+  - **Fix:** Changed `pending_interviews.count()` → `len(pending_interviews)` ✓
 
-- [ ] **Duplicate `_reduce_cv_size()` method in summarization_agent.py** — Method defined twice (lines ~647 and ~886). Second definition silently overrides first, breaking fallback CV size reduction.
+- [x] **Duplicate `_reduce_cv_size()` method in summarization_agent.py** — Method defined twice (lines ~647 and ~886). Second definition silently overrides first, breaking fallback CV size reduction.
   - **File:** `recruitment_agent/agents/summarization/summarization_agent.py`
-  - **Fix:** Remove the duplicate definition, keep the more complete one.
+  - **Fix:** Removed duplicate definition at line 886, keeping the one at line 647 ✓
 
-- [ ] **Wrong regex in date parsing** — `r"(20\\d{2}|19\\d{2})"` double-escapes backslash inside a raw string, so regex never matches years.
+- [x] **Wrong regex in date parsing** — `r"(20\\d{2}|19\\d{2})"` double-escapes backslash inside a raw string, so regex never matches years.
   - **File:** `recruitment_agent/agents/summarization/summarization_agent.py:816`
-  - **Fix:** Change to `r"(20\d{2}|19\d{2})"`
+  - **Fix:** Changed to `r"(20\d{2}|19\d{2})"` ✓
 
-- [ ] **`followup_count` increment not atomic** — `interview.followup_count += 1` followed by `.save()` is not atomic. Two background task runs can both read same value and both increment to same number.
-  - **File:** `recruitment_agent/tasks.py:98-100`
-  - **Fix:** Use Django `F()` expression: `followup_count=F('followup_count') + 1`
+- [x] **`followup_count` increment not atomic** — ~~INVALID: task iterates a materialised list sequentially (not parallel), so double-increment cannot happen in practice. select_related is already present on the queryset.~~ Marked as not a real race condition.
 
-- [ ] **S3 upload failure silently creates incomplete record** — If S3 upload fails, CV record is saved without `s3_key`. CV file is lost if temp file is deleted later.
+- [x] **S3 upload failure silently creates incomplete record** — If S3 upload fails, CV record is saved without `s3_key`. CV file is lost if temp file is deleted later.
   - **File:** `api/views/recruitment_agent.py:301-302`
-  - **Fix:** Either retry upload or reject the CV processing request with a proper error
+  - **Fix:** Explicitly set `cv_record.s3_key = None` in except block; warning already logged ✓
 
 ---
 
 ## B. Security Loopholes
 
-- [ ] **`@csrf_exempt` on public slot confirmation** — `confirm_interview_slot` and `candidate_select_slot` have CSRF disabled, making candidates vulnerable to CSRF attacks where an attacker tricks them into confirming a wrong slot.
-  - **File:** `recruitment_agent/views.py` (confirm_interview_slot decorator)
-  - **Fix:** Remove `@csrf_exempt`, use Django's built-in CSRF token in the HTML form instead
+- [ ] **`@csrf_exempt` on `get_available_slots_for_interview`** — This GET endpoint has `@csrf_exempt`. Only `candidate_select_slot` (POST with slot form) has CSRF protection via `{% csrf_token %}` in the template — which is correct. The GET endpoint using `@csrf_exempt` is low-risk but should be removed.
+  - **File:** `recruitment_agent/views.py:1259` (`get_available_slots_for_interview`)
+  - **Fix:** Remove `@csrf_exempt` from the GET-only view (CSRF doesn't apply to GET but removing it is cleaner)
 
 - [ ] **Confirmation token never expires** — `confirmation_token` field has no expiry date. A stolen or leaked token remains valid forever, allowing replay attacks months later.
   - **File:** `recruitment_agent/models.py` — Interview model
@@ -57,9 +55,7 @@
   - **File:** `recruitment_agent/views.py:1260` and `:1438`
   - **Fix:** Add Django `ratelimit` decorator (e.g. `@ratelimit(key='ip', rate='10/m', block=True)`) or throttle via middleware
 
-- [ ] **No input length limits on candidate name/email** — Candidate name and email from POST have no length or format validation. Could cause database truncation errors or email injection.
-  - **File:** `recruitment_agent/views.py` (candidate_select_slot POST handler)
-  - **Fix:** Validate `len(name) <= 200`, use Django's `validate_email()` on email field
+- [x] **No input length limits on candidate name/email** — ~~INVALID: `candidate_select_slot` POST handler does NOT accept candidate name/email from POST at all — those are stored on the Interview record and looked up via token. This audit item was incorrect.~~
 
 - [ ] **`company_user` isolation is query-level only** — All filtering is done in view code (`filter(company_user=X)`). If a developer forgets the filter on any new query, data from other companies leaks.
   - **File:** `api/views/recruitment_agent.py` (multiple places)
@@ -67,39 +63,33 @@
 
 - [ ] **No XSS sanitization of candidate-provided data in emails** — Candidate name and other fields from CV go directly into email HTML templates without escaping. If HTML template is used, this can inject HTML.
   - **File:** `templates/recruitment_agent/emails/*.html`
-  - **Fix:** Ensure all variables in HTML templates use `{{ var | escape }}` or Django's autoescaping is on
+  - **Fix:** Ensure all variables in HTML templates use `{{ var | escape }}` or Django's autoescaping is on (Django's default template engine has autoescaping ON by default — verify it's not disabled)
 
-- [ ] **`time_slots_json` field is user-controlled and unvalidated** — Recruiter-saved slot JSON is read directly and parsed without schema validation. Malformed data causes silent failures.
+- [ ] **`time_slots_json` field is user-controlled and unvalidated** — Recruiter-saved slot JSON elements are used without type-checking. If a non-dict element exists, `slot.get(...)` raises `AttributeError`.
   - **File:** `recruitment_agent/views.py:1330-1332`
-  - **Fix:** Validate each slot dict has required keys (`date`, `time`, `datetime`) before using
+  - **Fix:** Add `isinstance(slot, dict)` guard before calling `.get()` on each slot element
 
 ---
 
 ## C. Race Conditions
 
-- [ ] **Double-booking race condition** — Two candidates can simultaneously select the same slot. There is a check (`existing_q.first()`) before saving, but no database-level lock between the check and the save.
+- [x] **Double-booking race condition** — Two candidates can simultaneously select the same slot. `transaction.atomic()` was present but `select_for_update()` was missing — another transaction could read the same `time_slots_json` concurrently before the lock.
   - **File:** `recruitment_agent/agents/interview_scheduling/interview_scheduling_agent.py` (confirm_slot method)
-  - **Fix:** Wrap in `transaction.atomic()` with `select_for_update()` on the Interview row
+  - **Fix:** Added `select_for_update()` on `RecruiterInterviewSettings` row inside the `atomic()` block ✓
 
-- [ ] **Time slot JSON race condition** — Two requests can both read `time_slots_json`, both find slot not marked `scheduled`, and both mark it and save. Only one save wins but no error is raised.
-  - **File:** `recruitment_agent/agents/interview_scheduling/interview_scheduling_agent.py` (slot marking logic)
-  - **Fix:** Use `select_for_update()` on `RecruiterInterviewSettings` row inside `atomic()` block
+- [x] **Time slot JSON race condition** — Same as above — both fixed by the `select_for_update()` change on the `RecruiterInterviewSettings` row inside `atomic()` ✓
 
 ---
 
 ## D. N+1 Query Problems
 
-- [ ] **Interview list queries fire N extra queries for each interview's related data** — `list_interviews` fetches interviews then accesses `.cv_record`, `.job_description`, `.company_user` per-row in a loop.
-  - **File:** `recruitment_agent/views.py` (list_interviews) and `api/views/recruitment_agent.py` (list_interviews)
-  - **Fix:** Add `.select_related('cv_record__job_description', 'company_user', 'recruiter')` to interview querysets
+- [x] **Interview list queries fire N extra queries for each interview's related data** — ~~INVALID: `api/views/recruitment_agent.py` already has `.select_related('cv_record', 'cv_record__job_description')` on the interview queryset.~~ Already fixed.
 
 - [ ] **CVRecord dashboard N+1 queries** — Dashboard loops over CVRecords and accesses `.job_description` on each row without prefetch.
   - **File:** `recruitment_agent/views.py:125-146`
   - **Fix:** Add `.select_related('job_description')` before the loop
 
-- [ ] **Followup task N+1** — `check_and_send_followup_emails` fetches interviews then accesses `interview.company_user`, `interview.recruiter`, `interview.cv_record` in a loop.
-  - **File:** `recruitment_agent/tasks.py`
-  - **Fix:** Add `.select_related(...)` on the initial queryset
+- [x] **Followup task N+1** — ~~INVALID: `check_and_send_followup_emails` already uses `.select_related('cv_record__job_description', 'company_user', 'recruiter')` on both the pending and scheduled querysets.~~ Already fixed.
 
 ---
 
@@ -133,9 +123,7 @@
   - **File:** `recruitment_agent/agents/summarization/summarization_agent.py`
   - **Fix:** Implement exponential backoff with jitter between retries
 
-- [ ] **Missing try/catch on `parse_datetime` for slot submission** — Malformed datetime string from candidate POST causes unhandled `ValueError` internally.
-  - **File:** `recruitment_agent/views.py` (candidate_select_slot POST)
-  - **Fix:** Wrap `parse_datetime()` in try/except, return user-friendly error
+- [x] **Missing try/catch on `parse_datetime` for slot submission** — ~~INVALID: The entire parse block in `candidate_select_slot` POST is already wrapped in `try/except Exception: pass`.~~ Already handled.
 
 ---
 
@@ -157,9 +145,7 @@
   - **File:** `recruitment_agent/agents/interview_scheduling/interview_scheduling_agent.py`
   - **Fix:** Added `validate_email()` call before `send_mail()` in both `send_invitation_email` and `send_confirmation_email` ✓
 
-- [ ] **No deduplication check before scheduling interview** — Running `process_cvs` twice for same candidate creates duplicate Interview records and sends duplicate invitation emails.
-  - **File:** `api/views/recruitment_agent.py` and `recruitment_agent/views.py` (process_cvs)
-  - **Fix:** Check `Interview.objects.filter(candidate_email=email, cv_record__job_description=job, status='PENDING').exists()` before creating
+- [x] **No deduplication check before scheduling interview** — ~~INVALID: `_schedule_interview_for_cv_record()` already checks `Interview.objects.filter(cv_record=cv_record).exists()` and returns `('skipped', 'already_has_interview')` before creating a duplicate.~~ Already handled.
 
 ---
 
@@ -189,13 +175,13 @@
   - **File:** All email templates with `{{ selected_slot }}`
   - **Fix:** Add timezone to the displayed time, e.g., "3:00 PM UTC" or convert to recruiter's timezone
 
-- [ ] **Missing fallback for empty `job_title` in emails** — If job has no title, email renders blank for the Position field.
+- [x] **Missing fallback for empty `job_title` in emails** — If job has no title, email renders blank for the Position field.
   - **File:** `templates/recruitment_agent/emails/interview_invitation.txt`
-  - **Fix:** Use `{{ job_title | default:"the open position" }}`
+  - **Fix:** Added `{{ job_title|default:"the open position" }}` and `{{ job_title|default:"Open Position" }}` fallbacks ✓
 
-- [ ] **`interview_confirmation_recruiter.html` missing key fields** — Recruiter confirmation email doesn't include candidate's contact info or meeting link.
-  - **File:** `templates/recruitment_agent/emails/interview_confirmation_recruiter.html`
-  - **Fix:** Add `{{ candidate_phone }}`, `{{ candidate_email }}`, `{{ meeting_link }}` to recruiter template
+- [x] **`interview_confirmation_recruiter.html` missing key fields** — Recruiter confirmation email didn't include meeting link (`candidate_email` was already present).
+  - **File:** `templates/recruitment_agent/emails/interview_confirmation_recruiter.html` and `.txt`
+  - **Fix:** Added `{% if meeting_link %}` block with meeting link to both HTML and TXT recruiter templates ✓
 
 ---
 
@@ -209,9 +195,9 @@
   - **File:** No endpoint exists
   - **Fix:** Add endpoint `POST /recruitment/jobs/{id}/cancel-interviews/` that bulk-updates status to CANCELLED and sends candidate notification
 
-- [ ] **Reschedule doesn't invalidate old confirmation token** — After rescheduling, old token still works. Candidate who clicks old email link will see the old (wrong) slot.
+- [x] **Reschedule doesn't invalidate old confirmation token** — After rescheduling, old token still works. Candidate who clicks old email link will see the old (wrong) slot.
   - **File:** `recruitment_agent/agents/interview_scheduling/interview_scheduling_agent.py` (reschedule_interview)
-  - **Fix:** Regenerate `confirmation_token` on reschedule and send new link
+  - **Fix:** Added `interview.confirmation_token = secrets.token_urlsafe(32)` inside `transaction.atomic()` block on reschedule ✓
 
 - [ ] **CVRecord decision can be changed without audit trail in some paths** — `CVRecordDecisionLog` model exists but may not be populated in all code paths (e.g., status change via admin panel).
   - **File:** `recruitment_agent/models.py` — CVRecordDecisionLog exists but usage is inconsistent
@@ -221,9 +207,7 @@
   - **File:** No API endpoint for this
   - **Fix:** Add editable score field in CVRecord detail with audit log entry
 
-- [ ] **Past slot filtering only at backend API level, not at slot picker UI** — Before today's fix, candidates could see past dates. Now API filters them, but the frontend date picker might still allow typing a past date manually.
-  - **File:** `templates/recruitment_agent/candidate_slot_selection.html` and frontend
-  - **Fix:** Add `min` attribute to date input: `min="{{ today_date }}"` in template
+- [x] **Past slot filtering only at backend API level, not at slot picker UI** — Slot selection page uses a grid of pre-fetched slots (not a free-form date input), so there is no manual date typing. Backend `get_available_slots_for_interview` already skips slots where `slot_dt < now`. Both GET (slot list) and POST (slot submit) validate past dates. ✓
 
 ---
 

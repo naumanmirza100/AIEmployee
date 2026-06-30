@@ -1012,6 +1012,71 @@
       padding: 20px;
     }
   }
+
+  /* All Interviews Table */
+  .interviews-filter-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .interviews-filter-bar input[type="text"],
+  .interviews-filter-bar input[type="date"],
+  .interviews-filter-bar select {
+    background: var(--bg-panel);
+    border: 1px solid #334155;
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .interviews-filter-bar input[type="text"] { min-width: 200px; }
+  .interviews-filter-bar input[type="date"] { color-scheme: dark; }
+  .interviews-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+  .interviews-table thead tr {
+    border-bottom: 2px solid var(--purple-primary);
+  }
+  .interviews-table th {
+    padding: 10px 12px;
+    text-align: left;
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .interviews-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    vertical-align: middle;
+  }
+  .interviews-table tbody tr:hover { background: var(--bg-card-hover); }
+  .interviews-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 16px;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+  }
+  .status-badge.status-pending     { background: rgba(234,179,8,.15);  color: #eab308; }
+  .status-badge.status-scheduled   { background: rgba(99,102,241,.15); color: #818cf8; }
+  .status-badge.status-completed   { background: rgba(34,197,94,.15);  color: #4ade80; }
+  .status-badge.status-cancelled   { background: rgba(239,68,68,.15);  color: #f87171; }
+  .status-badge.status-rescheduled { background: rgba(249,115,22,.15); color: #fb923c; }
 </style>
 {% endblock %}
 
@@ -1448,6 +1513,59 @@
           </div>
           {% endfor %}
         </div>
+      </div>
+    </div>
+
+    <!-- All Interviews Table — inside Candidate Status section -->
+    <div style="margin-top:28px;border-top:1px solid rgba(255,255,255,0.08);padding-top:24px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:18px;color:var(--text-primary);font-weight:600;">📋 All Interviews</h3>
+        <div class="interviews-filter-bar">
+          <input type="text" id="interviewSearch" placeholder="Search name or email…" />
+          <input type="date" id="interviewDateFrom" title="Created from" />
+          <span style="color:var(--text-muted);font-size:12px;white-space:nowrap;">to</span>
+          <input type="date" id="interviewDateTo" title="Created to" />
+          <select id="interviewStatusFilter">
+            <option value="">All Status</option>
+            <option value="PENDING">Pending</option>
+            <option value="SCHEDULED">Scheduled</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="CANCELLED">Cancelled</option>
+            <option value="RESCHEDULED">Rescheduled</option>
+          </select>
+          <button class="btn btn-small btn-secondary" onclick="resetInterviewFilters()">Reset</button>
+        </div>
+      </div>
+
+      <div id="interviewsLoading" style="display:none;text-align:center;padding:24px;color:var(--text-muted);">
+        Loading interviews…
+      </div>
+      <div id="interviewsEmpty" style="display:none;text-align:center;padding:24px;color:var(--text-muted);">
+        No interviews found.
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="interviews-table" id="interviewsTable" style="display:none;">
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Email</th>
+              <th>Job Role</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Scheduled</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="interviewsTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="interviews-pagination" id="interviewsPagination" style="display:none;">
+        <button class="btn btn-small btn-secondary" id="interviewsPrevBtn"
+                onclick="loadInterviewsPage(currentInterviewPageGlobal - 1)">← Prev</button>
+        <span id="interviewsPageInfo" style="min-width:180px;text-align:center;"></span>
+        <button class="btn btn-small btn-secondary" id="interviewsNextBtn"
+                onclick="loadInterviewsPage(currentInterviewPageGlobal + 1)">Next →</button>
       </div>
     </div>
   </div>
@@ -2671,5 +2789,113 @@
       btn.style.display = 'block';
     }
   }
+
+  // ===================================================================
+  // All Interviews — server-side pagination, search, date range filter
+  // ===================================================================
+  var currentInterviewPageGlobal = 1;
+
+  (function () {
+    var searchTimer = null;
+
+    function esc(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      try {
+        var d = new Date(iso);
+        return d.toLocaleString('en-GB', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+      } catch(e) { return iso; }
+    }
+
+    window.loadInterviewsPage = function (page) {
+      if (page < 1) return;
+      currentInterviewPageGlobal = page;
+
+      var search   = document.getElementById('interviewSearch').value.trim();
+      var dateFrom = document.getElementById('interviewDateFrom').value;
+      var dateTo   = document.getElementById('interviewDateTo').value;
+      var statusV  = document.getElementById('interviewStatusFilter').value;
+
+      var params = new URLSearchParams({ page: page, page_size: 20 });
+      if (search)   params.set('search',    search);
+      if (dateFrom) params.set('date_from', dateFrom);
+      if (dateTo)   params.set('date_to',   dateTo);
+      if (statusV)  params.set('status',    statusV);
+
+      var loading  = document.getElementById('interviewsLoading');
+      var table    = document.getElementById('interviewsTable');
+      var tbody    = document.getElementById('interviewsTableBody');
+      var empty    = document.getElementById('interviewsEmpty');
+      var paging   = document.getElementById('interviewsPagination');
+      var pageInfo = document.getElementById('interviewsPageInfo');
+      var prevBtn  = document.getElementById('interviewsPrevBtn');
+      var nextBtn  = document.getElementById('interviewsNextBtn');
+
+      loading.style.display = 'block';
+      table.style.display   = 'none';
+      empty.style.display   = 'none';
+      paging.style.display  = 'none';
+
+      fetch('/recruitment/api/interviews/?' + params.toString(), {
+        headers: { 'X-CSRFToken': getCookie('csrftoken') }
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        loading.style.display = 'none';
+        var interviews = data.interviews || [];
+        var pg = data.pagination || {};
+
+        if (interviews.length === 0) {
+          empty.style.display = 'block';
+        } else {
+          table.style.display = '';
+          tbody.innerHTML = interviews.map(function(iv) {
+            return '<tr>' +
+              '<td>' + esc(iv.candidate_name) + '</td>' +
+              '<td>' + esc(iv.candidate_email) + '</td>' +
+              '<td>' + esc(iv.job_role) + '</td>' +
+              '<td>' + esc(iv.interview_type) + '</td>' +
+              '<td><span class="status-badge status-' + esc((iv.status||'').toLowerCase()) + '">' + esc(iv.status) + '</span></td>' +
+              '<td>' + fmtDate(iv.scheduled_datetime) + '</td>' +
+              '<td>' + fmtDate(iv.created_at) + '</td>' +
+              '</tr>';
+          }).join('');
+        }
+
+        if (pg.total_pages > 1) {
+          pageInfo.textContent = 'Page ' + pg.page + ' of ' + pg.total_pages + ' (' + pg.total + ' total)';
+          prevBtn.disabled = !pg.has_previous;
+          nextBtn.disabled = !pg.has_next;
+          paging.style.display = 'flex';
+        }
+      })
+      .catch(function(err) {
+        loading.style.display = 'none';
+        console.error('Interviews load failed:', err);
+      });
+    };
+
+    window.resetInterviewFilters = function () {
+      document.getElementById('interviewSearch').value = '';
+      document.getElementById('interviewDateFrom').value = '';
+      document.getElementById('interviewDateTo').value = '';
+      document.getElementById('interviewStatusFilter').value = '';
+      window.loadInterviewsPage(1);
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+      document.getElementById('interviewSearch').addEventListener('input', function () {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function() { window.loadInterviewsPage(1); }, 400);
+      });
+      ['interviewDateFrom', 'interviewDateTo', 'interviewStatusFilter'].forEach(function (id) {
+        document.getElementById(id).addEventListener('change', function () { window.loadInterviewsPage(1); });
+      });
+      window.loadInterviewsPage(1);
+    });
+  })();
 </script>
 {% endblock %}

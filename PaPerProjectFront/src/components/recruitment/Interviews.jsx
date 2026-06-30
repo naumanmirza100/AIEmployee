@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { format, startOfDay } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send, LayoutList, Columns, MoreVertical, RefreshCw, Award, Building2, Trophy, ThumbsUp, Lock } from 'lucide-react';
+import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send, LayoutList, Columns, MoreVertical, RefreshCw, Award, Building2, Trophy, ThumbsUp, Lock, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -29,6 +29,17 @@ const Interviews = ({ onUpdate }) => {
   const [decisionFilter, setDecisionFilter] = useState('');
   const [jobFilter, setJobFilter] = useState('');
   const [jobs, setJobs] = useState([]);
+  // Search & date filters
+  const [search, setSearch]         = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [dateFrom, setDateFrom]     = useState('');
+  const [dateTo, setDateTo]         = useState('');
+  // Pagination
+  const [currentPage, setCurrentPage]   = useState(1);
+  const [totalPages, setTotalPages]     = useState(1);
+  const [totalCount, setTotalCount]     = useState(0);
+  const [pageSize, setPageSize]         = useState(10);
+
   const [updatingId, setUpdatingId] = useState(null);
   const [pendingChange, setPendingChange] = useState(null);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
@@ -52,10 +63,21 @@ const Interviews = ({ onUpdate }) => {
   const setKanbanGroupBy = (v) =>
     setSearchParams((prev) => { const p = new URLSearchParams(prev); p.set('groupBy', v); return p; }, { replace: true });
 
+  // Debounce search input
   useEffect(() => {
-    fetchInterviews();
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Re-fetch (reset to page 1) when any filter changes
+  useEffect(() => {
+    fetchInterviews(1);
+    setCurrentPage(1);
+  }, [statusFilter, decisionFilter, jobFilter, dateFrom, dateTo, debouncedSearch, pageSize]);
+
+  useEffect(() => {
     fetchJobs();
-  }, [statusFilter, decisionFilter]);
+  }, []);
 
   const fetchJobs = async () => {
     try {
@@ -64,19 +86,36 @@ const Interviews = ({ onUpdate }) => {
     } catch (_) {}
   };
 
-  const fetchInterviews = async () => {
+  const fetchInterviews = async (page = 1) => {
     try {
       setLoading(true);
-      const filters = {};
-      if (statusFilter) filters.status = statusFilter;
-      if (decisionFilter !== '') filters.outcome = decisionFilter;
+      const filters = { page, page_size: pageSize };
+      if (statusFilter)          filters.status    = statusFilter;
+      if (decisionFilter !== '') filters.outcome   = decisionFilter;
+      if (jobFilter)             filters.job_title = jobFilter;
+      if (debouncedSearch)       filters.search    = debouncedSearch;
+      if (dateFrom)              filters.date_from = dateFrom;
+      if (dateTo)                filters.date_to   = dateTo;
       const response = await getInterviews(filters);
-      if (response.status === 'success') setInterviews(response.data || []);
+      if (response.status === 'success') {
+        setInterviews(response.data || []);
+        const pg = response.pagination;
+        if (pg) {
+          setTotalPages(pg.total_pages || 1);
+          setTotalCount(pg.total || 0);
+        }
+      }
     } catch (error) {
       toast({ title: 'Error', description: 'Failed to load interviews', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
+  };
+
+  const goToPage = (page) => {
+    if (page < 1 || page > totalPages) return;
+    setCurrentPage(page);
+    fetchInterviews(page);
   };
 
   const getStatusBadge = (status) => {
@@ -256,10 +295,6 @@ const Interviews = ({ onUpdate }) => {
     );
   }
 
-  const filteredInterviews = jobFilter
-    ? interviews.filter(i => (i.job_title || i.job_role || '') === jobFilter)
-    : interviews;
-
   return (
     <div className="space-y-4 w-full">
       {/* Header and Filters */}
@@ -330,7 +365,56 @@ const Interviews = ({ onUpdate }) => {
         </div>
       </div>
 
-      {filteredInterviews.length === 0 ? (
+      {/* Search + Date range + Rows per page */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[180px] max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/30 pointer-events-none" />
+          <Input
+            placeholder="Search name or email…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-8 h-8 text-xs bg-white/5 border-white/10 text-white placeholder:text-white/30"
+          />
+        </div>
+        <Input
+          type="date"
+          value={dateFrom}
+          onChange={e => setDateFrom(e.target.value)}
+          title="Created from"
+          className="h-8 w-36 text-xs bg-white/5 border-white/10 text-white [color-scheme:dark]"
+        />
+        <span className="text-white/30 text-xs">to</span>
+        <Input
+          type="date"
+          value={dateTo}
+          onChange={e => setDateTo(e.target.value)}
+          title="Created to"
+          className="h-8 w-36 text-xs bg-white/5 border-white/10 text-white [color-scheme:dark]"
+        />
+        {(search || dateFrom || dateTo) && (
+          <button
+            onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); }}
+            className="text-xs text-white/40 hover:text-white/70 transition-colors px-2 py-1 rounded border border-white/10 hover:border-white/25"
+          >
+            Clear
+          </button>
+        )}
+        {/* Rows per page dropdown */}
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="text-xs text-white/40 whitespace-nowrap">Rows per page:</span>
+          <select
+            value={pageSize}
+            onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+            className="h-8 rounded-lg border border-white/15 bg-white/5 text-white text-xs px-2 pr-6 appearance-none cursor-pointer focus:outline-none focus:border-violet-500"
+          >
+            {[5, 10, 25, 100].map(n => (
+              <option key={n} value={n} className="bg-[#0d0d1a]">{n}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {interviews.length === 0 ? (
         <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
             <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
@@ -340,7 +424,7 @@ const Interviews = ({ onUpdate }) => {
         </Card>
       ) : viewMode === 'kanban' ? (
         <InterviewKanban
-          interviews={filteredInterviews}
+          interviews={interviews}
           groupBy={kanbanGroupBy}
           onGroupByChange={setKanbanGroupBy}
           onStatusChange={(interview, value) => setPendingChange({ interview, type: 'status', value, label: STATUS_LABELS[value] || value })}
@@ -350,7 +434,7 @@ const Interviews = ({ onUpdate }) => {
         />
       ) : (
         <div className="space-y-3 sm:space-y-4">
-          {filteredInterviews.map((interview) => (
+          {interviews.map((interview) => (
             <Card key={interview.id} className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-4">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-4">
@@ -591,6 +675,27 @@ const Interviews = ({ onUpdate }) => {
           ))}
         </div>
       )}
+
+      {/* Pagination */}
+      <div className="flex items-center justify-center gap-2 pt-2 border-t border-white/8">
+        <button
+          onClick={() => goToPage(currentPage - 1)}
+          disabled={currentPage <= 1}
+          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/15 text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" /> Prev
+        </button>
+        <span className="text-xs text-white/50 min-w-[130px] text-center">
+          Page {currentPage} of {totalPages || 1} &nbsp;·&nbsp; {totalCount} total
+        </span>
+        <button
+          onClick={() => goToPage(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/15 text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          Next <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
 
       {/* Reschedule Modal */}
       <Dialog open={showRescheduleModal} onOpenChange={(open) => {
