@@ -41,6 +41,111 @@ from meeting_agent.models import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Email helpers
+# ---------------------------------------------------------------------------
+
+def _send_email_safe(subject, body, recipient_email):
+    """Send a plain-text email; swallow errors so a bad SMTP config never breaks the API."""
+    if not recipient_email or '@' not in recipient_email:
+        logger.warning("Email skipped — invalid recipient: %r", recipient_email)
+        return
+    try:
+        from django.core.mail import send_mail
+        from django.conf import settings
+        logger.info("Sending email to %s | subject: %s", recipient_email, subject)
+        send_mail(
+            subject,
+            body,
+            settings.DEFAULT_FROM_EMAIL,
+            [recipient_email],
+            fail_silently=False,
+        )
+        logger.info("Email sent OK to %s", recipient_email)
+    except Exception as exc:
+        logger.error("Email send FAILED to %s: %s", recipient_email, exc)
+
+
+def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_fields):
+    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    changed_str = ', '.join(changed_fields) if changed_fields else 'details'
+    body = (
+        f"Hi {participant_cu.full_name},\n\n"
+        f"The following meeting has been updated ({changed_str}):\n\n"
+        f"  Title     : {meeting.title}\n"
+        f"  Date/Time : {scheduled}\n"
+        f"  Duration  : {meeting.duration_minutes} minutes\n"
+        f"  Location  : {meeting.location or 'N/A'}\n"
+        f"  Link      : {meeting.meeting_link or 'N/A'}\n"
+        f"  Organizer : {organizer_name}\n"
+    )
+    if meeting.description:
+        body += f"\nDescription:\n{meeting.description}\n"
+    body += "\nPlease update your calendar accordingly.\n\nBest regards,\nAI Executive Assistant"
+    _send_email_safe(f"Meeting Updated: {meeting.title}", body, participant_cu.email)
+
+
+def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
+    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    body = (
+        f"Hi {participant_cu.full_name},\n\n"
+        f"You have been added as a participant to the following meeting:\n\n"
+        f"  Title     : {meeting.title}\n"
+        f"  Date/Time : {scheduled}\n"
+        f"  Duration  : {meeting.duration_minutes} minutes\n"
+        f"  Location  : {meeting.location or 'N/A'}\n"
+        f"  Link      : {meeting.meeting_link or 'N/A'}\n"
+        f"  Organizer : {organizer_name}\n"
+    )
+    if meeting.description:
+        body += f"\nDescription:\n{meeting.description}\n"
+    body += "\nPlease make sure to mark this in your calendar.\n\nBest regards,\nAI Executive Assistant"
+    _send_email_safe(f"Meeting Invitation: {meeting.title}", body, participant_cu.email)
+
+
+def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
+    body = (
+        f"Hi {assignee_cu.full_name},\n\n"
+        f"You have been assigned a new task:\n\n"
+        f"  Title      : {task.title}\n"
+        f"  Priority   : {task.priority.capitalize()}\n"
+        f"  Status     : {task.status.replace('_', ' ').capitalize()}\n"
+        f"  Due Date   : {task.due_date or 'Not set'}\n"
+        f"  Assigned by: {assigned_by_name}\n"
+    )
+    if task.description:
+        body += f"\nDescription:\n{task.description}\n"
+    body += "\nPlease log in to the platform to view and manage this task.\n\nBest regards,\nAI Executive Assistant"
+    _send_email_safe(f"Task Assigned: {task.title}", body, assignee_cu.email)
+
+
+def _send_meeting_removal_email(cu, meeting, removed_by_name):
+    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    body = (
+        f"Hi {cu.full_name},\n\n"
+        f"You have been removed from the following meeting:\n\n"
+        f"  Title     : {meeting.title}\n"
+        f"  Date/Time : {scheduled}\n"
+        f"  Organizer : {removed_by_name}\n\n"
+        f"If you believe this was a mistake, please contact the organizer.\n\n"
+        f"Best regards,\nAI Executive Assistant"
+    )
+    _send_email_safe(f"Removed from Meeting: {meeting.title}", body, cu.email)
+
+
+def _send_task_removal_email(cu, task, removed_by_name):
+    body = (
+        f"Hi {cu.full_name},\n\n"
+        f"You have been removed from the following task:\n\n"
+        f"  Title      : {task.title}\n"
+        f"  Priority   : {task.priority.capitalize()}\n"
+        f"  Removed by : {removed_by_name}\n\n"
+        f"If you believe this was a mistake, please contact the task owner.\n\n"
+        f"Best regards,\nAI Executive Assistant"
+    )
+    _send_email_safe(f"Removed from Task: {task.title}", body, cu.email)
+
+
+# ---------------------------------------------------------------------------
 # Throttle classes
 # ---------------------------------------------------------------------------
 
@@ -122,14 +227,47 @@ def _serialize_meeting(meeting, include_participants=False):
     return data
 
 
+def _resolve_assignees(assignee_list, company):
+    """
+    Accepts a list of {id, user_type} dicts from the frontend.
+    Returns a list of CompanyUser instances, creating mirror entries for
+    UserProfile-backed users when needed.
+    """
+    from core.models import CompanyUser as _CU, UserProfile as _UP
+    import secrets as _sec
+    from django.contrib.auth.hashers import make_password as _mkpw
+    result = []
+    for item in (assignee_list or []):
+        uid = item.get('id')
+        utype = item.get('user_type', 'company_user')
+        if not uid:
+            continue
+        if utype == 'profile':
+            try:
+                up = _UP.objects.select_related('user').get(id=uid, company=company)
+                u = up.user
+                full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+                cu, _ = _CU.objects.get_or_create(
+                    company=company, email=u.email,
+                    defaults={'full_name': full_name, 'role': up.role or 'company_user',
+                              'password_hash': _mkpw(_sec.token_urlsafe(16)), 'is_active': True},
+                )
+                result.append(cu)
+            except _UP.DoesNotExist:
+                pass
+        else:
+            try:
+                result.append(_CU.objects.get(id=uid, company=company))
+            except _CU.DoesNotExist:
+                pass
+    return result
+
+
 def _serialize_task(task):
-    assignee = None
-    if task.assignee_id:
-        try:
-            cu = task.assignee
-            assignee = {'id': cu.id, 'full_name': cu.full_name, 'email': cu.email}
-        except Exception:
-            pass
+    assignees = [
+        {'id': cu.id, 'full_name': cu.full_name, 'email': cu.email}
+        for cu in task.assignees.all()
+    ]
     return {
         'id': task.id,
         'title': task.title,
@@ -139,8 +277,7 @@ def _serialize_task(task):
         'due_date': task.due_date if isinstance(task.due_date, str) else (task.due_date.isoformat() if task.due_date else None),
         'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
         'ai_reasoning': task.ai_reasoning,
-        'assignee': assignee,
-        'assignee_id': task.assignee_id,
+        'assignees': assignees,
         'linked_meeting_id': task.linked_meeting_id,
         'created_at': task.created_at.isoformat(),
         'updated_at': task.updated_at.isoformat(),
@@ -285,14 +422,27 @@ def meeting_detail(request, meeting_id):
     if request.method == 'PATCH':
         updatable = ['title', 'description', 'agenda', 'location', 'meeting_link',
                      'duration_minutes', 'timezone_name', 'status', 'recurrence']
+        changed_fields = []
         for field in updatable:
             if field in request.data:
+                if getattr(meeting, field) != request.data[field]:
+                    changed_fields.append(field.replace('_', ' '))
                 setattr(meeting, field, request.data[field])
         if 'scheduled_at' in request.data:
             dt = _parse_datetime(request.data['scheduled_at'])
-            if dt:
+            if dt and dt != meeting.scheduled_at:
+                changed_fields.append('date/time')
                 meeting.scheduled_at = dt
         meeting.save()
+
+        # Notify existing participants about the update
+        if changed_fields:
+            participants = meeting.participants.select_related('company_user').all()
+            for p in participants:
+                cu = p.company_user
+                if cu.email and cu.id != company_user.id:
+                    _send_meeting_update_email(cu, meeting, company_user.full_name, changed_fields)
+
         return Response({'status': 'success', 'meeting': _serialize_meeting(meeting)})
 
     if request.method == 'DELETE':
@@ -408,6 +558,8 @@ def meeting_participants(request, meeting_id):
                 return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
         p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
+        if created and target.email:
+            _send_meeting_invite_email(target, meeting, company_user.full_name)
         return Response({'status': 'success', 'participant': {
             'id': p.id, 'user_id': target.id, 'full_name': target.full_name,
             'email': target.email, 'role': target.role, 'response': p.response,
@@ -415,7 +567,15 @@ def meeting_participants(request, meeting_id):
 
     if request.method == 'DELETE':
         user_id = request.data.get('user_id')
+        # Fetch before deleting so we can notify
+        removed_cu = None
+        try:
+            removed_cu = CompanyUser.objects.get(id=user_id, company=company_user.company)
+        except CompanyUser.DoesNotExist:
+            pass
         ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user_id=user_id).delete()
+        if removed_cu and removed_cu.email and removed_cu.id != company_user.id:
+            _send_meeting_removal_email(removed_cu, meeting, company_user.full_name)
         return Response({'status': 'success'})
 
 
@@ -623,31 +783,6 @@ def task_list(request):
     if not title:
         return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    assignee_id = request.data.get('assignee_id') or None
-    assignee_user_type = request.data.get('assignee_user_type', 'company_user')
-    assignee = None
-    if assignee_id:
-        from core.models import CompanyUser as _CU, UserProfile as _UP
-        import secrets as _sec
-        from django.contrib.auth.hashers import make_password as _mkpw
-        if assignee_user_type == 'profile':
-            try:
-                up = _UP.objects.select_related('user').get(id=assignee_id, company=company_user.company)
-                u = up.user
-                full_name = f"{u.first_name} {u.last_name}".strip() or u.username
-                assignee, _ = _CU.objects.get_or_create(
-                    company=company_user.company, email=u.email,
-                    defaults={'full_name': full_name, 'role': up.role or 'company_user',
-                              'password_hash': _mkpw(_sec.token_urlsafe(16)), 'is_active': True},
-                )
-            except _UP.DoesNotExist:
-                pass
-        else:
-            try:
-                assignee = _CU.objects.get(id=assignee_id, company=company_user.company)
-            except _CU.DoesNotExist:
-                pass
-
     task = ExecutiveTask.objects.create(
         company_user=company_user,
         title=title,
@@ -656,8 +791,15 @@ def task_list(request):
         priority=request.data.get('priority', 'medium'),
         due_date=request.data.get('due_date') or None,
         linked_meeting_id=request.data.get('linked_meeting_id') or None,
-        assignee=assignee,
     )
+    # assignees — list of {id, user_type} dicts
+    assignee_list = request.data.get('assignees', [])
+    resolved = _resolve_assignees(assignee_list, company_user.company)
+    if resolved:
+        task.assignees.set(resolved)
+        for cu in resolved:
+            if cu.email:
+                _send_task_assignment_email(cu, task, company_user.full_name)
     return Response({'status': 'success', 'task': _serialize_task(task)}, status=status.HTTP_201_CREATED)
 
 
@@ -679,17 +821,21 @@ def task_detail(request, task_id):
                 setattr(task, field, request.data[field] or None if field == 'due_date' else request.data[field])
         if 'estimated_hours' in request.data:
             task.estimated_hours = request.data['estimated_hours'] or None
-        if 'assignee_id' in request.data:
-            aid = request.data['assignee_id']
-            if not aid:
-                task.assignee = None
-            else:
-                from core.models import CompanyUser as _CU
-                try:
-                    task.assignee = _CU.objects.get(id=aid, company=company_user.company)
-                except _CU.DoesNotExist:
-                    pass
         task.save()
+        if 'assignees' in request.data:
+            resolved = _resolve_assignees(request.data['assignees'], company_user.company)
+            existing_qs = list(task.assignees.all())
+            existing_ids = {cu.id for cu in existing_qs}
+            new_ids = {cu.id for cu in resolved}
+            task.assignees.set(resolved)
+            # Email newly added assignees
+            for cu in resolved:
+                if cu.id not in existing_ids and cu.email:
+                    _send_task_assignment_email(cu, task, company_user.full_name)
+            # Email removed assignees
+            for cu in existing_qs:
+                if cu.id not in new_ids and cu.email:
+                    _send_task_removal_email(cu, task, company_user.full_name)
         return Response({'status': 'success', 'task': _serialize_task(task)})
 
     task.delete()

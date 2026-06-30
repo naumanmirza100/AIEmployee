@@ -22,7 +22,7 @@ import {
   Loader2, LayoutDashboard, CalendarClock, ListChecks, CalendarDays,
   FileText, Bell, Plus, Menu, Clock, AlertTriangle, CheckCircle2,
   RefreshCw, Trash2, MoreHorizontal, ChevronRight, Calendar as CalendarIcon,
-  Download, X, Sparkles,
+  Download, X, Sparkles, Pencil,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -134,7 +134,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
 
 // ── DateTimePicker component ────────────────────────────────────────────────
-const DateTimePicker = ({ value, onChange }) => {
+const DateTimePicker = ({ value, onChange, allowPast = false }) => {
   const [calOpen, setCalOpen] = useState(false);
 
   // Parse ISO string → { date, hour, minute }
@@ -186,7 +186,7 @@ const DateTimePicker = ({ value, onChange }) => {
             mode="single"
             selected={selectedDate}
             onSelect={handleDateSelect}
-            fromDate={new Date()}
+            fromDate={allowPast ? undefined : new Date()}
             initialFocus
             classNames={{
               months: 'flex flex-col',
@@ -382,7 +382,13 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
   const [form, setForm] = useState({
     title: '', description: '', scheduled_at: '', duration_minutes: '60', meeting_link: '',
   });
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const [linkError, setLinkError] = useState('');
+  const set = (k, v) => {
+    setForm(f => ({ ...f, [k]: v }));
+    if (k === 'meeting_link') {
+      setLinkError(v && !validateMeetingLink(v) ? 'Please enter a valid meeting link (Google Meet, Zoom, Teams, Jitsi, Webex, etc.)' : '');
+    }
+  };
 
   // Participant search state (local to dialog)
   const [searchQ, setSearchQ] = useState('');
@@ -412,6 +418,10 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
   const handleSubmit = async () => {
     if (!form.title || !form.scheduled_at) {
       toast({ title: 'Title and date are required', variant: 'destructive' });
+      return;
+    }
+    if (form.meeting_link && !validateMeetingLink(form.meeting_link)) {
+      toast({ title: 'Invalid meeting link', description: 'Use Google Meet, Zoom, Teams, Jitsi, or Webex links.', variant: 'destructive' });
       return;
     }
     setLoading(true);
@@ -460,7 +470,8 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
 
             <div className="space-y-1">
               <Label>Description</Label>
-              <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Meeting agenda..." className="bg-white/5 border-white/10 text-white" rows={3} />
+              <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Meeting agenda..." rows={3}
+                className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
             </div>
 
             <div className="space-y-1">
@@ -538,7 +549,10 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
            <div className="space-y-1">
               <Label>Video Call Link <span className="text-white/30 text-xs">(leave blank to auto-generate)</span></Label>
               <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
-                placeholder="https://meet.google.com/xxx-yyyy-zzz" className="bg-white/5 border-white/10 text-white" />
+                placeholder="https://meet.google.com/xxx-yyyy-zzz"
+                className={`bg-white/5 border-white/10 text-white ${linkError ? 'border-red-500/60' : ''}`} />
+              {linkError && <p className="text-red-400 text-[11px] mt-0.5">{linkError}</p>}
+              <p className="text-white/25 text-[10px]">Supported: Google Meet, Zoom, Teams, Jitsi, Webex</p>
             </div>
           </div>
 
@@ -556,62 +570,241 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
   );
 };
 
+const VALID_MEETING_LINK_PATTERN = /^https?:\/\/(meet\.google\.com|zoom\.us|[\w-]+\.zoom\.us|us\d+web\.zoom\.us|teams\.microsoft\.com|[\w-]+\.jitsi\.meet|meet\.jit\.si|webex\.com|[\w-]+\.webex\.com|whereby\.com|[\w-]+\.whereby\.com|bluejeans\.com|gotomeet\.me|goto\.meeting)[\w\-/?=&#%+.]*$/i;
+
+const validateMeetingLink = (url) => {
+  if (!url || !url.trim()) return true; // blank is OK (auto-generated)
+  return VALID_MEETING_LINK_PATTERN.test(url.trim());
+};
+
+// ── Edit meeting dialog ─────────────────────────────────────────────────────
+const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({
+    title: '', description: '', scheduled_at: '', duration_minutes: '60',
+    meeting_link: '', status: 'scheduled',
+  });
+  const [linkError, setLinkError] = useState('');
+  const set = (k, v) => {
+    setForm(f => ({ ...f, [k]: v }));
+    if (k === 'meeting_link') {
+      setLinkError(v && !validateMeetingLink(v) ? 'Please enter a valid meeting link (Google Meet, Zoom, Teams, Jitsi, Webex, etc.)' : '');
+    }
+  };
+
+  // Populate form when meeting changes
+  useEffect(() => {
+    if (meeting) {
+      setForm({
+        title: meeting.title || '',
+        description: meeting.description || '',
+        scheduled_at: meeting.scheduled_at ? meeting.scheduled_at.slice(0, 16) : '',
+        duration_minutes: String(meeting.duration_minutes || 60),
+        meeting_link: meeting.meeting_link || '',
+        status: meeting.status || 'scheduled',
+      });
+    }
+  }, [meeting]);
+
+  const handleSave = async () => {
+    if (!form.title || !form.scheduled_at) {
+      toast({ title: 'Title and date are required', variant: 'destructive' });
+      return;
+    }
+    if (form.meeting_link && !validateMeetingLink(form.meeting_link)) {
+      toast({ title: 'Invalid meeting link', description: 'Use Google Meet, Zoom, Teams, Jitsi, or Webex links.', variant: 'destructive' });
+      return;
+    }
+    setLoading(true);
+    try {
+      await execMeetingService.updateMeeting(meeting.id, {
+        title: form.title,
+        description: form.description,
+        scheduled_at: form.scheduled_at,
+        duration_minutes: parseInt(form.duration_minutes) || 60,
+        meeting_link: form.meeting_link.trim(),
+        status: form.status,
+      });
+      toast({ title: 'Meeting updated', description: 'Participants have been notified by email.' });
+      onUpdated();
+      onClose();
+    } catch (err) {
+      toast({ title: 'Update failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl bg-[#0d0b1f] border-white/10 text-white">
+        <DialogHeader>
+          <DialogTitle>Edit Meeting</DialogTitle>
+          <DialogDescription className="text-white/50">Update meeting details. All participants will receive an email notification.</DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-2 gap-8 py-2">
+          {/* LEFT */}
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label>Title *</Label>
+              <Input value={form.title} onChange={e => set('title', e.target.value)}
+                className="bg-white/5 border-white/10 text-white" />
+            </div>
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Textarea value={form.description} onChange={e => set('description', e.target.value)}
+                rows={3} className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
+            </div>
+            <div className="space-y-1">
+              <Label>Date & Time *</Label>
+              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} allowPast />
+            </div>
+          </div>
+
+          {/* RIGHT */}
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label>Duration</Label>
+              <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['15','30','45','60','90','120','180'].map(d => (
+                    <SelectItem key={d} value={d}>{d} min</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Status</Label>
+              <Select value={form.status} onValueChange={v => set('status', v)}>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['scheduled','in_progress','completed','cancelled'].map(s => (
+                    <SelectItem key={s} value={s}>{s.replace('_', ' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Video Call Link</Label>
+              <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
+                placeholder="https://meet.google.com/xxx"
+                className={`bg-white/5 border-white/10 text-white ${linkError ? 'border-red-500/60' : ''}`} />
+              {linkError && <p className="text-red-400 text-[11px] mt-0.5">{linkError}</p>}
+              <p className="text-white/25 text-[10px]">Supported: Google Meet, Zoom, Teams, Jitsi, Webex</p>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
+          <Button onClick={handleSave} disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Save Changes
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// ── Shared: multi-assignee picker (used by Add + Detail dialogs) ────────────
+const AssigneePicker = ({ assignees, onChange }) => {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  const search = async (val) => {
+    setQ(val);
+    if (val.length < 2) { setResults([]); return; }
+    setSearching(true);
+    try {
+      const data = await execMeetingService.searchUsers(val);
+      const addedKeys = assignees.map(a => `${a.user_type || 'cu'}-${a.id}`);
+      setResults((data.users || []).filter(u => !addedKeys.includes(`${u.user_type || 'cu'}-${u.id}`)));
+    } catch { setResults([]); }
+    finally { setSearching(false); }
+  };
+
+  const add = (u) => { onChange([...assignees, u]); setQ(''); setResults([]); };
+  const remove = (key) => onChange(assignees.filter(a => `${a.user_type || 'cu'}-${a.id}` !== key));
+
+  return (
+    <div className="space-y-2">
+      {assignees.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {assignees.map(a => {
+            const key = `${a.user_type || 'cu'}-${a.id}`;
+            return (
+              <span key={key} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
+                {a.full_name}
+                <button onClick={() => remove(key)} className="text-violet-300/60 hover:text-white leading-none">✕</button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <div className="relative">
+        <Input
+          value={q}
+          onChange={e => search(e.target.value)}
+          placeholder="Type name or email to add…"
+          autoComplete="off"
+          className="bg-white/5 border-white/10 text-white text-sm"
+        />
+        {searching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
+        {results.length > 0 && (
+          <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+            {results.map(u => (
+              <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => add(u)}
+                className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
+                <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
+                  {u.full_name?.[0]?.toUpperCase() || '?'}
+                </div>
+                <div>
+                  <p className="text-white text-xs font-medium">{u.full_name}</p>
+                  <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        {q.length >= 2 && !searching && results.length === 0 && (
+          <p className="text-white/30 text-xs mt-1">No users found</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── Add task dialog ─────────────────────────────────────────────────────────
 const AddTaskDialog = ({ open, onClose, onCreated }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', priority: 'medium', due_date: '' });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
-  // Assignee search state
-  const [assignee, setAssignee] = useState(null);
-  const [assigneeQ, setAssigneeQ] = useState('');
-  const [assigneeResults, setAssigneeResults] = useState([]);
-  const [assigneeLoading, setAssigneeLoading] = useState(false);
-
-  const searchAssignee = async (q) => {
-    setAssigneeQ(q);
-    if (q.length < 2) { setAssigneeResults([]); return; }
-    setAssigneeLoading(true);
-    try {
-      const data = await execMeetingService.searchUsers(q);
-      setAssigneeResults(data.users || []);
-    } catch { setAssigneeResults([]); }
-    finally { setAssigneeLoading(false); }
-  };
-
-  const selectAssignee = (u) => {
-    setAssignee(u);
-    setAssigneeQ('');
-    setAssigneeResults([]);
-  };
+  const [assignees, setAssignees] = useState([]);
 
   const reset = () => {
     setForm({ title: '', description: '', priority: 'medium', due_date: '' });
-    setAssignee(null); setAssigneeQ(''); setAssigneeResults([]);
+    setAssignees([]);
   };
 
   const handleSubmit = async () => {
-    if (!form.title) {
-      toast({ title: 'Title is required', variant: 'destructive' });
-      return;
-    }
+    if (!form.title) { toast({ title: 'Title is required', variant: 'destructive' }); return; }
     setLoading(true);
     try {
       await execMeetingService.createTask({
         ...form,
-        assignee_id: assignee ? assignee.id : null,
-        assignee_user_type: assignee ? (assignee.user_type || 'company_user') : null,
+        assignees: assignees.map(a => ({ id: a.id, user_type: a.user_type || 'company_user' })),
       });
       toast({ title: 'Task created!' });
-      onCreated();
-      onClose();
-      reset();
+      onCreated(); onClose(); reset();
     } catch (err) {
       toast({ title: 'Failed to create task', description: err.message, variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
@@ -633,13 +826,9 @@ const AddTaskDialog = ({ open, onClose, onCreated }) => {
             <div className="space-y-1">
               <Label>Priority</Label>
               <Select value={form.priority} onValueChange={v => set('priority', v)}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white">
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {['low','medium','high','critical'].map(p => (
-                    <SelectItem key={p} value={p}>{p}</SelectItem>
-                  ))}
+                  {['low','medium','high','critical'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -648,56 +837,110 @@ const AddTaskDialog = ({ open, onClose, onCreated }) => {
               <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
             </div>
           </div>
-
-          {/* Assignee */}
           <div className="space-y-1">
             <Label>Assign To</Label>
-            {assignee ? (
-              <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-violet-500/15 border border-violet-500/30">
-                <div>
-                  <span className="text-white text-sm font-medium">{assignee.full_name}</span>
-                  <span className="text-white/40 text-xs ml-2">{assignee.email}</span>
-                </div>
-                <button onClick={() => setAssignee(null)} className="text-violet-300/60 hover:text-white text-xs leading-none">✕</button>
-              </div>
-            ) : (
-              <div className="relative">
-                <Input
-                  value={assigneeQ}
-                  onChange={e => searchAssignee(e.target.value)}
-                  placeholder="Type name or email to assign…"
-                  autoComplete="off"
-                  className="bg-white/5 border-white/10 text-white text-sm"
-                />
-                {assigneeLoading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
-                {assigneeResults.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
-                    {assigneeResults.map(u => (
-                      <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => selectAssignee(u)}
-                        className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
-                        <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
-                          {u.full_name?.[0]?.toUpperCase() || '?'}
-                        </div>
-                        <div>
-                          <p className="text-white text-xs font-medium">{u.full_name}</p>
-                          <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {assigneeQ.length >= 2 && !assigneeLoading && assigneeResults.length === 0 && (
-                  <p className="text-white/30 text-xs mt-1">No users found</p>
-                )}
-              </div>
-            )}
+            <AssigneePicker assignees={assignees} onChange={setAssignees} />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
           <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Add Task
+            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Add Task
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// ── Task edit dialog (opens when Edit button clicked) ───────────────────────
+const TaskEditDialog = ({ task, onClose, onUpdated }) => {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(null);
+  const [assignees, setAssignees] = useState([]);
+
+  useEffect(() => {
+    if (task) {
+      setForm({
+        title: task.title || '',
+        description: task.description || '',
+        status: task.status || 'todo',
+        priority: task.priority || 'medium',
+        due_date: task.due_date || '',
+      });
+      setAssignees((task.assignees || []).map(a => ({ ...a, user_type: 'company_user' })));
+    }
+  }, [task]);
+
+  if (!task || !form) return null;
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await execMeetingService.updateTask(task.id, {
+        ...form,
+        assignees: assignees.map(a => ({ id: a.id, user_type: a.user_type || 'company_user' })),
+      });
+      toast({ title: 'Task updated!' });
+      onUpdated();
+      onClose();
+    } catch (err) {
+      toast({ title: 'Failed to save', description: err.message, variant: 'destructive' });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open={!!task} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg bg-[#0d0b1f] border-white/10 text-white">
+        <DialogHeader>
+          <DialogTitle>Edit Task</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1">
+            <Label>Title *</Label>
+            <Input value={form.title} onChange={e => set('title', e.target.value)} className="bg-white/5 border-white/10 text-white" />
+          </div>
+          <div className="space-y-1">
+            <Label>Description</Label>
+            <Textarea value={form.description} onChange={e => set('description', e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label>Status</Label>
+              <Select value={form.status} onValueChange={v => set('status', v)}>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['todo','in_progress','review','done','blocked'].map(s => (
+                    <SelectItem key={s} value={s}>{s.replace('_',' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Priority</Label>
+              <Select value={form.priority} onValueChange={v => set('priority', v)}>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['low','medium','high','critical'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Due Date</Label>
+              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>Assigned To</Label>
+            <AssigneePicker assignees={assignees} onChange={setAssignees} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Save
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -726,6 +969,9 @@ const ExecMeetingDashboard = () => {
   // Dialogs
   const [showMeetingDialog, setShowMeetingDialog] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [expandedTaskId, setExpandedTaskId] = useState(null); // inline-expanded task
+  const [editingTask, setEditingTask] = useState(null);       // task open in edit modal
+  const [editingMeeting, setEditingMeeting] = useState(null); // meeting open in edit modal
 
   // AI Documents
   const [aiDocLoading, setAiDocLoading] = useState(false);
@@ -748,6 +994,8 @@ const ExecMeetingDashboard = () => {
   const [userSearchQ, setUserSearchQ] = useState('');
   const [userSearchResults, setUserSearchResults] = useState([]);
   const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [pendingAddMap, setPendingAddMap] = useState({});     // { [meetingId]: userObj | null }
+  const [confirmRemoveMap, setConfirmRemoveMap] = useState({}); // { [meetingId]: userId | null }
 
   // Meeting Notetaker
   const [notesOpenId, setNotesOpenId] = useState(null);
@@ -898,7 +1146,7 @@ const ExecMeetingDashboard = () => {
   };
 
   const openParticipants = async (meetingId) => {
-    if (participantsOpenId === meetingId) { setParticipantsOpenId(null); setUserSearchQ(''); setUserSearchResults([]); return; }
+    if (participantsOpenId === meetingId) { setParticipantsOpenId(null); setUserSearchQ(''); setUserSearchResults([]); setPendingAddMap(prev => ({ ...prev, [meetingId]: null })); setConfirmRemoveMap(prev => ({ ...prev, [meetingId]: null })); return; }
     setParticipantsOpenId(meetingId);
     setNotesOpenId(null);
     setUserSearchQ(''); setUserSearchResults([]);
@@ -925,12 +1173,11 @@ const ExecMeetingDashboard = () => {
   const addParticipant = async (meetingId, user) => {
     try {
       await execMeetingService.addParticipant(meetingId, user.id, user.user_type);
-      setParticipantsMap(prev => ({
-        ...prev,
-        [meetingId]: [...(prev[meetingId] || []), { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending' }],
-      }));
+      // Reload from backend so user_id is always the CompanyUser ID (needed for correct DELETE)
+      const data = await execMeetingService.getParticipants(meetingId);
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
       setUserSearchQ(''); setUserSearchResults([]);
-      toast({ title: `${user.full_name} added` });
+      toast({ title: `${user.full_name} added`, description: 'An invitation email has been sent to them.' });
     } catch (err) { toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' }); }
   };
 
@@ -968,6 +1215,16 @@ const ExecMeetingDashboard = () => {
     } finally {
       setNotesLoading(false);
     }
+  };
+
+  const deleteTask = async (id) => {
+    try {
+      await execMeetingService.deleteTask(id);
+      setTasks(prev => prev.filter(t => t.id !== id));
+      setExpandedTaskId(null);
+      loadStats();
+      toast({ title: 'Task deleted' });
+    } catch { toast({ title: 'Failed to delete task', variant: 'destructive' }); }
   };
 
   const runAiPrioritize = async () => {
@@ -1111,15 +1368,6 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const deleteTask = async (id) => {
-    try {
-      await execMeetingService.deleteTask(id);
-      setTasks(prev => prev.filter(t => t.id !== id));
-      toast({ title: 'Task deleted' });
-    } catch {
-      toast({ title: 'Failed to delete task', variant: 'destructive' });
-    }
-  };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1255,6 +1503,11 @@ const ExecMeetingDashboard = () => {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {statusBadge(m.status)}
                     <Button size="sm" variant="ghost"
+                      onClick={() => setEditingMeeting(m)}
+                      className="text-white/40 hover:text-violet-300 p-1" title="Edit meeting">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost"
                       onClick={() => openParticipants(m.id)}
                       className={`text-xs gap-1 ${isPartsOpen ? 'text-violet-300' : 'text-white/40 hover:text-violet-300'}`}>
                       <span className="text-[11px]">👥</span>
@@ -1272,7 +1525,10 @@ const ExecMeetingDashboard = () => {
                 </div>
 
                 {/* Participants panel */}
-                {isPartsOpen && (
+                {isPartsOpen && (() => {
+                  const pendingUser = pendingAddMap[m.id] || null;
+                  const confirmRemoveId = confirmRemoveMap[m.id] || null;
+                  return (
                   <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
                     <p className="text-white/60 text-xs font-semibold">Participants</p>
 
@@ -1280,56 +1536,104 @@ const ExecMeetingDashboard = () => {
                     {parts.length > 0 && (
                       <div className="space-y-1">
                         {parts.map(p => (
-                          <div key={p.user_id} className="flex items-center justify-between rounded-lg px-3 py-2 bg-white/5">
-                            <div>
-                              <span className="text-white text-xs font-medium">{p.full_name}</span>
-                              <span className="text-white/40 text-xs ml-2">{p.email}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-white/30 text-[10px]">{p.response}</span>
-                              <button onClick={() => removeParticipant(m.id, p.user_id, p.full_name)}
-                                className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
+                          <div key={p.user_id}>
+                            <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-white/5">
+                              <div>
+                                <span className="text-white text-xs font-medium">{p.full_name}</span>
+                                <span className="text-white/40 text-xs ml-2">{p.email}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white/30 text-[10px]">{p.response}</span>
+                                {confirmRemoveId === p.user_id ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-white/50 text-[10px]">Remove?</span>
+                                    <button
+                                      onClick={() => { removeParticipant(m.id, p.user_id, p.full_name); setConfirmRemoveMap(prev => ({ ...prev, [m.id]: null })); }}
+                                      className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">
+                                      Yes
+                                    </button>
+                                    <button
+                                      onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: null }))}
+                                      className="px-2 py-0.5 rounded text-[10px] bg-white/10 text-white/50 hover:bg-white/20 transition-colors">
+                                      No
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: p.user_id }))}
+                                    className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
                       </div>
                     )}
 
-                    {/* Search + add */}
-                    <div className="relative">
-                      <Input
-                        value={participantsOpenId === m.id ? userSearchQ : ''}
-                        onChange={e => searchUsers(e.target.value, m.id)}
-                        placeholder="Type a name or email to add…"
-                        autoComplete="off"
-                        className="bg-white/5 border-white/10 text-white text-xs h-8"
-                      />
-                      {userSearchLoading && (
-                        <Loader2 className="absolute right-2 top-2 h-4 w-4 animate-spin text-white/40" />
-                      )}
-                      {userSearchResults.length > 0 && (
-                        <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
-                          {userSearchResults.map(u => (
-                            <button key={u.id}
-                              onClick={() => addParticipant(m.id, u)}
-                              className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
-                              <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
-                                {u.full_name?.[0]?.toUpperCase() || '?'}
-                              </div>
-                              <div>
-                                <p className="text-white text-xs font-medium">{u.full_name}</p>
-                                <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
-                              </div>
-                            </button>
-                          ))}
+                    {/* Pending add confirmation bar */}
+                    {pendingUser && (
+                      <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-violet-500/10 border border-violet-500/30">
+                        <div className="flex items-center gap-2">
+                          <div className="h-6 w-6 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
+                            {pendingUser.full_name?.[0]?.toUpperCase() || '?'}
+                          </div>
+                          <div>
+                            <p className="text-violet-200 text-xs font-medium">{pendingUser.full_name}</p>
+                            <p className="text-white/40 text-[10px]">{pendingUser.email}</p>
+                          </div>
                         </div>
-                      )}
-                      {userSearchQ.length >= 2 && !userSearchLoading && userSearchResults.length === 0 && (
-                        <p className="text-white/30 text-xs mt-1 px-1">No users found</p>
-                      )}
-                    </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-violet-300/60 text-[10px]">An email will be sent</span>
+                          <button
+                            onClick={() => { addParticipant(m.id, pendingUser); setPendingAddMap(prev => ({ ...prev, [m.id]: null })); setUserSearchQ(''); setUserSearchResults([]); }}
+                            className="px-2.5 py-1 rounded text-[11px] bg-violet-600 text-white hover:bg-violet-700 transition-colors font-medium">
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => { setPendingAddMap(prev => ({ ...prev, [m.id]: null })); setUserSearchQ(''); setUserSearchResults([]); }}
+                            className="text-white/30 hover:text-white/60 text-xs transition-colors">✕</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Search + add */}
+                    {!pendingUser && (
+                      <div className="relative">
+                        <Input
+                          value={participantsOpenId === m.id ? userSearchQ : ''}
+                          onChange={e => searchUsers(e.target.value, m.id)}
+                          placeholder="Type a name or email to add…"
+                          autoComplete="off"
+                          className="bg-white/5 border-white/10 text-white text-xs h-8"
+                        />
+                        {userSearchLoading && (
+                          <Loader2 className="absolute right-2 top-2 h-4 w-4 animate-spin text-white/40" />
+                        )}
+                        {userSearchResults.length > 0 && (
+                          <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+                            {userSearchResults.map(u => (
+                              <button key={u.id}
+                                onClick={() => { setPendingAddMap(prev => ({ ...prev, [m.id]: u })); setUserSearchResults([]); }}
+                                className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
+                                <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
+                                  {u.full_name?.[0]?.toUpperCase() || '?'}
+                                </div>
+                                <div>
+                                  <p className="text-white text-xs font-medium">{u.full_name}</p>
+                                  <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {userSearchQ.length >= 2 && !userSearchLoading && userSearchResults.length === 0 && (
+                          <p className="text-white/30 text-xs mt-1 px-1">No users found</p>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* Notetaker panel — expands inline */}
                 {isNotesOpen && (
@@ -1438,33 +1742,68 @@ const ExecMeetingDashboard = () => {
         <EmptyState icon={ListChecks} label="No tasks yet" />
       ) : (
         <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
-          {tasks.map(t => (
-            <div key={t.id} className="flex items-center gap-4 px-4 py-3" style={ROW_STYLE}>
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-medium truncate">{t.title}</p>
-                <p className="text-white/40 text-xs">
-                  {t.due_date ? `Due: ${t.due_date}` : 'No due date'}
-                  {t.assignee ? <span className="ml-2 text-violet-300/70">· {t.assignee.full_name}</span> : ''}
-                </p>
+          {tasks.map(t => {
+            const isOpen = expandedTaskId === t.id;
+            return (
+              <div key={t.id} style={ROW_STYLE}>
+                {/* ── Row ── */}
+                <div
+                  className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-white/[0.04] transition-colors"
+                  onClick={() => setExpandedTaskId(isOpen ? null : t.id)}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{t.title}</p>
+                    <p className="text-white/40 text-xs">
+                      {t.due_date ? `Due: ${t.due_date}` : 'No due date'}
+                      {(t.assignees || []).length > 0 && (
+                        <span className="text-violet-300/70 ml-1.5">
+                          · {t.assignees.map(a => a.full_name).join(', ')}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {priorityBadge(t.priority)}
+                    {statusBadge(t.status)}
+                    <ChevronRight className={`h-4 w-4 text-white/30 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                  </div>
+                </div>
+
+                {/* ── Inline detail panel ── */}
+                {isOpen && (
+                  <div className="px-4 pb-4 pt-2 border-t border-white/5 space-y-2">
+                    {t.description && (
+                      <p className="text-white/60 text-xs whitespace-pre-wrap">{t.description}</p>
+                    )}
+                    {(t.assignees || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {t.assignees.map(a => (
+                          <span key={a.id} className="px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
+                            {a.full_name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {t.ai_reasoning && (
+                      <p className="text-white/40 text-xs italic">{t.ai_reasoning}</p>
+                    )}
+                    <div className="flex gap-2 pt-1">
+                      <Button size="sm" variant="outline"
+                        className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs h-7 px-3"
+                        onClick={e => { e.stopPropagation(); setEditingTask(t); }}>
+                        <Pencil className="h-3 w-3 mr-1" /> Edit
+                      </Button>
+                      <Button size="sm" variant="ghost"
+                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs h-7 px-3"
+                        onClick={e => { e.stopPropagation(); deleteTask(t.id); }}>
+                        <Trash2 className="h-3 w-3 mr-1" /> Delete
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {priorityBadge(t.priority)}
-                {statusBadge(t.status)}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="icon" variant="ghost" className="h-7 w-7 text-white/40 hover:text-white">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuItem className="text-red-400" onClick={() => deleteTask(t.id)}>
-                      <Trash2 className="h-4 w-4 mr-2" /> Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -1903,6 +2242,20 @@ const ExecMeetingDashboard = () => {
         open={showTaskDialog}
         onClose={() => setShowTaskDialog(false)}
         onCreated={() => { loadTasks(); loadStats(); }}
+      />
+
+      <TaskEditDialog
+        task={editingTask}
+        onClose={() => setEditingTask(null)}
+        onUpdated={() => { loadTasks(); loadStats(); setExpandedTaskId(null); }}
+      />
+
+      <MeetingEditDialog
+        key={editingMeeting?.id}
+        meeting={editingMeeting}
+        open={!!editingMeeting}
+        onClose={() => setEditingMeeting(null)}
+        onUpdated={() => { loadMeetings(); loadStats(); }}
       />
 
       {/* Document viewer modal */}
