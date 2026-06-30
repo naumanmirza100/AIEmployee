@@ -203,9 +203,12 @@ export const companyApi = {
       body: JSON.stringify(data),
     });
   },
-  delete: (endpoint) => {
+  delete: (endpoint, options = {}) => {
+    const { data, ...rest } = options;
     return companyApiRequest(endpoint, {
       method: 'DELETE',
+      ...(data ? { body: JSON.stringify(data) } : {}),
+      ...rest,
     });
   },
 };

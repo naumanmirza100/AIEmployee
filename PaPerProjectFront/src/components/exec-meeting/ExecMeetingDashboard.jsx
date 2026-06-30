@@ -1150,12 +1150,11 @@ const ExecMeetingDashboard = () => {
     setParticipantsOpenId(meetingId);
     setNotesOpenId(null);
     setUserSearchQ(''); setUserSearchResults([]);
-    if (!participantsMap[meetingId]) {
-      try {
-        const data = await execMeetingService.getParticipants(meetingId);
-        setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
-      } catch { setParticipantsMap(prev => ({ ...prev, [meetingId]: [] })); }
-    }
+    // Always re-fetch to get fresh participant_id values needed for remove
+    try {
+      const data = await execMeetingService.getParticipants(meetingId);
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
+    } catch { setParticipantsMap(prev => ({ ...prev, [meetingId]: [] })); }
   };
 
   const searchUsers = async (q, meetingId) => {
@@ -1171,22 +1170,35 @@ const ExecMeetingDashboard = () => {
   };
 
   const addParticipant = async (meetingId, user) => {
+    // Optimistic update — show instantly, sync with real IDs in background
+    const optimistic = { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending' };
+    setParticipantsMap(prev => ({ ...prev, [meetingId]: [...(prev[meetingId] || []), optimistic] }));
+    setUserSearchQ(''); setUserSearchResults([]);
     try {
       await execMeetingService.addParticipant(meetingId, user.id, user.user_type);
-      // Reload from backend so user_id is always the CompanyUser ID (needed for correct DELETE)
+      // Reload from backend to replace optimistic entry with real CompanyUser ID (needed for correct DELETE)
       const data = await execMeetingService.getParticipants(meetingId);
       setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
-      setUserSearchQ(''); setUserSearchResults([]);
       toast({ title: `${user.full_name} added`, description: 'An invitation email has been sent to them.' });
-    } catch (err) { toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' }); }
+    } catch (err) {
+      // Roll back optimistic update on failure
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.user_id !== user.id) }));
+      toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' });
+    }
   };
 
-  const removeParticipant = async (meetingId, userId, name) => {
+  const removeParticipant = async (meetingId, participantId, userId, name) => {
+    // Optimistic remove — hide instantly
+    setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.id !== participantId && p.user_id !== userId) }));
     try {
-      await execMeetingService.removeParticipant(meetingId, userId);
-      setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.user_id !== userId) }));
-      toast({ title: `${name} removed` });
-    } catch (err) { toast({ title: 'Failed to remove', description: err.message, variant: 'destructive' }); }
+      await execMeetingService.removeParticipant(meetingId, participantId, userId);
+      toast({ title: `${name} removed`, description: 'They have been notified by email.' });
+    } catch (err) {
+      // Roll back on failure
+      const data = await execMeetingService.getParticipants(meetingId).catch(() => ({ participants: [] }));
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
+      toast({ title: 'Failed to remove', description: err.message, variant: 'destructive' });
+    }
   };
 
   const openNotes = async (meetingId) => {
@@ -1543,12 +1555,21 @@ const ExecMeetingDashboard = () => {
                                 <span className="text-white/40 text-xs ml-2">{p.email}</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="text-white/30 text-[10px]">{p.response}</span>
-                                {confirmRemoveId === p.user_id ? (
+                                {p.response && p.response !== 'pending' && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                    p.response === 'accepted' ? 'bg-emerald-500/20 text-emerald-400' :
+                                    p.response === 'rejected' ? 'bg-red-500/20 text-red-400' :
+                                    p.response === 'tentative' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    'bg-white/10 text-white/40'
+                                  }`}>{p.response}</span>
+                                )}
+                                {!p.id ? (
+                                  <span className="text-white/20 text-[10px]">syncing…</span>
+                                ) : confirmRemoveId === p.id ? (
                                   <div className="flex items-center gap-1">
                                     <span className="text-white/50 text-[10px]">Remove?</span>
                                     <button
-                                      onClick={() => { removeParticipant(m.id, p.user_id, p.full_name); setConfirmRemoveMap(prev => ({ ...prev, [m.id]: null })); }}
+                                      onClick={() => { removeParticipant(m.id, p.id, p.user_id, p.full_name); setConfirmRemoveMap(prev => ({ ...prev, [m.id]: null })); }}
                                       className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">
                                       Yes
                                     </button>
@@ -1560,7 +1581,7 @@ const ExecMeetingDashboard = () => {
                                   </div>
                                 ) : (
                                   <button
-                                    onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: p.user_id }))}
+                                    onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: p.id }))}
                                     className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
                                 )}
                               </div>

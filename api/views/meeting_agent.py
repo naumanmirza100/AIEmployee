@@ -435,13 +435,30 @@ def meeting_detail(request, meeting_id):
                 meeting.scheduled_at = dt
         meeting.save()
 
-        # Notify existing participants about the update
-        if changed_fields:
-            participants = meeting.participants.select_related('company_user').all()
-            for p in participants:
-                cu = p.company_user
-                if cu.email and cu.id != company_user.id:
-                    _send_meeting_update_email(cu, meeting, company_user.full_name, changed_fields)
+        # Notify existing participants only when calendar-relevant fields change.
+        # Run in a background thread with a short delay so any concurrent
+        # participant-remove requests finish writing to DB first.
+        calendar_fields = {'date/time', 'duration minutes', 'location', 'meeting link', 'title'}
+        if any(f in calendar_fields for f in changed_fields):
+            import threading as _threading
+            meeting_id_snap = meeting.id
+            organizer_name_snap = company_user.full_name
+            changed_snap = list(changed_fields)
+
+            def _notify():
+                import time as _time
+                _time.sleep(2)  # let any in-flight DELETE requests commit first
+                from meeting_agent.models import ExecutiveMeeting as _EM
+                try:
+                    _meeting = _EM.objects.get(id=meeting_id_snap)
+                    for _p in _meeting.participants.select_related('company_user').all():
+                        _cu = _p.company_user
+                        if _cu.email and _cu.id != company_user.id:
+                            _send_meeting_update_email(_cu, _meeting, organizer_name_snap, changed_snap)
+                except Exception as _e:
+                    logger.error("Meeting update notify error: %s", _e)
+
+            _threading.Thread(target=_notify, daemon=True).start()
 
         return Response({'status': 'success', 'meeting': _serialize_meeting(meeting)})
 
@@ -558,7 +575,7 @@ def meeting_participants(request, meeting_id):
                 return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
         p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
-        if created and target.email:
+        if target.email:
             _send_meeting_invite_email(target, meeting, company_user.full_name)
         return Response({'status': 'success', 'participant': {
             'id': p.id, 'user_id': target.id, 'full_name': target.full_name,
@@ -567,15 +584,31 @@ def meeting_participants(request, meeting_id):
 
     if request.method == 'DELETE':
         user_id = request.data.get('user_id')
-        # Fetch before deleting so we can notify
+        participant_id = request.data.get('participant_id')
+        logger.info("Participant remove: meeting=%s user_id=%s participant_id=%s by=%s", meeting.id, user_id, participant_id, company_user.id)
+        # Look up the participant record (prefer participant_id for reliability)
         removed_cu = None
         try:
-            removed_cu = CompanyUser.objects.get(id=user_id, company=company_user.company)
-        except CompanyUser.DoesNotExist:
-            pass
-        ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user_id=user_id).delete()
+            if participant_id:
+                p_obj = ExecutiveMeetingParticipant.objects.select_related('company_user').get(id=participant_id, meeting=meeting)
+                removed_cu = p_obj.company_user
+            elif user_id:
+                p_obj = ExecutiveMeetingParticipant.objects.select_related('company_user').get(meeting=meeting, company_user_id=user_id)
+                removed_cu = p_obj.company_user
+            if removed_cu:
+                logger.info("Participant remove: found cu=%s email=%s", removed_cu.id, removed_cu.email)
+        except ExecutiveMeetingParticipant.DoesNotExist:
+            logger.warning("Participant remove: participant record not found (user_id=%s participant_id=%s)", user_id, participant_id)
+        # Delete the record
+        if participant_id:
+            ExecutiveMeetingParticipant.objects.filter(id=participant_id, meeting=meeting).delete()
+        elif user_id:
+            ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user_id=user_id).delete()
+        # Send removal email
         if removed_cu and removed_cu.email and removed_cu.id != company_user.id:
             _send_meeting_removal_email(removed_cu, meeting, company_user.full_name)
+        elif removed_cu and removed_cu.id == company_user.id:
+            logger.info("Participant remove: skipping email — user removed themselves")
         return Response({'status': 'success'})
 
 
