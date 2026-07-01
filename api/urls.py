@@ -99,6 +99,7 @@ urlpatterns = [
     re_path(r'^industries/(?P<slug>[\w-]+)/?$', industry.get_industry_by_slug, name='get_industry_by_slug'),
     re_path(r'^industries/(?P<slug>[\w-]+)/challenges/?$', industry.get_industry_challenges, name='get_industry_challenges'),
     
+
     # Blog endpoints
     re_path(r'^blog/posts/?$', blog.list_blog_posts, name='list_blog_posts'),
     re_path(r'^blog/posts/(?P<slug>[\w-]+)/?$', blog.get_blog_post_by_slug, name='get_blog_post_by_slug'),
@@ -847,7 +848,9 @@ urlpatterns = [
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/notes/?$', exec_meeting_api.meeting_notes, name='exec_meeting_notes'),  # GET, POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/documents/?$', exec_meeting_api.meeting_documents, name='exec_meeting_documents'),  # GET
+    re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/participants/?$', exec_meeting_api.meeting_participants, name='exec_meeting_participants'),  # GET, POST, DELETE
     re_path(r'^exec-meeting/meetings/suggest-slots/?$', exec_meeting_api.meeting_suggest_slots, name='exec_meeting_suggest_slots'),  # GET
+    re_path(r'^exec-meeting/users/search/?$', exec_meeting_api.search_company_users, name='exec_users_search'),  # GET ?q=
 
     # Action Items
     re_path(r'^exec-meeting/action-items/(?P<item_id>\d+)/?$', exec_meeting_api.action_item_detail, name='exec_action_item_detail'),  # GET, PATCH
@@ -864,6 +867,8 @@ urlpatterns = [
 
     # Documents
     re_path(r'^exec-meeting/documents/draft/?$', exec_meeting_api.document_draft, name='exec_document_draft'),  # POST
+    re_path(r'^exec-meeting/documents/?$', exec_meeting_api.standalone_document_list, name='exec_document_list'),  # GET
+    re_path(r'^exec-meeting/documents/(?P<doc_id>\d+)/?$', exec_meeting_api.standalone_document_detail, name='exec_document_detail'),  # GET, DELETE
 
     # Notifications
     re_path(r'^exec-meeting/notifications/?$', exec_meeting_api.notification_list, name='exec_notification_list'),  # GET

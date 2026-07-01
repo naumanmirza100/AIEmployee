@@ -34,6 +34,7 @@ MODULE_PRICES = {
     'hr_agent': 129,
     'ai_sdr_agent': 199,
     'crm_sync_agent': 99,
+    'exec_meeting_agent': 179,
 }
 
 MODULE_DISPLAY_NAMES = {
@@ -46,6 +47,7 @@ MODULE_DISPLAY_NAMES = {
     'hr_agent': 'HR Support Agent',
     'ai_sdr_agent': 'AI SDR Agent',
     'crm_sync_agent': 'CRM & System Sync Agent',
+    'exec_meeting_agent': 'AI Executive Meeting Assistant',
 }
 
 # Subscription duration (30 days per purchase)

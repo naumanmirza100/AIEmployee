@@ -9,7 +9,8 @@ import {
   FileSearch,
   Reply,
   Target,
-  UserCog
+  UserCog,
+  CalendarClock
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
@@ -183,6 +184,26 @@ const ModuleCardsSection = () => {
         'HR document processing (offer letters, contracts, payslips)',
         'Birthday, anniversary & probation reminders',
         'Typed HR meetings (1:1, performance review, exit, grievance)'
+      ],
+      highlight: false,
+    },
+    {
+      title: 'AI Executive Meeting Assistant',
+      moduleName: 'exec_meeting_agent',
+      description: 'Full meeting lifecycle management — schedule, take notes, prioritize tasks, auto-plan your calendar, draft documents, and get proactive reminders.',
+      icon: CalendarClock,
+      iconColor: 'text-violet-500',
+      gradientFrom: gradientColors['purple-500'],
+      gradientTo: gradientColors['pink-500'],
+      price: 179,
+      pricePeriod: 'month',
+      features: [
+        'Natural language meeting scheduling',
+        'AI meeting notes & action item extraction',
+        'Smart task prioritization & workload analysis',
+        'Calendar auto-planning & free slot suggestions',
+        'AI document authoring (agenda, minutes, briefings)',
+        'Proactive reminders & daily digest'
       ],
       highlight: false,
     }
