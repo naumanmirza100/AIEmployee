@@ -312,6 +312,7 @@ class JobApplication(models.Model):
     cv_file_name = models.CharField(max_length=255, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     applied_at = models.DateTimeField(auto_now_add=True)
+    access_token = models.CharField(max_length=64, unique=True, blank=True, null=True)
 
     class Meta:
         db_table = 'ppp_recruitment_job_applications'

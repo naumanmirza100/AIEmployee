@@ -1,6 +1,10 @@
+import secrets
 from datetime import timedelta
 
 from django.utils import timezone
+from django.conf import settings
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
 
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.permissions import AllowAny
@@ -183,6 +187,8 @@ def public_job_apply(request, job_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    access_token = secrets.token_urlsafe(40)
+
     application = JobApplication.objects.create(
         job=job,
         first_name=first_name,
@@ -200,13 +206,248 @@ def public_job_apply(request, job_id):
         cover_letter=cover_letter,
         cv_file=cv_file,
         cv_file_name=cv_file.name if cv_file else None,
+        access_token=access_token,
     )
+
+    # Build tracking URL — points to React frontend
+    frontend_base = (getattr(settings, 'FRONTEND_URL', None) or getattr(settings, 'BACKEND_URL', None) or '').strip().rstrip('/')
+    if frontend_base and not frontend_base.startswith('http'):
+        frontend_base = f'https://{frontend_base}'
+    tracking_url = f"{frontend_base}/track-application/{access_token}" if frontend_base else ''
+
+    # Send confirmation email with magic tracking link
+    try:
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None)
+        if email and from_email:
+            candidate_name = f"{first_name} {last_name}".strip()
+            ctx = {
+                'candidate_name': candidate_name,
+                'job_title': job.title,
+                'applied_at': application.applied_at,
+                'tracking_url': tracking_url,
+            }
+            html_body = render_to_string('recruitment_agent/emails/application_confirmation.html', ctx)
+            text_body = render_to_string('recruitment_agent/emails/application_confirmation.txt', ctx)
+            send_mail(
+                subject=f"Application Received – {job.title}",
+                message=text_body,
+                from_email=from_email,
+                recipient_list=[email],
+                html_message=html_body,
+                fail_silently=True,
+            )
+    except Exception:
+        pass  # Never block application submission due to email failure
 
     return Response(
         {
             'status': 'success',
             'message': 'Your application has been submitted successfully!',
-            'data': {'application_id': application.id},
+            'data': {
+                'application_id': application.id,
+                'tracking_url': tracking_url,
+            },
         },
         status=status.HTTP_201_CREATED,
     )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_track_application(request, token):
+    """Public API — return application status by access_token (no auth required)."""
+    try:
+        application = JobApplication.objects.select_related('job').get(access_token=token)
+    except JobApplication.DoesNotExist:
+        return Response(
+            {'status': 'error', 'code': 'NOT_FOUND', 'message': 'Invalid or expired tracking link.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    job = application.job
+
+    # Try to find linked CVRecord and Interview
+    cv_record = None
+    interview = None
+    try:
+        from recruitment_agent.models import CVRecord, Interview
+        cv_record = CVRecord.objects.filter(job_application=application).first()
+        if cv_record:
+            interview = Interview.objects.filter(cv_record=cv_record).order_by('-created_at').first()
+    except Exception:
+        pass
+
+    status_label_map = {
+        'pending': 'Under Review',
+        'reviewed': 'Reviewed',
+        'shortlisted': 'Shortlisted',
+        'rejected': 'Not Selected',
+    }
+
+    interview_data = None
+    if interview:
+        interview_data = {
+            'status': interview.status,
+            'interview_type': getattr(interview, 'interview_type', None),
+            'scheduled_datetime': interview.scheduled_datetime.isoformat() if getattr(interview, 'scheduled_datetime', None) else None,
+            'meeting_link': getattr(interview, 'meeting_link', None),
+            'confirmation_token': interview.confirmation_token,
+        }
+
+    return Response({
+        'status': 'success',
+        'data': {
+            'application': {
+                'id': application.id,
+                'first_name': application.first_name,
+                'last_name': application.last_name,
+                'email': application.email,
+                'status': application.status,
+                'status_label': status_label_map.get(application.status, application.status.title()),
+                'applied_at': application.applied_at.isoformat(),
+            },
+            'job': {
+                'title': job.title,
+                'company_name': getattr(job, 'company_name', None),
+                'location': getattr(job, 'location', None),
+                'department': getattr(job, 'department', None),
+            },
+            'cv_record': {
+                'qualification_decision': cv_record.qualification_decision if cv_record else None,
+                'role_fit_score': cv_record.role_fit_score if cv_record else None,
+            } if cv_record else None,
+            'interview': interview_data,
+        },
+    })
+
+
+# ─── Candidate Portal ───────────────────────────────────────────────────────
+
+def _build_app_payload(app):
+    """Shared helper: serialize a JobApplication + linked interview for the portal."""
+    cv_record = None
+    interview = None
+    try:
+        from recruitment_agent.models import CVRecord, Interview
+        cv_record = CVRecord.objects.filter(job_application=app).first()
+        if cv_record:
+            interview = Interview.objects.filter(cv_record=cv_record).order_by('-created_at').first()
+    except Exception:
+        pass
+
+    status_label_map = {
+        'pending': 'Under Review',
+        'reviewed': 'Reviewed',
+        'shortlisted': 'Shortlisted',
+        'rejected': 'Not Selected',
+    }
+
+    interview_data = None
+    if interview:
+        interview_data = {
+            'status': interview.status,
+            'interview_type': getattr(interview, 'interview_type', None),
+            'scheduled_datetime': interview.scheduled_datetime.isoformat() if getattr(interview, 'scheduled_datetime', None) else None,
+            'meeting_link': getattr(interview, 'meeting_link', None),
+            'confirmation_token': interview.confirmation_token,
+        }
+
+    job = app.job
+    return {
+        'application': {
+            'id': app.id,
+            'status': app.status,
+            'status_label': status_label_map.get(app.status, app.status.title()),
+            'applied_at': app.applied_at.isoformat(),
+            'first_name': app.first_name,
+            'last_name': app.last_name,
+            'email': app.email,
+            'phone': app.phone,
+            'current_location': app.current_location,
+            'salary_expectation': app.salary_expectation,
+            'education': app.education,
+            'previous_company': app.previous_company,
+            'previous_salary': app.previous_salary,
+            'linkedin_url': app.linkedin_url,
+            'github_url': app.github_url,
+            'cover_letter': app.cover_letter,
+            'cv_file_name': app.cv_file_name,
+            'access_token': app.access_token,
+        },
+        'job': {
+            'id': job.id,
+            'title': job.title,
+            'company_name': getattr(job, 'company_name', None),
+            'location': getattr(job, 'location', None),
+            'department': getattr(job, 'department', None),
+            'type': getattr(job, 'type', None),
+        },
+        'cv_record': {
+            'qualification_decision': cv_record.qualification_decision,
+            'role_fit_score': cv_record.role_fit_score,
+        } if cv_record else None,
+        'interview': interview_data,
+    }
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def request_candidate_portal_access(request):
+    """Send a magic-link to the candidate so they can view all their applications."""
+    email = (request.data.get('email') or '').strip().lower()
+    if not email:
+        return Response({'status': 'error', 'message': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if JobApplication.objects.filter(email=email).exists():
+        try:
+            from django.core import signing
+            token = signing.dumps({'email': email}, salt='candidate-portal')
+
+            frontend_base = (getattr(settings, 'FRONTEND_URL', None) or getattr(settings, 'BACKEND_URL', None) or '').strip().rstrip('/')
+            if frontend_base and not frontend_base.startswith('http'):
+                frontend_base = f'https://{frontend_base}'
+            portal_url = f"{frontend_base}/candidate-portal/{token}" if frontend_base else ''
+
+            from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None)
+            if from_email and portal_url:
+                html_body = render_to_string('recruitment_agent/emails/candidate_portal_access.html', {
+                    'portal_url': portal_url,
+                    'email': email,
+                })
+                text_body = render_to_string('recruitment_agent/emails/candidate_portal_access.txt', {
+                    'portal_url': portal_url,
+                    'email': email,
+                })
+                send_mail(
+                    subject="Access Your Application Portal",
+                    message=text_body,
+                    from_email=from_email,
+                    recipient_list=[email],
+                    html_message=html_body,
+                    fail_silently=True,
+                )
+        except Exception:
+            pass
+
+    # Always return success to avoid email enumeration
+    return Response({'status': 'success', 'message': 'If we found applications for this email, an access link has been sent.'})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def candidate_portal_data(request, token):
+    """Return all applications for the candidate identified by a signed portal token."""
+    from django.core import signing
+    try:
+        data = signing.loads(token, salt='candidate-portal', max_age=86400)  # 24-hour validity
+        email = data.get('email', '')
+    except Exception:
+        return Response(
+            {'status': 'error', 'code': 'INVALID_TOKEN', 'message': 'This link has expired or is invalid. Please request a new one.'},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    applications = JobApplication.objects.filter(email=email).select_related('job').order_by('-applied_at')
+    payload = [_build_app_payload(app) for app in applications]
+
+    return Response({'status': 'success', 'email': email, 'data': payload, 'total': len(payload)})

@@ -1,0 +1,21 @@
+Application Received – {{ job_title }}
+
+Dear {{ candidate_name }},
+
+Thank you for applying for the {{ job_title }} position. Your application has been received and is currently under review.
+
+APPLICATION DETAILS
+Position: {{ job_title }}
+Status: Under Review
+
+{% if tracking_url %}TRACK YOUR APPLICATION
+You can check your application status at any time using this link (no login required):
+{{ tracking_url }}
+{% endif %}
+
+WHAT HAPPENS NEXT?
+- Our team will review your application
+- If shortlisted, you will receive an interview invitation email
+- You can track your status anytime using the link above
+
+This is an automated confirmation. Please do not reply to this email.

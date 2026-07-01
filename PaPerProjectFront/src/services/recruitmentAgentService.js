@@ -413,18 +413,13 @@ export const rescheduleInterview = async (interviewId, newSlotDatetime) => {
 export const getCVRecords = async (filters = {}) => {
   try {
     const params = new URLSearchParams();
-    if (filters.job_id) {
-      params.append('job_id', filters.job_id);
-    }
-    if (filters.decision) {
-      params.append('decision', filters.decision);
-    }
-    if (filters.page != null) {
-      params.append('page', String(filters.page));
-    }
-    if (filters.page_size != null) {
-      params.append('page_size', String(filters.page_size));
-    }
+    if (filters.job_id)    params.append('job_id',    filters.job_id);
+    if (filters.decision)  params.append('decision',  filters.decision);
+    if (filters.search)    params.append('search',    filters.search);
+    if (filters.date_from) params.append('date_from', filters.date_from);
+    if (filters.date_to)   params.append('date_to',   filters.date_to);
+    if (filters.page != null)      params.append('page',      String(filters.page));
+    if (filters.page_size != null) params.append('page_size', String(filters.page_size));
     
     const queryString = params.toString();
     const endpoint = `/recruitment/cv-records${queryString ? `?${queryString}` : ''}`;

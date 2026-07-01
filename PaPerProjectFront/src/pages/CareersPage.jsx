@@ -7,7 +7,10 @@ import {
   Search, UploadCloud, Star, Bot, CalendarDays, BarChart, ShieldCheck,
   FileText, ChevronsDown, Loader2, Building2, ChevronLeft, ChevronRight,
   ChevronsLeft, ChevronsRight, X, Filter, Clock, Copy, Link2,
+  Mail, Send, CheckCircle2, AlertCircle, LayoutGrid,
 } from 'lucide-react';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -152,6 +155,41 @@ const CareersPage = ({ scrollToJobs = false }) => {
 
   const activeFilters = [filterCo, filterType, searchRaw].filter(Boolean).length;
 
+  // ── portal modal ────────────────────────────────────────────────────────────
+  const [portalModal, setPortalModal]   = useState(false);
+  const [portalEmail, setPortalEmail]   = useState('');
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalSent, setPortalSent]     = useState(false);
+  const [portalError, setPortalError]   = useState('');
+
+  const openPortalModal = () => { setPortalModal(true); setPortalEmail(''); setPortalSent(false); setPortalError(''); };
+  const closePortalModal = () => setPortalModal(false);
+
+  const handlePortalRequest = async (e) => {
+    e.preventDefault();
+    if (!portalEmail.trim()) { setPortalError('Please enter your email address.'); return; }
+    if (!/^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(portalEmail.trim())) {
+      setPortalError('Please enter a valid email address.');
+      return;
+    }
+    setPortalError('');
+    setPortalLoading(true);
+    try {
+      const res  = await fetch(`${API_BASE}/public/candidate/request-access/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: portalEmail.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      if (data.status === 'success') setPortalSent(true);
+      else setPortalError(data.message || 'Something went wrong. Please try again.');
+    } catch {
+      setPortalError('Network error. Please check your connection.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <>
@@ -174,6 +212,11 @@ const CareersPage = ({ scrollToJobs = false }) => {
               <div className="mt-10 flex items-center justify-center gap-4 flex-wrap">
                 <Button size="lg" onClick={() => jobsRef.current?.scrollIntoView({ behavior: 'smooth' })}>
                   Browse Open Positions <ChevronsDown className="ml-2 h-5 w-5" />
+                </Button>
+                <Button size="lg" variant="outline" onClick={openPortalModal}
+                  className="gap-2 border-primary/40 text-primary hover:bg-primary/5">
+                  <LayoutGrid className="h-4 w-4" />
+                  View My Applications
                 </Button>
                 {pagination.total_count > 0 && (
                   <span className="text-muted-foreground text-base">{pagination.total_count} open position{pagination.total_count !== 1 ? 's' : ''}</span>
@@ -552,6 +595,118 @@ const CareersPage = ({ scrollToJobs = false }) => {
         </AnimatePresence>
 
       </div>
+
+      {/* ── View My Applications Modal ────────────────────────────────────── */}
+      <AnimatePresence>
+        {portalModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center px-4"
+            style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+            onClick={closePortalModal}
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="w-full max-w-md rounded-2xl p-8 relative"
+              style={{ background: '#1a1a2e', border: '1px solid rgba(99,102,241,0.25)' }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Close */}
+              <button onClick={closePortalModal}
+                className="absolute top-4 right-4 p-1.5 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+
+              {portalSent ? (
+                /* ── Success state ── */
+                <div className="text-center space-y-5">
+                  <div className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center"
+                    style={{ background: 'rgba(16,185,129,0.15)' }}>
+                    <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-white mb-2">Check Your Email</h2>
+                    <p className="text-white/50 text-sm leading-relaxed">
+                      We sent a secure access link to<br />
+                      <span className="text-white font-semibold">{portalEmail}</span>
+                    </p>
+                  </div>
+                  <div className="rounded-xl p-4 space-y-1.5 text-xs text-white/40 text-left"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    <p>• Link expires in <span className="text-white/60">24 hours</span></p>
+                    <p>• Check your spam/junk folder if you don't see it</p>
+                    <p>• Click the link to open your full application portal</p>
+                  </div>
+                  <button onClick={() => { setPortalSent(false); setPortalEmail(''); }}
+                    className="text-sm text-white/40 hover:text-white/70 transition-colors">
+                    Try a different email
+                  </button>
+                </div>
+              ) : (
+                /* ── Email entry state ── */
+                <div className="space-y-6">
+                  <div className="text-center">
+                    <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+                      style={{ background: 'linear-gradient(135deg,#6366f1,#4f46e5)' }}>
+                      <LayoutGrid className="w-6 h-6 text-white" />
+                    </div>
+                    <h2 className="text-xl font-bold text-white mb-1">View My Applications</h2>
+                    <p className="text-white/50 text-sm leading-relaxed">
+                      Enter the email you used when applying.<br />
+                      We'll send a secure link — no password needed.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handlePortalRequest} className="space-y-3">
+                    <div>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 pointer-events-none" />
+                        <input
+                          type="email"
+                          value={portalEmail}
+                          onChange={e => { setPortalEmail(e.target.value); setPortalError(''); }}
+                          placeholder="your@email.com"
+                          autoFocus
+                          className="w-full pl-10 pr-4 py-3 rounded-xl text-sm text-white placeholder-white/30 outline-none transition-colors"
+                          style={{
+                            background: 'rgba(255,255,255,0.05)',
+                            border: portalError ? '1px solid rgba(239,68,68,0.5)' : '1px solid rgba(255,255,255,0.12)',
+                          }}
+                          onFocus={e => { if (!portalError) e.target.style.borderColor = 'rgba(99,102,241,0.6)'; }}
+                          onBlur={e => { if (!portalError) e.target.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+                        />
+                      </div>
+                      {portalError && (
+                        <p className="text-xs text-red-400 mt-1.5 flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3 shrink-0" />{portalError}
+                        </p>
+                      )}
+                    </div>
+
+                    <button type="submit" disabled={portalLoading}
+                      className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-opacity hover:opacity-90 disabled:opacity-60"
+                      style={{ background: 'linear-gradient(135deg,#6366f1,#4f46e5)' }}>
+                      {portalLoading
+                        ? <><Loader2 className="w-4 h-4 animate-spin" />Sending…</>
+                        : <><Send className="w-4 h-4" />Send Access Link</>}
+                    </button>
+                  </form>
+
+                  <p className="text-center text-xs text-white/25">
+                    Each access link is valid for 24 hours and is unique to your email.
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </>
   );
 };
