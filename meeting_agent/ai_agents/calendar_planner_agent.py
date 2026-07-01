@@ -62,7 +62,12 @@ class CalendarPlannerAgent(BaseAgent):
         meetings_by_date = {}
         for m in meetings:
             d = m['scheduled_at'][:10]
-            meetings_by_date.setdefault(d, []).append(m['title'])
+            time_str = m['scheduled_at'][11:16] if len(m['scheduled_at']) > 10 else ''
+            meetings_by_date.setdefault(d, []).append({
+                'title': m['title'],
+                'time': time_str,
+                'duration_minutes': m.get('duration_minutes', 0),
+            })
 
         # Distribute tasks across days with fewest meetings (Python logic, no AI)
         work_days = [d for d in week_dates if day_names[datetime.strptime(d['date'], '%Y-%m-%d').weekday()] not in ('Saturday', 'Sunday')]
@@ -91,13 +96,10 @@ class CalendarPlannerAgent(BaseAgent):
 
         # Ask AI only for summary, recommendations, focus blocks per day
         days_summary = '\n'.join(
-            f"  {d['date']} ({d['day_name']}): meetings={meetings_by_date.get(d['date'], [])}, tasks={[t.get('title') for t in tasks_by_date.get(d['date'], [])]}"
+            f"  {d['date']} ({d['day_name']}): meetings={[m['title'] for m in meetings_by_date.get(d['date'], [])]}, tasks={[t.get('title') for t in tasks_by_date.get(d['date'], [])]}"
             for d in week_dates
         )
-        prompt = f"""You are a calendar assistant. Given this pre-built weekly schedule, provide:
-1. A brief weekly_summary (1-2 sentences)
-2. 2-3 practical recommendations
-3. One focus block per working day (morning or afternoon, avoid meeting times)
+        prompt = f"""You are a calendar assistant. Given this weekly schedule, provide a brief summary and practical recommendations only.
 
 Schedule:
 {days_summary}
@@ -106,21 +108,19 @@ Return ONLY this JSON (no markdown):
 {{
   "weekly_summary": "...",
   "conflicts_detected": [],
-  "recommendations": ["tip 1", "tip 2"],
-  "focus_blocks_by_date": {{
-    "YYYY-MM-DD": {{"start": "HH:MM", "end": "HH:MM", "label": "Deep Work"}}
-  }}
+  "recommendations": ["tip 1", "tip 2"]
 }}"""
         raw = self._call_llm(prompt, self.system_prompt, temperature=0.1, max_tokens=800)
         ai = self._extract_json(raw) or {}
-        focus_map = ai.get('focus_blocks_by_date') or {}
 
         # Build final plan entirely in Python
         fixed_days = []
         for d in week_dates:
             date = d['date']
+            is_weekend = d['day_name'] in ('Saturday', 'Sunday')
             day_meetings = meetings_by_date.get(date, [])
             day_tasks = tasks_by_date.get(date, [])
+
             # Assign slot times to tasks
             used_slots = set()
             task_slots = []
@@ -137,8 +137,31 @@ Return ONLY this JSON (no markdown):
                     used_slots.add(slot_times[slot_idx])
                     slot_idx += 1
 
-            focus = focus_map.get(date)
-            focus_blocks = [{'start': focus['start'], 'end': focus['end'], 'label': focus.get('label', 'Deep Work')}] if focus else []
+            # Compute focus block in Python — pick first 2-hour gap after all tasks+meetings
+            if not is_weekend:
+                # Collect all occupied hour blocks
+                occupied = set()
+                for ts in task_slots:
+                    h = int(ts['time'].split(':')[0])
+                    occupied.add(h)
+                for mt in day_meetings:
+                    if mt.get('time'):
+                        h = int(mt['time'].split(':')[0])
+                        dur_hours = max(1, (mt.get('duration_minutes') or 60) // 60)
+                        for i in range(dur_hours):
+                            occupied.add(h + i)
+                # Find first 2-hour consecutive free slot between 9-18
+                focus_start = None
+                for h in range(9, 17):
+                    if h not in occupied and (h + 1) not in occupied:
+                        focus_start = h
+                        break
+                if focus_start:
+                    focus_blocks = [{'start': f'{focus_start:02d}:00', 'end': f'{focus_start+2:02d}:00', 'label': 'Deep Work'}]
+                else:
+                    focus_blocks = []
+            else:
+                focus_blocks = []
 
             total_load = len(day_meetings) + len(day_tasks)
             workload = 'heavy' if total_load >= 4 else ('moderate' if total_load >= 2 else 'light')
@@ -155,9 +178,9 @@ Return ONLY this JSON (no markdown):
         return {
             'week_start': week_start,
             'daily_plans': fixed_days,
-            'weekly_summary': ai.get('weekly_summary', ''),
-            'conflicts_detected': ai.get('conflicts_detected', []),
-            'recommendations': ai.get('recommendations', []),
+            'weekly_summary': ai.get('weekly_summary') or '',
+            'conflicts_detected': ai.get('conflicts_detected') or [],
+            'recommendations': ai.get('recommendations') or [],
         }
 
     def auto_schedule_tasks(self, tasks: list, available_slots: list) -> list:
