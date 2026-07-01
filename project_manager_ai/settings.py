@@ -300,6 +300,7 @@ INSTALLED_APPS = [
     'api',  # API app
     'ai_sdr_agent.apps.AiSdrAgentConfig',  # AI SDR Agent
     'crm_sync_agent.apps.CRMSyncAgentConfig',  # CRM & System Sync Agent
+    'meeting_agent.apps.MeetingAgentConfig',   # AI Executive Meeting Assistant
     'whitenoise.runserver_nostatic',
 ]
 
@@ -483,6 +484,39 @@ PM_AGENT_LLM_CONFIG = {
     'knowledgeqaagent': {
         'temperature': 0.7,
         'max_tokens': 800,
+    },
+}
+
+# AI Executive Meeting Assistant — per-sub-agent LLM overrides
+EXEC_AGENT_LLM_CONFIG = {
+    'defaults': {
+        'model': GROQ_MODEL,
+        'temperature': 0.5,
+        'max_tokens': 1024,
+    },
+    'meetingschedulingagent': {
+        'temperature': 0.1,
+        'max_tokens': 600,
+    },
+    'meetingnotetakeragent': {
+        'temperature': 0.3,
+        'max_tokens': 800,
+    },
+    'taskprioritizationagent': {
+        'temperature': 0.2,
+        'max_tokens': 1200,
+    },
+    'calendarplanneragent': {
+        'temperature': 0.3,
+        'max_tokens': 1500,
+    },
+    'documentauthoringagent': {
+        'temperature': 0.4,
+        'max_tokens': 900,
+    },
+    'proactivenotificationagent': {
+        'temperature': 0.3,
+        'max_tokens': 400,
     },
 }
 GROQ_REC_API_KEY = os.getenv('GROQ_REC_API_KEY', '')
@@ -956,6 +990,32 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'hr_agent.tasks.purge_hr_audit_log',
         'schedule': 86400.0 * 7,
         'options': {'expires': 86400.0 * 14},
+    },
+
+    # ----- AI Executive Meeting Assistant -----
+    # Remind participants of meetings starting within 15 minutes — every 5 min.
+    'exec-meeting-send-reminders': {
+        'task': 'meeting_agent.send_meeting_reminders',
+        'schedule': 300.0,
+        'options': {'expires': 600},
+    },
+    # Proactive notifications: overdue tasks, approaching deadlines — every 15 min.
+    'exec-meeting-proactive-notifications': {
+        'task': 'meeting_agent.run_proactive_notifications',
+        'schedule': 900.0,
+        'options': {'expires': 1800},
+    },
+    # Auto-mark past meetings as completed — every 30 minutes.
+    'exec-meeting-mark-completed': {
+        'task': 'meeting_agent.mark_completed_meetings',
+        'schedule': 1800.0,
+        'options': {'expires': 3600},
+    },
+    # Clean up old read notifications — daily.
+    'exec-meeting-cleanup-notifications': {
+        'task': 'meeting_agent.cleanup_old_notifications',
+        'schedule': 86400.0,
+        'options': {'expires': 172800},
     },
 }
 

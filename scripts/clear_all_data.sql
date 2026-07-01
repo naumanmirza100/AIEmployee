@@ -9,6 +9,8 @@ EXEC sp_MSforeachtable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL'
 
 -- ============================================================
 -- RECRUITMENT AGENT
+
+
 -- ============================================================
 PRINT 'Clearing recruitment_agent tables...'
 DELETE FROM [ppp_recruitment_agent_recruitmentqachatmessage]
