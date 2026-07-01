@@ -136,7 +136,8 @@ export default function CalendarScheduleView() {
             </div>
           )}
 
-          {/* Conflicts */}
+          {/* Conflicts — now rendered with criterion + affected tasks so the
+              user knows WHY each item is flagged and which tasks to look at. */}
           {schedule.conflicts?.length > 0 && (
             <Card className="bg-white/[0.02] border-white/[0.06]">
               <CardHeader className="pb-2">
@@ -145,11 +146,85 @@ export default function CalendarScheduleView() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {schedule.conflicts.map((conflict, i) => (
-                  <div key={i} className="bg-amber-900/20 border border-amber-700 rounded p-2 text-sm text-white/65">
-                    {typeof conflict === 'string' ? conflict : conflict.description || conflict.message || JSON.stringify(conflict)}
-                  </div>
-                ))}
+                {schedule.conflicts.map((conflict, i) => {
+                  // Legacy shape — older agents emitted plain strings. Render
+                  // those compactly without an empty "Why" block.
+                  if (typeof conflict === 'string') {
+                    return (
+                      <div key={i} className="bg-amber-900/20 border border-amber-700 rounded p-2 text-sm text-white/65">
+                        {conflict}
+                      </div>
+                    );
+                  }
+                  const severity = conflict.severity || 'medium';
+                  const severityClass = severity === 'high'
+                    ? 'border-red-700 bg-red-900/20'
+                    : severity === 'low'
+                      ? 'border-white/[0.08] bg-white/[0.03]'
+                      : 'border-amber-700 bg-amber-900/20';
+                  const taskTitles = Array.isArray(conflict.task_titles) ? conflict.task_titles : [];
+                  return (
+                    <div key={i} className={`rounded border p-3 ${severityClass}`}>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <p className="text-sm font-medium text-white">
+                          {conflict.description || conflict.message || 'Conflict'}
+                        </p>
+                        {conflict.type && (
+                          <span className="text-[10px] uppercase tracking-wider text-white/40 shrink-0 mt-0.5">
+                            {String(conflict.type).replace(/_/g, ' ')}
+                          </span>
+                        )}
+                      </div>
+                      {conflict.criterion && (
+                        <p className="text-xs text-white/55 italic mb-2">
+                          <span className="text-white/40">Why: </span>{conflict.criterion}
+                        </p>
+                      )}
+                      {taskTitles.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {taskTitles.slice(0, 6).map((title, ti) => (
+                            <span key={ti} className="text-[11px] px-2 py-0.5 rounded bg-black/30 text-white/70 border border-white/[0.06]">
+                              {title}
+                            </span>
+                          ))}
+                          {taskTitles.length > 6 && (
+                            <span className="text-[11px] px-2 py-0.5 text-white/40">+{taskTitles.length - 6} more</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Recommendations — emitted as structured objects alongside conflicts */}
+          {schedule.recommendations?.length > 0 && (
+            <Card className="bg-white/[0.02] border-white/[0.06]">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-emerald-400 flex items-center gap-1">
+                  Recommendations ({schedule.recommendations.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {schedule.recommendations.map((rec, i) => {
+                  if (typeof rec === 'string') {
+                    return (
+                      <div key={i} className="bg-emerald-900/15 border border-emerald-700/50 rounded p-2 text-sm text-white/65">
+                        {rec}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={i} className="bg-emerald-900/10 border border-emerald-700/40 rounded p-3 text-sm">
+                      <p className="text-white/80 font-medium">{rec.description}</p>
+                      {rec.suggested_action && (
+                        <p className="text-xs text-white/60 mt-1">{rec.suggested_action}</p>
+                      )}
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           )}

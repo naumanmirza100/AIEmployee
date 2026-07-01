@@ -1604,57 +1604,105 @@ def public_submit(request):
             from Frontline_agent.contacts import recompute_contact_stats
             recompute_contact_stats(contact)
 
-        # Optional attachment — single file for now. Validates MIME + size against
-        # the tenant's widget config; stores under media/frontline_widget_uploads/<company>/.
-        attachment_info = None
-        uploaded_file = request.FILES.get('file') if hasattr(request, 'FILES') else None
-        if uploaded_file:
+        # Optional attachments — multi-file. Each file is independently
+        # validated; one bad file in the batch doesn't poison the others.
+        # Limits are enforced in priority order:
+        #   - hard cap on file count (`MAX_WIDGET_FILES`) so a malicious
+        #     submitter can't flood us with thousands of tiny files;
+        #   - per-file size cap from the tenant's widget config;
+        #   - total batch size cap (`max_attachment_bytes` × file count) so
+        #     a tenant who lifts the per-file cap can't be DoS'd by a huge
+        #     batch either;
+        #   - magic-byte MIME sniff (never trust the client's
+        #     `content_type` header) against the tenant's MIME allowlist.
+        # Stored under `media/frontline_widget_uploads/<company>/`. Filename
+        # pattern is `t<ticket_id>_<index>_<safe_name>` so the same form
+        # uploading two `screenshot.png` files doesn't collide.
+        MAX_WIDGET_FILES = 5
+        attachments_info: list = []
+        if hasattr(request, 'FILES'):
+            # ``getlist`` honours both `<input name="files" multiple>` and
+            # the legacy single `<input name="file">` shape — older embed
+            # forms keep working without change.
+            uploaded_files = (
+                list(request.FILES.getlist('files'))
+                + list(request.FILES.getlist('file'))
+            )[:MAX_WIDGET_FILES]
+        else:
+            uploaded_files = []
+
+        if uploaded_files:
             from Frontline_agent.widget_utils import resolved_widget_config
             cfg = resolved_widget_config(company)
             max_bytes = int(cfg.get('max_attachment_bytes') or 10 * 1024 * 1024)
             allowed_mime = set(cfg.get('allowed_attachment_mime') or [])
-            if uploaded_file.size > max_bytes:
-                attachment_info = {'skipped': True, 'reason': 'too_large',
-                                   'size': uploaded_file.size, 'max': max_bytes}
-            else:
-                # Magic-byte sniff the actual content rather than trusting the
-                # client-supplied content_type header. ``head`` is enough for
-                # all the formats we support; we seek(0) before saving.
+            # Total cap = per-file × file count. Generous but bounded.
+            max_total_bytes = max_bytes * MAX_WIDGET_FILES
+            running_total = 0
+            saved_paths: list = []
+            for idx, uploaded_file in enumerate(uploaded_files):
+                info = {'filename': uploaded_file.name, 'size': uploaded_file.size}
+                if uploaded_file.size > max_bytes:
+                    info.update({'skipped': True, 'reason': 'too_large', 'max': max_bytes})
+                    attachments_info.append(info)
+                    continue
+                if running_total + uploaded_file.size > max_total_bytes:
+                    info.update({'skipped': True, 'reason': 'batch_too_large',
+                                 'batch_max': max_total_bytes})
+                    attachments_info.append(info)
+                    continue
                 head = uploaded_file.read(8192)
                 uploaded_file.seek(0)
                 detected_mime = _sniff_widget_attachment_mime(head)
                 if detected_mime is None:
-                    attachment_info = {'skipped': True, 'reason': 'unrecognized_content',
-                                       'claimed_mime': uploaded_file.content_type}
-                elif allowed_mime and detected_mime.lower() not in {m.lower() for m in allowed_mime}:
-                    attachment_info = {'skipped': True, 'reason': 'disallowed_mime',
-                                       'detected_mime': detected_mime,
-                                       'claimed_mime': uploaded_file.content_type}
-                else:
-                    try:
-                        safe_name = DocumentProcessor.sanitize_filename(uploaded_file.name)
-                        upload_dir = Path(settings.MEDIA_ROOT) / 'frontline_widget_uploads' / str(company.id)
-                        upload_dir.mkdir(parents=True, exist_ok=True)
-                        stored = upload_dir / f"t{ticket.id}_{safe_name}"
-                        with open(stored, 'wb') as fh:
-                            for chunk in uploaded_file.chunks():
-                                fh.write(chunk)
-                        rel = str(stored.relative_to(settings.MEDIA_ROOT))
-                        # Append the attachment path to the ticket description so agents see it.
-                        ticket.description = (ticket.description or '') + f"\n\n[Attachment] {rel}"
-                        ticket.save(update_fields=['description', 'updated_at'])
-                        attachment_info = {'stored_path': rel, 'size': uploaded_file.size,
-                                           'mime': detected_mime}
-                    except Exception as exc:
-                        logger.warning("public_submit attachment save failed: %s", exc)
-                        attachment_info = {'skipped': True, 'reason': 'save_failed'}
+                    info.update({'skipped': True, 'reason': 'unrecognized_content',
+                                 'claimed_mime': uploaded_file.content_type})
+                    attachments_info.append(info)
+                    continue
+                if allowed_mime and detected_mime.lower() not in {m.lower() for m in allowed_mime}:
+                    info.update({'skipped': True, 'reason': 'disallowed_mime',
+                                 'detected_mime': detected_mime,
+                                 'claimed_mime': uploaded_file.content_type})
+                    attachments_info.append(info)
+                    continue
+                try:
+                    safe_name = DocumentProcessor.sanitize_filename(uploaded_file.name)
+                    upload_dir = Path(settings.MEDIA_ROOT) / 'frontline_widget_uploads' / str(company.id)
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    stored = upload_dir / f"t{ticket.id}_{idx}_{safe_name}"
+                    with open(stored, 'wb') as fh:
+                        for chunk in uploaded_file.chunks():
+                            fh.write(chunk)
+                    rel = str(stored.relative_to(settings.MEDIA_ROOT))
+                    saved_paths.append(rel)
+                    running_total += uploaded_file.size
+                    info.update({'stored_path': rel, 'mime': detected_mime})
+                    attachments_info.append(info)
+                except Exception as exc:
+                    logger.warning("public_submit attachment save failed: %s", exc)
+                    info.update({'skipped': True, 'reason': 'save_failed'})
+                    attachments_info.append(info)
+
+            if saved_paths:
+                # Mark all attachments in the ticket description so they show
+                # up in any text-only view (legacy clients, email digests).
+                # The dashboard fetches them as structured rows via the
+                # `widget_attachments_list` endpoint instead of parsing.
+                attachment_lines = '\n'.join(f"[Attachment] {p}" for p in saved_paths)
+                ticket.description = (ticket.description or '') + f"\n\n{attachment_lines}"
+                ticket.save(update_fields=['description', 'updated_at'])
 
         _run_notification_triggers(company.id, 'ticket_created', ticket)
         _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
         return Response({
             'status': 'success',
             'message': 'Submitted successfully. We will get back to you soon.',
-            'data': {'ticket_id': ticket.id, 'attachment': attachment_info},
+            'data': {
+                'ticket_id': ticket.id,
+                # Back-compat alias: pre-multi-file callers read `attachment`.
+                'attachment': attachments_info[0] if attachments_info else None,
+                'attachments': attachments_info,
+            },
         }, status=status.HTTP_201_CREATED)
     except KeyServiceError:
         raise
@@ -1664,6 +1712,119 @@ def public_submit(request):
             {'status': 'error', 'message': 'Failed to submit', 'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ============================================================================
+# Widget attachments — list / download for triagers
+# ============================================================================
+
+def _widget_attachment_dir_for(company) -> 'Path':
+    """Return the on-disk directory holding this company's widget uploads."""
+    return Path(settings.MEDIA_ROOT) / 'frontline_widget_uploads' / str(company.id)
+
+
+def _list_widget_attachments_for_ticket(company, ticket_id: int) -> list:
+    """Enumerate widget-uploaded files belonging to one ticket.
+
+    Files live at ``media/frontline_widget_uploads/<company>/t<ticket_id>_*``
+    and are written by `public_submit`. We don't have a database row per file
+    (the existing design just appends the path to the ticket description) so
+    we enumerate the directory and pattern-match.
+
+    Returns dicts shaped like::
+
+        {"name": str, "size": int, "stored_filename": str}
+
+    The `stored_filename` is what the download endpoint takes — it's the
+    exact on-disk basename, scoped to this ticket prefix so a triager can't
+    request a different ticket's file by editing the URL.
+    """
+    directory = _widget_attachment_dir_for(company)
+    if not directory.exists() or not directory.is_dir():
+        return []
+    prefix = f"t{int(ticket_id)}_"
+    out = []
+    for path in sorted(directory.iterdir()):
+        if not path.is_file() or not path.name.startswith(prefix):
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        # Strip the `t<id>_<idx>_` prefix from the display name so triagers
+        # see the customer's original filename instead of our storage format.
+        display = path.name[len(prefix):]
+        head_match = re.match(r'^(\d+)_(.+)$', display)
+        if head_match:
+            display = head_match.group(2)
+        out.append({
+            'name': display,
+            'size': size,
+            'stored_filename': path.name,
+        })
+    return out
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_widget_attachments(request, ticket_id):
+    """List widget-uploaded files attached to a ticket. Auth-gated by company."""
+    ticket, err = _get_company_ticket_or_404(request, ticket_id)
+    if err:
+        return err
+    try:
+        rows = _list_widget_attachments_for_ticket(ticket.company, ticket.id)
+    except Exception:
+        logger.exception("list_widget_attachments failed")
+        return Response({'status': 'error', 'message': 'Failed to list attachments'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response({'status': 'success', 'data': rows})
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def download_widget_attachment(request, ticket_id, filename):
+    """Stream a widget-uploaded attachment back to a triager.
+
+    The `filename` URL parameter is the on-disk basename returned by
+    `list_widget_attachments`. We re-enforce the ticket-prefix check so a
+    triager from company A cannot ask for `t<ticket_in_company_B>_0_x.png`
+    even if they somehow know the filename — the on-disk path is rebuilt
+    using THIS company's directory, never trusting the URL beyond the
+    basename.
+    """
+    from django.http import FileResponse
+    ticket, err = _get_company_ticket_or_404(request, ticket_id)
+    if err:
+        return err
+
+    # Reject any filename that tries to escape the company directory.
+    expected_prefix = f"t{ticket.id}_"
+    if not filename or '/' in filename or '\\' in filename or filename.startswith('.'):
+        return Response({'status': 'error', 'message': 'Invalid filename'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if not filename.startswith(expected_prefix):
+        return Response({'status': 'error', 'message': 'Attachment not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    directory = _widget_attachment_dir_for(ticket.company)
+    full_path = directory / filename
+    try:
+        # Resolve symlinks etc. and re-check containment, defence-in-depth.
+        resolved = full_path.resolve(strict=True)
+        resolved.relative_to(directory.resolve())
+    except (FileNotFoundError, ValueError):
+        return Response({'status': 'error', 'message': 'Attachment not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    # Inline-friendly: the browser can preview images/PDFs directly; for
+    # binaries the browser will download. as_attachment=False keeps that
+    # behaviour native to the content-type.
+    display_name = filename[len(expected_prefix):]
+    display_name = re.sub(r'^\d+_', '', display_name)
+    return FileResponse(resolved.open('rb'), filename=display_name)
 
 
 @api_view(["POST"])
@@ -5560,6 +5721,29 @@ def update_contact(request, contact_id):
     return Response({'status': 'success', 'data': _serialize_contact(contact)})
 
 
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def delete_contact(request, contact_id):
+    """Delete a contact scoped to the caller's company.
+
+    Tickets that reference this contact stay (with `contact_id=NULL` after
+    cascade — see the model). The contact's notes cascade away with the
+    contact row. Merge stays the canonical "combine two records" action;
+    this endpoint is for genuine removal (test data, spam contacts, GDPR
+    delete requests).
+    """
+    contact = _get_company_contact_or_404(request, contact_id)
+    if not contact:
+        return Response({'status': 'error', 'message': 'Contact not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    contact_id_int = contact.id
+    contact_email = contact.email
+    contact.delete()
+    return Response({'status': 'success', 'data': {'id': contact_id_int, 'email': contact_email}})
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -6253,6 +6437,88 @@ def bulk_update_tickets(request):
     return Response({'status': 'success', 'data': results})
 
 
+@api_view(['PATCH', 'PUT'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_ticket(request, ticket_id):
+    """Update one ticket's status / priority / category / assignee.
+
+    The dashboard previously had to go through `bulk_update_tickets` even for
+    a single-row change, which is overkill and produces "0 updated, 1 not
+    found" responses when the row id is fine but the change is a no-op.
+    This endpoint takes the same fields as bulk update but for one ticket
+    and returns the updated ticket payload directly.
+
+    Allowed body fields:
+      - `status`                       (must satisfy state-machine)
+      - `priority`                     (low/medium/high/urgent)
+      - `category`                     (free-form short label)
+      - `assigned_to_company_user_id`  (CompanyUser id; null to unassign)
+    """
+    company = request.user.company
+    t = Ticket.objects.filter(id=ticket_id, company=company).first()
+    if not t:
+        return Response({'status': 'error', 'message': 'Ticket not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    before = {'status': t.status, 'priority': t.priority, 'category': t.category,
+              'assigned_to_id': t.assigned_to_id}
+    fields = []
+
+    if 'status' in d and d['status'] is not None:
+        new_status = str(d['status']).strip()
+        ok, err = _validate_ticket_transition(t.status, new_status)
+        if not ok:
+            return Response({'status': 'error', 'message': err},
+                            status=status.HTTP_400_BAD_REQUEST)
+        t.status = new_status
+        fields.append('status')
+    if 'priority' in d and d['priority'] is not None:
+        t.priority = str(d['priority']).strip()[:10]
+        fields.append('priority')
+    if 'category' in d and d['category'] is not None:
+        t.category = str(d['category']).strip()[:20]
+        fields.append('category')
+    if 'assigned_to_company_user_id' in d:
+        cu_id = d.get('assigned_to_company_user_id')
+        if cu_id in (None, '', 0):
+            t.assigned_to = None
+            fields.append('assigned_to')
+        else:
+            cu = CompanyUser.objects.filter(id=cu_id, company=company, is_active=True).first()
+            if not cu:
+                return Response({'status': 'error',
+                                 'message': 'Assignee not found in this company'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            t.assigned_to = _get_or_create_user_for_company_user(cu)
+            fields.append('assigned_to')
+
+    if not fields:
+        return Response({'status': 'error',
+                         'message': 'Pass at least one of: status, priority, category, assigned_to_company_user_id'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    fields.append('updated_at')
+    t.save(update_fields=list(set(fields)))
+    _write_frontline_audit_log(
+        request.user, company, 'ticket.update', 'ticket', t.id,
+        before=before,
+        after={'status': t.status, 'priority': t.priority,
+               'category': t.category, 'assigned_to_id': t.assigned_to_id},
+    )
+    # Return the salient post-update fields. Frontend already knows the rest
+    # (title, body, contact) since it had the ticket open to edit it.
+    return Response({'status': 'success', 'data': {
+        'id': t.id,
+        'status': t.status,
+        'priority': t.priority,
+        'category': t.category,
+        'assigned_to_id': t.assigned_to_id,
+        'updated_at': t.updated_at.isoformat() if t.updated_at else None,
+    }})
+
+
 # ============================================================================
 # Workflow idempotency helper (F4)
 # ============================================================================
@@ -6365,6 +6631,27 @@ def resolve_dead_letter(request, dlq_id):
     r.resolved_at = timezone.now()
     r.save(update_fields=['resolved_at'])
     return Response({'status': 'success', 'data': {'id': r.id, 'resolved_at': r.resolved_at.isoformat()}})
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_dead_letter(request, dlq_id):
+    """Hard-delete a DLQ row scoped to the caller's company.
+
+    `resolve_dead_letter` only soft-hides rows (sets `resolved_at`); over time
+    the table accumulates resolved rows that ops typically want gone. This
+    endpoint lets the dashboard offer a real "remove" action so old DLQ noise
+    can be cleaned up.
+    """
+    company = request.user.company
+    r = FrontlineDeadLetter.objects.filter(company=company, pk=dlq_id).first()
+    if not r:
+        return Response({'status': 'error', 'message': 'DLQ row not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    dlq_id_int = r.id
+    r.delete()
+    return Response({'status': 'success', 'data': {'id': dlq_id_int}})
 
 
 # ============================================================================
@@ -6986,6 +7273,74 @@ def merge_contacts(request):
 # ============================================================================
 # Handoff release (H1)
 # ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def reassign_ticket_handoff(request, ticket_id):
+    """Hand a ticket's handoff off to a *specific* other agent.
+
+    Body: ``{ to_company_user_id: int }``.
+
+    Used when the currently-assigned agent can't take it but knows who can —
+    instead of `release_handoff` (which dumps it back into the unowned queue),
+    `reassign` sets both `assigned_to` AND `handoff_accepted_by` to the new
+    user so it shows up in *their* queue immediately. Status stays
+    `accepted` because someone is owning it.
+
+    Works whether the handoff is currently `pending` or `accepted`, so the
+    UI can route a fresh pending handoff to a teammate without claiming it
+    first.
+    """
+    company = request.user.company
+    ticket = Ticket.objects.filter(pk=ticket_id, company=company).first()
+    if not ticket:
+        return Response({'status': 'error', 'message': 'Ticket not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if ticket.handoff_status not in ('pending', 'accepted'):
+        return Response({'status': 'error',
+                         'message': f'Handoff is {ticket.handoff_status!r}, not pending/accepted.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    d = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+    try:
+        target_cu_id = int(d.get('to_company_user_id'))
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'to_company_user_id is required (integer)'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    target_cu = CompanyUser.objects.filter(id=target_cu_id, company=company, is_active=True).first()
+    if not target_cu:
+        return Response({'status': 'error', 'message': 'Target user not found in this company'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    target_user = _get_or_create_user_for_company_user(target_cu)
+
+    before = {
+        'handoff_status': ticket.handoff_status,
+        'handoff_accepted_by_id': ticket.handoff_accepted_by_id,
+        'assigned_to_id': ticket.assigned_to_id,
+    }
+    ticket.handoff_status = 'accepted'
+    ticket.handoff_accepted_at = timezone.now()
+    ticket.handoff_accepted_by = target_user
+    ticket.assigned_to = target_user
+    ticket.save(update_fields=['handoff_status', 'handoff_accepted_at',
+                               'handoff_accepted_by', 'assigned_to', 'updated_at'])
+    _write_frontline_audit_log(
+        request.user, company, 'ticket.handoff.reassign', 'ticket', ticket.id,
+        before=before,
+        after={'handoff_status': ticket.handoff_status,
+               'handoff_accepted_by_id': target_user.id,
+               'assigned_to_id': target_user.id,
+               'reassigned_to_company_user_id': target_cu_id},
+    )
+    return Response({'status': 'success', 'data': {
+        'id': ticket.id,
+        'handoff_status': ticket.handoff_status,
+        'handoff_accepted_by_id': target_user.id,
+        'assigned_to_id': target_user.id,
+    }})
+
 
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])

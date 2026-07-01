@@ -34,6 +34,21 @@ const companyProjectsTasksService = {
   },
 
   /**
+   * Delete a task owned by this company. Cascades to subtasks.
+   * @param {number} taskId
+   * @returns {Promise} API response
+   */
+  async deleteTask(taskId) {
+    try {
+      const response = await companyApi.delete(`/company/tasks/${taskId}/delete`);
+      return response;
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      throw error;
+    }
+  },
+
+  /**
    * Get list of users for task assignment
    * @returns {Promise} API response with list of users
    */

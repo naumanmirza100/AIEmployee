@@ -74,6 +74,7 @@ import {
   CheckSquare,
   Square,
   X as XIcon,
+  Paperclip,
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 import frontlineAgentService from '@/services/frontlineAgentService';
@@ -440,9 +441,17 @@ function FrontlineNotificationsTab() {
               <Select value={templateDialog.channel} onValueChange={(v) => setTemplateDialog((d) => ({ ...d, channel: v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  {/* Only channels the backend dispatcher (`_dispatch_notification`)
+                      actually routes are offered. SMS / In-App are accepted by
+                      the form but silently dropped at send-time — we hide them
+                      until they ship. Slack/Teams use the same global PM
+                      webhook config; if it isn't set, notifications fall back
+                      to email. */}
                   <SelectItem value="email">Email</SelectItem>
-                  <SelectItem value="sms">SMS</SelectItem>
-                  <SelectItem value="in_app">In-App</SelectItem>
+                  <SelectItem value="slack">Slack (uses PM webhook)</SelectItem>
+                  <SelectItem value="teams">Microsoft Teams (uses PM webhook)</SelectItem>
+                  <SelectItem value="sms" disabled>SMS — coming soon</SelectItem>
+                  <SelectItem value="in_app" disabled>In-App — coming soon</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -489,6 +498,12 @@ function FrontlineWorkflowsTab() {
   const [stepBuilderTemplatesLoading, setStepBuilderTemplatesLoading] = useState(false);
   const [stepForm, setStepForm] = useState(null);
   const [stepEditIndex, setStepEditIndex] = useState(null);
+  // Dry-run dialog — opened when the user clicks the Play button on a workflow
+  // row. Side-effect-free preview of what the workflow would do; backend at
+  // `dry_run_workflow` returns step-by-step result_data with simulated: true.
+  const [dryRunDialog, setDryRunDialog] = useState({
+    open: false, loading: false, workflowName: '', result: null, error: '',
+  });
   const TRIGGER_ON_OPTIONS = [{ value: 'none', label: 'None (manual only)' }, { value: 'ticket_created', label: 'Ticket created' }, { value: 'ticket_updated', label: 'Ticket updated' }];
   const CATEGORY_OPTIONS = ['technical', 'billing', 'account', 'feature_request', 'bug', 'knowledge_gap', 'other'];
   const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
@@ -652,6 +667,46 @@ function FrontlineWorkflowsTab() {
       setExecuting(false);
     }
   };
+  // Approve or reject a paused execution (status='awaiting_approval').
+  // Backend resumes the workflow on approve, terminates it on reject.
+  const [approvingExecId, setApprovingExecId] = useState(null);
+  const handleApproveExecution = async (ex, action) => {
+    setApprovingExecId(ex.id);
+    try {
+      const res = await frontlineAgentService.approveWorkflowExecution(ex.id, action);
+      if (res.status === 'success' || res.status === 'accepted') {
+        toast({
+          title: action === 'approve' ? 'Workflow resumed' : 'Workflow rejected',
+          description: res.data?.status ? `New state: ${res.data.status}` : undefined,
+        });
+        load();
+      } else {
+        throw new Error(res.message || `${action} failed`);
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: err.message || `Failed to ${action}`, variant: 'destructive' });
+    } finally {
+      setApprovingExecId(null);
+    }
+  };
+
+  // Side-effect-free preview. We invoke with an empty context so the user
+  // can sanity-check the workflow shape; a richer "pick a sample ticket"
+  // picker can be added later if needed.
+  const runDryRun = async (w) => {
+    setDryRunDialog({ open: true, loading: true, workflowName: w.name || `Workflow #${w.id}`, result: null, error: '' });
+    try {
+      const res = await frontlineAgentService.dryRunWorkflow(w.id, {});
+      if (res.status === 'success') {
+        setDryRunDialog((d) => ({ ...d, loading: false, result: res.data || res, error: '' }));
+      } else {
+        throw new Error(res.message || 'Dry run failed');
+      }
+    } catch (err) {
+      setDryRunDialog((d) => ({ ...d, loading: false, result: null, error: err.message || 'Dry run failed' }));
+    }
+  };
+
   const openCreateWorkflow = () => setWorkflowDialog({
     open: true, editingId: null, name: '', description: '', stepsJson: WORKFLOW_STEPS_DEFAULT, is_active: true,
     triggerOn: 'none', triggerCategory: '', triggerPriority: '', triggerStatus: '',
@@ -782,6 +837,7 @@ function FrontlineWorkflowsTab() {
                     <div className="flex items-center gap-1 flex-wrap justify-end shrink-0">
                       {(w.trigger_conditions?.on) && <Badge variant="outline" className="text-xs">{w.trigger_conditions.on.replace('_', ' ')}</Badge>}
                       <Badge variant={w.is_active ? 'default' : 'secondary'}>{w.is_active ? 'Active' : 'Inactive'}</Badge>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => runDryRun(w)} title="Dry run (preview, no side effects)"><PlayCircle className="h-4 w-4" /></Button>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditWorkflow(w)} title="Edit"><Pencil className="h-4 w-4" /></Button>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteWorkflow(w)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
                     </div>
@@ -795,7 +851,30 @@ function FrontlineWorkflowsTab() {
                 {executions.length === 0 ? <p className="text-sm text-muted-foreground">No executions yet.</p> : executions.slice(0, 15).map((ex) => (
                   <div key={ex.id} className="flex justify-between items-center p-2 border rounded text-sm gap-2">
                     <span className="truncate min-w-0">{ex.workflow_name} · {new Date(ex.started_at).toLocaleString()}</span>
-                    <Badge variant={ex.status === 'completed' ? 'default' : ex.status === 'failed' ? 'destructive' : 'secondary'} className="shrink-0">{ex.status}</Badge>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Badge variant={ex.status === 'completed' ? 'default' : ex.status === 'failed' ? 'destructive' : 'secondary'}>{ex.status}</Badge>
+                      {/* Approve / Reject only render when the execution is
+                          actually paused waiting for a human. Avoids cluttering
+                          rows that have nothing to action. */}
+                      {ex.status === 'awaiting_approval' && (
+                        <>
+                          <Button type="button" size="icon" variant="ghost"
+                                  className="h-7 w-7 text-emerald-400 hover:text-emerald-300"
+                                  disabled={approvingExecId === ex.id}
+                                  onClick={() => handleApproveExecution(ex, 'approve')}
+                                  title="Approve & resume workflow">
+                            {approvingExecId === ex.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+                          </Button>
+                          <Button type="button" size="icon" variant="ghost"
+                                  className="h-7 w-7 text-destructive hover:text-destructive"
+                                  disabled={approvingExecId === ex.id}
+                                  onClick={() => handleApproveExecution(ex, 'reject')}
+                                  title="Reject (terminate workflow)">
+                            <XCircle className="h-3 w-3" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -898,6 +977,71 @@ function FrontlineWorkflowsTab() {
             <Button type="submit" disabled={savingWorkflow}>{savingWorkflow ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save</Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+
+    {/* Workflow dry-run preview — shows what each step WOULD do without
+        actually sending emails, hitting webhooks, or writing to the DB. */}
+    <Dialog open={dryRunDialog.open} onOpenChange={(open) => !open && setDryRunDialog((d) => ({ ...d, open: false }))}>
+      <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <PlayCircle className="h-5 w-5 text-amber-400" />
+            Dry run: {dryRunDialog.workflowName}
+          </DialogTitle>
+          <DialogDescription>
+            Preview of what this workflow would do with an empty context. Side-effect-free — no emails, webhooks, or DB writes.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-y-auto min-h-0 flex-1 space-y-3">
+          {dryRunDialog.loading ? (
+            <div className="flex items-center gap-2 text-sm text-white/55 py-4">
+              <Loader2 className="h-4 w-4 animate-spin" /> Simulating…
+            </div>
+          ) : dryRunDialog.error ? (
+            <div className="rounded border border-red-700 bg-red-900/20 p-3 text-sm text-red-300">
+              {dryRunDialog.error}
+            </div>
+          ) : dryRunDialog.result ? (
+            <>
+              <div className="flex items-center gap-2 text-xs">
+                <Badge variant={dryRunDialog.result.success ? 'default' : 'destructive'}>
+                  {dryRunDialog.result.success ? 'Would succeed' : 'Would fail'}
+                </Badge>
+                {dryRunDialog.result.error && (
+                  <span className="text-red-300">{dryRunDialog.result.error}</span>
+                )}
+              </div>
+              {Array.isArray(dryRunDialog.result?.result_data?.steps) && dryRunDialog.result.result_data.steps.length > 0 ? (
+                <ol className="space-y-2">
+                  {dryRunDialog.result.result_data.steps.map((step, idx) => (
+                    <li key={idx} className="rounded border border-white/[0.08] bg-black/30 p-3 text-sm">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <span className="font-medium text-white">{idx + 1}. {step.type || step.action || 'Step'}</span>
+                        <Badge variant={step.success === false ? 'destructive' : 'default'} className="shrink-0 text-xs">
+                          {step.simulated ? 'Simulated' : (step.success === false ? 'Would fail' : 'Would run')}
+                        </Badge>
+                      </div>
+                      {(step.summary || step.detail || step.note) && (
+                        <p className="text-xs text-white/65">{step.summary || step.detail || step.note}</p>
+                      )}
+                      {step.recipient && (
+                        <p className="text-xs text-white/40 mt-1">→ {step.recipient}</p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <pre className="text-xs bg-black/40 border border-white/[0.06] rounded p-3 overflow-x-auto text-white/75">
+                  {JSON.stringify(dryRunDialog.result?.result_data ?? dryRunDialog.result, null, 2)}
+                </pre>
+              )}
+            </>
+          ) : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setDryRunDialog((d) => ({ ...d, open: false }))}>Close</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
 
@@ -1115,6 +1259,134 @@ function HandoffQueueTab() {
   });
   // Macro picker — opens when the agent wants a canned reply.
   const [macroOpen, setMacroOpen] = useState(false);
+  // Ticket-link state for the open drawer: existing links + the in-progress
+  // form for creating a new one. Reloaded each time the drawer opens.
+  const [ticketLinks, setTicketLinks] = useState([]);
+  const [ticketLinksLoading, setTicketLinksLoading] = useState(false);
+  const [newLink, setNewLink] = useState({ relation: 'related', toTicketId: '' });
+  const [creatingLink, setCreatingLink] = useState(false);
+
+  // Customer-submitted widget attachments (images, PDFs, etc.) for the open
+  // ticket. Loaded lazily when the drawer opens — the list endpoint walks
+  // the per-company upload directory and returns rows shaped like
+  // `{ name, size, stored_filename }`. The stored_filename is what the
+  // download URL needs.
+  const [widgetAttachments, setWidgetAttachments] = useState([]);
+  const [widgetAttachmentsLoading, setWidgetAttachmentsLoading] = useState(false);
+
+  const loadWidgetAttachments = async (ticketId) => {
+    if (!ticketId) return;
+    setWidgetAttachmentsLoading(true);
+    try {
+      const res = await frontlineAgentService.listWidgetAttachments(ticketId);
+      setWidgetAttachments((res?.data) || []);
+    } catch (e) {
+      console.warn('Load widget attachments failed', e);
+      setWidgetAttachments([]);
+    } finally {
+      setWidgetAttachmentsLoading(false);
+    }
+  };
+
+  const formatAttachmentSize = (n) => {
+    if (typeof n !== 'number' || n < 0) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const loadTicketLinks = async (ticketId) => {
+    if (!ticketId) return;
+    setTicketLinksLoading(true);
+    try {
+      const res = await frontlineAgentService.listTicketLinks(ticketId);
+      setTicketLinks((res?.data) || []);
+    } catch (e) {
+      console.warn('Load ticket links failed', e);
+      setTicketLinks([]);
+    } finally {
+      setTicketLinksLoading(false);
+    }
+  };
+
+  const handleCreateTicketLink = async () => {
+    const toId = parseInt(String(newLink.toTicketId).trim(), 10);
+    if (!drawer.ticket || !toId) {
+      toast({ title: 'Pick a target ticket', description: 'Enter the ID of the ticket you want to link to.', variant: 'destructive' });
+      return;
+    }
+    setCreatingLink(true);
+    try {
+      await frontlineAgentService.createTicketLink(drawer.ticket.id, {
+        to_ticket_id: toId, relation: newLink.relation,
+      });
+      toast({ title: 'Linked' });
+      setNewLink({ relation: 'related', toTicketId: '' });
+      await loadTicketLinks(drawer.ticket.id);
+    } catch (e) {
+      toast({ title: 'Link failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally {
+      setCreatingLink(false);
+    }
+  };
+
+  const handleDeleteTicketLink = async (linkId) => {
+    try {
+      await frontlineAgentService.deleteTicketLink(linkId);
+      setTicketLinks((rows) => rows.filter((l) => l.id !== linkId));
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  // Reassign / Release support — handoffs to colleagues.
+  // We lazy-load the company-user list the first time the reassign popover opens.
+  const [reassignPopover, setReassignPopover] = useState({ open: false, candidates: [], loading: false });
+  const [releasingHandoff, setReleasingHandoff] = useState(false);
+  const [reassigningHandoff, setReassigningHandoff] = useState(false);
+
+  const openReassignPopover = async () => {
+    setReassignPopover({ open: true, candidates: [], loading: true });
+    try {
+      const res = await frontlineAgentService.listWorkflowCompanyUsers();
+      const data = (res?.data) || [];
+      setReassignPopover({ open: true, candidates: data, loading: false });
+    } catch (e) {
+      setReassignPopover({ open: false, candidates: [], loading: false });
+      toast({ title: 'Failed to load agents', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleReleaseHandoff = async () => {
+    if (!drawer.ticket) return;
+    setReleasingHandoff(true);
+    try {
+      await frontlineAgentService.releaseHandoff(drawer.ticket.id);
+      toast({ title: 'Released', description: 'Hand-off returned to the pending pool.' });
+      setDrawer((prev) => ({ ...prev, open: false }));
+      load();
+    } catch (e) {
+      toast({ title: 'Release failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally {
+      setReleasingHandoff(false);
+    }
+  };
+
+  const handleReassignHandoff = async (cu) => {
+    if (!drawer.ticket || !cu) return;
+    setReassigningHandoff(true);
+    try {
+      await frontlineAgentService.reassignHandoff(drawer.ticket.id, cu.id);
+      toast({ title: 'Reassigned', description: `Hand-off transferred to ${cu.full_name || cu.username || cu.email}.` });
+      setReassignPopover({ open: false, candidates: [], loading: false });
+      setDrawer((prev) => ({ ...prev, open: false }));
+      load();
+    } catch (e) {
+      toast({ title: 'Reassign failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally {
+      setReassigningHandoff(false);
+    }
+  };
   const handleMacroInsert = (body) => {
     setDrawer((prev) => {
       const cur = prev.reply || '';
@@ -1145,6 +1417,11 @@ function HandoffQueueTab() {
       open: true, ticket, messages: [], loading: true,
       reply: '', sending: false, suggesting: false, accepting: false,
     });
+    setTicketLinks([]);
+    setNewLink({ relation: 'related', toTicketId: '' });
+    setWidgetAttachments([]);
+    loadTicketLinks(ticket.id);
+    loadWidgetAttachments(ticket.id);
     try {
       const res = await frontlineAgentService.listTicketMessages(ticket.id);
       setDrawer((prev) => ({
@@ -1388,6 +1665,90 @@ function HandoffQueueTab() {
             ))}
           </div>
 
+          {/* Customer-uploaded attachments from the public widget. Files are
+              auth-gated server-side and stored under the company directory;
+              the link below opens an inline-served stream (images / PDFs
+              preview, binaries download). */}
+          {(widgetAttachments.length > 0 || widgetAttachmentsLoading) && (
+            <div className="space-y-2 pt-2 border-t border-border/50">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs uppercase tracking-wider text-muted-foreground">Customer attachments</Label>
+                {widgetAttachmentsLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+              </div>
+              {widgetAttachments.length > 0 && (
+                <div className="space-y-1">
+                  {widgetAttachments.map((a) => (
+                    <a
+                      key={a.stored_filename}
+                      href={frontlineAgentService.widgetAttachmentDownloadUrl(drawer.ticket.id, a.stored_filename)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-xs rounded border border-border/40 bg-muted/30 px-2 py-1.5 hover:bg-muted/50 transition-colors"
+                    >
+                      <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="truncate flex-1">{a.name}</span>
+                      {typeof a.size === 'number' && (
+                        <span className="text-muted-foreground shrink-0">{formatAttachmentSize(a.size)}</span>
+                      )}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Linked tickets — pick a relation + target ticket ID to annotate
+              cross-ticket relationships. Backend stores them in TicketLink and
+              the relation drives downstream automation (e.g. closing a parent
+              cascades to children). */}
+          <div className="space-y-2 pt-2 border-t border-border/50">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Linked tickets</Label>
+              {ticketLinksLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+            </div>
+            {ticketLinks.length > 0 && (
+              <div className="space-y-1">
+                {ticketLinks.map((l) => (
+                  <div key={l.id} className="flex items-center gap-2 text-xs rounded border border-border/40 bg-muted/30 px-2 py-1">
+                    <Badge variant="secondary" className="text-[10px] shrink-0">
+                      {(frontlineAgentService.TICKET_LINK_RELATIONS.find((r) => r.value === l.relation) || {}).label || l.relation}
+                    </Badge>
+                    <span className="truncate flex-1">
+                      #{l.other_ticket?.id ?? l.to_ticket?.id ?? l.from_ticket?.id} —{' '}
+                      {l.other_ticket?.title || l.to_ticket?.title || l.from_ticket?.title || 'Untitled'}
+                    </span>
+                    <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive shrink-0"
+                            onClick={() => handleDeleteTicketLink(l.id)} title="Remove link">
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <Select value={newLink.relation} onValueChange={(v) => setNewLink((n) => ({ ...n, relation: v }))}>
+                <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {frontlineAgentService.TICKET_LINK_RELATIONS.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                type="number"
+                inputMode="numeric"
+                placeholder="Ticket ID"
+                className="h-8 w-32 text-xs"
+                value={newLink.toTicketId}
+                onChange={(e) => setNewLink((n) => ({ ...n, toTicketId: e.target.value }))}
+              />
+              <Button size="sm" variant="outline" onClick={handleCreateTicketLink} disabled={creatingLink || !newLink.toTicketId}>
+                {creatingLink ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plus className="h-3 w-3 mr-1" />}
+                Link
+              </Button>
+            </div>
+          </div>
+
           {/* Reply box + actions */}
           <div className="space-y-2 pt-2 border-t border-border/50">
             <Textarea
@@ -1428,6 +1789,35 @@ function HandoffQueueTab() {
                     ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
                     : <CheckCircle2 className="h-4 w-4 mr-1" />}
                   Accept hand-off
+                </Button>
+              )}
+              {/* Release returns the handoff to the unowned pending pool.
+                  Only meaningful on accepted handoffs (the endpoint 400s
+                  otherwise). Reassign explicitly transfers to another
+                  agent and works on either pending or accepted. */}
+              {drawer.ticket?.handoff_status === 'accepted' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleReleaseHandoff}
+                  disabled={releasingHandoff}
+                  title="Send back to the unowned queue"
+                >
+                  {releasingHandoff
+                    ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                    : <RotateCcw className="h-4 w-4 mr-1" />}
+                  Release
+                </Button>
+              )}
+              {(drawer.ticket?.handoff_status === 'pending' || drawer.ticket?.handoff_status === 'accepted') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openReassignPopover}
+                  disabled={reassigningHandoff}
+                  title="Hand off to a specific other agent"
+                >
+                  <User className="h-4 w-4 mr-1" /> Reassign…
                 </Button>
               )}
               <div className="ml-auto">
@@ -2261,6 +2651,26 @@ const FrontlineDashboard = () => {
     } catch (err) {
       console.error('Delete note failed', err);
       toast({ title: 'Failed to delete note', variant: 'destructive' });
+    }
+  };
+
+  // Delete the contact currently shown in the Customer-360 dialog. Tickets
+  // that reference this contact stay (the FK is set null on delete); the
+  // contact's notes cascade away. Confirmation is delegated to a custom
+  // dialog instead of window.confirm to match the rest of the dashboard UX.
+  const [deleteContactConfirm, setDeleteContactConfirm] = useState({ open: false, busy: false });
+  const handleDeleteContact = async () => {
+    const contact = customerDialog.contact;
+    if (!contact) return;
+    setDeleteContactConfirm((d) => ({ ...d, busy: true }));
+    try {
+      await frontlineAgentService.deleteContact(contact.id);
+      toast({ title: 'Contact deleted', description: contact.email });
+      setDeleteContactConfirm({ open: false, busy: false });
+      setCustomerDialog((prev) => ({ ...prev, open: false, contact: null }));
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e.message || 'Unknown error', variant: 'destructive' });
+      setDeleteContactConfirm((d) => ({ ...d, busy: false }));
     }
   };
 
@@ -4108,7 +4518,7 @@ const FrontlineDashboard = () => {
                     <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
                       <User className="h-5 w-5 text-primary" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="font-medium truncate">
                         {customerDialog.contact.name || customerDialog.contact.email}
                       </div>
@@ -4117,6 +4527,16 @@ const FrontlineDashboard = () => {
                         {customerDialog.contact.phone ? ` · ${customerDialog.contact.phone}` : ''}
                       </div>
                     </div>
+                    {/* Hard-delete the contact record. Tickets stay; their
+                        contact reference is detached (FK null-on-delete). */}
+                    <Button
+                      variant="ghost" size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive shrink-0"
+                      title="Delete contact"
+                      onClick={() => setDeleteContactConfirm({ open: true, busy: false })}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                   {(customerDialog.contact.tags || []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-3">
@@ -4186,6 +4606,79 @@ const FrontlineDashboard = () => {
               </>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete-contact confirmation. Two-step on purpose because deleting a
+          contact is destructive: it detaches them from any open tickets and
+          drops their custom_fields/tags. */}
+      <Dialog open={deleteContactConfirm.open} onOpenChange={(open) => !open && !deleteContactConfirm.busy && setDeleteContactConfirm({ open: false, busy: false })}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-destructive flex items-center gap-2">
+              <Trash2 className="h-4 w-4" /> Delete contact?
+            </DialogTitle>
+            <DialogDescription>
+              Permanently removes <strong>{customerDialog.contact?.email}</strong>. Past tickets remain
+              but lose the link to this contact record. Notes attached to the
+              contact will be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteContactConfirm({ open: false, busy: false })} disabled={deleteContactConfirm.busy}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteContact} disabled={deleteContactConfirm.busy}>
+              {deleteContactConfirm.busy ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />}
+              Delete contact
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reassign-handoff picker. Opens when "Reassign…" is clicked in the
+          drawer; lists company users and assigns the ticket directly to the
+          picked one. */}
+      <Dialog open={reassignPopover.open} onOpenChange={(open) => !open && !reassigningHandoff && setReassignPopover({ open: false, candidates: [], loading: false })}>
+        <DialogContent className="max-w-md max-h-[70vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <User className="h-4 w-4" /> Reassign hand-off
+            </DialogTitle>
+            <DialogDescription>
+              Pick the agent to hand this ticket to. They'll see it in their own queue immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="overflow-y-auto min-h-0 flex-1 space-y-1">
+            {reassignPopover.loading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading agents…
+              </div>
+            ) : reassignPopover.candidates.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No agents available in your company.</p>
+            ) : (
+              reassignPopover.candidates.map((cu) => (
+                <Button
+                  key={cu.id}
+                  variant="ghost"
+                  size="sm"
+                  disabled={reassigningHandoff}
+                  className="w-full justify-start"
+                  onClick={() => handleReassignHandoff(cu)}
+                >
+                  <User className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="truncate">{cu.full_name || cu.username || cu.email}</div>
+                    {cu.email && <div className="text-xs text-muted-foreground truncate">{cu.email}</div>}
+                  </div>
+                  {reassigningHandoff && <Loader2 className="h-3 w-3 animate-spin ml-2" />}
+                </Button>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignPopover({ open: false, candidates: [], loading: false })} disabled={reassigningHandoff}>
+              Cancel
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

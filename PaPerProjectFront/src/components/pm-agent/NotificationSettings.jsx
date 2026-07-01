@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import pmAgentService from '@/services/pmAgentService';
-import { Loader2, Trash2, Send, Plus } from 'lucide-react';
+import { Loader2, Trash2, Send, Plus, Pencil, X, Check } from 'lucide-react';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
 
 const CHANNEL_TYPES = [
@@ -50,6 +50,17 @@ export default function NotificationSettings() {
     open: false, title: '', description: '', confirmLabel: 'Delete', onConfirm: null, loading: false,
   });
   const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }));
+
+  // Inline-edit state — when non-null, the corresponding row swaps to a form.
+  // We keep separate `editing*` (= id being edited) and `edit*Form` (= live
+  // form values) so the original row data stays intact in `channels` /
+  // `templates` until save succeeds.
+  const [editingChannelId, setEditingChannelId] = useState(null);
+  const [editChannelForm, setEditChannelForm] = useState(null);
+  const [savingEditChannel, setSavingEditChannel] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState(null);
+  const [editTemplateForm, setEditTemplateForm] = useState(null);
+  const [savingEditTemplate, setSavingEditTemplate] = useState(false);
 
   useEffect(() => {
     refreshChannels();
@@ -128,6 +139,42 @@ export default function NotificationSettings() {
     });
   };
 
+  // ─── Channel edit-in-place ─────────────────────────────────────────
+  const startEditChannel = (ch) => {
+    setEditingChannelId(ch.id);
+    setEditChannelForm({
+      name: ch.name || '',
+      channel_type: ch.channel_type || 'slack',
+      target: ch.target || '',
+      severities: ch.severities || 'info,warning,critical',
+      types: ch.types || '',
+    });
+  };
+
+  const cancelEditChannel = () => {
+    setEditingChannelId(null);
+    setEditChannelForm(null);
+  };
+
+  const saveEditedChannel = async () => {
+    if (!editingChannelId || !editChannelForm) return;
+    if (!editChannelForm.name.trim() || !editChannelForm.target.trim()) {
+      toast({ title: 'Missing fields', description: 'Name and target are required', variant: 'destructive' });
+      return;
+    }
+    setSavingEditChannel(true);
+    try {
+      await pmAgentService.updateNotificationChannel(editingChannelId, editChannelForm);
+      toast({ title: 'Channel updated' });
+      cancelEditChannel();
+      refreshChannels();
+    } catch (e) {
+      toast({ title: 'Error', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally {
+      setSavingEditChannel(false);
+    }
+  };
+
   const testChannel = async (id) => {
     try {
       const res = await pmAgentService.testNotificationChannel(id);
@@ -190,6 +237,42 @@ export default function NotificationSettings() {
     });
   };
 
+  // ─── Template edit-in-place ────────────────────────────────────────
+  const startEditTemplate = (t) => {
+    setEditingTemplateId(t.id);
+    setEditTemplateForm({
+      notification_type: t.notification_type || 'overdue_task',
+      name: t.name || '',
+      title_template: t.title_template || '',
+      message_template: t.message_template || '',
+      default_severity: t.default_severity || 'info',
+    });
+  };
+
+  const cancelEditTemplate = () => {
+    setEditingTemplateId(null);
+    setEditTemplateForm(null);
+  };
+
+  const saveEditedTemplate = async () => {
+    if (!editingTemplateId || !editTemplateForm) return;
+    if (!editTemplateForm.name.trim() || !editTemplateForm.title_template.trim() || !editTemplateForm.message_template.trim()) {
+      toast({ title: 'Missing fields', description: 'Name, title, and message are required', variant: 'destructive' });
+      return;
+    }
+    setSavingEditTemplate(true);
+    try {
+      await pmAgentService.updateNotificationTemplate(editingTemplateId, editTemplateForm);
+      toast({ title: 'Template updated' });
+      cancelEditTemplate();
+      refreshTemplates();
+    } catch (e) {
+      toast({ title: 'Error', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally {
+      setSavingEditTemplate(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Channels */}
@@ -243,27 +326,74 @@ export default function NotificationSettings() {
             <p className="text-sm text-white/40">No channels configured yet.</p>
           ) : (
             <div className="space-y-2">
-              {channels.map((ch) => (
-                <div key={ch.id} className="flex flex-wrap items-center gap-3 p-3 rounded border border-white/[0.06] bg-black/30/40">
-                  <Checkbox checked={ch.is_active} onCheckedChange={() => toggleChannelActive(ch)} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-white truncate">{ch.name}</p>
-                    <p className="text-xs text-white/55 truncate">
-                      {ch.channel_type} · {ch.target}
-                    </p>
-                    <p className="text-xs text-white/40">severities: {ch.severities || 'all'}{ch.types ? ` · types: ${ch.types}` : ''}</p>
-                    {ch.last_error && (
-                      <p className="text-xs text-red-400 mt-1">Last error: {ch.last_error}</p>
-                    )}
+              {channels.map((ch) => {
+                if (editingChannelId === ch.id && editChannelForm) {
+                  // Inline edit form — mirrors the "new channel" form layout
+                  // so users get the same UX for both flows.
+                  return (
+                    <div key={ch.id} className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.04]">
+                      <div>
+                        <Label>Name</Label>
+                        <Input value={editChannelForm.name} onChange={(e) => setEditChannelForm({ ...editChannelForm, name: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label>Type</Label>
+                        <Select value={editChannelForm.channel_type} onValueChange={(v) => setEditChannelForm({ ...editChannelForm, channel_type: v })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {CHANNEL_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="md:col-span-2">
+                        <Label>{editChannelForm.channel_type === 'email' ? 'Email address' : 'Webhook URL'}</Label>
+                        <Input value={editChannelForm.target} onChange={(e) => setEditChannelForm({ ...editChannelForm, target: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label>Severities (comma-separated)</Label>
+                        <Input value={editChannelForm.severities} onChange={(e) => setEditChannelForm({ ...editChannelForm, severities: e.target.value })} placeholder="info,warning,critical" />
+                      </div>
+                      <div>
+                        <Label>Notification types filter (optional)</Label>
+                        <Input value={editChannelForm.types} onChange={(e) => setEditChannelForm({ ...editChannelForm, types: e.target.value })} placeholder="empty = all" />
+                      </div>
+                      <div className="md:col-span-2 flex justify-end gap-2">
+                        <Button size="sm" variant="ghost" onClick={cancelEditChannel} disabled={savingEditChannel}>
+                          <X className="w-3 h-3 mr-1" /> Cancel
+                        </Button>
+                        <Button size="sm" onClick={saveEditedChannel} disabled={savingEditChannel}>
+                          {savingEditChannel ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Check className="w-3 h-3 mr-1" />}
+                          Save changes
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={ch.id} className="flex flex-wrap items-center gap-3 p-3 rounded border border-white/[0.06] bg-black/30/40">
+                    <Checkbox checked={ch.is_active} onCheckedChange={() => toggleChannelActive(ch)} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">{ch.name}</p>
+                      <p className="text-xs text-white/55 truncate">
+                        {ch.channel_type} · {ch.target}
+                      </p>
+                      <p className="text-xs text-white/40">severities: {ch.severities || 'all'}{ch.types ? ` · types: ${ch.types}` : ''}</p>
+                      {ch.last_error && (
+                        <p className="text-xs text-red-400 mt-1">Last error: {ch.last_error}</p>
+                      )}
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => testChannel(ch.id)}>
+                      <Send className="w-3 h-3 mr-1" /> Test
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => startEditChannel(ch)} title="Edit channel">
+                      <Pencil className="w-3 h-3 text-white/70" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => removeChannel(ch.id)} title="Delete channel">
+                      <Trash2 className="w-3 h-3 text-red-400" />
+                    </Button>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => testChannel(ch.id)}>
-                    <Send className="w-3 h-3 mr-1" /> Test
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => removeChannel(ch.id)}>
-                    <Trash2 className="w-3 h-3 text-red-400" />
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -325,21 +455,72 @@ export default function NotificationSettings() {
             <p className="text-sm text-white/40">No custom templates yet — defaults will be used.</p>
           ) : (
             <div className="space-y-2">
-              {templates.map((t) => (
-                <div key={t.id} className="flex items-start gap-3 p-3 rounded border border-white/[0.06] bg-black/30/40">
-                  <Checkbox checked={t.is_active} onCheckedChange={() => toggleTemplateActive(t)} className="mt-1" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-white truncate">
-                      {t.name} <span className="text-xs text-white/40">· {t.notification_type} · {t.default_severity}</span>
-                    </p>
-                    <p className="text-xs text-white/55 truncate mt-1">{t.title_template}</p>
-                    <p className="text-xs text-white/40 line-clamp-2">{t.message_template}</p>
+              {templates.map((t) => {
+                if (editingTemplateId === t.id && editTemplateForm) {
+                  // Inline edit form — mirrors the "new template" form layout.
+                  return (
+                    <div key={t.id} className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.04]">
+                      <div>
+                        <Label>Notification type</Label>
+                        <Select value={editTemplateForm.notification_type} onValueChange={(v) => setEditTemplateForm({ ...editTemplateForm, notification_type: v })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {NOTIFICATION_TYPES.map((tp) => <SelectItem key={tp} value={tp}>{tp}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Template name</Label>
+                        <Input value={editTemplateForm.name} onChange={(e) => setEditTemplateForm({ ...editTemplateForm, name: e.target.value })} />
+                      </div>
+                      <div className="md:col-span-2">
+                        <Label>Title template</Label>
+                        <Input value={editTemplateForm.title_template} onChange={(e) => setEditTemplateForm({ ...editTemplateForm, title_template: e.target.value })} />
+                      </div>
+                      <div className="md:col-span-2">
+                        <Label>Message template</Label>
+                        <Textarea value={editTemplateForm.message_template} onChange={(e) => setEditTemplateForm({ ...editTemplateForm, message_template: e.target.value })} rows={3} />
+                      </div>
+                      <div>
+                        <Label>Default severity</Label>
+                        <Select value={editTemplateForm.default_severity} onValueChange={(v) => setEditTemplateForm({ ...editTemplateForm, default_severity: v })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {SEVERITY_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="md:col-span-2 flex justify-end gap-2">
+                        <Button size="sm" variant="ghost" onClick={cancelEditTemplate} disabled={savingEditTemplate}>
+                          <X className="w-3 h-3 mr-1" /> Cancel
+                        </Button>
+                        <Button size="sm" onClick={saveEditedTemplate} disabled={savingEditTemplate}>
+                          {savingEditTemplate ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Check className="w-3 h-3 mr-1" />}
+                          Save changes
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={t.id} className="flex items-start gap-3 p-3 rounded border border-white/[0.06] bg-black/30/40">
+                    <Checkbox checked={t.is_active} onCheckedChange={() => toggleTemplateActive(t)} className="mt-1" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">
+                        {t.name} <span className="text-xs text-white/40">· {t.notification_type} · {t.default_severity}</span>
+                      </p>
+                      <p className="text-xs text-white/55 truncate mt-1">{t.title_template}</p>
+                      <p className="text-xs text-white/40 line-clamp-2">{t.message_template}</p>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => startEditTemplate(t)} title="Edit template">
+                      <Pencil className="w-3 h-3 text-white/70" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => removeTemplate(t.id)} title="Delete template">
+                      <Trash2 className="w-3 h-3 text-red-400" />
+                    </Button>
                   </div>
-                  <Button size="sm" variant="ghost" onClick={() => removeTemplate(t.id)}>
-                    <Trash2 className="w-3 h-3 text-red-400" />
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>

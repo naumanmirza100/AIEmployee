@@ -2,7 +2,7 @@
 
 **Source:** `AI Employee Project manager testing.pdf`
 **Tested by:** Noor &nbsp;·&nbsp; **Verified by:** Hamza &nbsp;·&nbsp; **Owner:** Abdullah
-**Last updated:** 2026-06-23 (fourth batch — #23 team-members graph data, #26 task-update scope fix, Assign-To dropdown widened)
+**Last updated:** 2026-06-23 (fifth batch — Channel/Template Edit UI, Delete Task, search bars on Projects/Users/All-Tasks, structured calendar conflicts)
 
 ## Legend
 - [x] **Done** — verified fix is in the current code (file reference shown).
@@ -112,10 +112,13 @@
 
 ## 8. Calendar / Schedule planner
 
-- [~] **Scheduling conflicts now display a reason (when the backend returns one)**
-  UI already renders `conflict.description || conflict.message` — so reasons WILL show if the backend includes them.
-  Evidence: [`PaPerProjectFront/src/components/pm-agent/CalendarScheduleView.jsx:148-150`](PaPerProjectFront/src/components/pm-agent/CalendarScheduleView.jsx#L148-L150).
-  **Still to do (depending on backend):** confirm the backend conflict-detector actually populates `description`/`message` with the criterion (e.g. *"same deadline"*, *"same assignee"*). The screenshot in the PDF showed conflicts with no readable basis — that's a backend message-text issue if the UI is rendering empty strings.
+- [x] **Scheduling conflicts now show structured reason + affected tasks**
+  **Root cause:** the agent ([`calendar_planner_agent.py:detect_conflicts`](project_manager_agent/ai_agents/calendar_planner_agent.py#L130)) emitted **plain strings** like *"X has 3 active tasks - potential overload"* with no `criterion`, no `task_ids`, no `severity`. The UI rendered them as opaque blobs and the user couldn't tell why a conflict was flagged or which tasks were involved.
+  **Fix:**
+  - Agent now emits each conflict as a structured object: `{ type, severity, description, criterion, task_ids, task_titles, metadata }`.
+  - Added a **same-deadline** detector (the specific case from the PDF — "Implement Backend API and Implement Avatar Classification Service have the same deadline" — now produces a conflict with the shared date + both task titles).
+  - Recommendations follow the same structured pattern with `suggested_action`.
+  - Frontend [`CalendarScheduleView.jsx`](PaPerProjectFront/src/components/pm-agent/CalendarScheduleView.jsx) renders the criterion, task-title chips, and a severity-coloured border. Legacy plain-string conflicts still render correctly (backwards compatible).
 
 ---
 
@@ -190,8 +193,20 @@
   3. `due_date` is now explicitly parsed via `parse_datetime` / `parse_date` — an unparseable string returns a clear 400 *"Invalid due date format. Send an ISO 8601 datetime …"* instead of a generic 500.
   4. The Assign-To dropdown source `get_company_users_for_assignment` was widened the same way, so colleagues' users appear and are valid targets.
 
-- [ ] **No search bar for projects / users / tasks**
-  No `<Input>` search filter present in the PM listing views. *Deferred* — needs scope confirmation (which views: Projects tab, Users tab, Tasks tab, or all three with one global search?).
+- [x] **Search bars added on Projects, Users, and All-Tasks tabs**
+  Each tab now has a styled `<Input>` with a search icon. Filtering is client-side over the current page (status/user/project dropdowns on All-Tasks already narrow server-side):
+  - **Projects** — searches project name + description AND drills into each project's task titles, so typing a task name surfaces the parent project. Empty-state shows a clear *"No projects or tasks match …"* message.
+  - **Users** — searches full name, username, email, role.
+  - **All Tasks** — searches title, description, project name (works alongside the existing status/user/project dropdowns).
+  Evidence: [`CompanyDashboardPage.jsx:1184+`](PaPerProjectFront/src/pages/CompanyDashboardPage.jsx#L1184), [`:1572+`](PaPerProjectFront/src/pages/CompanyDashboardPage.jsx#L1572), [`:1805+`](PaPerProjectFront/src/pages/CompanyDashboardPage.jsx#L1805).
+
+- [x] **Edit UI for Notification Channels & Templates** *(feature gap closed)*
+  Backend already supported `PUT`/`PATCH` on both via `pm_notification_channel_detail` / `pm_notification_template_detail`, but the frontend never wired them up — users could create / toggle-active / test / delete but not edit, so they had to recreate to change a webhook URL or template body. Added inline edit-in-place: a pencil icon on each row flips that row into the same form layout as Create, with Save / Cancel buttons. Save calls the existing `updateNotificationChannel` / `updateNotificationTemplate` services.
+  Evidence: [`NotificationSettings.jsx`](PaPerProjectFront/src/components/pm-agent/NotificationSettings.jsx) — new `editingChannelId` / `editingTemplateId` state, `startEditChannel` / `startEditTemplate` / `saveEditedChannel` / `saveEditedTemplate` handlers, plus inline form renderers that mirror the Create form layout.
+
+- [x] **Delete task** — backend endpoint + UI button + confirm dialog *(feature gap closed)*
+  Parallel to the delete-project surface I added earlier. New `DELETE /api/company/tasks/{id}/delete` endpoint at [`company_projects_tasks.py:delete_company_task`](api/views/company_projects_tasks.py), scoped by `project__company=user.company` (same security boundary as `update_company_task`). Subtasks cascade via the FK. Service helper `companyProjectsTasksService.deleteTask` calls it. Frontend: red Trash button next to Edit on every task — both in the expanded project card AND in the All-Tasks table — gated by `ConfirmDialog`.
+  Evidence: backend [`api/views/company_projects_tasks.py:delete_company_task`](api/views/company_projects_tasks.py), URL [`api/urls.py:209`](api/urls.py#L209), button at [`CompanyDashboardPage.jsx:1281-1294`](PaPerProjectFront/src/pages/CompanyDashboardPage.jsx#L1281) and [`:1884-1904`](PaPerProjectFront/src/pages/CompanyDashboardPage.jsx#L1884).
 
 ---
 
@@ -199,25 +214,22 @@
 
 | Status | Count | Items |
 |---|---|---|
-| Done | **26** | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 |
-| Partially done | **1** | 17 (UI ready; backend message text still suspected weak) |
-| Not done | **2** | 14 (skipped by user request), 28 (search bar — scope pick needed) |
-| Needs clarification | **0** | — |
+| Done | **28** | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 (plus new Channel/Template Edit + Delete Task features) |
+| Not done | **1** | 14 (skipped by user request) |
 
-### Landed this session (2026-06-23, fourth batch)
+### Landed this session (2026-06-23, fifth batch — feature gaps)
 
-1. **#23** Team-members graph — `_pm_build_analytics_data` had zero team-member fields and was scoped per-creator. Added `tasks_by_assignee_obj` + `assignees_active_obj`, surfaced them in both the data summary and the system-prompt mapping rules, and widened the scope filter from `created_by_company_user=user` to `company=user.company`. The LLM now has real data to chart for prompts like *"team members of this project"* or *"workload by member"*.
-2. **#26** Task update — three bugs in one. Task lookup was scoped to the creator (404 on colleagues' tasks). Assignee validation was scoped to the creator (400 on colleagues' users — even when the dropdown surfaced them via a different code path). Unparseable date strings bubbled into a generic 500 with no actionable error. All three fixed: scope by company across the board, plus explicit `parse_datetime`/`parse_date` with a clear 400 message on bad input.
-3. **Assign-To dropdown** — `get_company_users_for_assignment` was using the same per-creator filter, so colleagues' users were invisible. Widened to `created_by_company_user__company=user.company` + `user__is_active=True` (consistent with #27).
+1. **#17** Structured calendar conflicts — agent now emits `{ type, severity, description, criterion, task_ids, task_titles, metadata }` objects instead of plain strings. Added same-deadline detection (the specific case the tester flagged). Recommendations follow the same structured pattern. Frontend renders criterion + task-title chips + severity-coloured border; legacy plain-string conflicts still render for backwards-compat.
+2. **#28** Search bars — added on Projects tab (filters by project name/description + drills into task titles), Users tab (filters by name/username/email/role), and All-Tasks tab (filters by title/description/project name, complementing the existing status/user/project dropdowns).
+3. **Notification Channels + Templates Edit UI** — backend already supported `PUT`/`PATCH`, but the frontend never wired it. Added pencil-icon-driven inline edit that flips each row into the same form layout as Create.
+4. **Delete task** — new `DELETE /api/company/tasks/{id}/delete` endpoint scoped by company, parallel to delete-project. Trash button on every task (both project-card view and All-Tasks table), gated by `ConfirmDialog`.
 
-Sanity-checked: 2 Python files parse, `python manage.py check` reports no issues.
+Sanity-checked: 3 Python files parse, 4 JSX/JS files compile cleanly via esbuild, `python manage.py check` reports no issues.
 
 ---
 
-## Next steps — what I need from you
+## Open items
 
-Only one open item now:
+Only one item remains, deferred per your request:
 
-- **#28** Search bar — confirm scope (Projects tab? Users tab? Tasks tab? one global search bar?) and I'll wire it.
-
-(**#14** Standup duplicate is skipped per your request, **#17** is partial pending a backend audit.)
+- **#14** Daily Standup duplicate — code path is clean; if the symptom persists in the running app, it's most likely the backend writing two report rows for the same date. Needs a reproduction to fix.

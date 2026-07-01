@@ -129,6 +129,25 @@ export default function FrontlineInsightsPanel() {
     }
   };
 
+  // Hard-delete a DLQ row. Resolve only soft-hides; this is the "actually
+  // purge from the table" action. Backend endpoint scoped to the company.
+  const handleDeleteDlq = async (row) => {
+    setResolvingId(row.id);
+    try {
+      await frontlineAgentService.deleteFrontlineDeadLetter(row.id);
+      setDlq((s) => ({
+        ...s,
+        rows: s.rows.filter((r) => r.id !== row.id),
+        total: Math.max(0, s.total - 1),
+      }));
+      toast({ title: 'DLQ entry deleted' });
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div>
@@ -258,11 +277,18 @@ export default function FrontlineInsightsPanel() {
                   <div key={r.id} className="rounded-md border border-white/[0.06] bg-white/[0.02] p-2">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-xs font-mono text-white/80 truncate">{r.task_name}</span>
-                      <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-emerald-300 hover:text-emerald-200"
-                        disabled={resolvingId === r.id}
-                        onClick={() => handleResolveDlq(r)}>
-                        {resolvingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Resolve'}
-                      </Button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-emerald-300 hover:text-emerald-200"
+                          disabled={resolvingId === r.id}
+                          onClick={() => handleResolveDlq(r)} title="Mark resolved (soft-hide)">
+                          {resolvingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Resolve'}
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-rose-300 hover:text-rose-200"
+                          disabled={resolvingId === r.id}
+                          onClick={() => handleDeleteDlq(r)} title="Permanently delete">
+                          ✕
+                        </Button>
+                      </div>
                     </div>
                     <div className="text-[10px] text-rose-200/70 mt-0.5 truncate" title={r.error_message}>
                       {r.error_type}: {r.error_message}
