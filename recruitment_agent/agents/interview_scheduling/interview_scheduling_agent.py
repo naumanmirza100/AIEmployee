@@ -456,7 +456,7 @@ class InterviewSchedulingAgent:
             True if email sent successfully, False otherwise
         """
         print("\n" + "="*60)
-        print("📧 SENDING INTERVIEW INVITATION EMAIL")
+        print("[EMAIL] SENDING INTERVIEW INVITATION EMAIL")
         print("="*60)
         try:
             # Use job title for subject and body (from job description or truncated job_role)
@@ -495,16 +495,32 @@ class InterviewSchedulingAgent:
             print(f"✓ Job Role: {interview.job_role}")
             print(f"✓ Interview Type: {interview.interview_type}")
             
-            # Render email template
+            # Validate candidate email format before attempting to send
+            from django.core.validators import validate_email as _validate_email
+            from django.core.exceptions import ValidationError as _ValidationError
+            try:
+                _validate_email(interview.candidate_email)
+            except _ValidationError:
+                logger.error(f"Invalid candidate email '{interview.candidate_email}' for interview {interview.id}")
+                return False
+
+            # Render email template with plain-text fallback if template is missing/broken
             print("\n📝 Rendering email templates...")
             try:
                 message = render_to_string('recruitment_agent/emails/interview_invitation.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_invitation.html', context)
                 print("✓ Templates rendered successfully")
             except Exception as template_error:
-                print(f"❌ ERROR: Template rendering failed: {template_error}")
-                raise
-            
+                print(f"⚠ Template rendering failed ({template_error}), using plain-text fallback")
+                logger.warning(f"Invitation template error for interview {interview.id}: {template_error}")
+                message = (
+                    f"Dear {interview.candidate_name},\n\n"
+                    f"You have been invited for an interview for the position: {job_title}.\n"
+                    f"Please select your preferred slot here: {slot_selection_url or '(link unavailable)'}\n\n"
+                    f"Best regards,\nRecruitment Team"
+                )
+                html_message = None
+
             # Get from email and clean all email addresses
             from_email_raw = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
             from_email = self._clean_email_header(from_email_raw)
@@ -613,26 +629,37 @@ class InterviewSchedulingAgent:
                     "error": f"Invalid datetime format: {str(e)}",
                 }
             
-            # Get recruiter interview settings
+            # Get recruiter interview settings (prefer company_user → job, then recruiter → job)
             from recruitment_agent.models import RecruiterInterviewSettings
             recruiter = interview.recruiter
             schedule_from_date = None
             schedule_to_date = None
             start_time = None
             end_time = None
-            
-            if recruiter:
-                try:
-                    settings = recruiter.recruiter_interview_settings
-                    schedule_from_date = settings.schedule_from_date
-                    schedule_to_date = settings.schedule_to_date
-                    start_time = settings.start_time
-                    end_time = settings.end_time
-                except RecruiterInterviewSettings.DoesNotExist:
-                    # Use defaults
-                    from datetime import time as dt_time
-                    start_time = dt_time(9, 0)
-                    end_time = dt_time(17, 0)
+
+            job = (interview.cv_record.job_description
+                   if (interview.cv_record and interview.cv_record.job_description_id) else None)
+            settings = None
+            if interview.company_user_id:
+                if job:
+                    settings = RecruiterInterviewSettings.objects.filter(
+                        company_user=interview.company_user, job=job).first()
+                if not settings:
+                    settings = RecruiterInterviewSettings.objects.filter(
+                        company_user=interview.company_user, job__isnull=True).first()
+            if not settings and interview.recruiter_id:
+                if job:
+                    settings = RecruiterInterviewSettings.objects.filter(
+                        recruiter=recruiter, job=job).first()
+                if not settings:
+                    settings = RecruiterInterviewSettings.objects.filter(
+                        recruiter=recruiter, job__isnull=True).first()
+
+            if settings:
+                schedule_from_date = settings.schedule_from_date
+                schedule_to_date = settings.schedule_to_date
+                start_time = settings.start_time
+                end_time = settings.end_time
             
             # Validate date range
             selected_date = selected_datetime.date()
@@ -679,48 +706,45 @@ class InterviewSchedulingAgent:
             slot_found = False
             slot_available = False
             slot_scheduled = False
-            settings = None
-            
-            if recruiter:
-                try:
-                    settings = recruiter.recruiter_interview_settings
-                    if settings.time_slots_json:
-                        # Check if the selected datetime matches an available slot
-                        for slot in settings.time_slots_json:
-                            slot_datetime = slot.get('datetime', '')
-                            # Normalize for comparison
-                            slot_datetime_normalized = slot_datetime
-                            if 'T' in slot_datetime:
-                                date_part, time_part = slot_datetime.split('T')
-                                if ':' in time_part:
-                                    time_hour_min = ':'.join(time_part.split(':')[:2])
-                                    slot_datetime_normalized = f"{date_part}T{time_hour_min}"
-                            
-                            if slot_datetime_normalized == selected_datetime_str or slot_datetime == selected_datetime_str:
-                                slot_found = True
-                                slot_available = slot.get('available', True)
-                                slot_scheduled = slot.get('scheduled', False)
-                                break
-                        
-                        if not slot_found:
-                            return {
-                                "success": False,
-                                "error": "Selected time slot not found in available slots. Please select a valid time slot.",
-                            }
-                        
-                        if not slot_available:
-                            return {
-                                "success": False,
-                                "error": "This time slot is not available. Please select another time slot.",
-                            }
-                        
-                        if slot_scheduled:
-                            return {
-                                "success": False,
-                                "error": "This time slot is already selected by another candidate. Please select a different time slot.",
-                            }
-                except RecruiterInterviewSettings.DoesNotExist:
-                    pass
+            # `settings` is already resolved above via company_user/recruiter lookup
+
+            if settings and settings.time_slots_json:
+                # Check if the selected datetime matches an available slot
+                for slot in settings.time_slots_json:
+                    if not isinstance(slot, dict):
+                        continue
+                    slot_datetime = slot.get('datetime', '')
+                    # Normalize for comparison
+                    slot_datetime_normalized = slot_datetime
+                    if 'T' in slot_datetime:
+                        date_part, time_part = slot_datetime.split('T')
+                        if ':' in time_part:
+                            time_hour_min = ':'.join(time_part.split(':')[:2])
+                            slot_datetime_normalized = f"{date_part}T{time_hour_min}"
+
+                    if slot_datetime_normalized == selected_datetime_str or slot_datetime == selected_datetime_str:
+                        slot_found = True
+                        slot_available = slot.get('available', True)
+                        slot_scheduled = slot.get('scheduled', False)
+                        break
+
+                if not slot_found:
+                    return {
+                        "success": False,
+                        "error": "Selected time slot not found in available slots. Please select a valid time slot.",
+                    }
+
+                if not slot_available:
+                    return {
+                        "success": False,
+                        "error": "This time slot is not available. Please select another time slot.",
+                    }
+
+                if slot_scheduled:
+                    return {
+                        "success": False,
+                        "error": "This time slot is already selected by another candidate. Please select a different time slot.",
+                    }
             
             # Check for double-booking: same job + same time = only one candidate (doosra bande use select na kr ske)
             existing_q = Interview.objects.filter(
@@ -744,9 +768,9 @@ class InterviewSchedulingAgent:
             
             # Use transaction to atomically mark slot as scheduled and save interview
             with transaction.atomic():
-                # Reload settings to get latest data (prevent race condition)
-                if recruiter and settings:
-                    settings.refresh_from_db()
+                # Lock the settings row to prevent concurrent double-booking
+                if settings:
+                    settings = RecruiterInterviewSettings.objects.select_for_update().get(pk=settings.pk)
                     if settings.time_slots_json:
                         # Mark slot as scheduled in time_slots_json
                         slot_marked = False
@@ -788,6 +812,11 @@ class InterviewSchedulingAgent:
             if meet_link:
                 interview.meeting_link = meet_link
                 interview.save(update_fields=['meeting_link'])
+            else:
+                logger.warning(
+                    f"Google Meet link was not generated for interview {interview.id}. "
+                    "Recruiter should add the meeting link manually from the dashboard."
+                )
 
             # Send confirmation email
             confirmation_sent = self.send_confirmation_email(interview)
@@ -1034,7 +1063,8 @@ class InterviewSchedulingAgent:
             interview.status = 'SCHEDULED'
             interview.scheduled_datetime = selected_datetime
             interview.selected_slot = selected_slot_display
-            interview.save(update_fields=['status', 'scheduled_datetime', 'selected_slot', 'updated_at'])
+            interview.confirmation_token = secrets.token_urlsafe(32)
+            interview.save(update_fields=['status', 'scheduled_datetime', 'selected_slot', 'confirmation_token', 'updated_at'])
 
         email_sent = self.send_reschedule_email(interview)
         return {
@@ -1088,13 +1118,31 @@ class InterviewSchedulingAgent:
                 'meeting_link': interview.meeting_link or '',
             }
             
+            # Validate candidate email format
+            from django.core.validators import validate_email as _validate_email
+            from django.core.exceptions import ValidationError as _ValidationError
+            try:
+                _validate_email(interview.candidate_email)
+            except _ValidationError:
+                logger.error(f"Invalid candidate email '{interview.candidate_email}' — skipping confirmation for interview {interview.id}")
+                return False
+
             try:
                 candidate_message = render_to_string('recruitment_agent/emails/interview_confirmation.txt', candidate_context)
                 candidate_html = render_to_string('recruitment_agent/emails/interview_confirmation.html', candidate_context)
                 print("✓ Candidate email templates rendered")
             except Exception as template_error:
-                print(f"❌ ERROR: Candidate template rendering failed: {template_error}")
-                raise
+                print(f"⚠ Confirmation template failed ({template_error}), using plain-text fallback")
+                logger.warning(f"Confirmation template error for interview {interview.id}: {template_error}")
+                slot_str = interview.selected_slot or (interview.scheduled_datetime.strftime('%A, %B %d, %Y at %I:%M %p') if interview.scheduled_datetime else 'TBD')
+                candidate_message = (
+                    f"Dear {interview.candidate_name},\n\n"
+                    f"Your interview for {job_title} has been confirmed.\n"
+                    f"Scheduled: {slot_str}\n"
+                    + (f"Meeting Link: {interview.meeting_link}\n" if interview.meeting_link else "")
+                    + "\nBest regards,\nRecruitment Team"
+                )
+                candidate_html = None
             
             to_email = self._clean_email_header(interview.candidate_email)
             

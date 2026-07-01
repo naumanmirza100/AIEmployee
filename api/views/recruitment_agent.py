@@ -300,6 +300,7 @@ def process_cvs(request):
                                 cv_record.s3_key = actual_key
                             except Exception as s3_err:
                                 logger.warning(f"CV S3 upload failed for {uploaded_file.name}: {s3_err}")
+                                cv_record.s3_key = None
 
                         cv_record.save()
                     except CVRecord.DoesNotExist:
@@ -1035,33 +1036,73 @@ def delete_job_description(request, job_description_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_interviews(request):
-    """List all interviews for the company user"""
+    """List interviews for the company user with pagination, search, and date filtering.
+
+    Query params:
+      status       — filter by status (PENDING, SCHEDULED, COMPLETED, CANCELLED, RESCHEDULED)
+      outcome      — filter by outcome; use NOT_SET for null/empty
+      search       — partial match on candidate_name or candidate_email
+      date_from    — created_at >= YYYY-MM-DD
+      date_to      — created_at <= YYYY-MM-DD
+      page         — 1-based page number (default 1)
+      page_size    — results per page (default 20, max 100)
+    """
+    from django.core.paginator import Paginator
     try:
         company_user = request.user
-        
-        status_filter = request.query_params.get('status')
+
+        status_filter  = request.query_params.get('status')
         outcome_filter = request.query_params.get('outcome')
+        search         = request.query_params.get('search', '').strip()
+        date_from      = request.query_params.get('date_from')
+        date_to        = request.query_params.get('date_to')
+        job_title      = request.query_params.get('job_title', '').strip()
+
+        try:
+            page_num  = max(1, int(request.query_params.get('page', 1)))
+            page_size = min(100, max(1, int(request.query_params.get('page_size', 10))))
+        except (ValueError, TypeError):
+            page_num, page_size = 1, 20
+
         interviews = Interview.objects.filter(company_user=company_user).select_related(
             'cv_record', 'cv_record__job_description'
         )
-        
+
         if status_filter:
             interviews = interviews.filter(status=status_filter)
+
         if outcome_filter is not None and outcome_filter != '':
             if outcome_filter.upper() == 'NOT_SET':
                 interviews = interviews.filter(Q(outcome__isnull=True) | Q(outcome=''))
             else:
                 interviews = interviews.filter(outcome=outcome_filter.upper())
-        
-        interviews = interviews.order_by('-created_at')[:100]  # Limit to 100 most recent
-        
+
+        if search:
+            interviews = interviews.filter(
+                Q(candidate_name__icontains=search) | Q(candidate_email__icontains=search)
+            )
+
+        if date_from:
+            interviews = interviews.filter(created_at__date__gte=date_from)
+
+        if date_to:
+            interviews = interviews.filter(created_at__date__lte=date_to)
+
+        if job_title:
+            interviews = interviews.filter(cv_record__job_description__title=job_title)
+
+        interviews = interviews.order_by('-created_at')
+
+        paginator   = Paginator(interviews, page_size)
+        page_obj    = paginator.get_page(page_num)
+        total_count = paginator.count
+
         interview_list = []
-        for interview in interviews:
-            # Get job title from cv_record -> job_description if available
+        for interview in page_obj:
             job_title = None
             if interview.cv_record and interview.cv_record.job_description:
                 job_title = interview.cv_record.job_description.title
-            
+
             interview_list.append({
                 'id': interview.id,
                 'candidate_name': interview.candidate_name,
@@ -1084,12 +1125,20 @@ def list_interviews(request):
                 'feedback_submitted_at': interview.feedback_submitted_at.isoformat() if interview.feedback_submitted_at else None,
                 'created_at': interview.created_at.isoformat() if interview.created_at else None,
             })
-        
+
         return Response({
             'status': 'success',
-            'data': interview_list
+            'data': interview_list,
+            'pagination': {
+                'total': total_count,
+                'page': page_num,
+                'page_size': page_size,
+                'total_pages': paginator.num_pages,
+                'has_next': page_obj.has_next(),
+                'has_previous': page_obj.has_previous(),
+            },
         })
-    
+
     except KeyServiceError:
         raise
     except Exception as e:

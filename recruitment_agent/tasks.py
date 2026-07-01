@@ -55,7 +55,7 @@ def check_and_send_followup_emails():
             status__in=['COMPLETED', 'CANCELLED']
         ).select_related('cv_record__job_description', 'company_user', 'recruiter'))
         
-        logger.info(f"Found {pending_interviews.count()} PENDING interviews to check")
+        logger.info(f"Found {len(pending_interviews)} PENDING interviews to check")
         
         for interview in pending_interviews:
             try:

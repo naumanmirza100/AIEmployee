@@ -312,16 +312,18 @@ export const deleteJobDescription = async (jobId) => {
 export const getInterviews = async (filters = {}) => {
   try {
     const params = new URLSearchParams();
-    if (filters.status) {
-      params.append('status', filters.status);
-    }
-    if (filters.outcome !== undefined && filters.outcome !== '') {
-      params.append('outcome', filters.outcome);
-    }
-    
+    if (filters.status)                                       params.append('status',     filters.status);
+    if (filters.outcome !== undefined && filters.outcome !== '') params.append('outcome',  filters.outcome);
+    if (filters.search)                                       params.append('search',     filters.search);
+    if (filters.date_from)                                    params.append('date_from',  filters.date_from);
+    if (filters.date_to)                                      params.append('date_to',    filters.date_to);
+    if (filters.job_title)                                    params.append('job_title',  filters.job_title);
+    if (filters.page)                                         params.append('page',       filters.page);
+    if (filters.page_size)                                    params.append('page_size',  filters.page_size);
+
     const queryString = params.toString();
     const endpoint = `/recruitment/interviews${queryString ? `?${queryString}` : ''}`;
-    
+
     const response = await companyApi.get(endpoint);
     return response;
   } catch (error) {
