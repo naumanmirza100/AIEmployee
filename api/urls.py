@@ -421,10 +421,14 @@ urlpatterns = [
 
     # Bulk ticket ops (F3)
     re_path(r'^frontline/tickets/bulk-update/?$', frontline_agent.bulk_update_tickets, name='frontline_bulk_update_tickets'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/update/?$', frontline_agent.update_ticket, name='frontline_update_ticket'),  # PATCH/PUT
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/widget-attachments/?$', frontline_agent.list_widget_attachments, name='frontline_list_widget_attachments'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/widget-attachments/(?P<filename>[^/]+)/download/?$', frontline_agent.download_widget_attachment, name='frontline_download_widget_attachment'),  # GET
 
     # Dead letter queue (F5)
     re_path(r'^frontline/dead-letters/?$', frontline_agent.list_dead_letters, name='frontline_list_dead_letters'),  # GET
     re_path(r'^frontline/dead-letters/(?P<dlq_id>\d+)/resolve/?$', frontline_agent.resolve_dead_letter, name='frontline_resolve_dead_letter'),  # POST
+    re_path(r'^frontline/dead-letters/(?P<dlq_id>\d+)/delete/?$', frontline_agent.delete_dead_letter, name='frontline_delete_dead_letter'),  # DELETE
 
     # CSAT (F2)
     re_path(r'^frontline/csat/submit/?$', frontline_agent.submit_satisfaction, name='frontline_submit_satisfaction'),  # POST (public)
@@ -457,6 +461,7 @@ urlpatterns = [
 
     # Handoff release (H1)
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/release-handoff/?$', frontline_agent.release_handoff, name='frontline_release_handoff'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/reassign-handoff/?$', frontline_agent.reassign_ticket_handoff, name='frontline_reassign_handoff'),  # POST
 
     re_path(r'^frontline/tickets/?$', frontline_agent.list_tickets, name='frontline_list_tickets'),  # GET
     re_path(r'^frontline/tickets/aging/?$', frontline_agent.list_tickets_aging, name='frontline_list_tickets_aging'),  # GET
@@ -490,6 +495,7 @@ urlpatterns = [
     re_path(r'^frontline/contacts/create/?$', frontline_agent.create_contact, name='frontline_create_contact'),  # POST
     re_path(r'^frontline/contacts/(?P<contact_id>\d+)/?$', frontline_agent.get_contact, name='frontline_get_contact'),  # GET
     re_path(r'^frontline/contacts/(?P<contact_id>\d+)/update/?$', frontline_agent.update_contact, name='frontline_update_contact'),  # PATCH/PUT
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/delete/?$', frontline_agent.delete_contact, name='frontline_delete_contact'),  # DELETE
     re_path(r'^frontline/contacts/(?P<contact_id>\d+)/tickets/?$', frontline_agent.list_contact_tickets, name='frontline_list_contact_tickets'),  # GET
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/context/?$', frontline_agent.get_ticket_context, name='frontline_get_ticket_context'),  # GET
     # Hand-off queue + reply-draft assist (Phase 3 §3.2)

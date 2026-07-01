@@ -530,6 +530,13 @@ export const dryRunWorkflow = async (workflowId, context = {}) => {
   return response;
 };
 
+/** Approve or reject a paused workflow execution (i.e. one in
+ *  `awaiting_approval`). `action` must be `'approve'` or `'reject'`. */
+export const approveWorkflowExecution = async (executionId, action = 'approve') => {
+  const response = await companyApi.post(`/frontline/workflows/executions/${executionId}/approve`, { action });
+  return response;
+};
+
 /** List historical versions of a workflow (most recent first). */
 export const listWorkflowVersions = async (workflowId) => {
   const response = await companyApi.get(`/frontline/workflows/${workflowId}/versions`);
@@ -692,6 +699,99 @@ export const updateContact = async (contactId, payload) => {
   }
 };
 
+/** List widget-uploaded attachments for a ticket. Returns rows with
+ *  `name`, `size`, and the opaque `stored_filename` you pass back to
+ *  `widgetAttachmentDownloadUrl` to fetch the file. */
+export const listWidgetAttachments = async (ticketId) => {
+  try {
+    const response = await companyApi.get(`/frontline/tickets/${ticketId}/widget-attachments`);
+    return response;
+  } catch (error) {
+    console.error('List widget attachments error:', error);
+    throw error;
+  }
+};
+
+/** Build a download URL for a widget attachment. The endpoint streams the
+ *  file with an inline content-type so images/PDFs preview in a new tab,
+ *  binaries trigger a save dialog. Auth-gated server-side. */
+export const widgetAttachmentDownloadUrl = (ticketId, storedFilename) =>
+  `${API_BASE_URL}/frontline/tickets/${ticketId}/widget-attachments/${encodeURIComponent(storedFilename)}/download`;
+
+/** Update one ticket's status / priority / category / assignee.
+ *  Avoids the round-trip + "0 updated" footgun of using `bulk-update` for
+ *  one row. Body uses `assigned_to_company_user_id` (null to unassign). */
+export const updateTicket = async (ticketId, payload) => {
+  try {
+    const response = await companyApi.patch(`/frontline/tickets/${ticketId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update ticket error:', error);
+    throw error;
+  }
+};
+
+/** Delete a contact. Linked tickets stay (contact reference is detached). */
+export const deleteContact = async (contactId) => {
+  try {
+    const response = await companyApi.delete(`/frontline/contacts/${contactId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete contact error:', error);
+    throw error;
+  }
+};
+
+/* ── Ticket links ─────────────────────────────────────────────
+ * Backend at /frontline/tickets/{id}/links lets agents annotate cross-ticket
+ * relationships (duplicate_of / blocks / blocked_by / related / parent_of /
+ * child_of). The dashboard wires these into the ticket drawer so triagers
+ * can mark "this duplicates #123" or "this is blocked by #456" from one
+ * place, instead of comment threads with ad-hoc text. */
+
+export const listTicketLinks = async (ticketId) => {
+  try {
+    const response = await companyApi.get(`/frontline/tickets/${ticketId}/links`);
+    return response;
+  } catch (error) {
+    console.error('List ticket links error:', error);
+    throw error;
+  }
+};
+
+export const createTicketLink = async (ticketId, { to_ticket_id, relation }) => {
+  try {
+    const response = await companyApi.post(`/frontline/tickets/${ticketId}/links/create`, {
+      to_ticket_id, relation,
+    });
+    return response;
+  } catch (error) {
+    console.error('Create ticket link error:', error);
+    throw error;
+  }
+};
+
+export const deleteTicketLink = async (linkId) => {
+  try {
+    const response = await companyApi.delete(`/frontline/ticket-links/${linkId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete ticket link error:', error);
+    throw error;
+  }
+};
+
+/** Canonical list of TicketLink.RELATION_CHOICES (kept in sync with the
+ *  backend model). Used by the relation-picker dropdown in the dashboard. */
+export const TICKET_LINK_RELATIONS = [
+  { value: 'duplicate_of', label: 'Duplicate of' },
+  { value: 'blocks',       label: 'Blocks' },
+  { value: 'blocked_by',   label: 'Blocked by' },
+  { value: 'related',      label: 'Related to' },
+  { value: 'parent_of',    label: 'Parent of' },
+  { value: 'child_of',     label: 'Child of' },
+];
+
 /** All tickets linked to a contact. */
 export const listContactTickets = async (contactId) => {
   try {
@@ -756,6 +856,32 @@ export const acceptHandoff = async (ticketId) => {
     return response;
   } catch (error) {
     console.error('Accept handoff error:', error);
+    throw error;
+  }
+};
+
+/** Release an accepted hand-off back to the pending pool. Use when the
+ *  current owner can't take it and wants any-other-agent to pick it up. */
+export const releaseHandoff = async (ticketId) => {
+  try {
+    const response = await companyApi.post(`/frontline/tickets/${ticketId}/release-handoff`);
+    return response;
+  } catch (error) {
+    console.error('Release handoff error:', error);
+    throw error;
+  }
+};
+
+/** Hand a ticket's handoff directly to a specific other agent.
+ *  Works on both pending and accepted handoffs. */
+export const reassignHandoff = async (ticketId, toCompanyUserId) => {
+  try {
+    const response = await companyApi.post(`/frontline/tickets/${ticketId}/reassign-handoff`, {
+      to_company_user_id: toCompanyUserId,
+    });
+    return response;
+  } catch (error) {
+    console.error('Reassign handoff error:', error);
     throw error;
   }
 };
@@ -868,6 +994,17 @@ export const resolveFrontlineDeadLetter = async (dlqId) => {
     return response;
   } catch (error) {
     console.error('Resolve Frontline DLQ entry error:', error);
+    throw error;
+  }
+};
+
+/** Hard-delete a DLQ row. Use for cleanup of old resolved entries. */
+export const deleteFrontlineDeadLetter = async (dlqId) => {
+  try {
+    const response = await companyApi.delete(`/frontline/dead-letters/${dlqId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete Frontline DLQ entry error:', error);
     throw error;
   }
 };
@@ -1016,6 +1153,7 @@ export default {
   deleteWorkflow,
   executeWorkflow,
   dryRunWorkflow,
+  approveWorkflowExecution,
   listWorkflowVersions,
   rollbackWorkflow,
   listWorkflowExecutions,
@@ -1032,12 +1170,22 @@ export default {
   createContact,
   getContact,
   updateContact,
+  deleteContact,
+  updateTicket,
+  listWidgetAttachments,
+  widgetAttachmentDownloadUrl,
+  listTicketLinks,
+  createTicketLink,
+  deleteTicketLink,
+  TICKET_LINK_RELATIONS,
   listContactTickets,
   getTicketContext,
   listTicketMessages,
   replyToTicket,
   listHandoffQueue,
   acceptHandoff,
+  releaseHandoff,
+  reassignHandoff,
   suggestTicketReply,
   summarizeDocument,
   extractDocument,
@@ -1051,6 +1199,7 @@ export default {
   // 7-feature UI batch
   listFrontlineDeadLetters,
   resolveFrontlineDeadLetter,
+  deleteFrontlineDeadLetter,
   listFrontlineAuditLog,
   getKbCoverageReport,
   getFrontlineSlaDashboard,
