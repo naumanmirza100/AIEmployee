@@ -1611,6 +1611,9 @@ def list_cv_records(request):
         
         job_id = request.query_params.get('job_id')
         decision = request.query_params.get('decision')  # INTERVIEW, HOLD, REJECT
+        search = request.query_params.get('search', '').strip()
+        date_from = request.query_params.get('date_from', '').strip()
+        date_to = request.query_params.get('date_to', '').strip()
         page_param = request.query_params.get('page')
         page_size_param = request.query_params.get('page_size')
         
@@ -1635,6 +1638,32 @@ def list_cv_records(request):
 
         if decision:
             cv_records = cv_records.filter(qualification_decision=decision)
+
+        if search:
+            cv_records = cv_records.filter(
+                Q(job_application__first_name__icontains=search) |
+                Q(job_application__last_name__icontains=search) |
+                Q(job_application__email__icontains=search) |
+                Q(parsed_json__icontains=search)
+            )
+
+        if date_from:
+            try:
+                from django.utils.dateparse import parse_date
+                df = parse_date(date_from)
+                if df:
+                    cv_records = cv_records.filter(created_at__date__gte=df)
+            except Exception:
+                pass
+
+        if date_to:
+            try:
+                from django.utils.dateparse import parse_date
+                dt = parse_date(date_to)
+                if dt:
+                    cv_records = cv_records.filter(created_at__date__lte=dt)
+            except Exception:
+                pass
 
         cv_records = cv_records.order_by('-rank', '-created_at')
         total = cv_records.count()

@@ -1,0 +1,11 @@
+Access Your Application Portal
+
+Hello,
+
+Here is your secure link to access all job applications submitted from {{ email }}.
+
+VIEW MY APPLICATIONS:
+{{ portal_url }}
+
+This link expires in 24 hours. If you did not request this, simply ignore this email.
+Do not share this link with anyone.

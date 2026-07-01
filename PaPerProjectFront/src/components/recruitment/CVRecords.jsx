@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,8 +19,9 @@ import {
   Loader2, FileText, Calendar, ChevronLeft, ChevronRight,
   Mail, Briefcase, Percent, Printer, MapPin, DollarSign,
   GraduationCap, Building2, Link2, Phone, ExternalLink,
-  User, Star, CheckCircle2, Clock,
+  User, Star, CheckCircle2, Clock, Search, X,
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { getCVRecords, getJobDescriptions, bulkUpdateCVRecords } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
@@ -43,6 +44,10 @@ const CVRecords = () => {
   const [loading, setLoading] = useState(true);
   const [jobFilter, setJobFilter] = useState('');
   const [decisionFilter, setDecisionFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [jobs, setJobs] = useState([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -54,12 +59,17 @@ const CVRecords = () => {
   }, []);
 
   useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
     fetchRecords();
-  }, [jobFilter, decisionFilter, page, pageSize]);
+  }, [jobFilter, decisionFilter, debouncedSearch, dateFrom, dateTo, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
-  }, [jobFilter, decisionFilter, pageSize]);
+  }, [jobFilter, decisionFilter, debouncedSearch, dateFrom, dateTo, pageSize]);
 
   const fetchJobs = async () => {
     try {
@@ -76,6 +86,9 @@ const CVRecords = () => {
       const filters = { page, page_size: pageSize };
       if (jobFilter) filters.job_id = jobFilter;
       if (decisionFilter) filters.decision = decisionFilter;
+      if (debouncedSearch) filters.search = debouncedSearch;
+      if (dateFrom) filters.date_from = dateFrom;
+      if (dateTo) filters.date_to = dateTo;
       const response = await getCVRecords(filters);
       if (response.status === 'success') {
         setRecords(response.data || []);
@@ -211,6 +224,42 @@ const CVRecords = () => {
         </div>
       </div>
 
+      {/* Search + Date Filter Bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[180px] max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40 pointer-events-none" />
+          <Input
+            placeholder="Search name or email…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-8 h-9 text-sm bg-white/5 border-white/20 text-white placeholder:text-white/40 focus:border-violet-500/60"
+          />
+        </div>
+        <Input
+          type="date"
+          value={dateFrom}
+          onChange={e => { setDateFrom(e.target.value); }}
+          className="h-9 w-[140px] text-sm bg-white/5 border-white/20 text-white focus:border-violet-500/60"
+          title="From date"
+        />
+        <span className="text-white/40 text-xs">to</span>
+        <Input
+          type="date"
+          value={dateTo}
+          onChange={e => { setDateTo(e.target.value); }}
+          className="h-9 w-[140px] text-sm bg-white/5 border-white/20 text-white focus:border-violet-500/60"
+          title="To date"
+        />
+        {(search || dateFrom || dateTo) && (
+          <button
+            onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); }}
+            className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 px-2 py-1.5 rounded hover:bg-white/5 transition-colors"
+          >
+            <X className="h-3 w-3" />Clear
+          </button>
+        )}
+      </div>
+
       {/* Bulk Actions Bar */}
       {selectedIds.size > 0 && (
         <Card className="border-primary/50 bg-primary/5">
@@ -237,7 +286,7 @@ const CVRecords = () => {
             <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
             <p className="text-base sm:text-lg font-medium mb-2 text-white">No candidates yet</p>
             <p className="text-xs sm:text-sm text-white/60 px-4">
-              {jobFilter || decisionFilter ? 'No records match the selected filters.' : 'Process CVs to see candidate records here'}
+              {jobFilter || decisionFilter || debouncedSearch || dateFrom || dateTo ? 'No records match the selected filters.' : 'Process CVs to see candidate records here'}
             </p>
           </CardContent>
         </Card>

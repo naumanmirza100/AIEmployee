@@ -1762,7 +1762,7 @@ def view_parsed_cv(request, cv_id):
     try:
         cv_record = CVRecord.objects.get(id=cv_id)
         parsed_data = json.loads(cv_record.parsed_json) if cv_record.parsed_json else None
-        
+
         # Return JSON response for easy viewing
         return JsonResponse({
             'cv_record_id': cv_record.id,
@@ -1772,3 +1772,63 @@ def view_parsed_cv(request, cv_id):
         }, json_dumps_params={'indent': 2, 'ensure_ascii': False})
     except CVRecord.DoesNotExist:
         return JsonResponse({"error": "CV record not found"}, status=404)
+
+
+def candidate_application_status(request, token):
+    """
+    Public page for a candidate to track their application status.
+    No authentication required — accessed via unique token sent in confirmation email.
+    """
+    from recruitment_agent.models import JobApplication
+
+    try:
+        application = JobApplication.objects.select_related('job').get(access_token=token)
+    except JobApplication.DoesNotExist:
+        return render(request, 'recruitment_agent/application_status.html', {
+            'error': 'Invalid or expired tracking link. Please contact the recruiter.',
+            'invalid_token': True,
+        })
+
+    # Try to find linked CVRecord and its Interview
+    cv_record = None
+    interview = None
+    try:
+        cv_record = CVRecord.objects.filter(job_application=application).select_related('job_description').first()
+        if cv_record:
+            interview = Interview.objects.filter(cv_record=cv_record).order_by('-created_at').first()
+    except Exception:
+        pass
+
+    status_label = {
+        'pending': 'Under Review',
+        'reviewed': 'Reviewed',
+        'shortlisted': 'Shortlisted',
+        'rejected': 'Not Selected',
+    }.get(application.status, application.status.title())
+
+    status_color = {
+        'pending': 'blue',
+        'reviewed': 'yellow',
+        'shortlisted': 'green',
+        'rejected': 'red',
+    }.get(application.status, 'blue')
+
+    interview_status_label = None
+    if interview:
+        interview_status_label = {
+            'PENDING': 'Awaiting Your Slot Selection',
+            'SCHEDULED': 'Interview Scheduled',
+            'COMPLETED': 'Interview Completed',
+            'CANCELLED': 'Interview Cancelled',
+            'RESCHEDULED': 'Interview Rescheduled',
+        }.get(interview.status, interview.status)
+
+    return render(request, 'recruitment_agent/application_status.html', {
+        'application': application,
+        'job': application.job,
+        'cv_record': cv_record,
+        'interview': interview,
+        'status_label': status_label,
+        'status_color': status_color,
+        'interview_status_label': interview_status_label,
+    })

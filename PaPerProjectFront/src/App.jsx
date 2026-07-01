@@ -59,6 +59,8 @@ import OperationsAgentPage from '@/pages/OperationsAgentPage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
 import AiSdrAgentPage from '@/pages/AiSdrAgentPage';
 import JobApplicationPage from '@/pages/JobApplicationPage';
+import ApplicationTrackerPage from '@/pages/ApplicationTrackerPage';
+import CandidatePortalPage from '@/pages/CandidatePortalPage';
 import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
 import FrontlineEmbedFormPage from '@/pages/FrontlineEmbedFormPage';
@@ -140,6 +142,11 @@ import { useTranslation } from 'react-i18next';
             
             {/* Public job application (no auth) */}
             <Route path="/jobs/apply/:jobId" element={<JobApplicationPage />} />
+            {/* Public application tracker — candidate tracks status via magic link */}
+            <Route path="/track-application/:token" element={<ApplicationTrackerPage />} />
+            {/* Candidate portal — view all applications (email login or token) */}
+            <Route path="/candidate-portal" element={<CandidatePortalPage />} />
+            <Route path="/candidate-portal/:token" element={<CandidatePortalPage />} />
 
             {/* Recruitment Agent routes without header/footer */}
             <Route path="/recruitment" element={<Navigate to="/recruitment/dashboard" replace />} />

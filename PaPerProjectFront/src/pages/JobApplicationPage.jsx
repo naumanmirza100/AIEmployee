@@ -10,6 +10,7 @@ const JobApplicationPage = () => {
   const [jobLoading, setJobLoading] = useState(true);
   const [jobError, setJobError] = useState(null); // { code, message }
   const [submitted, setSubmitted] = useState(false);
+  const [trackingUrl, setTrackingUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [alreadyApplied, setAlreadyApplied] = useState(false);
@@ -49,9 +50,25 @@ const JobApplicationPage = () => {
     const e = {};
     if (!data.first_name.trim()) e.first_name = 'Required';
     if (!data.last_name.trim()) e.last_name = 'Required';
+
+    // Email — strict format check
     if (!data.email.trim()) e.email = 'Required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) e.email = 'Invalid email';
-    if (!data.phone.trim()) e.phone = 'Required';
+    else if (!/^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(data.email.trim()))
+      e.email = 'Please enter a valid email address (e.g. name@example.com)';
+
+    // Phone — must contain 7–15 digits (allows +, spaces, dashes, parentheses)
+    if (!data.phone.trim()) {
+      e.phone = 'Required';
+    } else {
+      const digits = data.phone.replace(/\D/g, '');
+      if (!/^\+?[\d\s\-().]+$/.test(data.phone.trim()))
+        e.phone = 'Phone number contains invalid characters';
+      else if (digits.length < 7)
+        e.phone = 'Phone number is too short (minimum 7 digits)';
+      else if (digits.length > 15)
+        e.phone = 'Phone number is too long (maximum 15 digits)';
+    }
+
     if (!data.education.trim()) e.education = 'Required';
     if (!data.salary_expectation.trim()) e.salary_expectation = 'Required';
     if (!data.previous_company.trim()) e.previous_company = 'Required';
@@ -109,6 +126,7 @@ const JobApplicationPage = () => {
       });
       const data = await res.json();
       if (data.status === 'success') {
+        setTrackingUrl(data.data?.tracking_url || '');
         setSubmitted(true);
       } else if (data.code === 'ALREADY_APPLIED') {
         setAlreadyApplied(true);
@@ -167,19 +185,36 @@ const JobApplicationPage = () => {
     return (
       <div className="min-h-screen flex items-center justify-center px-4" style={{ background: '#020308' }}>
         <div
-          className="w-full max-w-md rounded-2xl p-8 text-center"
+          className="w-full max-w-md rounded-2xl p-8 text-center space-y-5"
           style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(52,211,153,0.25)' }}
         >
-          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full" style={{ background: 'rgba(52,211,153,0.15)' }}>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full" style={{ background: 'rgba(52,211,153,0.15)' }}>
             <CheckCircle2 className="h-8 w-8 text-emerald-400" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Application Submitted!</h2>
-          <p className="text-white/60 text-sm mb-1">
-            Thank you, <span className="text-white font-medium">{form.first_name}</span>!
-          </p>
-          <p className="text-white/50 text-sm">
-            Your application for <span className="text-violet-300 font-medium">{job.title}</span> has been received. We'll be in touch soon.
-          </p>
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-2">Application Submitted!</h2>
+            <p className="text-white/60 text-sm mb-1">
+              Thank you, <span className="text-white font-medium">{form.first_name}</span>!
+            </p>
+            <p className="text-white/50 text-sm">
+              Your application for <span className="text-violet-300 font-medium">{job?.title}</span> has been received. We'll be in touch soon.
+            </p>
+          </div>
+
+          {trackingUrl && (
+            <div className="space-y-3">
+              <a
+                href={trackingUrl}
+                className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg,#6366f1,#4f46e5)' }}
+              >
+                📋 Track My Application
+              </a>
+              <p className="text-white/30 text-xs">
+                A confirmation email with this link has also been sent to your inbox.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     );
