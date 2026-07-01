@@ -1239,28 +1239,77 @@ def calendar_plan_week(request):
     """Generate an AI weekly calendar plan."""
     company_user = request.user
     week_start = request.data.get('week_start', timezone.now().strftime('%Y-%m-%d'))
+    include_past_tasks = bool(request.data.get('include_past_tasks', False))
 
-    meetings = [
-        {
-            'id': m.id, 'title': m.title,
-            'scheduled_at': m.scheduled_at.isoformat(),
-            'duration_minutes': m.duration_minutes,
-            'status': m.status,
-        }
-        for m in ExecutiveMeeting.objects.filter(
-            organizer=company_user,
-            scheduled_at__date__gte=week_start,
-            status__in=['scheduled', 'in_progress'],
-        )[:30]
-    ]
+    from datetime import date as _date, timedelta as _td
+    try:
+        _week_start_date = datetime.strptime(week_start, '%Y-%m-%d').date()
+    except ValueError:
+        _week_start_date = timezone.now().date()
+    _week_end_date = _week_start_date + _td(days=6)
 
-    tasks = [_serialize_task(t) for t in ExecutiveTask.objects.filter(
+    meetings = []
+    for m in ExecutiveMeeting.objects.filter(
+        organizer=company_user,
+        status__in=['scheduled', 'in_progress'],
+    ):
+        # Convert to local date using the meeting's stored datetime
+        local_date = timezone.localtime(m.scheduled_at).date() if timezone.is_aware(m.scheduled_at) else m.scheduled_at.date()
+        if _week_start_date <= local_date <= _week_end_date:
+            meetings.append({
+                'id': m.id, 'title': m.title,
+                'scheduled_at': local_date.isoformat() + 'T' + timezone.localtime(m.scheduled_at).strftime('%H:%M:%S'),
+                'duration_minutes': m.duration_minutes,
+                'status': m.status,
+            })
+
+    tasks_qs = ExecutiveTask.objects.filter(
         company_user=company_user, status__in=['todo', 'in_progress']
-    )[:30]]
+    )
+    if include_past_tasks:
+        # Past + this week only — never show future (next week+) tasks
+        tasks_qs = tasks_qs.filter(
+            models.Q(due_date__isnull=True) |
+            models.Q(due_date__lte=_week_end_date)
+        )
+    else:
+        # Only tasks due within this week or with no due date
+        tasks_qs = tasks_qs.filter(
+            models.Q(due_date__isnull=True) |
+            models.Q(due_date__gte=_week_start_date, due_date__lte=_week_end_date)
+        )
+    tasks = [_serialize_task(t) for t in tasks_qs[:30]]
+
+    logger.info("calendar_plan_week: user=%s week_start=%s meetings=%d tasks=%d include_past=%s",
+                company_user.id, week_start, len(meetings), len(tasks), include_past_tasks)
+
+    # Also include meetings where user is a participant (not just organizer)
+    participant_meeting_ids = set(m['id'] for m in meetings)
+    from meeting_agent.models import ExecutiveMeetingParticipant as _EMP
+    for p in _EMP.objects.select_related('meeting').filter(
+        company_user=company_user,
+        meeting__status__in=['scheduled', 'in_progress'],
+    ):
+        m = p.meeting
+        if m.id not in participant_meeting_ids:
+            local_date = timezone.localtime(m.scheduled_at).date() if timezone.is_aware(m.scheduled_at) else m.scheduled_at.date()
+            if _week_start_date <= local_date <= _week_end_date:
+                meetings.append({
+                    'id': m.id, 'title': m.title,
+                    'scheduled_at': local_date.isoformat() + 'T' + timezone.localtime(m.scheduled_at).strftime('%H:%M:%S'),
+                    'duration_minutes': m.duration_minutes,
+                    'status': m.status,
+                })
+                participant_meeting_ids.add(m.id)
+
+    logger.info("calendar_plan_week: after participant merge meetings=%d", len(meetings))
 
     try:
         agent = _get_agent('calendar_planner', company_user)
         plan = agent.plan_week(meetings, tasks, week_start)
+        logger.info("calendar_plan_week: plan keys=%s daily_plans=%s",
+                    list(plan.keys()) if plan else None,
+                    len(plan.get('daily_plans', [])) if plan else 0)
         return Response({'status': 'success', 'plan': plan})
     except KeyServiceError:
         raise

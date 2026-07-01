@@ -63,7 +63,7 @@ const execMeetingService = {
   prioritizeTasks: ()           => companyApi.post(`${BASE}/tasks/ai/prioritize`, {}),
 
   // Calendar
-  planWeek:       ()        => companyApi.post(`${BASE}/calendar/plan-week`, {}),
+  planWeek:       (opts = {}) => companyApi.post(`${BASE}/calendar/plan-week`, opts),
   getFreeSlots:   (payload) => companyApi.get(`${BASE}/calendar/free-slots`, { params: payload }),
 
   // Documents

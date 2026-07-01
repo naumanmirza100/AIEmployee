@@ -122,7 +122,8 @@
       "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python manage.py check 2>&1 | Where-Object { $_ -match \"System check|error|Error|issue|warning\" } | Select-Object -Last 5)",
       "Bash(grep -E \"\\\\.py$|\\\\.html$\")",
       "Bash(python manage.py makemigrations meeting_agent --name remove_location_from_executivemeeting)",
-      "Bash(python manage.py migrate meeting_agent)"
+      "Bash(python manage.py migrate meeting_agent)",
+      "Bash(python manage.py shell -c ' *)"
     ]
   }
 }

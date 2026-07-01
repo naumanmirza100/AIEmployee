@@ -948,6 +948,20 @@ const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   );
 };
 
+// Display ISO datetime string as UTC — avoids browser timezone shifting the date
+const fmtUtc = (isoStr) => {
+  if (!isoStr) return '—';
+  const [datePart, timePart] = isoStr.replace('Z', '').replace('+00:00', '').split('T');
+  if (!datePart) return '—';
+  const [y, mo, d] = datePart.split('-');
+  if (!timePart) return `${mo}/${d}/${y}`;
+  const [h, m] = timePart.split(':');
+  const hour = parseInt(h, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const h12 = hour % 12 || 12;
+  return `${mo}/${d}/${y}, ${h12}:${m} ${ampm}`;
+};
+
 // ── Main dashboard ──────────────────────────────────────────────────────────
 const ExecMeetingDashboard = () => {
   const { toast } = useToast();
@@ -988,6 +1002,8 @@ const ExecMeetingDashboard = () => {
   // Calendar plan
   const [weekPlan, setWeekPlan] = useState(null);
   const [weekPlanLoading, setWeekPlanLoading] = useState(false);
+  const [includePastTasks, setIncludePastTasks] = useState(false);
+  const [showPastTasksConfirm, setShowPastTasksConfirm] = useState(false);
 
   // Participants
   const [participantsOpenId, setParticipantsOpenId] = useState(null);
@@ -1465,7 +1481,7 @@ const ExecMeetingDashboard = () => {
             <div key={m.id} className="flex items-center justify-between py-2.5" style={ROW_STYLE}>
               <div className="min-w-0">
                 <p className="text-white text-sm font-medium truncate">{m.title}</p>
-                <p className="text-white/40 text-xs">{m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : '—'}</p>
+                <p className="text-white/40 text-xs">{fmtUtc(m.scheduled_at)}</p>
               </div>
               {statusBadge(m.status)}
             </div>
@@ -1506,7 +1522,7 @@ const ExecMeetingDashboard = () => {
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{m.title}</p>
                     <p className="text-white/40 text-xs">
-                      {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : '—'}
+                      {fmtUtc(m.scheduled_at)}
                       {m.duration_minutes ? ` · ${m.duration_minutes}min` : ''}
                     </p>
                     {m.meeting_link && (
@@ -1842,8 +1858,8 @@ const ExecMeetingDashboard = () => {
 
   const calendarPanel = () => (
     <div className="space-y-5">
-      {/* Generate button */}
-      <div className="rounded-2xl p-5 space-y-3" style={CARD_STYLE}>
+      {/* Generate button + settings */}
+      <div className="rounded-2xl p-5 space-y-4" style={CARD_STYLE}>
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-white font-semibold flex items-center gap-2">
@@ -1856,11 +1872,20 @@ const ExecMeetingDashboard = () => {
           <Button onClick={async () => {
             setWeekPlanLoading(true);
             try {
-              const res = await execMeetingService.planWeek();
-              setWeekPlan(res.plan || res);
-              toast({ title: 'Week plan ready!' });
+              const today = new Date();
+              const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+              const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart });
+              console.log('[WeekPlan] response:', res);
+              const plan = res.plan || res;
+              setWeekPlan(plan);
+              if (!plan || (!plan.daily_plans?.length && !plan.weekly_summary)) {
+                toast({ title: 'Plan generated but empty', description: 'No meetings or tasks found for this week. Add some first!', variant: 'destructive' });
+              } else {
+                toast({ title: 'Week plan ready!' });
+              }
             } catch (err) {
-              toast({ title: 'Planning failed', description: err.message, variant: 'destructive' });
+              console.error('[WeekPlan] error:', err);
+              toast({ title: 'Planning failed', description: err?.data?.message || err.message || 'Unknown error', variant: 'destructive' });
             } finally {
               setWeekPlanLoading(false);
             }
@@ -1869,11 +1894,171 @@ const ExecMeetingDashboard = () => {
             {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
           </Button>
         </div>
+
+        {/* Settings row */}
+        <div className="flex items-center justify-between rounded-xl px-4 py-3 bg-white/5 border border-white/10">
+          <div>
+            <p className="text-white/80 text-sm font-medium">Include overdue / older tasks</p>
+            <p className="text-white/40 text-xs mt-0.5">
+              {includePastTasks
+                ? 'All todo & in-progress tasks included regardless of due date'
+                : 'Only tasks due this week or later are included'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (!includePastTasks) {
+                setShowPastTasksConfirm(true);
+              } else {
+                setIncludePastTasks(false);
+              }
+            }}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+              includePastTasks ? 'bg-violet-600' : 'bg-white/20'
+            }`}
+          >
+            <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+              includePastTasks ? 'translate-x-5' : 'translate-x-0'
+            }`} />
+          </button>
+        </div>
       </div>
 
       {/* Plan results */}
-      {weekPlan && (
+      {weekPlan && !weekPlan.daily_plans?.length && !weekPlan.weekly_summary && (
+        <div className="rounded-2xl p-8 text-center" style={CARD_STYLE}>
+          <CalendarDays className="h-10 w-10 text-white/20 mx-auto mb-3" />
+          <p className="text-white/50 text-sm">No meetings or tasks found for this week.</p>
+          <p className="text-white/30 text-xs mt-1">Schedule some meetings or add tasks first, then try again.</p>
+        </div>
+      )}
+      {weekPlan && (weekPlan.daily_plans?.length > 0 || weekPlan.weekly_summary) && (
         <div className="space-y-4">
+          {/* Download button */}
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10 gap-2"
+              onClick={() => {
+                const weekLabel = weekPlan.week_start || '';
+                const lines = [];
+                lines.push(`AI EXECUTIVE WEEKLY PLAN${weekLabel ? ' — ' + weekLabel : ''}`);
+                lines.push('='.repeat(60));
+                if (weekPlan.weekly_summary) {
+                  lines.push('');
+                  lines.push('SUMMARY');
+                  lines.push(weekPlan.weekly_summary);
+                }
+                if (weekPlan.conflicts_detected?.length) {
+                  lines.push('');
+                  lines.push('CONFLICTS DETECTED');
+                  weekPlan.conflicts_detected.forEach(c => lines.push('  • ' + c));
+                }
+                if (weekPlan.recommendations?.length) {
+                  lines.push('');
+                  lines.push('RECOMMENDATIONS');
+                  weekPlan.recommendations.forEach(r => lines.push('  › ' + r));
+                }
+                (weekPlan.daily_plans || []).forEach(day => {
+                  lines.push('');
+                  lines.push('-'.repeat(60));
+                  lines.push(`${day.day_name}  ${day.date}${day.workload_level ? '  [' + day.workload_level.toUpperCase() + ']' : ''}`);
+                  lines.push('-'.repeat(60));
+                  if (day.scheduled_meetings?.length) {
+                    lines.push('MEETINGS');
+                    day.scheduled_meetings.forEach(m => lines.push('  • ' + (typeof m === 'string' ? m : m.title)));
+                  }
+                  if (day.suggested_task_slots?.length) {
+                    lines.push('SUGGESTED TASK SLOTS');
+                    day.suggested_task_slots.forEach(s => lines.push(`  ${s.time}  ${s.task}${s.duration_minutes ? '  ('+s.duration_minutes+'min)' : ''}`));
+                  }
+                  if (day.focus_blocks?.length) {
+                    lines.push('FOCUS BLOCKS');
+                    day.focus_blocks.forEach(b => lines.push(`  ${b.start}–${b.end}  ${b.label}`));
+                  }
+                });
+                lines.push('');
+                lines.push('='.repeat(60));
+                lines.push('Generated by AI Executive Meeting Assistant');
+
+                const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `weekly-plan${weekLabel ? '-' + weekLabel : ''}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                // Open print dialog for PDF
+                const printWin = window.open('', '_blank', 'width=800,height=900');
+                printWin.document.write(`<!DOCTYPE html><html><head><title>Weekly Plan${weekLabel ? ' — ' + weekLabel : ''}</title>
+                <style>
+                  body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 32px; color: #111; background: #fff; }
+                  h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; color: #1e1b4b; }
+                  .subtitle { font-size: 13px; color: #6b7280; margin-bottom: 24px; }
+                  .summary-box { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; }
+                  .summary-box p { margin: 0; font-size: 14px; color: #374151; line-height: 1.6; }
+                  .conflicts { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; }
+                  .conflicts .label { color: #ef4444; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+                  .recs { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 12px 18px; margin-bottom: 20px; }
+                  .recs .label { color: #7c3aed; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+                  .recs li, .conflicts li { font-size: 13px; color: #374151; margin-bottom: 3px; }
+                  .day-card { border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 18px; overflow: hidden; page-break-inside: avoid; }
+                  .day-header { display: flex; align-items: center; justify-content: space-between; background: #f9fafb; padding: 12px 18px; border-bottom: 1px solid #e5e7eb; }
+                  .day-name { font-size: 16px; font-weight: 700; color: #1e1b4b; }
+                  .day-date { font-size: 12px; color: #6b7280; margin-top: 2px; }
+                  .workload { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+                  .workload.light { background: #dcfce7; color: #166534; }
+                  .workload.moderate { background: #fef9c3; color: #854d0e; }
+                  .workload.heavy { background: #fee2e2; color: #991b1b; }
+                  .day-body { padding: 14px 18px; }
+                  .section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #9ca3af; margin: 10px 0 6px; }
+                  .row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; font-size: 13px; color: #374151; }
+                  .time { font-family: monospace; color: #7c3aed; min-width: 44px; }
+                  .dur { color: #9ca3af; font-size: 12px; margin-left: auto; }
+                  .footer { margin-top: 32px; text-align: center; font-size: 11px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 14px; }
+                  @media print { body { padding: 20px; } }
+                </style></head><body>`);
+                printWin.document.write(`<h1>AI Executive Weekly Plan</h1>`);
+                printWin.document.write(`<p class="subtitle">${weekLabel ? 'Week starting ' + weekLabel : ''} &nbsp;·&nbsp; Generated by AI Executive Meeting Assistant</p>`);
+                if (weekPlan.weekly_summary) {
+                  printWin.document.write(`<div class="summary-box"><p>${weekPlan.weekly_summary}</p></div>`);
+                }
+                if (weekPlan.conflicts_detected?.length) {
+                  printWin.document.write(`<div class="conflicts"><div class="label">Conflicts Detected</div><ul>${weekPlan.conflicts_detected.map(c=>`<li>${c}</li>`).join('')}</ul></div>`);
+                }
+                if (weekPlan.recommendations?.length) {
+                  printWin.document.write(`<div class="recs"><div class="label">Recommendations</div><ul>${weekPlan.recommendations.map(r=>`<li>${r}</li>`).join('')}</ul></div>`);
+                }
+                (weekPlan.daily_plans || []).forEach(day => {
+                  const wl = day.workload_level || 'moderate';
+                  printWin.document.write(`<div class="day-card"><div class="day-header"><div><div class="day-name">${day.day_name}</div><div class="day-date">${day.date}</div></div><span class="workload ${wl}">${wl.charAt(0).toUpperCase()+wl.slice(1)}</span></div><div class="day-body">`);
+                  if (day.scheduled_meetings?.length) {
+                    printWin.document.write(`<div class="section-label">Meetings</div>`);
+                    day.scheduled_meetings.forEach(m => printWin.document.write(`<div class="row">📅 ${typeof m==='string'?m:m.title}</div>`));
+                  }
+                  if (day.suggested_task_slots?.length) {
+                    printWin.document.write(`<div class="section-label">Suggested Task Slots</div>`);
+                    day.suggested_task_slots.forEach(s => printWin.document.write(`<div class="row"><span class="time">${s.time}</span>${s.task}${s.duration_minutes?`<span class="dur">${s.duration_minutes}min</span>`:''}</div>`));
+                  }
+                  if (day.focus_blocks?.length) {
+                    printWin.document.write(`<div class="section-label">Focus Blocks</div>`);
+                    day.focus_blocks.forEach(b => printWin.document.write(`<div class="row"><span class="time">${b.start}–${b.end}</span>${b.label}</div>`));
+                  }
+                  printWin.document.write(`</div></div>`);
+                });
+                printWin.document.write(`<div class="footer">AI Executive Meeting Assistant &nbsp;·&nbsp; ${weekLabel}</div></body></html>`);
+                printWin.document.close();
+                printWin.focus();
+                setTimeout(() => { printWin.print(); }, 400);
+              }}
+            >
+              <Download className="h-4 w-4" /> Download PDF
+            </Button>
+          </div>
+
           {/* Summary + recommendations */}
           {(weekPlan.weekly_summary || weekPlan.recommendations?.length > 0) && (
             <div className="rounded-2xl p-5 space-y-3" style={CARD_STYLE}>
@@ -1900,7 +2085,11 @@ const ExecMeetingDashboard = () => {
           )}
 
           {/* Daily plan cards */}
-          {Array.isArray(weekPlan.daily_plans) && weekPlan.daily_plans.map((day, i) => (
+          {Array.isArray(weekPlan.daily_plans) && weekPlan.daily_plans.filter(day =>
+            day.scheduled_meetings?.length > 0 ||
+            day.suggested_task_slots?.length > 0 ||
+            day.focus_blocks?.length > 0
+          ).map((day, i) => (
             <div key={i} className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
               <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
                 <div className="flex items-center gap-3">
@@ -2017,7 +2206,7 @@ const ExecMeetingDashboard = () => {
                 <SelectItem value="none">— None / manual topic —</SelectItem>
                 {Array.isArray(meetings) && meetings.map(m => (
                   <SelectItem key={m.id} value={String(m.id)}>
-                    {m.title}{m.scheduled_at ? ` · ${new Date(m.scheduled_at).toLocaleDateString()}` : ''}
+                    {m.title}{m.scheduled_at ? ` · ${fmtUtc(m.scheduled_at)}` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -2282,6 +2471,38 @@ const ExecMeetingDashboard = () => {
         onClose={() => setEditingMeeting(null)}
         onUpdated={() => { loadMeetings(); loadStats(); }}
       />
+
+      {/* Past tasks confirm dialog */}
+      <Dialog open={showPastTasksConfirm} onOpenChange={open => { if (!open) setShowPastTasksConfirm(false); }}>
+        <DialogContent className="max-w-sm w-full bg-[#0d0b1f] border-white/10 text-white">
+          <div className="flex flex-col items-center gap-4 py-2">
+            <div className="w-14 h-14 rounded-full bg-violet-500/10 flex items-center justify-center">
+              <CalendarDays className="h-7 w-7 text-violet-400" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-semibold text-white mb-1">Include older tasks?</h3>
+              <p className="text-white/50 text-sm">
+                This will include all pending and in-progress tasks from previous weeks and months in your weekly plan, not just tasks due this week.
+              </p>
+            </div>
+            <div className="flex gap-3 w-full mt-2">
+              <Button
+                variant="outline"
+                className="flex-1 border-white/10 text-white/60 hover:bg-white/5"
+                onClick={() => setShowPastTasksConfirm(false)}
+              >
+                No, keep default
+              </Button>
+              <Button
+                className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+                onClick={() => { setIncludePastTasks(true); setShowPastTasksConfirm(false); }}
+              >
+                Yes, include all
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Task delete confirm dialog */}
       <Dialog open={!!confirmDeleteTaskId} onOpenChange={open => { if (!open) setConfirmDeleteTaskId(null); }}>
