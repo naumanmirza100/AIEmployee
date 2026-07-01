@@ -18,8 +18,12 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Shield, BarChart3, AlertOctagon, History, ChevronRight, RefreshCw,
-  CheckCircle,
+  CheckCircle, FilePlus, EyeOff, ClipboardList,
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import frontlineAgentService from '@/services/frontlineAgentService';
 
 
@@ -64,6 +68,11 @@ export default function FrontlineInsightsPanel() {
   const [dlq, setDlq] = useState({ rows: [], total: 0, loading: true });
   const [audit, setAudit] = useState({ rows: [], loading: true });
   const [resolvingId, setResolvingId] = useState(null);
+  // Meeting action items inbox — aggregated across every meeting the company
+  // has transcribed. `total` covers everything matching the query even if we
+  // sliced to the top-N shown here; the "and N more" badge uses the delta.
+  const [actionItems, setActionItems] = useState({ rows: [], total: 0, loading: true });
+  const [toggleBusyKey, setToggleBusyKey] = useState(null);
 
   const loadSla = async () => {
     setSla((s) => ({ ...s, loading: true }));
@@ -110,7 +119,90 @@ export default function FrontlineInsightsPanel() {
     }
   };
 
-  useEffect(() => { loadSla(); loadKb(); loadDlq(); loadAudit(); }, []);
+  const loadActionItems = async () => {
+    setActionItems((s) => ({ ...s, loading: true }));
+    try {
+      const res = await frontlineAgentService.listMeetingActionItems({
+        openOnly: true, windowDays: 90, limit: 5,
+      });
+      setActionItems({
+        rows: res?.data || [],
+        total: res?.total || 0,
+        loading: false,
+      });
+    } catch (e) {
+      setActionItems({ rows: [], total: 0, loading: false });
+      console.warn('Action items tile load failed:', e.message);
+    }
+  };
+
+  const handleToggleActionItem = async (row) => {
+    const key = `${row.meeting_id}:${row.item_index}`;
+    setToggleBusyKey(key);
+    try {
+      await frontlineAgentService.toggleMeetingActionItem({
+        meetingId: row.meeting_id,
+        itemIndex: row.item_index,
+        done: !row.done,
+      });
+      // Optimistic-ish: refetch. The tile is small enough (5 rows) that a
+      // full refresh feels instant and keeps aging/order consistent.
+      loadActionItems();
+    } catch (e) {
+      toast({ title: 'Failed to update', description: e.message, variant: 'destructive' });
+    } finally {
+      setToggleBusyKey(null);
+    }
+  };
+
+  useEffect(() => { loadSla(); loadKb(); loadDlq(); loadAudit(); loadActionItems(); }, []);
+
+  // Which KB gap row is currently mid-dismiss — used to disable its
+  // buttons + surface a small spinner. Keying by `question` because rollup
+  // rows don't have DB ids.
+  const [kbDismissingQ, setKbDismissingQ] = useState(null);
+
+  const handleDismissKbGap = async (item, snoozeHours) => {
+    setKbDismissingQ(item.question);
+    try {
+      await frontlineAgentService.dismissKbCoverageGap({
+        question: item.question,
+        snoozeHours,
+        reason: snoozeHours > 0 ? 'wip' : 'covered',
+      });
+      toast({
+        title: snoozeHours > 0
+          ? `Snoozed for ${snoozeHours >= 24 ? `${Math.round(snoozeHours / 24)}d` : `${snoozeHours}h`}`
+          : 'Gap dismissed',
+      });
+      loadKb(); // refresh — dismissed row disappears
+    } catch (e) {
+      toast({ title: 'Failed to dismiss', description: e.message, variant: 'destructive' });
+    } finally {
+      setKbDismissingQ(null);
+    }
+  };
+
+  // Take the agent to the Documents tab to author a KB doc that answers
+  // this gap. The dashboard uses hash-based tab routing (?tab=documents
+  // reads on mount), so a query param is enough — we also copy the
+  // question text so the agent can paste it as the title or into the
+  // document body. Clipboard write is best-effort.
+  const handleDraftKbDoc = async (item) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(item.question);
+      }
+    } catch { /* clipboard blocked — not fatal */ }
+    toast({
+      title: 'Question copied',
+      description: 'Paste it as the doc title after uploading.',
+    });
+    // Give the toast a beat to render before the tab swap wipes state.
+    setTimeout(() => {
+      window.location.hash = 'documents';
+    }, 80);
+  };
 
   const handleResolveDlq = async (row) => {
     setResolvingId(row.id);
@@ -237,20 +329,75 @@ export default function FrontlineInsightsPanel() {
               <div className="text-xs text-white/55">
                 Top questions retrieval struggled with — add KB content for these.
               </div>
-              <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                {kb.data.items.slice(0, 5).map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-2 text-xs rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1">
-                    <span className="text-white/80 truncate flex-1" title={item.question}>
-                      {item.question}
-                    </span>
-                    <Badge variant="outline" className="text-[10px] shrink-0">
-                      {item.kb_gap_count + item.thumbs_down_count} hits
-                    </Badge>
-                  </div>
-                ))}
+              <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+                {kb.data.items.slice(0, 5).map((item, idx) => {
+                  const busy = kbDismissingQ === item.question;
+                  return (
+                    <div key={idx} className="group flex items-center gap-2 text-xs rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1">
+                      <span className="text-white/80 truncate flex-1" title={item.question}>
+                        {item.question}
+                      </span>
+                      <Badge variant="outline" className="text-[10px] shrink-0">
+                        {item.kb_gap_count + item.thumbs_down_count} hits
+                      </Badge>
+                      {/* Draft KB doc — copies question to clipboard and takes
+                          the user to the Documents tab so they can upload
+                          something that closes the gap. */}
+                      <Button
+                        variant="ghost" size="sm"
+                        className="h-6 w-6 p-0 text-white/40 hover:text-emerald-300 shrink-0"
+                        onClick={() => handleDraftKbDoc(item)}
+                        title="Draft a KB doc that answers this — copies the question + jumps to Documents"
+                        disabled={busy}
+                      >
+                        <FilePlus className="h-3.5 w-3.5" />
+                      </Button>
+                      {/* Dismiss — dropdown so the agent can pick permanent
+                          vs a snooze window. Snoozed rows re-appear on their
+                          own once the timer expires. */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost" size="sm"
+                            className="h-6 w-6 p-0 text-white/40 hover:text-rose-300 shrink-0"
+                            title="Hide this gap"
+                            disabled={busy}
+                          >
+                            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <EyeOff className="h-3.5 w-3.5" />}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-52">
+                          <DropdownMenuLabel className="text-xs">Hide this gap</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => handleDismissKbGap(item, 24)}>
+                            Snooze 24 hours
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDismissKbGap(item, 24 * 7)}>
+                            Snooze 7 days (WIP)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDismissKbGap(item, 24 * 30)}>
+                            Snooze 30 days
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => handleDismissKbGap(item, 0)}
+                            className="text-rose-400 focus:text-rose-300"
+                          >
+                            Dismiss permanently
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="text-[10px] text-white/40 pt-1">
-                {kb.data.total_kb_gaps} gap tickets · {kb.data.total_thumbs_down} thumbs-down
+              <div className="text-[10px] text-white/40 pt-1 flex items-center justify-between">
+                <span>{kb.data.total_kb_gaps} gap tickets · {kb.data.total_thumbs_down} thumbs-down</span>
+                {kb.data.dismissed_count > 0 && (
+                  <span title="Rows currently hidden by dismissals/snoozes">
+                    {kb.data.dismissed_count} hidden
+                  </span>
+                )}
               </div>
             </>
           )}
@@ -302,6 +449,73 @@ export default function FrontlineInsightsPanel() {
               {dlq.total > dlq.rows.length && (
                 <div className="text-[10px] text-white/40 pt-1">
                   Showing {dlq.rows.length} of {dlq.total} total.
+                </div>
+              )}
+            </>
+          )}
+        </TileShell>
+
+        {/* Meeting action-items inbox — surfaces items extracted from meeting
+            transcripts that don't have a "done" flip yet. Aging is measured
+            from the meeting date so the oldest-outstanding rise to the top. */}
+        <TileShell
+          icon={ClipboardList} title="Meeting action items"
+          color="#818cf8" accent="rgba(129,140,248,0.15)"
+          isLoading={actionItems.loading} onRefresh={loadActionItems}
+        >
+          {actionItems.rows.length === 0 ? (
+            <div className="flex items-center gap-2 text-emerald-300/80 text-sm">
+              <CheckCircle className="h-4 w-4" />
+              No open action items from meeting transcripts.
+            </div>
+          ) : (
+            <>
+              <div className="text-xs text-white/55">
+                Open items extracted from meeting transcripts — oldest first.
+              </div>
+              <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                {actionItems.rows.map((row) => {
+                  const busyKey = `${row.meeting_id}:${row.item_index}`;
+                  const busy = toggleBusyKey === busyKey;
+                  const aged = (row.aging_days ?? 0) >= 14; // 2+ weeks = stale
+                  return (
+                    <div key={busyKey}
+                         className="group flex items-center gap-2 text-xs rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1">
+                      <Button
+                        variant="ghost" size="sm"
+                        className="h-6 w-6 p-0 shrink-0"
+                        onClick={() => handleToggleActionItem(row)}
+                        disabled={busy}
+                        title={row.done ? 'Mark as open' : 'Mark as done'}
+                      >
+                        {busy
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : <CheckCircle className={`h-3.5 w-3.5 ${row.done ? 'text-emerald-400' : 'text-white/30 hover:text-emerald-300'}`} />}
+                      </Button>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white/85 truncate" title={row.text}>
+                          {row.text}
+                        </div>
+                        <div className="text-[10px] text-white/45 truncate">
+                          {row.meeting_title}
+                          {row.owner_name && <> · <span className="text-white/60">{row.owner_name}</span></>}
+                          {row.due_date && <> · due {row.due_date}</>}
+                          {row.ticket_id && <> · #T{row.ticket_id}</>}
+                        </div>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] shrink-0 ${aged ? 'text-rose-300 border-rose-500/40 bg-rose-500/10' : ''}`}
+                      >
+                        {row.aging_days == null ? '—' : `${row.aging_days}d`}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+              {actionItems.total > actionItems.rows.length && (
+                <div className="text-[10px] text-white/40 pt-1">
+                  Showing {actionItems.rows.length} of {actionItems.total} open items.
                 </div>
               )}
             </>

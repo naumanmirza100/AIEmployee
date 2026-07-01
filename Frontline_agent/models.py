@@ -856,6 +856,74 @@ class KBFeedback(models.Model):
         return f"KB feedback: {'helpful' if self.helpful else 'not helpful'} ({self.question[:40]}...)"
 
 
+class KBCoverageDismissal(models.Model):
+    """Agent-dismissed rows on the "Knowledge gaps" dashboard tile.
+
+    The KB coverage report rolls up (a) ``kb_gap`` tickets and (b) thumbs-down
+    ``KBFeedback`` entries under a normalised-question key so the top gaps
+    surface. This model lets a company mark a specific question as
+    "handled elsewhere" (already covered by an existing doc, deemed
+    out-of-scope, spam / test question, etc.) so it stops cluttering the
+    report.
+
+    Dismissals are **company-wide** rather than per-user: dashboards are
+    shared by triagers, and the gap either matters to the team or doesn't.
+
+    Two modes:
+      * **permanent** — ``snooze_until`` is null. The row is hidden until an
+        admin explicitly un-dismisses it (out of scope for this iteration —
+        UI just doesn't offer an "un-dismiss" button yet).
+      * **snooze** — ``snooze_until`` set to a future timestamp. The row
+        reappears once the report is fetched after that time; useful for
+        "we're writing the doc this sprint, hide it for 7 days".
+
+    Uniqueness is (company, question_key), so retrying the same dismiss
+    just updates the snooze — no orphan duplicates. `question_key` is a
+    lowercased, whitespace-collapsed prefix of the question text (same
+    normalisation the coverage report uses) — NOT a hash — so we can debug
+    what an entry corresponds to without joining anywhere.
+    """
+
+    company = models.ForeignKey(
+        'core.Company', on_delete=models.CASCADE,
+        related_name='frontline_kb_coverage_dismissals',
+    )
+    question_key = models.CharField(
+        max_length=120,
+        help_text="Normalised question text used for rollup deduplication.",
+    )
+    question_display = models.CharField(
+        max_length=240, blank=True,
+        help_text="Original-case question for display; may be longer than the key.",
+    )
+    dismissed_by = models.ForeignKey(
+        'core.CompanyUser', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='frontline_kb_dismissals',
+    )
+    reason = models.CharField(
+        max_length=32, blank=True,
+        help_text="Optional short code: 'covered' | 'off_topic' | 'spam' | 'wip' | ''",
+    )
+    dismissed_at = models.DateTimeField(auto_now_add=True)
+    snooze_until = models.DateTimeField(
+        null=True, blank=True,
+        help_text="If set and in the past, this dismissal is expired and the "
+                  "gap will reappear on the next report fetch.",
+    )
+
+    class Meta:
+        app_label = 'Frontline_agent'
+        ordering = ['-dismissed_at']
+        unique_together = [('company', 'question_key')]
+        indexes = [
+            models.Index(fields=['company', 'question_key']),
+            models.Index(fields=['company', 'snooze_until']),
+        ]
+
+    def __str__(self):
+        return f"KB dismiss: {self.question_key[:40]} ({self.company_id})"
+
+
 class FrontlineNotificationPreferences(models.Model):
     """Per-company-user notification preferences. Respect user choice, less spam."""
     company_user = models.OneToOneField(
