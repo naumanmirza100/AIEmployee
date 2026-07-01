@@ -45,6 +45,7 @@ from Frontline_agent.models import (
     Contact, FrontlineAuditLog,
     TicketMacro, FrontlineDeadLetter, TicketSatisfaction,
     TicketLink, ContactNote,
+    KBCoverageDismissal,
 )
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Frontline_agent.frontline_agent import FrontlineAgent
@@ -4006,6 +4007,124 @@ def extract_meeting_action_items(request, meeting_id):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# ============================================================================
+# Meeting action-items inbox (M-A1)
+#
+# Meeting transcripts get LLM-extracted into `FrontlineMeeting.action_items`
+# (a JSON array of `{text, owner_name, due_date, ticket_id?, done?}`). Prior
+# to this endpoint, once items were extracted they had nowhere to be seen or
+# managed — hence the "no inbox for extracted items" gap. This aggregates
+# them across every meeting in the company so managers can see the backlog.
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_meeting_action_items(request):
+    """Cross-meeting inbox of extracted action items.
+
+    Query params:
+      - open_only:   '1' (default) → hide items with `done=true`.
+      - window_days: how far back to look. Default 90, cap 365.
+      - owner_name:  case-insensitive contains match against `owner_name`.
+      - limit:       max items returned (default 50, cap 200).
+
+    Each returned entry preserves the source (meeting_id + item_index) so
+    the toggle-done endpoint below can address it back.
+    """
+    company = request.user.company
+    try:
+        window_days = max(1, min(int(request.GET.get('window_days') or 90), 365))
+    except ValueError:
+        window_days = 90
+    try:
+        limit = max(1, min(int(request.GET.get('limit') or 50), 200))
+    except ValueError:
+        limit = 50
+    open_only = request.GET.get('open_only', '1') != '0'
+    owner_filter = (request.GET.get('owner_name') or '').strip().lower()
+
+    cutoff = timezone.now() - timedelta(days=window_days)
+    meetings = (
+        FrontlineMeeting.objects
+        .filter(company=company, scheduled_at__gte=cutoff)
+        .exclude(action_items=[])
+        .order_by('-scheduled_at')
+        .only('id', 'title', 'scheduled_at', 'action_items', 'organizer_id')
+    )
+
+    rows = []
+    now = timezone.now()
+    for m in meetings:
+        for idx, it in enumerate(m.action_items or []):
+            if not isinstance(it, dict) or not it.get('text'):
+                continue
+            done = bool(it.get('done'))
+            if open_only and done:
+                continue
+            owner = (it.get('owner_name') or '') or ''
+            if owner_filter and owner_filter not in owner.lower():
+                continue
+            # Aging = days since the meeting happened (proxy for "how long
+            # this item has been sitting undone"). If done, we return it as
+            # closed_at fallback via the meeting date — we don't track the
+            # actual completion timestamp for scope.
+            aging_days = None
+            if m.scheduled_at:
+                aging_days = max(0, (now - m.scheduled_at).days)
+            rows.append({
+                'meeting_id': m.id,
+                'meeting_title': m.title,
+                'meeting_date': m.scheduled_at.isoformat() if m.scheduled_at else None,
+                'item_index': idx,
+                'text': it.get('text'),
+                'owner_name': it.get('owner_name'),
+                'due_date': it.get('due_date'),
+                'ticket_id': it.get('ticket_id'),
+                'done': done,
+                'aging_days': aging_days,
+            })
+
+    # Order: open items with the oldest aging first (they're the ones at
+    # risk of being forgotten); done items after (they show only when
+    # `open_only=0`).
+    rows.sort(key=lambda r: (r['done'], -(r['aging_days'] or 0)))
+    return Response({'status': 'success', 'data': rows[:limit], 'total': len(rows)})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def toggle_meeting_action_item(request, meeting_id, item_index):
+    """Toggle the `done` flag on one action item.
+
+    Body: ``{ done: true|false }`` — required. This mutates the JSON blob
+    in place (Django JSONField handles the round-trip); the extractor
+    endpoint clobbers this on re-run, which is acceptable since re-extract
+    is rare and admin-triggered.
+    """
+    m, err = _get_company_meeting_or_404(request, meeting_id)
+    if err:
+        return err
+    try:
+        idx = int(item_index)
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'Invalid item_index'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    items = list(m.action_items or [])
+    if idx < 0 or idx >= len(items) or not isinstance(items[idx], dict):
+        return Response({'status': 'error', 'message': 'Action item not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    data = request.data if isinstance(request.data, dict) else json.loads(request.body or '{}')
+    if 'done' not in data:
+        return Response({'status': 'error', 'message': "'done' is required"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    items[idx]['done'] = bool(data['done'])
+    m.action_items = items
+    m.save(update_fields=['action_items', 'updated_at'])
+    return Response({'status': 'success', 'data': items[idx]})
+
+
 # ---------- Workflow / SOP Runner ----------
 
 
@@ -5060,7 +5179,11 @@ def frontline_analytics_export(request):
     Query params:
       - entity: tickets (default) | meetings
       - date_from / date_to: YYYY-MM-DD
-      - status, priority, category (tickets only)
+      - status:   applied to BOTH tickets and meetings (they share the field name).
+      - priority: tickets only — silently ignored on meetings (they don't have priority).
+      - category: tickets only — silently ignored on meetings (they don't have category).
+      - organizer_id: meetings only — filters by organizer.
+
     Now correctly scoped to the caller's company instead of just their own tickets."""
     try:
         company = request.user.company
@@ -5087,6 +5210,31 @@ def frontline_analytics_export(request):
         if entity == 'meetings':
             qs = FrontlineMeeting.objects.filter(company=company).order_by('-scheduled_at')
             qs = _apply_date_range(qs, field='scheduled_at')
+
+            # Apply the filters that are legal on FrontlineMeeting. Previously
+            # this branch exited without touching status/priority/category, so
+            # an export with ?status=scheduled returned every meeting rather
+            # than only scheduled ones — the bug flagged in the audit.
+            meeting_status = request.GET.get('status')
+            if meeting_status:
+                qs = qs.filter(status=meeting_status)
+            organizer_id = request.GET.get('organizer_id')
+            if organizer_id:
+                try:
+                    qs = qs.filter(organizer_id=int(organizer_id))
+                except (TypeError, ValueError):
+                    pass
+            # `priority` / `category` don't exist on meetings. If the caller
+            # sent them anyway, log so the frontend team notices — but don't
+            # fail the request (the export otherwise still works and it's
+            # unfriendly to reject over a stray irrelevant param).
+            for f in ('priority', 'category'):
+                if request.GET.get(f):
+                    logger.info(
+                        "frontline_analytics_export: '%s' filter is ticket-only; "
+                        "ignored for entity=meetings", f,
+                    )
+
             response['Content-Disposition'] = 'attachment; filename="frontline_meetings_export.csv"'
             writer.writerow(['id', 'title', 'scheduled_at', 'duration_minutes', 'status',
                              'organizer_id', 'participant_count', 'action_item_count',
@@ -5184,7 +5332,12 @@ def frontline_agent_performance(request):
             a = agents.setdefault(aid, {
                 'assigned_to_id': aid,
                 'tickets_assigned': 0, 'resolved': 0, 'auto_resolved': 0,
-                'resolution_seconds_sum': 0, 'resolution_count': 0,
+                # We keep the full list of resolution times (bounded by
+                # `tickets_assigned` per agent — small memory cost) so we can
+                # emit a median, not just a mean. Medians are much less
+                # skewed by an agent's one 30-day-old ticket that finally
+                # got closed, which was distorting rankings.
+                'resolution_times': [],
                 'sla_breached_count': 0,
             })
             a['tickets_assigned'] += 1
@@ -5194,8 +5347,7 @@ def frontline_agent_performance(request):
                 a['resolved'] += 1
                 delta = (t.resolved_at - t.created_at).total_seconds()
                 if delta >= 0:
-                    a['resolution_seconds_sum'] += delta
-                    a['resolution_count'] += 1
+                    a['resolution_times'].append(delta)
                 if t.sla_due_at and t.resolved_at > t.sla_due_at:
                     a['sla_breached_count'] += 1
 
@@ -5204,10 +5356,25 @@ def frontline_agent_performance(request):
         user_map = {u.id: (u.get_full_name() or u.username)
                     for u in _User.objects.filter(id__in=list(agents.keys()))}
 
+        def _median(values):
+            if not values:
+                return None
+            s = sorted(values)
+            n = len(s)
+            mid = n // 2
+            if n % 2:
+                return float(s[mid])
+            return (s[mid - 1] + s[mid]) / 2.0
+
         rows = []
         for aid, a in agents.items():
-            avg = (a['resolution_seconds_sum'] / a['resolution_count']) if a['resolution_count'] else None
+            times = a['resolution_times']
+            avg = (sum(times) / len(times)) if times else None
+            med = _median(times)
             rate = (a['resolved'] / a['tickets_assigned']) if a['tickets_assigned'] else 0.0
+            # SLA breach % is over RESOLVED tickets (not assigned), since only
+            # resolved tickets can definitively be checked for a breach.
+            breach_pct = (a['sla_breached_count'] / a['resolved']) if a['resolved'] else 0.0
             rows.append({
                 'assigned_to_id': aid,
                 'assigned_to_name': user_map.get(aid),
@@ -5216,7 +5383,9 @@ def frontline_agent_performance(request):
                 'auto_resolved': a['auto_resolved'],
                 'resolution_rate': round(rate, 3),
                 'avg_resolution_seconds': round(avg, 1) if avg is not None else None,
+                'median_resolution_seconds': round(med, 1) if med is not None else None,
                 'sla_breached_count': a['sla_breached_count'],
+                'sla_breach_pct': round(breach_pct, 3),
             })
         rows.sort(key=lambda r: r['tickets_assigned'], reverse=True)
         return Response({'status': 'success', 'data': rows})
@@ -6745,31 +6914,97 @@ def submit_satisfaction(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def satisfaction_summary(request):
-    """CSAT summary tile for the company dashboard. Returns average rating +
-    response count + per-star distribution for the last 90 days."""
+    """CSAT summary for the company dashboard.
+
+    Baseline (backwards-compatible) payload: average rating + response count
+    + per-star distribution for the last N days (default 90, override with
+    ``?window_days=``, max 365).
+
+    Optional add-ons (opt in with query params so the tile can keep its
+    small default payload and the analytics tab can ask for more):
+      * ``by_agent=1``   — attaches ``by_agent`` list: one entry per
+                           assigned agent with response_count, average,
+                           and per-star distribution.
+      * ``by_month=1``   — attaches ``trend`` list: one entry per calendar
+                           month within the window, response_count + average.
+                           Empty months are omitted (client renders gaps).
+    """
     company = request.user.company
-    cutoff = timezone.now() - timedelta(days=90)
-    rows = TicketSatisfaction.objects.filter(
+    try:
+        window_days = max(1, min(int(request.GET.get('window_days') or 90), 365))
+    except ValueError:
+        window_days = 90
+    cutoff = timezone.now() - timedelta(days=window_days)
+
+    qs = TicketSatisfaction.objects.filter(
         ticket__company=company,
         submitted_at__isnull=False, submitted_at__gte=cutoff,
-    ).values_list('rating', flat=True)
-    ratings = list(rows)
-    total = len(ratings)
-    if total == 0:
-        return Response({'status': 'success', 'data': {
-            'response_count': 0, 'average': None, 'distribution': {str(i): 0 for i in range(1, 6)},
-            'window_days': 90,
-        }})
+    )
+    rows = list(qs.values('rating', 'submitted_at', 'ticket__assigned_to_id'))
+    total = len(rows)
     distribution = {str(i): 0 for i in range(1, 6)}
-    for r in ratings:
-        if r is not None:
-            distribution[str(r)] = distribution.get(str(r), 0) + 1
-    return Response({'status': 'success', 'data': {
+    for r in rows:
+        rating = r.get('rating')
+        if rating is not None:
+            distribution[str(rating)] = distribution.get(str(rating), 0) + 1
+
+    payload = {
         'response_count': total,
-        'average': round(sum(ratings) / total, 2),
+        'average': round(sum(r['rating'] for r in rows if r['rating'] is not None) / total, 2) if total else None,
         'distribution': distribution,
-        'window_days': 90,
-    }})
+        'window_days': window_days,
+    }
+
+    if request.GET.get('by_agent') == '1' and total:
+        # Bucket by assigned_to. Unassigned surveys (contact-only) roll up
+        # under "Unassigned" so the total lines up with the top-level count.
+        buckets: dict = {}
+        for r in rows:
+            aid = r.get('ticket__assigned_to_id')
+            b = buckets.setdefault(aid, {'ratings': [], 'distribution': {str(i): 0 for i in range(1, 6)}})
+            if r['rating'] is not None:
+                b['ratings'].append(r['rating'])
+                b['distribution'][str(r['rating'])] = b['distribution'].get(str(r['rating']), 0) + 1
+        from django.contrib.auth.models import User as _User
+        agent_ids = [aid for aid in buckets.keys() if aid is not None]
+        name_map = {u.id: (u.get_full_name() or u.username)
+                    for u in _User.objects.filter(id__in=agent_ids)}
+        by_agent = []
+        for aid, b in buckets.items():
+            count = len(b['ratings'])
+            by_agent.append({
+                'assigned_to_id': aid,
+                'assigned_to_name': name_map.get(aid) if aid else 'Unassigned',
+                'response_count': count,
+                'average': round(sum(b['ratings']) / count, 2) if count else None,
+                'distribution': b['distribution'],
+            })
+        by_agent.sort(key=lambda a: a['response_count'], reverse=True)
+        payload['by_agent'] = by_agent
+
+    if request.GET.get('by_month') == '1' and total:
+        # Bucket by YYYY-MM in the caller's timezone-agnostic UTC sense. The
+        # month key is stable across DST; the UI can format it locally.
+        monthly: dict = {}
+        for r in rows:
+            ts = r['submitted_at']
+            if ts is None:
+                continue
+            k = ts.strftime('%Y-%m')
+            m = monthly.setdefault(k, {'ratings': []})
+            if r['rating'] is not None:
+                m['ratings'].append(r['rating'])
+        trend = []
+        for k in sorted(monthly.keys()):
+            ratings = monthly[k]['ratings']
+            trend.append({
+                'month': k,
+                'response_count': len(ratings),
+                'average': round(sum(ratings) / len(ratings), 2) if ratings else None,
+            })
+        payload['trend'] = trend
+
+    return Response({'status': 'success', 'data': payload})
 
 
 # ============================================================================
@@ -6827,6 +7062,24 @@ def kb_coverage_report(request):
         # KBFeedback may not always be populated — kb_gap count alone is still useful.
         logger.exception("kb_coverage_report: KBFeedback aggregation failed (kb_gap counts still returned)")
 
+    # Filter out dismissed rollups. A dismissal is "active" if it has no
+    # snooze_until OR its snooze_until is still in the future — expired
+    # snoozes fall through and the gap re-surfaces automatically on the
+    # next fetch. We do the filter in Python since `rollup` is a small dict
+    # and the dismissals table is tenant-scoped and typically tiny too.
+    now = timezone.now()
+    from django.db.models import Q
+    active_keys = set(
+        KBCoverageDismissal.objects
+        .filter(company=company)
+        .filter(Q(snooze_until__isnull=True) | Q(snooze_until__gt=now))
+        .values_list('question_key', flat=True)
+    )
+    if active_keys:
+        for k in list(rollup.keys()):
+            if k in active_keys:
+                del rollup[k]
+
     items = sorted(
         rollup.values(),
         key=lambda r: r['kb_gap_count'] + r['thumbs_down_count'],
@@ -6838,6 +7091,60 @@ def kb_coverage_report(request):
         'items': items,
         'total_kb_gaps': sum(i['kb_gap_count'] for i in rollup.values()),
         'total_thumbs_down': sum(i['thumbs_down_count'] for i in rollup.values()),
+        'dismissed_count': len(active_keys),
+    }})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def dismiss_kb_coverage_gap(request):
+    """Dismiss (or snooze) a row on the KB coverage report.
+
+    Body:
+      - question:      str (required) — the gap's normalised question text
+                       as shown in the report.
+      - snooze_hours:  int, optional. If omitted / null / 0, the dismissal
+                       is permanent. If > 0, the gap re-surfaces after
+                       that many hours.
+      - reason:        optional short code — 'covered' | 'off_topic' |
+                       'spam' | 'wip'.
+    """
+    company = request.user.company
+    data = request.data if isinstance(request.data, dict) else json.loads(request.body or '{}')
+    raw_question = (data.get('question') or '').strip()
+    if not raw_question:
+        return Response({'status': 'error', 'message': 'question is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # Same normalisation the report uses so keys line up.
+    key = raw_question.strip().lower()[:120]
+
+    try:
+        snooze_hours = int(data.get('snooze_hours') or 0)
+    except (TypeError, ValueError):
+        snooze_hours = 0
+    snooze_until = None
+    if snooze_hours > 0:
+        # Cap at 30 days so an over-eager click doesn't hide a real issue forever.
+        snooze_hours = min(snooze_hours, 24 * 30)
+        snooze_until = timezone.now() + timedelta(hours=snooze_hours)
+
+    reason = (data.get('reason') or '')[:32]
+
+    dismissal, _created = KBCoverageDismissal.objects.update_or_create(
+        company=company, question_key=key,
+        defaults={
+            'question_display': raw_question[:240],
+            'dismissed_by': request.user,
+            'reason': reason,
+            'snooze_until': snooze_until,
+        },
+    )
+    return Response({'status': 'success', 'data': {
+        'question_key': dismissal.question_key,
+        'snooze_until': dismissal.snooze_until.isoformat() if dismissal.snooze_until else None,
+        'permanent': dismissal.snooze_until is None,
     }})
 
 

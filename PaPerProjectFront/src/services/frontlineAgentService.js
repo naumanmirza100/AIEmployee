@@ -1035,6 +1035,48 @@ export const getKbCoverageReport = async ({ windowDays = 30, topN = 10 } = {}) =
   }
 };
 
+/** Dismiss (or snooze) a KB coverage gap row.
+ * `snoozeHours` = 0/undefined → permanent; > 0 → hide for N hours then reappear. */
+export const dismissKbCoverageGap = async ({ question, snoozeHours = 0, reason = '' }) => {
+  try {
+    const response = await companyApi.post('/frontline/kb-coverage/dismiss', {
+      question, snooze_hours: snoozeHours, reason,
+    });
+    return response;
+  } catch (error) {
+    console.error('Dismiss KB coverage gap error:', error);
+    throw error;
+  }
+};
+
+/** Flat inbox of action items extracted from every meeting in the company.
+ * Aggregates FrontlineMeeting.action_items across the window. */
+export const listMeetingActionItems = async ({ openOnly = true, windowDays = 90, ownerName = '', limit = 50 } = {}) => {
+  try {
+    const params = new URLSearchParams({ open_only: openOnly ? '1' : '0', window_days: String(windowDays), limit: String(limit) });
+    if (ownerName) params.set('owner_name', ownerName);
+    const response = await companyApi.get(`/frontline/meetings/action-items?${params.toString()}`);
+    return response;
+  } catch (error) {
+    console.error('List meeting action items error:', error);
+    throw error;
+  }
+};
+
+/** Toggle a single action item's done state. */
+export const toggleMeetingActionItem = async ({ meetingId, itemIndex, done }) => {
+  try {
+    const response = await companyApi.post(
+      `/frontline/meetings/${meetingId}/action-items/${itemIndex}/toggle-done`,
+      { done },
+    );
+    return response;
+  } catch (error) {
+    console.error('Toggle meeting action item error:', error);
+    throw error;
+  }
+};
+
 export const getFrontlineSlaDashboard = async ({ windowDays = 30 } = {}) => {
   try {
     const response = await companyApi.get(`/frontline/sla/dashboard?window_days=${windowDays}`);
@@ -1081,9 +1123,17 @@ export const submitFrontlineSatisfaction = async ({ token, rating, comment = '' 
   return data;
 };
 
-export const getFrontlineSatisfactionSummary = async ({ windowDays = 90 } = {}) => {
+/** Fetch CSAT summary. Opt-in add-ons:
+ *   - `byAgent=true`  → include per-agent breakdown
+ *   - `byMonth=true`  → include monthly trend
+ * Backwards-compatible: baseline payload is unchanged when both flags are false.
+ */
+export const getFrontlineSatisfactionSummary = async ({ windowDays = 90, byAgent = false, byMonth = false } = {}) => {
   try {
-    const response = await companyApi.get(`/frontline/csat/summary?window_days=${windowDays}`);
+    const params = new URLSearchParams({ window_days: String(windowDays) });
+    if (byAgent) params.set('by_agent', '1');
+    if (byMonth) params.set('by_month', '1');
+    const response = await companyApi.get(`/frontline/csat/summary?${params.toString()}`);
     return response;
   } catch (error) {
     console.error('Get Frontline CSAT summary error:', error);

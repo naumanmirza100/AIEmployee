@@ -1851,6 +1851,19 @@ function FrontlineAnalyticsTab() {
   const [nlQuestion, setNlQuestion] = useState('');
   const [nlLoading, setNlLoading] = useState(false);
   const [nlResult, setNlResult] = useState(null);
+  // Team performance drill-down (per-agent). Loaded alongside analytics
+  // so the same date range applies to both. State is separate from `data`
+  // so a slow team-perf fetch doesn't block the summary cards from rendering.
+  const [perfRows, setPerfRows] = useState(null);
+  const [perfLoading, setPerfLoading] = useState(false);
+  // Column the perf table is sorted by (defaults to tickets_assigned desc,
+  // matching the backend order but rebindable client-side).
+  const [perfSort, setPerfSort] = useState({ col: 'tickets_assigned', dir: 'desc' });
+  // CSAT drill-down — same fetch strategy as team perf, requests the
+  // opt-in `by_agent` + `by_month` add-ons.
+  const [csatDetail, setCsatDetail] = useState(null);
+  const [csatLoading, setCsatLoading] = useState(false);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -1862,7 +1875,43 @@ function FrontlineAnalyticsTab() {
       setLoading(false);
     }
   };
-  useEffect(() => { load(); }, [dateFrom, dateTo]);
+  const loadPerf = async () => {
+    setPerfLoading(true);
+    try {
+      const res = await frontlineAgentService.getFrontlineAgentPerformance(
+        dateFrom || undefined, dateTo || undefined,
+      );
+      setPerfRows((res.status === 'success' && Array.isArray(res.data)) ? res.data : []);
+    } catch (e) {
+      setPerfRows([]);
+      console.warn('Team performance load failed:', e.message);
+    } finally {
+      setPerfLoading(false);
+    }
+  };
+  const loadCsat = async () => {
+    setCsatLoading(true);
+    try {
+      // The date-range inputs above are ticket-created dates. CSAT's
+      // window_days param counts back from now. As a pragmatic compromise:
+      // if a date-range is set, size the window from the earlier of the
+      // two — imperfect but consistent with how the SLA tile works.
+      const daysFromRange = dateFrom
+        ? Math.max(1, Math.ceil((Date.now() - new Date(dateFrom).getTime()) / 86400000))
+        : 90;
+      const res = await frontlineAgentService.getFrontlineSatisfactionSummary({
+        windowDays: Math.min(daysFromRange, 365),
+        byAgent: true, byMonth: true,
+      });
+      setCsatDetail((res.status === 'success' && res.data) ? res.data : null);
+    } catch (e) {
+      setCsatDetail(null);
+      console.warn('CSAT detail load failed:', e.message);
+    } finally {
+      setCsatLoading(false);
+    }
+  };
+  useEffect(() => { load(); loadPerf(); loadCsat(); }, [dateFrom, dateTo]);
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -2103,6 +2152,301 @@ function FrontlineAnalyticsTab() {
             </div>
           </div>
         )}
+
+        {/* Team performance — per-agent breakdown. Sortable columns +
+            outlier highlighting so a manager can spot who needs help
+            (high SLA breach %) or who's carrying more than their share
+            (high tickets_assigned relative to the team average). */}
+        <div className="rounded-lg border bg-muted/20 p-4 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h4 className="font-medium text-sm">Team performance</h4>
+              <p className="text-xs text-muted-foreground">
+                Per-agent stats over the selected date range. Click a column
+                to sort. Median is more robust than mean for skewed data.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={loadPerf} disabled={perfLoading}>
+              {perfLoading
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <RefreshCw className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+
+          {perfLoading && !perfRows ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : !perfRows || perfRows.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-3">
+              No agents with assigned tickets in this window.
+            </p>
+          ) : (() => {
+            // Compute team averages for outlier highlighting. Uses the
+            // subset of agents who resolved anything — computing a mean
+            // over agents who never resolved would just skew everything.
+            const withResolved = perfRows.filter((r) => r.resolved > 0);
+            const avgBreachPct = withResolved.length
+              ? withResolved.reduce((s, r) => s + (r.sla_breach_pct || 0), 0) / withResolved.length
+              : 0;
+            const avgMedianRes = withResolved.length
+              ? withResolved.reduce((s, r) => s + (r.median_resolution_seconds || 0), 0) / withResolved.length
+              : 0;
+
+            const sorted = [...perfRows].sort((a, b) => {
+              const av = a[perfSort.col] ?? -Infinity;
+              const bv = b[perfSort.col] ?? -Infinity;
+              const cmp = av === bv ? 0 : (av < bv ? -1 : 1);
+              return perfSort.dir === 'asc' ? cmp : -cmp;
+            });
+            const setSort = (col) => setPerfSort((s) =>
+              s.col === col
+                ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+                : { col, dir: 'desc' },
+            );
+            const hdr = (col, label) => (
+              <th
+                onClick={() => setSort(col)}
+                className={`px-2 py-1.5 text-left font-medium cursor-pointer select-none ${
+                  perfSort.col === col ? 'text-white' : 'text-white/60'
+                } hover:text-white`}
+              >
+                {label}{perfSort.col === col ? (perfSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+              </th>
+            );
+            const fmtSecs = (s) => {
+              if (s == null) return '—';
+              if (s < 60) return `${Math.round(s)}s`;
+              if (s < 3600) return `${Math.round(s / 60)}m`;
+              if (s < 86400) return `${(s / 3600).toFixed(1)}h`;
+              return `${(s / 86400).toFixed(1)}d`;
+            };
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="border-b border-white/[0.06]">
+                    <tr>
+                      {hdr('assigned_to_name', 'Agent')}
+                      {hdr('tickets_assigned', 'Assigned')}
+                      {hdr('resolved', 'Resolved')}
+                      {hdr('resolution_rate', 'Rate')}
+                      {hdr('median_resolution_seconds', 'Median resolve')}
+                      {hdr('sla_breach_pct', 'SLA breach %')}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((r) => {
+                      // Flag as outlier if this agent's breach % is at least
+                      // 15 percentage points above the team's average AND they
+                      // resolved enough to be statistically meaningful (>= 3).
+                      // 15pp is a rule-of-thumb, not gospel — tune later.
+                      const isBreachOutlier = r.resolved >= 3
+                        && (r.sla_breach_pct - avgBreachPct) >= 0.15;
+                      // Similarly for slow median resolution — flag if ≥1.5×
+                      // the team median AND at least 3 resolved tickets.
+                      const isSlowOutlier = r.resolved >= 3
+                        && avgMedianRes > 0
+                        && r.median_resolution_seconds
+                        && r.median_resolution_seconds >= 1.5 * avgMedianRes;
+                      const bg = isBreachOutlier
+                        ? 'bg-rose-500/[0.05]'
+                        : isSlowOutlier ? 'bg-amber-500/[0.05]' : '';
+                      return (
+                        <tr key={r.assigned_to_id} className={`border-b border-white/[0.04] ${bg}`}>
+                          <td className="px-2 py-1.5 text-white/85">
+                            {r.assigned_to_name || `User #${r.assigned_to_id}`}
+                          </td>
+                          <td className="px-2 py-1.5 text-white/70">{r.tickets_assigned}</td>
+                          <td className="px-2 py-1.5 text-white/70">
+                            {r.resolved}
+                            {r.auto_resolved > 0 && (
+                              <span className="text-white/40"> ({r.auto_resolved} auto)</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 text-white/70">
+                            {r.tickets_assigned > 0 ? `${Math.round(r.resolution_rate * 100)}%` : '—'}
+                          </td>
+                          <td className={`px-2 py-1.5 ${isSlowOutlier ? 'text-amber-300' : 'text-white/70'}`}>
+                            {fmtSecs(r.median_resolution_seconds)}
+                          </td>
+                          <td className={`px-2 py-1.5 ${isBreachOutlier ? 'text-rose-300 font-medium' : 'text-white/70'}`}>
+                            {r.resolved > 0
+                              ? `${Math.round(r.sla_breach_pct * 100)}%`
+                              : '—'}
+                            {r.sla_breached_count > 0 && (
+                              <span className="text-white/40"> ({r.sla_breached_count})</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {(withResolved.length > 0) && (
+                  <p className="text-[10px] text-muted-foreground pt-2">
+                    Team average: median resolve <span className="text-white/70">{fmtSecs(avgMedianRes)}</span>
+                    {' · '}
+                    SLA breach <span className="text-white/70">{Math.round(avgBreachPct * 100)}%</span>.
+                    <span className="text-rose-300"> Rose </span>rows = breach % ≥ 15pp over team avg.
+                    <span className="text-amber-300"> Amber </span>rows = median resolve ≥ 1.5× team median.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* CSAT drill-down — per-agent breakdown + monthly trend. The tile
+            on the Overview shows only the roll-up; this section adds the
+            "who's getting the good ratings" and "are we trending up or
+            down" dimensions the reporting was missing. */}
+        <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h4 className="font-medium text-sm">CSAT drill-down</h4>
+              <p className="text-xs text-muted-foreground">
+                Per-agent and monthly trend for customer satisfaction.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={loadCsat} disabled={csatLoading}>
+              {csatLoading
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <RefreshCw className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+
+          {csatLoading && !csatDetail ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : !csatDetail || csatDetail.response_count === 0 ? (
+            <p className="text-xs text-muted-foreground py-3">
+              No CSAT responses in this window.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {/* Header stats */}
+              <div className="flex items-baseline gap-4 flex-wrap">
+                <div>
+                  <div className="text-2xl font-semibold text-white">
+                    {csatDetail.average != null ? csatDetail.average.toFixed(2) : '—'}
+                    <span className="text-sm text-white/40 font-normal"> / 5</span>
+                  </div>
+                  <div className="text-[10px] text-white/40">
+                    {csatDetail.response_count} responses over {csatDetail.window_days}d
+                  </div>
+                </div>
+                {/* Distribution — inline horizontal bar (no chart lib). */}
+                <div className="flex-1 min-w-[200px] space-y-0.5">
+                  {[5, 4, 3, 2, 1].map((star) => {
+                    const c = csatDetail.distribution?.[String(star)] || 0;
+                    const pct = csatDetail.response_count
+                      ? Math.round((c / csatDetail.response_count) * 100)
+                      : 0;
+                    return (
+                      <div key={star} className="flex items-center gap-2 text-[11px]">
+                        <span className="w-4 text-white/50 text-right">{star}</span>
+                        <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                          <div
+                            className={`h-full ${star >= 4 ? 'bg-emerald-500' : star === 3 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="w-8 text-white/50 text-right">{c}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Monthly trend */}
+              {Array.isArray(csatDetail.trend) && csatDetail.trend.length > 0 && (
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-white/40 mb-1">Monthly trend</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="border-b border-white/[0.06]">
+                        <tr className="text-white/60">
+                          <th className="px-2 py-1.5 text-left font-medium">Month</th>
+                          <th className="px-2 py-1.5 text-left font-medium">Responses</th>
+                          <th className="px-2 py-1.5 text-left font-medium">Average</th>
+                          <th className="px-2 py-1.5 text-left font-medium">vs prev</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csatDetail.trend.map((m, i) => {
+                          const prev = csatDetail.trend[i - 1];
+                          const delta = prev && prev.average != null && m.average != null
+                            ? m.average - prev.average
+                            : null;
+                          const deltaColor = delta == null
+                            ? 'text-white/40'
+                            : delta > 0.05 ? 'text-emerald-400'
+                              : delta < -0.05 ? 'text-rose-400'
+                                : 'text-white/50';
+                          return (
+                            <tr key={m.month} className="border-b border-white/[0.04]">
+                              <td className="px-2 py-1.5 text-white/80">{m.month}</td>
+                              <td className="px-2 py-1.5 text-white/70">{m.response_count}</td>
+                              <td className="px-2 py-1.5 text-white/80">
+                                {m.average != null ? m.average.toFixed(2) : '—'}
+                              </td>
+                              <td className={`px-2 py-1.5 ${deltaColor}`}>
+                                {delta == null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Per-agent breakdown */}
+              {Array.isArray(csatDetail.by_agent) && csatDetail.by_agent.length > 0 && (
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-white/40 mb-1">By agent</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="border-b border-white/[0.06]">
+                        <tr className="text-white/60">
+                          <th className="px-2 py-1.5 text-left font-medium">Agent</th>
+                          <th className="px-2 py-1.5 text-left font-medium">Responses</th>
+                          <th className="px-2 py-1.5 text-left font-medium">Average</th>
+                          <th className="px-2 py-1.5 text-left font-medium">5★</th>
+                          <th className="px-2 py-1.5 text-left font-medium">1★</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csatDetail.by_agent.map((a) => {
+                          const low = a.average != null && a.average < 3.5 && a.response_count >= 3;
+                          const good = a.average != null && a.average >= 4.5 && a.response_count >= 3;
+                          return (
+                            <tr key={a.assigned_to_id ?? 'unassigned'}
+                                className={`border-b border-white/[0.04] ${low ? 'bg-rose-500/[0.05]' : good ? 'bg-emerald-500/[0.05]' : ''}`}>
+                              <td className="px-2 py-1.5 text-white/85">{a.assigned_to_name || `User #${a.assigned_to_id}`}</td>
+                              <td className="px-2 py-1.5 text-white/70">{a.response_count}</td>
+                              <td className={`px-2 py-1.5 ${low ? 'text-rose-300' : good ? 'text-emerald-300' : 'text-white/85'}`}>
+                                {a.average != null ? a.average.toFixed(2) : '—'}
+                              </td>
+                              <td className="px-2 py-1.5 text-white/70">{a.distribution?.['5'] || 0}</td>
+                              <td className="px-2 py-1.5 text-white/70">{a.distribution?.['1'] || 0}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <p className="text-[10px] text-muted-foreground pt-2">
+                      Highlighted: <span className="text-emerald-300">green</span> = avg ≥ 4.5 with 3+ responses;
+                      <span className="text-rose-300"> red</span> = avg &lt; 3.5 with 3+ responses.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

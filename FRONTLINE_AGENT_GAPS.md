@@ -1,7 +1,7 @@
 # Frontline Agent — Feature Gaps Tracker
 
 **Source:** read-only audit of `frontline_agent/`, `api/views/frontline_agent.py`, `PaPerProjectFront/src/components/frontline/*`, and the embed pages.
-**Last updated:** 2026-07-01 (#5 embed-form attachments + #8 MacroPickerDialog UX rebuild — all 10 medium/high-impact gaps now closed)
+**Last updated:** 2026-07-01 (reporting batch — #11–#15 all shipped; every audit item closed)
 
 ## Legend
 - [x] **Done** — implementation verified in current code with file references.
@@ -75,13 +75,27 @@
   Dropdown used to offer `email` / `sms` / `in_app` — but the backend dispatcher (`_dispatch_notification`) only routes `email`, `slack`, and `teams`; sms + in_app are silently dropped. Two fixes: added the actually-implemented `slack` and `teams` options (with hint that they use the global PM webhook), and disabled `sms` + `in_app` with a "coming soon" label so users can see what's planned without saving templates that'll never fire.
   Evidence: [`FrontlineDashboard.jsx`](PaPerProjectFront/src/components/frontline/FrontlineDashboard.jsx) template Channel `<Select>`.
 
-## Lower-impact reporting gaps (not in this batch)
+## Lower-impact reporting gaps
 
-- [ ] **#11 — Meeting action-items have no inbox** — `extract_meeting_action_items` creates tickets but no dashboard widget to view/track them. Needs design.
-- [ ] **#12 — CSAT per-agent breakdown + trend** — current summary is aggregate-only.
-- [ ] **#13 — Per-agent performance drill-down** — needs ranking + filter UI.
-- [ ] **#14 — KB coverage gap → "create KB doc" quick action** + snooze/dismiss.
-- [ ] **#15 — Analytics export ignores filter params when entity=meetings** — backend-only fix.
+- [x] **#11 — Meeting action-items now have an inbox**
+  Extracted items were being written to `FrontlineMeeting.action_items` and forgotten — no dashboard view. Two new endpoints: `GET /api/frontline/meetings/action-items` aggregates every meeting's items into a flat, filterable inbox with meeting title, owner, due date, and aging (days since the meeting); `POST /api/frontline/meetings/{id}/action-items/{idx}/toggle-done` flips a `done` flag in place on the JSON blob (item ordering is preserved so the index stays stable). Fifth tile added to `FrontlineInsightsPanel` — shows up to 5 open items, oldest-aging first, with a green ✓ toggle. Aging ≥ 14d renders the aging badge red so stale items stand out. **Trade-off documented:** re-running `extract_meeting_action_items` overwrites the array — including `done` flags — which is acceptable since re-extract is a manual admin action, but flagged for future work if it becomes a pain point.
+  Evidence: [`api/views/frontline_agent.py`](api/views/frontline_agent.py) — `list_meeting_action_items` + `toggle_meeting_action_item`, URLs at [`api/urls.py:481-482`](api/urls.py#L481), service `listMeetingActionItems` + `toggleMeetingActionItem`, tile in [`FrontlineInsightsPanel.jsx`](PaPerProjectFront/src/components/frontline/FrontlineInsightsPanel.jsx).
+
+- [x] **#12 — CSAT drill-down: per-agent + monthly trend**
+  `satisfaction_summary` extended with opt-in `?by_agent=1` and `?by_month=1` add-ons (baseline payload unchanged, so the existing overview tile keeps its small response). Frontend fetches both when the Analytics tab loads and renders two new tables under a "CSAT drill-down" heading: (1) header stats with inline distribution bars (5★–1★ percentages), (2) monthly trend table with month-over-month delta (+/- coloured green/red beyond ±0.05), (3) per-agent table highlighting outliers — green rows for avg ≥ 4.5 with 3+ responses, red rows for avg < 3.5 with 3+ responses. Median vs. mean discussed: kept mean for CSAT because ratings are 1–5 discrete, so mean is intuitive and the small range limits skew.
+  Evidence: [`api/views/frontline_agent.py:satisfaction_summary`](api/views/frontline_agent.py), service `getFrontlineSatisfactionSummary({ byAgent, byMonth })`, UI in `FrontlineAnalyticsTab` inside [`FrontlineDashboard.jsx`](PaPerProjectFront/src/components/frontline/FrontlineDashboard.jsx).
+
+- [x] **#13 — Per-agent performance drill-down**
+  Backend already computed per-agent metrics but the frontend never rendered them. Enhanced the endpoint with **median resolution time** (more robust than mean for skewed data — one 30-day-old ticket that finally closes was distorting rankings) and **SLA breach percentage** (breached ÷ resolved, since only resolved tickets can definitively be checked for breach). New sortable table in the Analytics tab: agent, assigned, resolved (with `(N auto)` sub-count), rate, median resolve time, SLA breach %. Two outlier heuristics with visual highlighting: **rose row** if breach % ≥ 15 percentage points above team average AND resolved ≥ 3; **amber row** if median resolve time ≥ 1.5× team median AND resolved ≥ 3. Footer explains the highlighting policy so it's not folklore.
+  Evidence: [`frontline_agent_performance`](api/views/frontline_agent.py) (backend metric additions), Team Performance section in `FrontlineAnalyticsTab` inside [`FrontlineDashboard.jsx`](PaPerProjectFront/src/components/frontline/FrontlineDashboard.jsx).
+
+- [x] **#14 — KB coverage gaps: dismiss + draft-KB-doc quick actions**
+  New `KBCoverageDismissal` model (company + normalised question_key + optional snooze_until) with migration; the coverage report filters out currently-active dismissals. Two actions per row in the "Knowledge gaps" tile: **📄 Draft KB doc** copies the question to clipboard + navigates to the Documents tab (agent pastes it as the doc title after uploading), and **👁 Dismiss** with a dropdown offering Snooze 24h / 7d / 30d or Dismiss permanently. Snoozes are capped at 30 days server-side so an over-eager click can't hide a real issue forever. Response includes a `dismissed_count` for a subtle footer badge — no permanent counter, just current state.
+  Evidence: [`frontline_agent/models.py:KBCoverageDismissal`](frontline_agent/models.py), migration `0042_kbcoveragedismissal`, backend [`kb_coverage_report`](api/views/frontline_agent.py) (filter) + [`dismiss_kb_coverage_gap`](api/views/frontline_agent.py), URL at [`api/urls.py:440`](api/urls.py#L440), tile in [`FrontlineInsightsPanel.jsx`](PaPerProjectFront/src/components/frontline/FrontlineInsightsPanel.jsx).
+
+- [x] **#15 — Analytics export meetings filter**
+  The meetings branch of `frontline_analytics_export` exited before the ticket branch's filter loop — so `?status=scheduled` returned every meeting in the window, not scheduled ones. Now applies **status** (valid on `FrontlineMeeting`) and **organizer_id** (meetings-specific), silently ignores **priority/category** with an `INFO` log line (they're ticket-only fields), and the docstring documents which filters apply to which entity. Backwards-compatible: existing ticket callers unchanged.
+  Evidence: [`api/views/frontline_agent.py:frontline_analytics_export`](api/views/frontline_agent.py).
 
 ---
 
@@ -89,26 +103,17 @@
 
 | Status | Count | Items |
 |---|---|---|
-| Done | **10** | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 |
-| Lower-impact (not in this batch) | **5** | 11, 12, 13, 14, 15 |
+| Done | **15** | 1–15 (every item from the initial audit) |
 
-### Landed this session (2026-06-23)
+### Landed this session (2026-07-01 — reporting batch)
 
-Backend: 4 new endpoints (`update_ticket`, `delete_dead_letter`, `delete_contact`, `reassign_ticket_handoff`) + 4 URL routes.
-Frontend: 7 new service helpers + 1 constant (`TICKET_LINK_RELATIONS`) + multiple UI flows (workflow approve/reject buttons, dry-run dialog, DLQ delete button, contact delete with confirmation, ticket-link section in drawer, release/reassign handoff actions + agent picker, sms/in_app disabled in template channel dropdown).
+Backend: 1 new model + migration (`KBCoverageDismissal`), 4 new endpoints (`dismiss_kb_coverage_gap`, `list_meeting_action_items`, `toggle_meeting_action_item`; `frontline_analytics_export` and `satisfaction_summary` extended), 3 new URL routes, enhanced `frontline_agent_performance` with median + breach %.
+Frontend: 4 new service helpers (`dismissKbCoverageGap`, `listMeetingActionItems`, `toggleMeetingActionItem`, `getFrontlineSatisfactionSummary` extended), fifth tile added to `FrontlineInsightsPanel` (Meeting action items), dismiss/snooze dropdown + Draft KB doc action on the KB tile, two new sections in `FrontlineAnalyticsTab` (Team performance table with outlier highlighting; CSAT drill-down with monthly trend + per-agent breakdown).
 
-Sanity-checked: 2 Python files parse, 3 JSX/JS files compile via esbuild, `python manage.py check` reports no issues.
+Sanity-checked: 3 Python files parse, 3 JSX/JS files compile via esbuild, `python manage.py check` reports no issues, migration applied cleanly.
 
 ---
 
 ## Open items
 
-All 10 medium-and-high-impact items closed. Remaining items are the lower-impact reporting/UX gaps:
-
-- **#11** Meeting action-items inbox — needs design.
-- **#12** CSAT per-agent + trend.
-- **#13** Per-agent performance drill-down.
-- **#14** KB coverage gap → "create KB doc" quick action + dismiss.
-- **#15** Analytics export filter bug for `entity=meetings`.
-
-Tell me whether to start on these now (#15 is the cheapest — backend-only filter fix), or hold them for a dedicated reporting sprint.
+None. Every item from the audit is now closed. If more gaps surface during use, they'd get added here as a new batch.

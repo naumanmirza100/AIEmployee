@@ -438,6 +438,7 @@ urlpatterns = [
 
     # KB coverage + SLA dashboard (KB-C1, S4)
     re_path(r'^frontline/kb-coverage/?$', frontline_agent.kb_coverage_report, name='frontline_kb_coverage'),  # GET
+    re_path(r'^frontline/kb-coverage/dismiss/?$', frontline_agent.dismiss_kb_coverage_gap, name='frontline_dismiss_kb_coverage_gap'),  # POST
     re_path(r'^frontline/sla/dashboard/?$', frontline_agent.sla_dashboard, name='frontline_sla_dashboard'),  # GET
 
     # Document soft-deprecation (D-O2)
@@ -478,6 +479,8 @@ urlpatterns = [
     re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/update/?$', frontline_agent.update_meeting, name='frontline_update_meeting'),  # PATCH
     re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/delete/?$', frontline_agent.delete_meeting, name='frontline_delete_meeting'),  # DELETE
     re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/extract-action-items/?$', frontline_agent.extract_meeting_action_items, name='frontline_extract_meeting_action_items'),  # POST
+    re_path(r'^frontline/meetings/action-items/?$', frontline_agent.list_meeting_action_items, name='frontline_list_meeting_action_items'),  # GET
+    re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/action-items/(?P<item_index>\d+)/toggle-done/?$', frontline_agent.toggle_meeting_action_item, name='frontline_toggle_meeting_action_item'),  # POST
     # Ticket lifecycle (Phase 2 Batch 2)
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/?$', frontline_agent.list_ticket_notes, name='frontline_list_ticket_notes'),  # GET
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/create/?$', frontline_agent.create_ticket_note, name='frontline_create_ticket_note'),  # POST
