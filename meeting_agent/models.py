@@ -30,7 +30,6 @@ class ExecutiveMeeting(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default='')
     agenda = models.JSONField(default=list, blank=True, help_text='List of agenda items')
-    location = models.CharField(max_length=255, blank=True, default='')
     meeting_link = models.URLField(blank=True, default='')
 
     scheduled_at = models.DateTimeField()
