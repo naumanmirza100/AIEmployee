@@ -58,6 +58,8 @@ import HRMyProfilePage from '@/components/hr/HRMyProfilePage';
 import OperationsAgentPage from '@/pages/OperationsAgentPage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
 import AiSdrAgentPage from '@/pages/AiSdrAgentPage';
+import ExecMeetingAgentPage from '@/pages/ExecMeetingAgentPage';
+import ExecMeetingDashboard from '@/components/exec-meeting/ExecMeetingDashboard';
 import JobApplicationPage from '@/pages/JobApplicationPage';
 import DocumentDetailPage from '@/components/operations/DocumentDetailPage';
 import FrontlineEmbedChatPage from '@/pages/FrontlineEmbedChatPage';
@@ -199,6 +201,12 @@ import { useTranslation } from 'react-i18next';
             <Route path="/ai-sdr/email-assistant" element={<AiSdrAgentPage />} />
             <Route path="/ai-sdr/crm-sync" element={<AiSdrAgentPage />} />
             <Route path="/ai-sdr/settings" element={<AiSdrAgentPage />} />
+
+            {/* AI Executive Meeting Assistant routes */}
+            <Route path="/exec-meeting" element={<Navigate to="/exec-meeting/dashboard" replace />} />
+            <Route path="/exec-meeting/dashboard" element={<ExecMeetingAgentPage />}>
+              <Route index element={<ExecMeetingDashboard />} />
+            </Route>
 
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />

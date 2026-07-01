@@ -36,7 +36,7 @@ class CalendarPlannerAgent(BaseAgent):
     def __init__(self, company_id: Optional[int] = None):
         super().__init__()
         self.company_id = company_id
-        self.agent_key_name = 'exec_calendar_planner'
+        self.agent_key_name = 'exec_meeting_agent'
         self.system_prompt = SYSTEM_PROMPT
 
     def plan_week(self, meetings: list, tasks: list, week_start: str = None) -> dict:

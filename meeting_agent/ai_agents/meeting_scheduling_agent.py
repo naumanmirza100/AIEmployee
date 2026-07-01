@@ -36,7 +36,7 @@ class MeetingSchedulingAgent(BaseAgent):
     def __init__(self, company_id: Optional[int] = None):
         super().__init__()
         self.company_id = company_id
-        self.agent_key_name = 'exec_meeting_scheduling'
+        self.agent_key_name = 'exec_meeting_agent'
         self.system_prompt = SYSTEM_PROMPT
 
     def parse_meeting_request(self, message: str, company_user_id: int) -> dict:
