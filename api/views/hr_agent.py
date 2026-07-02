@@ -301,6 +301,13 @@ def create_employee(request):
             employment_status=d.get('employment_status') or 'active',
             employment_type=d.get('employment_type') or 'full_time',
         )
+        _write_audit_log(request.user, company, 'employee.create',
+                         'employee', e.id, before=None,
+                         after={'full_name': e.full_name, 'work_email': e.work_email,
+                                'job_title': e.job_title, 'department': e.department,
+                                'department_id': department_obj.id if department_obj else None,
+                                'employment_status': e.employment_status,
+                                'employment_type': e.employment_type})
         return Response({'status': 'success', 'data': _serialize_employee(e)},
                         status=status.HTTP_201_CREATED)
     except Exception:
@@ -358,6 +365,11 @@ def create_department(request):
         parent=parent, head=head,
         is_active=bool(d.get('is_active', True)),
     )
+    _write_audit_log(request.user, company, 'department.create', 'Department', dept.id,
+                     before=None,
+                     after={'name': dept.name, 'code': dept.code,
+                            'parent_id': dept.parent_id, 'head_id': dept.head_id,
+                            'is_active': dept.is_active})
     return Response({'status': 'success', 'data': _serialize_department(dept)},
                     status=status.HTTP_201_CREATED)
 
@@ -377,6 +389,9 @@ def update_department(request, dept_id):
                         status=status.HTTP_404_NOT_FOUND)
     d = request.data or {}
     fields_changed = []
+    before = {'name': dept.name, 'code': dept.code,
+              'is_active': dept.is_active,
+              'parent_id': dept.parent_id, 'head_id': dept.head_id}
     if 'name' in d:
         new_name = (d['name'] or '').strip()[:120]
         if new_name and new_name.lower() != dept.name.lower():
@@ -430,6 +445,12 @@ def update_department(request, dept_id):
     if fields_changed:
         fields_changed.append('updated_at')
         dept.save(update_fields=fields_changed)
+        _write_audit_log(request.user, company, 'department.update', 'Department', dept.id,
+                         before,
+                         after={'name': dept.name, 'code': dept.code,
+                                'is_active': dept.is_active,
+                                'parent_id': dept.parent_id, 'head_id': dept.head_id,
+                                'fields_changed': sorted(set(fields_changed) - {'updated_at'})})
     return Response({'status': 'success', 'data': _serialize_department(dept)})
 
 
@@ -446,11 +467,17 @@ def delete_department(request, dept_id):
     if not dept:
         return Response({'status': 'error', 'message': 'Department not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    snap = {'name': dept.name, 'code': dept.code,
+            'parent_id': dept.parent_id, 'head_id': dept.head_id}
     # Detach employees rather than cascading: keep them in the table but
     # null the FK + clear the legacy string. Children become roots.
-    Employee.objects.filter(department_obj=dept).update(department_obj=None, department='')
-    Department.objects.filter(parent=dept).update(parent=None)
+    detached = Employee.objects.filter(department_obj=dept).update(department_obj=None, department='')
+    reparented = Department.objects.filter(parent=dept).update(parent=None)
     dept.delete()
+    _write_audit_log(request.user, company, 'department.delete', 'Department', int(dept_id),
+                     before=snap,
+                     after={'employees_detached': int(detached or 0),
+                            'children_reparented': int(reparented or 0)})
     return Response({'status': 'success', 'data': {'deleted_id': int(dept_id)}})
 
 
@@ -1094,7 +1121,13 @@ def delete_hr_document(request, document_id):
         except Exception:
             logger.warning("delete_hr_document: failed to unlink file for doc %s", d.id)
         deleted_id = d.id
+        snap = {'title': d.title, 'document_type': d.document_type,
+                'confidentiality': d.confidentiality,
+                'file_path': d.file_path, 'file_size': d.file_size,
+                'employee_id': getattr(d, 'employee_id', None)}
         d.delete()
+        _write_audit_log(request.user, company, 'hr_document.delete',
+                         'HRDocument', deleted_id, before=snap, after=None)
         return Response({'status': 'success', 'data': {'deleted_id': deleted_id}})
     except Exception:
         logger.exception("delete_hr_document failed")
@@ -1488,19 +1521,18 @@ def create_hr_notification_template(request):
                         status=status.HTTP_400_BAD_REQUEST)
     trigger_config = d.get('trigger_config') or {}
     if trigger_config:
-        _KNOWN_EVENTS = {'probation_ending', 'birthday', 'work_anniversary', 'document_expiring', 'review_due'}
         event_on = trigger_config.get('on')
         if not event_on:
             return Response({
                 'status': 'error',
                 'message': "trigger_config must include an 'on' key specifying the event name.",
             }, status=status.HTTP_400_BAD_REQUEST)
-        if event_on not in _KNOWN_EVENTS:
+        if event_on not in _HR_NOTIFICATION_KNOWN_EVENTS:
             return Response({
                 'status': 'error',
                 'message': (
                     f"Unknown trigger event '{event_on}'. "
-                    f"Recognised events: {', '.join(sorted(_KNOWN_EVENTS))}."
+                    f"Recognised events: {', '.join(sorted(_HR_NOTIFICATION_KNOWN_EVENTS))}."
                 ),
             }, status=status.HTTP_400_BAD_REQUEST)
     t = HRNotificationTemplate.objects.create(
@@ -1511,8 +1543,249 @@ def create_hr_notification_template(request):
         trigger_config=trigger_config,
         use_llm_personalization=bool(d.get('use_llm_personalization', False)),
     )
+    _write_audit_log(request.user, company, 'hr_notification_template.create',
+                     'HRNotificationTemplate', t.id,
+                     before=None,
+                     after={'name': t.name, 'channel': t.channel,
+                            'notification_type': t.notification_type,
+                            'trigger_config': t.trigger_config})
     return Response({'status': 'success', 'data': {'id': t.id, 'name': t.name}},
                     status=status.HTTP_201_CREATED)
+
+
+# Small set of trigger events we accept from the client. Kept module-level so
+# `create_` and `update_` stay in sync — if you add a new event, both endpoints
+# pick it up automatically.
+_HR_NOTIFICATION_KNOWN_EVENTS = {
+    'probation_ending', 'birthday', 'work_anniversary',
+    'document_expiring', 'review_due',
+}
+
+
+@api_view(['PATCH', 'PUT'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def update_hr_notification_template(request, template_id):
+    """Edit an HR notification template. All fields optional — only the
+    keys present in the request body are updated. Mirrors the same event
+    validation as create so a bad `trigger_config.on` fails cleanly instead
+    of silently persisting garbage that would fire nothing at run time."""
+    company = request.user.company
+    try:
+        t = HRNotificationTemplate.objects.get(id=template_id, company=company)
+    except HRNotificationTemplate.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Template not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    d = request.data or {}
+    dirty = []
+    before = {'name': t.name, 'channel': t.channel,
+              'notification_type': t.notification_type,
+              'subject': t.subject,
+              'trigger_config': t.trigger_config,
+              'use_llm_personalization': t.use_llm_personalization}
+
+    if 'name' in d:
+        name = str(d.get('name') or '').strip()
+        if not name:
+            return Response({'status': 'error', 'message': 'name cannot be empty'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        t.name = name[:200]
+        dirty.append('name')
+    if 'body' in d:
+        body = str(d.get('body') or '').strip()
+        if not body:
+            return Response({'status': 'error', 'message': 'body cannot be empty'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        t.body = body
+        dirty.append('body')
+    if 'subject' in d:
+        t.subject = str(d.get('subject') or '')[:500]
+        dirty.append('subject')
+    if 'channel' in d:
+        t.channel = str(d.get('channel') or 'email').strip()[:20]
+        dirty.append('channel')
+    if 'notification_type' in d:
+        t.notification_type = str(d.get('notification_type') or 'system').strip()[:50]
+        dirty.append('notification_type')
+    if 'use_llm_personalization' in d:
+        t.use_llm_personalization = bool(d.get('use_llm_personalization'))
+        dirty.append('use_llm_personalization')
+    if 'trigger_config' in d:
+        trigger_config = d.get('trigger_config') or {}
+        if trigger_config:
+            event_on = trigger_config.get('on')
+            if not event_on:
+                return Response({'status': 'error',
+                                 'message': "trigger_config must include an 'on' key."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if event_on not in _HR_NOTIFICATION_KNOWN_EVENTS:
+                return Response({'status': 'error', 'message': (
+                    f"Unknown trigger event '{event_on}'. Recognised: "
+                    f"{', '.join(sorted(_HR_NOTIFICATION_KNOWN_EVENTS))}."
+                )}, status=status.HTTP_400_BAD_REQUEST)
+        t.trigger_config = trigger_config
+        dirty.append('trigger_config')
+
+    if not dirty:
+        return Response({'status': 'error',
+                         'message': 'No editable fields provided.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    dirty.append('updated_at')
+    t.save(update_fields=list(set(dirty)))
+    _write_audit_log(request.user, company, 'hr_notification_template.update',
+                     'HRNotificationTemplate', t.id, before,
+                     after={'name': t.name, 'channel': t.channel,
+                            'notification_type': t.notification_type,
+                            'subject': t.subject,
+                            'trigger_config': t.trigger_config,
+                            'use_llm_personalization': t.use_llm_personalization,
+                            'fields_changed': sorted(set(dirty) - {'updated_at'})})
+    return Response({'status': 'success', 'data': {
+        'id': t.id, 'name': t.name, 'channel': t.channel,
+        'notification_type': t.notification_type,
+        'subject': t.subject, 'body': t.body,
+        'trigger_config': t.trigger_config,
+        'use_llm_personalization': t.use_llm_personalization,
+    }})
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def delete_hr_notification_template(request, template_id):
+    """Delete an HR notification template. Scheduled notifications that
+    already reference this template stay (`template_id` becomes null on the
+    row via FK-null-on-delete, if the model allows; otherwise cascade). The
+    template is company-scoped, so this endpoint only ever touches the
+    caller's own data."""
+    company = request.user.company
+    try:
+        t = HRNotificationTemplate.objects.get(id=template_id, company=company)
+    except HRNotificationTemplate.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Template not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    snap = {'name': t.name, 'channel': t.channel,
+            'notification_type': t.notification_type,
+            'subject': t.subject,
+            'trigger_config': t.trigger_config}
+    template_name = t.name
+    t.delete()
+    _write_audit_log(request.user, company, 'hr_notification_template.delete',
+                     'HRNotificationTemplate', int(template_id),
+                     before=snap, after=None)
+    return Response({'status': 'success', 'data': {'id': int(template_id), 'name': template_name}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def send_hr_notification_now(request):
+    """Fire a template right now — for testing a new template, sending a
+    one-off HR announcement, or resending a stuck scheduled notification.
+
+    Body:
+      * ``template_id``          (int, required) — must be a template in the
+                                  caller's company.
+      * ``recipient_email``      (str, optional) — direct address.
+      * ``recipient_employee_id`` (int, optional) — resolves to the
+                                  employee's `work_email` if `recipient_email`
+                                  isn't set. At least one of the two must be
+                                  usable at dispatch time.
+      * ``context``              (dict, optional) — substitution values for
+                                  the template placeholders. Missing keys
+                                  format to empty strings, not KeyError.
+
+    Restricted to HR admins so ordinary employees can't fan mail out
+    through the office notification channels.
+
+    Writes an ``HRScheduledNotification`` row for the sent (or failed)
+    dispatch so it lands in the same audit view as walker-fanned messages.
+    """
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR admin only.'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    d = request.data or {}
+    try:
+        template_id = int(d.get('template_id'))
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'template_id is required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        template = HRNotificationTemplate.objects.get(id=template_id, company=company)
+    except HRNotificationTemplate.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Template not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    recipient_email = (d.get('recipient_email') or '').strip()
+    recipient_employee = None
+    rec_emp_id = d.get('recipient_employee_id')
+    if rec_emp_id:
+        try:
+            recipient_employee = Employee.objects.get(id=int(rec_emp_id), company=company)
+        except (Employee.DoesNotExist, TypeError, ValueError):
+            return Response({'status': 'error', 'message': 'recipient_employee_id not found'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not recipient_email:
+            recipient_email = getattr(recipient_employee, 'work_email', '') or ''
+
+    # For non-email channels the recipient address is a fallback log field,
+    # not the routing key — Slack/Teams post into the company's channel.
+    is_addressable_channel = (template.channel or 'email').lower() == 'email'
+    if is_addressable_channel and not recipient_email:
+        return Response({'status': 'error',
+                         'message': 'recipient_email (or an employee with work_email) is required for email templates.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Render the subject + body using the caller's context. ────
+    context = d.get('context') or {}
+    # Provide a couple of automatic keys for convenience so simple templates
+    # like "Welcome {{employee_name}}" work when a recipient_employee is set.
+    if recipient_employee:
+        context.setdefault('employee_name', recipient_employee.full_name)
+    # `format_map` with a defaultdict-like tolerates missing keys instead of
+    # raising KeyError, which is the friendlier behaviour for a manual
+    # "send now" (the sender might be testing before filling every slot).
+    class _SafeDict(dict):
+        def __missing__(self, key):
+            return f'{{{key}}}'  # leave the placeholder visible so it's obvious what's unresolved
+    safe = _SafeDict(context)
+    try:
+        rendered_subject = (template.subject or '').format_map(safe)
+        rendered_body = (template.body or '').format_map(safe)
+    except (IndexError, ValueError):
+        # e.g. template used `{0}` positional; fall back to raw
+        rendered_subject = template.subject or ''
+        rendered_body = template.body or ''
+
+    ok, channel_used = _dispatch_hr_notification(
+        template, recipient_email, rendered_subject, rendered_body, company,
+    )
+    now = timezone.now()
+    scheduled = HRScheduledNotification.objects.create(
+        company=company,
+        template=template,
+        recipient_employee=recipient_employee,
+        recipient_email=recipient_email,
+        scheduled_at=now,
+        status='sent' if ok else 'failed',
+        sent_at=now if ok else None,
+        error_message=None if ok else f'send-now via {channel_used} returned false',
+        attempts=1,
+        context=context,
+    )
+    return Response({'status': 'success', 'data': {
+        'ok': ok,
+        'channel_used': channel_used,
+        'scheduled_notification_id': scheduled.id,
+        'rendered_subject': rendered_subject,
+        'template_id': template.id,
+    }})
 
 
 @api_view(['GET'])
@@ -1605,6 +1878,14 @@ def create_hr_meeting(request):
     if d.get('participant_ids'):
         valid = Employee.objects.filter(pk__in=d['participant_ids'], company=company)
         m.participants.set(valid)
+    _write_audit_log(request.user, company, 'hr_meeting.create', 'HRMeeting', m.id,
+                     before=None,
+                     after={'title': m.title, 'meeting_type': m.meeting_type,
+                            'visibility': m.visibility,
+                            'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+                            'duration_minutes': m.duration_minutes,
+                            'organizer_id': m.organizer_id,
+                            'participant_count': m.participants.count()})
     return Response({'status': 'success', 'data': {'id': m.id, 'title': m.title,
                                                    'visibility': m.visibility}},
                     status=status.HTTP_201_CREATED)
@@ -1769,6 +2050,10 @@ def update_leave_request(request, request_id):
 
         d = request.data or {}
         fields = []
+        before = {'leave_type': lr.leave_type, 'reason': lr.reason,
+                  'start_date': lr.start_date.isoformat(),
+                  'end_date': lr.end_date.isoformat(),
+                  'days_requested': float(lr.days_requested or 0)}
         if 'leave_type' in d:
             lr.leave_type = d['leave_type'] or lr.leave_type
             fields.append('leave_type')
@@ -1802,6 +2087,13 @@ def update_leave_request(request, request_id):
         if fields:
             fields.append('updated_at')
             lr.save(update_fields=fields)
+            _write_audit_log(request.user, company, 'leave_request.update',
+                             'leave_request', lr.id, before,
+                             after={'leave_type': lr.leave_type, 'reason': lr.reason,
+                                    'start_date': lr.start_date.isoformat(),
+                                    'end_date': lr.end_date.isoformat(),
+                                    'days_requested': float(lr.days_requested or 0),
+                                    'fields_changed': sorted(set(fields) - {'updated_at'})})
         return Response({'status': 'success', 'data': {
             'id': lr.id, 'status': lr.status,
             'start_date': lr.start_date.isoformat(), 'end_date': lr.end_date.isoformat(),
@@ -1858,6 +2150,126 @@ def cancel_leave_request(request, request_id):
     except Exception:
         logger.exception("cancel_leave_request failed")
         return Response({'status': 'error', 'message': 'Failed to cancel leave request'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def withdraw_leave_request(request, request_id):
+    """Withdraw an already-*approved* leave. Distinct from cancel (which acts on
+    pending requests): withdraw restores the `used_days` that were deducted at
+    approval time, so the employee's balance goes back up.
+
+    Guardrails:
+      * Only owner or HR-admin can withdraw.
+      * Only status='approved' is withdrawable — cancelled/rejected/pending
+        can't come here.
+      * Once the leave has fully passed (end_date < today), only HR-admin can
+        withdraw. The rationale: an employee retroactively withdrawing leave
+        they already took would let them double-dip on balance. HR-admin can
+        still do it (data corrections happen), but it's flagged in audit.
+      * `reason` is required — the audit trail is the whole point.
+    """
+    try:
+        from django.db import transaction
+        from django.db.models import F
+        company = request.user.company
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'status': 'error', 'message': 'reason is required for withdraw'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            lr = (LeaveRequest.objects
+                  .select_for_update()
+                  .filter(pk=request_id, employee__company=company)
+                  .first())
+            if not lr:
+                return Response({'status': 'error', 'message': 'Leave request not found'},
+                                status=status.HTTP_404_NOT_FOUND)
+
+            is_admin = _is_hr_admin(request.user)
+            caller_user_id = getattr(request.user, 'user_id', None)
+            is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
+            if not (is_admin or is_owner):
+                return Response({'status': 'error',
+                                 'message': 'Only the submitter or HR-admin can withdraw this leave'},
+                                status=status.HTTP_403_FORBIDDEN)
+
+            if lr.status != 'approved':
+                return Response({
+                    'status': 'error',
+                    'message': (f"Leave request is {lr.status} — only approved leaves can be withdrawn. "
+                                f"Use cancel for a pending request."),
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            today = timezone.now().date()
+            already_taken = lr.end_date and lr.end_date < today
+            if already_taken and not is_admin:
+                return Response({
+                    'status': 'error',
+                    'message': ('This leave has already ended. Only HR-admin can withdraw a '
+                                'past leave (contact HR for a correction).'),
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            prev_status = lr.status
+            lr.status = 'withdrawn'
+            lr.decided_at = timezone.now()
+            note_prefix = '[withdraw] ' + reason
+            lr.approval_note = (note_prefix + (('\n\nPrev note:\n' + lr.approval_note)
+                                               if lr.approval_note else ''))[:2000]
+            lr.save(update_fields=['status', 'decided_at', 'approval_note', 'updated_at'])
+
+            # Restore used_days. Mirror-image of the approve deduction: same
+            # F() atomic update, same year-scoped LeaveBalance row. If the
+            # balance row doesn't exist for whatever reason (approved before
+            # our LeaveBalance code existed?), skip silently rather than fail.
+            restored = 0.0
+            try:
+                from hr_agent.models import LeaveBalance
+                from datetime import date as _date
+                year_start = _date(lr.start_date.year, 1, 1)
+                bal = LeaveBalance.objects.filter(
+                    employee_id=lr.employee_id, leave_type=lr.leave_type,
+                    period_start=year_start,
+                ).first()
+                if bal:
+                    days = float(lr.days_requested or 0)
+                    # Floor at 0 — never let used_days go negative. If the
+                    # balance was manually zeroed since approval, we can't
+                    # restore more than what's there.
+                    from django.db.models import Case, When, Value, DecimalField
+                    LeaveBalance.objects.filter(pk=bal.pk).update(
+                        used_days=Case(
+                            When(used_days__lte=days, then=Value(0)),
+                            default=F('used_days') - days,
+                            output_field=DecimalField(max_digits=6, decimal_places=2),
+                        ),
+                        updated_at=timezone.now(),
+                    )
+                    restored = days
+            except Exception:
+                logger.exception("withdraw_leave_request: failed to restore LeaveBalance for lr %s", lr.id)
+
+        _write_audit_log(
+            request.user, company, 'leave_request.withdraw',
+            'leave_request', lr.id,
+            before={'status': prev_status},
+            after={'status': lr.status, 'employee_id': lr.employee_id,
+                   'leave_type': lr.leave_type,
+                   'days_requested': float(lr.days_requested or 0),
+                   'days_restored': restored,
+                   'after_end_date': bool(already_taken),
+                   'reason': reason[:500]},
+        )
+        return Response({'status': 'success',
+                         'data': {'id': lr.id, 'status': lr.status,
+                                  'days_restored': restored}})
+    except Exception:
+        logger.exception("withdraw_leave_request failed")
+        return Response({'status': 'error', 'message': 'Failed to withdraw leave request'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -2364,6 +2776,10 @@ def update_hr_meeting(request, meeting_id):
         return err
     d = request.data or {}
     dirty = []
+    before = {'title': m.title, 'status': m.status,
+              'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+              'duration_minutes': m.duration_minutes,
+              'visibility': m.visibility}
     if 'title' in d:
         m.title = str(d['title'] or '')[:200]
         dirty.append('title')
@@ -2409,12 +2825,25 @@ def update_hr_meeting(request, meeting_id):
     if dirty:
         dirty.append('updated_at')
         m.save(update_fields=list(set(dirty)))
+    participants_changed = False
     if 'participant_ids' in d:
         ids = d.get('participant_ids') or []
         if isinstance(ids, list):
             valid = Employee.objects.filter(pk__in=ids, company=request.user.company)
             m.participants.set(valid)
+            participants_changed = True
     m.refresh_from_db()
+    if dirty or participants_changed:
+        _write_audit_log(request.user, request.user.company, 'hr_meeting.update',
+                         'HRMeeting', m.id, before,
+                         after={'title': m.title, 'status': m.status,
+                                'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+                                'duration_minutes': m.duration_minutes,
+                                'visibility': m.visibility,
+                                'participant_count': m.participants.count() if participants_changed else None,
+                                'fields_changed': sorted(set(dirty) - {'updated_at',
+                                                                      'reminder_24h_sent_at',
+                                                                      'reminder_15m_sent_at'})})
     return Response({'status': 'success', 'data': _serialize_hr_meeting(m)})
 
 
@@ -2627,11 +3056,18 @@ def create_holiday(request):
             'notes': d.get('notes') or '',
         },
     )
+    before = None if created else {'name': h.name, 'is_working_day': h.is_working_day,
+                                   'notes': h.notes}
     if not created:
         h.name = name[:200]
         h.is_working_day = bool(d.get('is_working_day', False))
         h.notes = d.get('notes') or ''
         h.save()
+    _write_audit_log(request.user, company,
+                     'holiday.create' if created else 'holiday.update',
+                     'Holiday', h.id, before,
+                     after={'name': h.name, 'date': h.date.isoformat(),
+                            'region': h.region, 'is_working_day': h.is_working_day})
     return Response({'status': 'success', 'data': _serialize_holiday(h)},
                     status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
@@ -2642,10 +3078,15 @@ def create_holiday(request):
 @throttle_classes([HRCRUDThrottle])
 def delete_holiday(request, holiday_id):
     from hr_agent.models import Holiday
-    deleted, _ = Holiday.objects.filter(pk=holiday_id, company=request.user.company).delete()
-    if not deleted:
+    company = request.user.company
+    h = Holiday.objects.filter(pk=holiday_id, company=company).first()
+    if not h:
         return Response({'status': 'error', 'message': 'Holiday not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    snap = {'name': h.name, 'date': h.date.isoformat(), 'region': h.region}
+    h.delete()
+    _write_audit_log(request.user, company, 'holiday.delete',
+                     'Holiday', int(holiday_id), before=snap, after=None)
     return Response({'status': 'success', 'data': {'deleted_id': int(holiday_id)}})
 
 
@@ -2686,7 +3127,11 @@ def upsert_accrual_policy(request):
     if leave_type not in {c[0] for c in LeaveBalance.LEAVE_TYPE_CHOICES}:
         return Response({'status': 'error', 'message': 'invalid leave_type'},
                         status=status.HTTP_400_BAD_REQUEST)
-    p, _ = LeaveAccrualPolicy.objects.get_or_create(company=company, leave_type=leave_type)
+    p, created = LeaveAccrualPolicy.objects.get_or_create(company=company, leave_type=leave_type)
+    before = None if created else {'period': p.period,
+                                   'days_per_period': float(p.days_per_period or 0),
+                                   'max_balance': float(p.max_balance) if p.max_balance is not None else None,
+                                   'is_active': p.is_active}
     p.period = d.get('period') if d.get('period') in ('monthly', 'biweekly', 'annual') else (p.period or 'monthly')
     if 'days_per_period' in d:
         try:
@@ -2704,6 +3149,13 @@ def upsert_accrual_policy(request):
     if 'is_active' in d:
         p.is_active = bool(d['is_active'])
     p.save()
+    _write_audit_log(request.user, company,
+                     'accrual_policy.create' if created else 'accrual_policy.update',
+                     'LeaveAccrualPolicy', p.id, before,
+                     after={'leave_type': p.leave_type, 'period': p.period,
+                            'days_per_period': float(p.days_per_period or 0),
+                            'max_balance': float(p.max_balance) if p.max_balance is not None else None,
+                            'is_active': p.is_active})
     return Response({'status': 'success', 'data': _serialize_accrual_policy(p)})
 
 
@@ -2713,10 +3165,16 @@ def upsert_accrual_policy(request):
 @throttle_classes([HRCRUDThrottle])
 def delete_accrual_policy(request, policy_id):
     from hr_agent.models import LeaveAccrualPolicy
-    deleted, _ = LeaveAccrualPolicy.objects.filter(pk=policy_id, company=request.user.company).delete()
-    if not deleted:
+    company = request.user.company
+    p = LeaveAccrualPolicy.objects.filter(pk=policy_id, company=company).first()
+    if not p:
         return Response({'status': 'error', 'message': 'Policy not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    snap = {'leave_type': p.leave_type, 'period': p.period,
+            'days_per_period': float(p.days_per_period or 0)}
+    p.delete()
+    _write_audit_log(request.user, company, 'accrual_policy.delete',
+                     'LeaveAccrualPolicy', int(policy_id), before=snap, after=None)
     return Response({'status': 'success', 'data': {'deleted_id': int(policy_id)}})
 
 
@@ -3015,6 +3473,109 @@ def update_employee(request, employee_id):
 
 
 # ============================================================================
+# Employee lifecycle — deactivate / reactivate
+#
+# Before this pair, an HR admin who wanted to offboard someone had to go
+# through the general `update_employee` endpoint and set `employment_status`
+# to 'offboarded'. That works but has two problems:
+#   1. The audit log entry is a generic diff instead of a distinct
+#      "employee.deactivate" event that reporting/DLP can key off.
+#   2. There's no dedicated round-trip for reactivation, so a mistake
+#      requires the operator to remember which status the employee was in
+#      previously (active / probation / on_leave / …). We now stash the
+#      pre-deactivation status into audit metadata so reactivate can put
+#      it back to the same state.
+# ============================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def deactivate_employee(request, employee_id):
+    """Mark an employee as offboarded. HR-admin only.
+
+    Body:
+      * ``reason`` (str, optional) — free text; goes into the audit log.
+
+    Idempotent: calling on an already-offboarded employee returns success
+    without mutating (200, `already_offboarded=True`). The pre-deactivate
+    status is stashed in `before` so `reactivate_employee` can restore it.
+    """
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR admin only.'},
+                        status=status.HTTP_403_FORBIDDEN)
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    if emp.employment_status == 'offboarded':
+        return Response({'status': 'success', 'data': {
+            'id': emp.id, 'employment_status': emp.employment_status,
+            'already_offboarded': True,
+        }})
+    d = request.data or {}
+    reason = (d.get('reason') or '').strip()[:500]
+    previous_status = emp.employment_status
+    emp.employment_status = 'offboarded'
+    emp.save(update_fields=['employment_status', 'updated_at'])
+    _write_audit_log(
+        request.user, request.user.company,
+        'employee.deactivate', 'employee', emp.id,
+        before={'employment_status': previous_status},
+        after={'employment_status': 'offboarded', 'reason': reason},
+    )
+    return Response({'status': 'success', 'data': {
+        'id': emp.id, 'employment_status': emp.employment_status,
+        'previous_status': previous_status,
+    }})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def reactivate_employee(request, employee_id):
+    """Reverse an earlier deactivation. HR-admin only.
+
+    Body:
+      * ``target_status`` (str, optional) — override the reactivated status.
+                            Defaults to 'active'. Accepts any valid choice
+                            except 'offboarded' (that's what deactivate does).
+      * ``reason``        (str, optional).
+
+    Not-idempotent on the audit trail (each call writes a log entry) but
+    idempotent on the model (calling on an already-active employee just
+    logs and returns).
+    """
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR admin only.'},
+                        status=status.HTTP_403_FORBIDDEN)
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    d = request.data or {}
+    target = (d.get('target_status') or 'active').strip()
+    valid = {c[0] for c in Employee.EMPLOYMENT_STATUS_CHOICES} - {'offboarded'}
+    if target not in valid:
+        return Response({'status': 'error',
+                         'message': f"target_status must be one of {sorted(valid)}"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    reason = (d.get('reason') or '').strip()[:500]
+    previous_status = emp.employment_status
+    emp.employment_status = target
+    emp.save(update_fields=['employment_status', 'updated_at'])
+    _write_audit_log(
+        request.user, request.user.company,
+        'employee.reactivate', 'employee', emp.id,
+        before={'employment_status': previous_status},
+        after={'employment_status': target, 'reason': reason},
+    )
+    return Response({'status': 'success', 'data': {
+        'id': emp.id, 'employment_status': emp.employment_status,
+        'previous_status': previous_status,
+    }})
+
+
+# ============================================================================
 # Audit log — HR-admin read-only view
 # ============================================================================
 
@@ -3299,6 +3860,11 @@ def create_review_cycle(request):
         ('draft', 'active', 'closed', 'cancelled') else 'draft',
         created_by=user,
     )
+    _write_audit_log(request.user, company, 'review_cycle.create',
+                     'PerformanceReviewCycle', cycle.id, before=None,
+                     after={'name': cycle.name, 'status': cycle.status,
+                            'period_start': cycle.period_start.isoformat(),
+                            'period_end': cycle.period_end.isoformat()})
     return Response({'status': 'success', 'data': _serialize_review_cycle(cycle)},
                     status=status.HTTP_201_CREATED)
 
@@ -3347,13 +3913,93 @@ def delete_review_cycle(request, cycle_id):
         return Response({'status': 'error', 'message': 'HR-admin role required'},
                         status=status.HTTP_403_FORBIDDEN)
     from hr_agent.models import PerformanceReviewCycle
-    deleted, _ = PerformanceReviewCycle.objects.filter(
-        pk=cycle_id, company=request.user.company,
-    ).delete()
-    if not deleted:
+    company = request.user.company
+    cycle = PerformanceReviewCycle.objects.filter(pk=cycle_id, company=company).first()
+    if not cycle:
         return Response({'status': 'error', 'message': 'Cycle not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    snap = {'name': cycle.name, 'status': cycle.status,
+            'period_start': cycle.period_start.isoformat(),
+            'period_end': cycle.period_end.isoformat(),
+            'review_count': cycle.reviews.count()}
+    cycle.delete()
+    _write_audit_log(request.user, company, 'review_cycle.delete',
+                     'PerformanceReviewCycle', int(cycle_id),
+                     before=snap, after=None)
     return Response({'status': 'success', 'data': {'deleted_id': int(cycle_id)}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def close_review_cycle(request, cycle_id):
+    """Flip an active cycle to `closed` so the cycle becomes read-only. Optionally
+    releases every review to its employee (``release_reviews=true``) — otherwise
+    ratings stay HR-only until someone flips ``visible_to_employee`` per row."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    from hr_agent.models import PerformanceReviewCycle, PerformanceReview
+    company = request.user.company
+    cycle = PerformanceReviewCycle.objects.filter(company=company, pk=cycle_id).first()
+    if not cycle:
+        return Response({'status': 'error', 'message': 'Cycle not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if cycle.status == 'closed':
+        return Response({'status': 'success',
+                         'data': {**_serialize_review_cycle(cycle), 'released': 0}})
+
+    before = {'status': cycle.status}
+    cycle.status = 'closed'
+    cycle.save(update_fields=['status', 'updated_at'])
+
+    released = 0
+    if str(request.data.get('release_reviews', '')).lower() in ('1', 'true', 'yes'):
+        released = PerformanceReview.objects.filter(
+            cycle=cycle, visible_to_employee=False,
+        ).update(visible_to_employee=True, status='closed')
+
+    _write_audit_log(request.user, company, 'review_cycle_closed',
+                     'PerformanceReviewCycle', cycle.pk, before,
+                     {'status': 'closed', 'released': released,
+                      'reason': (request.data.get('reason') or '')[:500]})
+
+    return Response({'status': 'success',
+                     'data': {**_serialize_review_cycle(cycle), 'released': released}})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def reopen_review_cycle(request, cycle_id):
+    """Flip a closed cycle back to `active` so late submissions can land. Does
+    NOT re-hide already-released reviews — that would surprise employees who've
+    already seen their rating."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    from hr_agent.models import PerformanceReviewCycle
+    company = request.user.company
+    cycle = PerformanceReviewCycle.objects.filter(company=company, pk=cycle_id).first()
+    if not cycle:
+        return Response({'status': 'error', 'message': 'Cycle not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if cycle.status not in ('closed', 'cancelled'):
+        return Response({'status': 'error',
+                         'message': f"Cannot reopen a cycle in status '{cycle.status}'."},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    before = {'status': cycle.status}
+    cycle.status = 'active'
+    cycle.save(update_fields=['status', 'updated_at'])
+    _write_audit_log(request.user, company, 'review_cycle_reopened',
+                     'PerformanceReviewCycle', cycle.pk, before,
+                     {'status': 'active',
+                      'reason': (request.data.get('reason') or '')[:500]})
+
+    return Response({'status': 'success', 'data': _serialize_review_cycle(cycle)})
 
 
 @api_view(['GET'])
@@ -3599,6 +4245,149 @@ def list_employee_goals(request, employee_id):
     if cycle_id:
         qs = qs.filter(cycle_id=cycle_id)
     return Response({'status': 'success', 'data': [_serialize_goal(g) for g in qs]})
+
+
+# ============================================================================
+# Leave balances — dedicated read + admin-adjust
+#
+# `get_employee_detail` already returns balances as part of its bundle, but
+# there was no lightweight standalone read (annoying for widgets that only
+# want balances) and — worse — no way for HR to hand-correct a wrong accrual
+# without direct DB access. These two endpoints fix both.
+# ============================================================================
+
+def _serialize_leave_balance(row) -> dict:
+    return {
+        'id': row.id,
+        'leave_type': row.leave_type,
+        'accrued_days': float(row.accrued_days or 0),
+        'used_days': float(row.used_days or 0),
+        'carried_over_days': float(row.carried_over_days or 0),
+        'remaining': row.remaining,
+        'period_start': row.period_start.isoformat() if row.period_start else None,
+        'period_end': row.period_end.isoformat() if row.period_end else None,
+        'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_leave_balances(request, employee_id):
+    """Dedicated balances read for one employee. Employees can read their
+    own; managers can read their reports'; HR-admins can read anyone in
+    the company. Order is unspecified — clients that care should sort by
+    `leave_type` themselves."""
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    is_admin = _is_hr_admin(request.user)
+    caller_emp = (Employee.objects.filter(company=request.user.company, company_user=request.user).first()
+                  or Employee.objects.filter(company=request.user.company, work_email__iexact=request.user.email).first())
+    if not is_admin:
+        # self or their reports only
+        is_self = caller_emp and caller_emp.id == emp.id
+        is_report = caller_emp and emp.manager_id == caller_emp.id
+        if not (is_self or is_report):
+            return Response({'status': 'error', 'message': 'Not authorized.'},
+                            status=status.HTTP_403_FORBIDDEN)
+    rows = list(emp.leave_balances.all())
+    return Response({'status': 'success', 'data': [_serialize_leave_balance(r) for r in rows]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def adjust_leave_balance(request, employee_id):
+    """HR-admin only. Adjust an employee's leave balance for a specific
+    leave_type. Use the ``delta_*`` deltas to bump values relatively (the
+    typical case — "add 2 vacation days"), or ``set_*`` to hard-set an
+    absolute value (rare — post-migration correction).
+
+    Body:
+      * ``leave_type``  (str, required)     — vacation / sick / parental / etc.
+      * ``delta_accrued_days``    (float)   — add to accrued (can be negative)
+      * ``delta_used_days``       (float)   — add to used (can be negative)
+      * ``delta_carried_over_days`` (float)
+      * ``set_accrued_days``      (float)   — hard set; ignores delta on this field
+      * ``set_used_days``         (float)
+      * ``set_carried_over_days`` (float)
+      * ``reason``      (str, required)     — free text explaining the change,
+                                              written to the audit log.
+
+    Creates the row if it doesn't exist yet (with period_start=None so it
+    matches the model's `unique_together`).
+    """
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR admin only.'},
+                        status=status.HTTP_403_FORBIDDEN)
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    d = request.data or {}
+    leave_type = (d.get('leave_type') or '').strip()
+    valid_types = {c[0] for c in LeaveBalance.LEAVE_TYPE_CHOICES}
+    if leave_type not in valid_types:
+        return Response({'status': 'error',
+                         'message': f"leave_type must be one of {sorted(valid_types)}"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    reason = (d.get('reason') or '').strip()
+    if not reason:
+        return Response({'status': 'error',
+                         'message': 'reason is required — it goes to the audit log.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # Look up (or create) the row. We look at the current period-open row
+    # (`period_start=None` is the "always-on" bucket, which is how balances
+    # start out before an accrual policy tags them).
+    row = emp.leave_balances.filter(leave_type=leave_type).order_by('-period_start').first()
+    created = False
+    if row is None:
+        row = LeaveBalance.objects.create(employee=emp, leave_type=leave_type)
+        created = True
+
+    def _num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    before = {
+        'accrued_days': float(row.accrued_days or 0),
+        'used_days': float(row.used_days or 0),
+        'carried_over_days': float(row.carried_over_days or 0),
+    }
+
+    for field, set_key, delta_key in (
+        ('accrued_days',      'set_accrued_days',      'delta_accrued_days'),
+        ('used_days',         'set_used_days',         'delta_used_days'),
+        ('carried_over_days', 'set_carried_over_days', 'delta_carried_over_days'),
+    ):
+        if set_key in d and d[set_key] is not None:
+            v = _num(d[set_key])
+            if v is not None:
+                setattr(row, field, max(0.0, v))  # never negative
+        elif delta_key in d and d[delta_key] is not None:
+            v = _num(d[delta_key])
+            if v is not None:
+                setattr(row, field, max(0.0, float(getattr(row, field) or 0) + v))
+
+    row.save()
+    after = {
+        'accrued_days': float(row.accrued_days or 0),
+        'used_days': float(row.used_days or 0),
+        'carried_over_days': float(row.carried_over_days or 0),
+    }
+    # Audit log with the diff. Uses the same helper the rest of the HR
+    # code uses so the log shape is consistent.
+    _write_audit_log(
+        request.user, request.user.company,
+        'leave_balance.adjust', 'leave_balance', row.id,
+        before=before, after={**after, 'reason': reason, 'leave_type': leave_type, 'created': created},
+    )
+    return Response({'status': 'success', 'data': _serialize_leave_balance(row)})
 
 
 @api_view(['POST'])

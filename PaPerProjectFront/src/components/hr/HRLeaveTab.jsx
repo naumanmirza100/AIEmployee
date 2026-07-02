@@ -36,6 +36,7 @@ const STATUS_BADGE = {
   approved: 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30',
   rejected: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
   cancelled: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
+  withdrawn: 'bg-sky-500/10 text-sky-300 border-sky-400/30',
 };
 
 
@@ -152,13 +153,35 @@ export default function HRLeaveTab() {
   });
 
   const handleCancel = async (lr) => {
-    if (!confirm(`Withdraw your leave request for ${lr.start_date} → ${lr.end_date}? This is different from a rejection — the audit trail will show "cancelled".`)) return;
+    if (!confirm(`Cancel your pending leave request for ${lr.start_date} → ${lr.end_date}? The audit trail will show "cancelled" (distinct from "rejected"). No balance change since it wasn't approved yet.`)) return;
     try {
       await hrAgentService.cancelLeaveRequest(lr.id);
       toast({ title: 'Leave request cancelled' });
       load();
     } catch (e) {
       toast({ title: 'Cancel failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleWithdraw = async (lr) => {
+    const reason = prompt(
+      `Withdraw your APPROVED leave (${lr.start_date} → ${lr.end_date})?\n\n` +
+      `This restores ${lr.days_requested} day(s) to your balance. Enter a reason (required, saved to audit log):`,
+    );
+    if (!reason || !reason.trim()) {
+      if (reason !== null) toast({ title: 'Reason required', variant: 'destructive' });
+      return;
+    }
+    try {
+      const res = await hrAgentService.withdrawLeaveRequest(lr.id, reason.trim());
+      const restored = res?.data?.days_restored;
+      toast({
+        title: 'Leave withdrawn',
+        description: restored != null ? `${restored} day(s) restored to balance` : undefined,
+      });
+      load();
+    } catch (e) {
+      toast({ title: 'Withdraw failed', description: e.message, variant: 'destructive' });
     }
   };
 
@@ -288,6 +311,13 @@ export default function HRLeaveTab() {
                             <Button variant="outline" size="sm" className="h-7 text-xs text-rose-400 hover:text-rose-300"
                               onClick={() => openDecide(lr, 'reject')}>
                               <X className="h-3 w-3 mr-1" /> Reject
+                            </Button>
+                          </div>
+                        ) : lr.status === 'approved' ? (
+                          <div className="flex gap-1 justify-end flex-wrap">
+                            <Button variant="outline" size="sm" className="h-7 text-xs text-sky-300 hover:text-sky-200"
+                              onClick={() => handleWithdraw(lr)} title="Give back an approved leave — restores balance">
+                              <Ban className="h-3 w-3 mr-1" /> Withdraw
                             </Button>
                           </div>
                         ) : (

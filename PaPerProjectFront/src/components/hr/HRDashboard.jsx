@@ -259,6 +259,39 @@ const HRDashboard = () => {
     }
   };
 
+  const handleCloseCycle = async (c) => {
+    const release = window.confirm(
+      `Close cycle "${c.name}"?\n\nOK = close AND release all reviews to employees (they can see their ratings).\nCancel = close only, ratings stay HR-only.`,
+    );
+    // Second confirm — the first is a two-way choice, this one is the actual go/no-go.
+    if (!window.confirm(`Confirm: close cycle "${c.name}"${release ? ' and release reviews to employees' : ''}?`)) return;
+    const reason = window.prompt('Reason for closing? (audit log)') || '';
+    try {
+      const res = await hrAgentService.closeHRReviewCycle(c.id, { releaseReviews: release, reason });
+      const updated = res?.data || {};
+      setCycles((arr) => arr.map((x) => (x.id === c.id ? { ...x, ...updated } : x)));
+      toast({
+        title: 'Cycle closed',
+        description: release ? `${updated.released ?? 0} reviews released to employees` : 'Cycle is read-only',
+      });
+    } catch (e) {
+      toast({ title: 'Close failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleReopenCycle = async (c) => {
+    if (!window.confirm(`Reopen cycle "${c.name}"? Already-released reviews stay visible.`)) return;
+    const reason = window.prompt('Reason for reopening? (audit log)') || '';
+    try {
+      const res = await hrAgentService.reopenHRReviewCycle(c.id, { reason });
+      const updated = res?.data || {};
+      setCycles((arr) => arr.map((x) => (x.id === c.id ? { ...x, ...updated } : x)));
+      toast({ title: 'Cycle reopened' });
+    } catch (e) {
+      toast({ title: 'Reopen failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
   const handleDeleteDept = async (dept) => {
     if (!window.confirm(`Delete "${dept.name}"? Employees in it will be detached.`)) return;
     try {
@@ -1060,6 +1093,14 @@ const HRDashboard = () => {
                               {c.status !== 'active' && c.status !== 'closed' && (
                                 <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-emerald-300"
                                         onClick={() => handleActivateCycle(c)}>Activate</Button>
+                              )}
+                              {c.status === 'active' && (
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-sky-300"
+                                        onClick={() => handleCloseCycle(c)}>Close</Button>
+                              )}
+                              {(c.status === 'closed' || c.status === 'cancelled') && (
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-amber-300"
+                                        onClick={() => handleReopenCycle(c)}>Reopen</Button>
                               )}
                               <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-rose-300"
                                       onClick={() => handleDeleteCycle(c)}>Delete</Button>

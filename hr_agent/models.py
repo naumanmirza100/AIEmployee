@@ -242,13 +242,19 @@ class LeaveAccrualPolicy(models.Model):
 
 
 class LeaveRequest(models.Model):
-    """Employee-initiated leave request. Lifecycle: pending → approved /
-    rejected / cancelled. The workflow runner reacts to status changes."""
+    """Employee-initiated leave request. Lifecycle:
+        pending → approved / rejected / cancelled
+        approved → withdrawn (employee no longer taking the leave; restores balance)
+    The workflow runner reacts to status changes.
+
+    `cancelled` = employee changed their mind BEFORE a decision (no balance impact).
+    `withdrawn` = employee had approval and gave it back (balance is restored)."""
     STATUS_CHOICES = [
         ('pending', 'Pending Approval'),
         ('approved', 'Approved'),
         ('rejected', 'Rejected'),
-        ('cancelled', 'Cancelled'),
+        ('cancelled', 'Cancelled (before decision)'),
+        ('withdrawn', 'Withdrawn (after approval)'),
     ]
 
     PARTIAL_DAY_PERIOD_CHOICES = [
