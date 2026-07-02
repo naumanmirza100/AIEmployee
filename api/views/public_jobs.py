@@ -264,61 +264,7 @@ def public_track_application(request, token):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    job = application.job
-
-    # Try to find linked CVRecord and Interview
-    cv_record = None
-    interview = None
-    try:
-        from recruitment_agent.models import CVRecord, Interview
-        cv_record = CVRecord.objects.filter(job_application=application).first()
-        if cv_record:
-            interview = Interview.objects.filter(cv_record=cv_record).order_by('-created_at').first()
-    except Exception:
-        pass
-
-    status_label_map = {
-        'pending': 'Under Review',
-        'reviewed': 'Reviewed',
-        'shortlisted': 'Shortlisted',
-        'rejected': 'Not Selected',
-    }
-
-    interview_data = None
-    if interview:
-        interview_data = {
-            'status': interview.status,
-            'interview_type': getattr(interview, 'interview_type', None),
-            'scheduled_datetime': interview.scheduled_datetime.isoformat() if getattr(interview, 'scheduled_datetime', None) else None,
-            'meeting_link': getattr(interview, 'meeting_link', None),
-            'confirmation_token': interview.confirmation_token,
-        }
-
-    return Response({
-        'status': 'success',
-        'data': {
-            'application': {
-                'id': application.id,
-                'first_name': application.first_name,
-                'last_name': application.last_name,
-                'email': application.email,
-                'status': application.status,
-                'status_label': status_label_map.get(application.status, application.status.title()),
-                'applied_at': application.applied_at.isoformat(),
-            },
-            'job': {
-                'title': job.title,
-                'company_name': getattr(job, 'company_name', None),
-                'location': getattr(job, 'location', None),
-                'department': getattr(job, 'department', None),
-            },
-            'cv_record': {
-                'qualification_decision': cv_record.qualification_decision if cv_record else None,
-                'role_fit_score': cv_record.role_fit_score if cv_record else None,
-            } if cv_record else None,
-            'interview': interview_data,
-        },
-    })
+    return Response({'status': 'success', 'data': _build_app_payload(application)})
 
 
 # ─── Candidate Portal ───────────────────────────────────────────────────────
@@ -349,7 +295,9 @@ def _build_app_payload(app):
             'interview_type': getattr(interview, 'interview_type', None),
             'scheduled_datetime': interview.scheduled_datetime.isoformat() if getattr(interview, 'scheduled_datetime', None) else None,
             'meeting_link': getattr(interview, 'meeting_link', None),
-            'confirmation_token': interview.confirmation_token,
+            'confirmation_token': getattr(interview, 'confirmation_token', None),
+            'selected_slot': getattr(interview, 'selected_slot', None),
+            'outcome': getattr(interview, 'outcome', None),
         }
 
     job = app.job
@@ -370,8 +318,10 @@ def _build_app_payload(app):
             'previous_salary': app.previous_salary,
             'linkedin_url': app.linkedin_url,
             'github_url': app.github_url,
+            'other_links': app.other_links,
             'cover_letter': app.cover_letter,
             'cv_file_name': app.cv_file_name,
+            'cv_file_url': app.cv_file.url if app.cv_file else None,
             'access_token': app.access_token,
         },
         'job': {

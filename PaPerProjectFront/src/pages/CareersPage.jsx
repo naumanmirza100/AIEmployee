@@ -7,7 +7,7 @@ import {
   Search, UploadCloud, Star, Bot, CalendarDays, BarChart, ShieldCheck,
   FileText, ChevronsDown, Loader2, Building2, ChevronLeft, ChevronRight,
   ChevronsLeft, ChevronsRight, X, Filter, Clock, Copy, Link2,
-  Mail, Send, CheckCircle2, AlertCircle, LayoutGrid,
+  Mail, Send, CheckCircle2, AlertCircle, LayoutGrid, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -70,6 +70,7 @@ const CareersPage = ({ scrollToJobs = false }) => {
 
   const [selectedPosition, setSelectedPosition] = useState(null);
   const [positions, setPositions]               = useState([]);
+  const [expandedJobs, setExpandedJobs]         = useState(new Set());
   const [companies, setCompanies]               = useState([]);
   const [pagination, setPagination]             = useState({ page: 1, page_size: 10, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
   const [loading, setLoading]                   = useState(true);
@@ -442,12 +443,32 @@ const CareersPage = ({ scrollToJobs = false }) => {
                               )}
                             </div>
 
-                            {/* Description preview */}
-                            {pos.description && (
-                              <p className="text-muted-foreground text-sm mt-3 line-clamp-2 leading-relaxed">
-                                {pos.description}
-                              </p>
-                            )}
+                            {/* Description preview with show more */}
+                            {pos.description && (() => {
+                              const isExp = expandedJobs.has(pos.id);
+                              const toggle = () => setExpandedJobs(prev => {
+                                const next = new Set(prev);
+                                isExp ? next.delete(pos.id) : next.add(pos.id);
+                                return next;
+                              });
+                              const LIMIT = 180;
+                              const isLong = pos.description.length > LIMIT;
+                              return (
+                                <div className="mt-3">
+                                  <p className="text-muted-foreground text-sm leading-relaxed">
+                                    {isExp || !isLong ? pos.description : pos.description.slice(0, LIMIT) + '…'}
+                                  </p>
+                                  {isLong && (
+                                    <button
+                                      onClick={toggle}
+                                      className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+                                    >
+                                      {isExp ? <><ChevronUp className="h-3.5 w-3.5" />Show Less</> : <><ChevronDown className="h-3.5 w-3.5" />Show More</>}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           {/* Right — CTA */}
@@ -473,11 +494,11 @@ const CareersPage = ({ scrollToJobs = false }) => {
                           </div>
                         </div>
 
-                        {/* Requirements snippet */}
+                        {/* Requirements — always fully visible */}
                         {pos.requirements && (
                           <div className="mt-4 pt-4 border-t border-border/60">
                             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Requirements</p>
-                            <p className="text-sm text-muted-foreground line-clamp-2">{pos.requirements}</p>
+                            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">{pos.requirements}</p>
                           </div>
                         )}
                       </div>

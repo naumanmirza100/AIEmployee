@@ -209,6 +209,15 @@ function SubmissionModal({ item, onClose }) {
                   <p className="text-[10px] text-white/30 mb-0.5">Status</p>
                   <InterviewPill status={interview.status} />
                 </div>
+                {interview.outcome && (
+                  <div>
+                    <p className="text-[10px] text-white/30 mb-0.5">Outcome</p>
+                    <p className="text-sm font-semibold capitalize"
+                      style={{ color: interview.outcome === 'passed' ? '#34d399' : interview.outcome === 'failed' ? '#f87171' : '#fbbf24' }}>
+                      {interview.outcome}
+                    </p>
+                  </div>
+                )}
               </div>
               {/* Interview actions inside modal */}
               <div className="mt-3 flex gap-2">
@@ -246,7 +255,42 @@ function SubmissionModal({ item, onClose }) {
             <DetailRow icon={Linkedin}      label="LinkedIn"         value={app.linkedin_url}  link />
             <DetailRow icon={Github}        label="GitHub"           value={app.github_url}    link />
             <DetailRow icon={Link2}         label="Other Links"      value={app.other_links} />
-            <DetailRow icon={FileText}      label="CV File"          value={app.cv_file_name} />
+            {/* CV file row — download/view button */}
+            {app.cv_file_name && (
+              <div className="flex items-start gap-3 py-2.5 border-b" style={{ borderColor:'rgba(255,255,255,0.05)' }}>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                  style={{ background:'rgba(99,102,241,0.1)' }}>
+                  <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">CV / Resume</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-white/70 truncate max-w-[200px]">{app.cv_file_name}</span>
+                    {app.cv_file_url && (
+                      <div className="flex items-center gap-1.5">
+                        <a
+                          href={app.cv_file_url.startsWith('http') ? app.cv_file_url : `${BACKEND_BASE}${app.cv_file_url}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
+                          style={{ background:'rgba(99,102,241,0.2)', color:'#a5b4fc', border:'1px solid rgba(99,102,241,0.3)' }}
+                        >
+                          <ExternalLink className="w-3 h-3" />View
+                        </a>
+                        <a
+                          href={app.cv_file_url.startsWith('http') ? app.cv_file_url : `${BACKEND_BASE}${app.cv_file_url}`}
+                          download={app.cv_file_name}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
+                          style={{ background:'rgba(16,185,129,0.15)', color:'#34d399', border:'1px solid rgba(16,185,129,0.25)' }}
+                        >
+                          <FileText className="w-3 h-3" />Download
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {app.cover_letter && (

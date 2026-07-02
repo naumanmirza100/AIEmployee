@@ -226,6 +226,16 @@ function InterviewCard({ interview, backendBase }) {
           <ChevronRight className="w-4 h-4" />
         </a>
       )}
+
+      {interview.outcome && (
+        <div className="pt-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+          <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Outcome</p>
+          <p className="text-sm font-semibold capitalize"
+            style={{ color: interview.outcome === 'passed' ? '#34d399' : interview.outcome === 'failed' ? '#f87171' : '#fbbf24' }}>
+            {interview.outcome}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
