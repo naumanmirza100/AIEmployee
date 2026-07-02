@@ -102,6 +102,7 @@ urlpatterns = [
     re_path(r'^industries/(?P<slug>[\w-]+)/?$', industry.get_industry_by_slug, name='get_industry_by_slug'),
     re_path(r'^industries/(?P<slug>[\w-]+)/challenges/?$', industry.get_industry_challenges, name='get_industry_challenges'),
     
+
     # Blog endpoints
     re_path(r'^blog/posts/?$', blog.list_blog_posts, name='list_blog_posts'),
     re_path(r'^blog/posts/(?P<slug>[\w-]+)/?$', blog.get_blog_post_by_slug, name='get_blog_post_by_slug'),
@@ -210,6 +211,7 @@ urlpatterns = [
     
     # Company User Tasks endpoints
     re_path(r'^company/tasks/(?P<task_id>\d+)/update/?$', company_projects_tasks.update_company_task, name='update_company_task'),
+    re_path(r'^company/tasks/(?P<task_id>\d+)/delete/?$', company_projects_tasks.delete_company_task, name='delete_company_task'),
     re_path(r'^company/users/for-assignment/?$', company_projects_tasks.get_company_users_for_assignment, name='get_company_users_for_assignment'),
 
     # Project Manager AI Agent endpoints (token-auth friendly)
@@ -424,10 +426,14 @@ urlpatterns = [
 
     # Bulk ticket ops (F3)
     re_path(r'^frontline/tickets/bulk-update/?$', frontline_agent.bulk_update_tickets, name='frontline_bulk_update_tickets'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/update/?$', frontline_agent.update_ticket, name='frontline_update_ticket'),  # PATCH/PUT
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/widget-attachments/?$', frontline_agent.list_widget_attachments, name='frontline_list_widget_attachments'),  # GET
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/widget-attachments/(?P<filename>[^/]+)/download/?$', frontline_agent.download_widget_attachment, name='frontline_download_widget_attachment'),  # GET
 
     # Dead letter queue (F5)
     re_path(r'^frontline/dead-letters/?$', frontline_agent.list_dead_letters, name='frontline_list_dead_letters'),  # GET
     re_path(r'^frontline/dead-letters/(?P<dlq_id>\d+)/resolve/?$', frontline_agent.resolve_dead_letter, name='frontline_resolve_dead_letter'),  # POST
+    re_path(r'^frontline/dead-letters/(?P<dlq_id>\d+)/delete/?$', frontline_agent.delete_dead_letter, name='frontline_delete_dead_letter'),  # DELETE
 
     # CSAT (F2)
     re_path(r'^frontline/csat/submit/?$', frontline_agent.submit_satisfaction, name='frontline_submit_satisfaction'),  # POST (public)
@@ -460,6 +466,7 @@ urlpatterns = [
 
     # Handoff release (H1)
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/release-handoff/?$', frontline_agent.release_handoff, name='frontline_release_handoff'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/reassign-handoff/?$', frontline_agent.reassign_ticket_handoff, name='frontline_reassign_handoff'),  # POST
 
     re_path(r'^frontline/tickets/?$', frontline_agent.list_tickets, name='frontline_list_tickets'),  # GET
     re_path(r'^frontline/tickets/aging/?$', frontline_agent.list_tickets_aging, name='frontline_list_tickets_aging'),  # GET
@@ -493,6 +500,7 @@ urlpatterns = [
     re_path(r'^frontline/contacts/create/?$', frontline_agent.create_contact, name='frontline_create_contact'),  # POST
     re_path(r'^frontline/contacts/(?P<contact_id>\d+)/?$', frontline_agent.get_contact, name='frontline_get_contact'),  # GET
     re_path(r'^frontline/contacts/(?P<contact_id>\d+)/update/?$', frontline_agent.update_contact, name='frontline_update_contact'),  # PATCH/PUT
+    re_path(r'^frontline/contacts/(?P<contact_id>\d+)/delete/?$', frontline_agent.delete_contact, name='frontline_delete_contact'),  # DELETE
     re_path(r'^frontline/contacts/(?P<contact_id>\d+)/tickets/?$', frontline_agent.list_contact_tickets, name='frontline_list_contact_tickets'),  # GET
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/context/?$', frontline_agent.get_ticket_context, name='frontline_get_ticket_context'),  # GET
     # Hand-off queue + reply-draft assist (Phase 3 §3.2)
@@ -850,7 +858,9 @@ urlpatterns = [
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/notes/?$', exec_meeting_api.meeting_notes, name='exec_meeting_notes'),  # GET, POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/documents/?$', exec_meeting_api.meeting_documents, name='exec_meeting_documents'),  # GET
+    re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/participants/?$', exec_meeting_api.meeting_participants, name='exec_meeting_participants'),  # GET, POST, DELETE
     re_path(r'^exec-meeting/meetings/suggest-slots/?$', exec_meeting_api.meeting_suggest_slots, name='exec_meeting_suggest_slots'),  # GET
+    re_path(r'^exec-meeting/users/search/?$', exec_meeting_api.search_company_users, name='exec_users_search'),  # GET ?q=
 
     # Action Items
     re_path(r'^exec-meeting/action-items/(?P<item_id>\d+)/?$', exec_meeting_api.action_item_detail, name='exec_action_item_detail'),  # GET, PATCH
@@ -867,6 +877,8 @@ urlpatterns = [
 
     # Documents
     re_path(r'^exec-meeting/documents/draft/?$', exec_meeting_api.document_draft, name='exec_document_draft'),  # POST
+    re_path(r'^exec-meeting/documents/?$', exec_meeting_api.standalone_document_list, name='exec_document_list'),  # GET
+    re_path(r'^exec-meeting/documents/(?P<doc_id>\d+)/?$', exec_meeting_api.standalone_document_detail, name='exec_document_detail'),  # GET, DELETE
 
     # Notifications
     re_path(r'^exec-meeting/notifications/?$', exec_meeting_api.notification_list, name='exec_notification_list'),  # GET

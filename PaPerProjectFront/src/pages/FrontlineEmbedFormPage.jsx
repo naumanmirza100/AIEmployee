@@ -1,7 +1,24 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '@/config/apiConfig';
-import { Loader2, Send, CheckCircle } from 'lucide-react';
+import { Loader2, Send, CheckCircle, Paperclip, X } from 'lucide-react';
+
+// Mirror the backend caps so the user gets a friendly error before the
+// upload even leaves the browser. Backend re-enforces these — the client
+// values are a UX courtesy, not the security boundary.
+const MAX_FILES = 5;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;        // 10 MB per file
+const MAX_TOTAL_BYTES = MAX_FILE_BYTES * MAX_FILES; // 50 MB across the batch
+// MIME allowlist hint shown in the file-picker `accept` attribute. The
+// backend uses magic-byte sniffing on top of this, so a renamed `.exe`
+// won't slip through even if a browser ignores `accept`.
+const ACCEPT_LIST = 'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain';
+
+const formatBytes = (n) => {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+};
 
 /**
  * Embeddable web form. Load in iframe: /embed/form?key=WIDGET_KEY
@@ -14,11 +31,52 @@ export default function FrontlineEmbedFormPage() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [question, setQuestion] = useState('');
+  // Attachments — array of File. Stored in state so the user can review +
+  // remove individual files before submit (browser file inputs are otherwise
+  // append-only and clunky).
+  const [files, setFiles] = useState([]);
+  const [fileWarning, setFileWarning] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [askLoading, setAskLoading] = useState(false);
   const [answer, setAnswer] = useState('');
+
+  const handleFileSelection = (incoming) => {
+    setFileWarning('');
+    const fresh = Array.from(incoming || []);
+    const merged = [...files];
+    const skipped = [];
+    for (const f of fresh) {
+      if (merged.length >= MAX_FILES) {
+        skipped.push(`${f.name} (over ${MAX_FILES}-file limit)`);
+        continue;
+      }
+      if (f.size > MAX_FILE_BYTES) {
+        skipped.push(`${f.name} (over ${formatBytes(MAX_FILE_BYTES)})`);
+        continue;
+      }
+      // Dedup by (name, size) — re-picking the same file in two clicks of
+      // the file dialog shouldn't queue it twice.
+      if (merged.some((m) => m.name === f.name && m.size === f.size)) {
+        continue;
+      }
+      merged.push(f);
+    }
+    const totalBytes = merged.reduce((s, f) => s + f.size, 0);
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      setFileWarning(`Total attachment size exceeds ${formatBytes(MAX_TOTAL_BYTES)}. Remove a file or pick smaller ones.`);
+    }
+    if (skipped.length > 0) {
+      setFileWarning((prev) => (prev ? prev + ' ' : '') + `Skipped: ${skipped.join(', ')}.`);
+    }
+    setFiles(merged);
+  };
+
+  const removeFile = (idx) => {
+    setFiles((current) => current.filter((_, i) => i !== idx));
+    setFileWarning('');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -29,22 +87,46 @@ export default function FrontlineEmbedFormPage() {
     setSubmitError('');
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/frontline/public/submit/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          widget_key: widgetKey,
-          name: name.trim(),
-          email: email.trim(),
-          message: message.trim(),
-        }),
-      });
+      // Always send as multipart when there are files; fall back to JSON
+      // for the no-attachment path to keep behaviour identical for legacy
+      // tenants who don't enable attachments.
+      let res;
+      if (files.length > 0) {
+        const form = new FormData();
+        form.append('widget_key', widgetKey);
+        form.append('name', name.trim());
+        form.append('email', email.trim());
+        form.append('message', message.trim());
+        files.forEach((f) => form.append('files', f, f.name));
+        res = await fetch(`${API_BASE_URL}/frontline/public/submit/`, {
+          method: 'POST',
+          body: form,
+        });
+      } else {
+        res = await fetch(`${API_BASE_URL}/frontline/public/submit/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            widget_key: widgetKey,
+            name: name.trim(),
+            email: email.trim(),
+            message: message.trim(),
+          }),
+        });
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || 'Submit failed');
+      // Surface server-side skip reasons (e.g. MIME rejected) so the user
+      // knows their file didn't make it through.
+      const skipped = (data?.data?.attachments || []).filter((a) => a?.skipped);
+      if (skipped.length > 0) {
+        setSubmitError(`Note: ${skipped.length} file(s) were rejected (${skipped.map((s) => s.reason).join(', ')}).`);
+      }
       setSubmitSuccess(true);
       setName('');
       setEmail('');
       setMessage('');
+      setFiles([]);
     } catch (err) {
       setSubmitError(err.message || 'Failed to submit');
     } finally {
@@ -126,6 +208,47 @@ export default function FrontlineEmbedFormPage() {
                 required
                 className="w-full rounded-lg border bg-background px-3 py-2 text-sm resize-none"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                Attachments <span className="text-muted-foreground/70">(optional, up to {MAX_FILES})</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-dashed bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground hover:bg-muted/50">
+                <Paperclip className="h-4 w-4 shrink-0" />
+                <span className="flex-1 truncate">
+                  {files.length === 0
+                    ? `Add file (images, PDF, text · max ${formatBytes(MAX_FILE_BYTES)} each)`
+                    : `Add another file (${MAX_FILES - files.length} slot${MAX_FILES - files.length === 1 ? '' : 's'} left)`}
+                </span>
+                <input
+                  type="file"
+                  multiple
+                  accept={ACCEPT_LIST}
+                  className="hidden"
+                  onChange={(e) => { handleFileSelection(e.target.files); e.target.value = ''; }}
+                  disabled={files.length >= MAX_FILES}
+                />
+              </label>
+              {files.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {files.map((f, idx) => (
+                    <li key={`${f.name}-${idx}`} className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">
+                      <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="flex-1 truncate">{f.name}</span>
+                      <span className="text-muted-foreground shrink-0">{formatBytes(f.size)}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeFile(idx)}
+                        className="text-muted-foreground hover:text-destructive shrink-0"
+                        aria-label={`Remove ${f.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {fileWarning && <p className="mt-1 text-xs text-amber-600">{fileWarning}</p>}
             </div>
             {submitError && <p className="text-xs text-destructive">{submitError}</p>}
             <button

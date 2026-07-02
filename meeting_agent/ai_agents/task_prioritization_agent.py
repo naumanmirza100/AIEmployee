@@ -33,7 +33,7 @@ class TaskPrioritizationAgent(BaseAgent):
     def __init__(self, company_id: Optional[int] = None):
         super().__init__()
         self.company_id = company_id
-        self.agent_key_name = 'exec_task_prioritization'
+        self.agent_key_name = 'exec_meeting_agent'
         self.system_prompt = SYSTEM_PROMPT
 
     def prioritize_tasks(self, tasks: list, context: str = '') -> list:

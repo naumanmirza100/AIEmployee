@@ -35,7 +35,7 @@ class ProactiveNotificationAgent(BaseAgent):
     def __init__(self, company_id: Optional[int] = None):
         super().__init__()
         self.company_id = company_id
-        self.agent_key_name = 'exec_proactive_notification'
+        self.agent_key_name = 'exec_meeting_agent'
         self.system_prompt = SYSTEM_PROMPT
 
     def scan_and_create_notifications(self, company_user_id: int) -> list:

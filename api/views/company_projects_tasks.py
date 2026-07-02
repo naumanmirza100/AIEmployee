@@ -220,6 +220,52 @@ def update_company_task(request, task_id):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_company_task(request, task_id):
+    """Delete a task that belongs to one of this company's projects.
+
+    DELETE /api/company/tasks/{task_id}/delete
+
+    Same company-scope policy as `update_company_task` — any CompanyUser in
+    the same company can delete any task in the company's projects. Subtasks
+    cascade via the FK on_delete=CASCADE.
+    """
+    try:
+        company_user = request.user
+        company = getattr(company_user, 'company', None)
+
+        task_qs_kwargs = {'id': task_id}
+        if company is not None:
+            task_qs_kwargs['project__company'] = company
+        else:
+            task_qs_kwargs['project__created_by_company_user'] = company_user
+        task = get_object_or_404(Task, **task_qs_kwargs)
+
+        task_title = task.title
+        task.delete()
+
+        return Response({
+            'status': 'success',
+            'message': 'Task deleted successfully',
+            'data': {'id': task_id, 'title': task_title},
+        }, status=status.HTTP_200_OK)
+
+    except Task.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': 'Task not found or you do not have permission to delete it.',
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.exception(f"Error deleting task: {str(e)}")
+        return Response({
+            'status': 'error',
+            'message': 'Failed to delete task',
+            'error': str(e),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])

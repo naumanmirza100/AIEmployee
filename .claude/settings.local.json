@@ -119,7 +119,8 @@
       "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python manage.py makemigrations --merge --no-input 2>&1 | Where-Object { $_ -match \"Merging|Created|merge|leaf\" })",
       "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python manage.py migrate ai_sdr_agent 2>&1 | Where-Object { $_ -match \"Applying|OK|error|Error|migrat\" })",
       "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python -c \"from api.views import ai_sdr_agent; print\\('OK'\\)\" 2>&1 | Where-Object { $_ -notmatch \"WARNING|NOTE|Every|Sequence|CELERY|EMAIL|Broker|Backend|Timezone|Scheduled|monitor|automated|ai sdr|redis\" })",
-      "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python manage.py check 2>&1 | Where-Object { $_ -match \"System check|error|Error|issue|warning\" } | Select-Object -Last 5)"
+      "PowerShell(Set-Location \"d:\\\\University\\\\work\\\\AI_Employyes\\\\ReplyAgent\\\\AIEmployee\"; python manage.py check 2>&1 | Where-Object { $_ -match \"System check|error|Error|issue|warning\" } | Select-Object -Last 5)",
+      "Bash(grep -E \"\\\\.py$|\\\\.html$\")"
     ]
   }
 }

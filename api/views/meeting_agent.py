@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 
+from django.db import models
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -38,6 +39,111 @@ from meeting_agent.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Email helpers
+# ---------------------------------------------------------------------------
+
+def _send_email_safe(subject, body, recipient_email):
+    """Send a plain-text email; swallow errors so a bad SMTP config never breaks the API."""
+    if not recipient_email or '@' not in recipient_email:
+        logger.warning("Email skipped — invalid recipient: %r", recipient_email)
+        return
+    try:
+        from django.core.mail import send_mail
+        from django.conf import settings
+        logger.info("Sending email to %s | subject: %s", recipient_email, subject)
+        send_mail(
+            subject,
+            body,
+            settings.DEFAULT_FROM_EMAIL,
+            [recipient_email],
+            fail_silently=False,
+        )
+        logger.info("Email sent OK to %s", recipient_email)
+    except Exception as exc:
+        logger.error("Email send FAILED to %s: %s", recipient_email, exc)
+
+
+def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_fields):
+    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    changed_str = ', '.join(changed_fields) if changed_fields else 'details'
+    body = (
+        f"Hi {participant_cu.full_name},\n\n"
+        f"The following meeting has been updated ({changed_str}):\n\n"
+        f"  Title     : {meeting.title}\n"
+        f"  Date/Time : {scheduled}\n"
+        f"  Duration  : {meeting.duration_minutes} minutes\n"
+        f"  Location  : {meeting.location or 'N/A'}\n"
+        f"  Link      : {meeting.meeting_link or 'N/A'}\n"
+        f"  Organizer : {organizer_name}\n"
+    )
+    if meeting.description:
+        body += f"\nDescription:\n{meeting.description}\n"
+    body += "\nPlease update your calendar accordingly.\n\nBest regards,\nAI Executive Assistant"
+    _send_email_safe(f"Meeting Updated: {meeting.title}", body, participant_cu.email)
+
+
+def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
+    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    body = (
+        f"Hi {participant_cu.full_name},\n\n"
+        f"You have been added as a participant to the following meeting:\n\n"
+        f"  Title     : {meeting.title}\n"
+        f"  Date/Time : {scheduled}\n"
+        f"  Duration  : {meeting.duration_minutes} minutes\n"
+        f"  Location  : {meeting.location or 'N/A'}\n"
+        f"  Link      : {meeting.meeting_link or 'N/A'}\n"
+        f"  Organizer : {organizer_name}\n"
+    )
+    if meeting.description:
+        body += f"\nDescription:\n{meeting.description}\n"
+    body += "\nPlease make sure to mark this in your calendar.\n\nBest regards,\nAI Executive Assistant"
+    _send_email_safe(f"Meeting Invitation: {meeting.title}", body, participant_cu.email)
+
+
+def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
+    body = (
+        f"Hi {assignee_cu.full_name},\n\n"
+        f"You have been assigned a new task:\n\n"
+        f"  Title      : {task.title}\n"
+        f"  Priority   : {task.priority.capitalize()}\n"
+        f"  Status     : {task.status.replace('_', ' ').capitalize()}\n"
+        f"  Due Date   : {task.due_date or 'Not set'}\n"
+        f"  Assigned by: {assigned_by_name}\n"
+    )
+    if task.description:
+        body += f"\nDescription:\n{task.description}\n"
+    body += "\nPlease log in to the platform to view and manage this task.\n\nBest regards,\nAI Executive Assistant"
+    _send_email_safe(f"Task Assigned: {task.title}", body, assignee_cu.email)
+
+
+def _send_meeting_removal_email(cu, meeting, removed_by_name):
+    scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
+    body = (
+        f"Hi {cu.full_name},\n\n"
+        f"You have been removed from the following meeting:\n\n"
+        f"  Title     : {meeting.title}\n"
+        f"  Date/Time : {scheduled}\n"
+        f"  Organizer : {removed_by_name}\n\n"
+        f"If you believe this was a mistake, please contact the organizer.\n\n"
+        f"Best regards,\nAI Executive Assistant"
+    )
+    _send_email_safe(f"Removed from Meeting: {meeting.title}", body, cu.email)
+
+
+def _send_task_removal_email(cu, task, removed_by_name):
+    body = (
+        f"Hi {cu.full_name},\n\n"
+        f"You have been removed from the following task:\n\n"
+        f"  Title      : {task.title}\n"
+        f"  Priority   : {task.priority.capitalize()}\n"
+        f"  Removed by : {removed_by_name}\n\n"
+        f"If you believe this was a mistake, please contact the task owner.\n\n"
+        f"Best regards,\nAI Executive Assistant"
+    )
+    _send_email_safe(f"Removed from Task: {task.title}", body, cu.email)
+
 
 # ---------------------------------------------------------------------------
 # Throttle classes
@@ -121,16 +227,57 @@ def _serialize_meeting(meeting, include_participants=False):
     return data
 
 
+def _resolve_assignees(assignee_list, company):
+    """
+    Accepts a list of {id, user_type} dicts from the frontend.
+    Returns a list of CompanyUser instances, creating mirror entries for
+    UserProfile-backed users when needed.
+    """
+    from core.models import CompanyUser as _CU, UserProfile as _UP
+    import secrets as _sec
+    from django.contrib.auth.hashers import make_password as _mkpw
+    result = []
+    for item in (assignee_list or []):
+        uid = item.get('id')
+        utype = item.get('user_type', 'company_user')
+        if not uid:
+            continue
+        if utype == 'profile':
+            try:
+                up = _UP.objects.select_related('user').get(id=uid, company=company)
+                u = up.user
+                full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+                cu, _ = _CU.objects.get_or_create(
+                    company=company, email=u.email,
+                    defaults={'full_name': full_name, 'role': up.role or 'company_user',
+                              'password_hash': _mkpw(_sec.token_urlsafe(16)), 'is_active': True},
+                )
+                result.append(cu)
+            except _UP.DoesNotExist:
+                pass
+        else:
+            try:
+                result.append(_CU.objects.get(id=uid, company=company))
+            except _CU.DoesNotExist:
+                pass
+    return result
+
+
 def _serialize_task(task):
+    assignees = [
+        {'id': cu.id, 'full_name': cu.full_name, 'email': cu.email}
+        for cu in task.assignees.all()
+    ]
     return {
         'id': task.id,
         'title': task.title,
         'description': task.description,
         'status': task.status,
         'priority': task.priority,
-        'due_date': task.due_date.isoformat() if task.due_date else None,
+        'due_date': task.due_date if isinstance(task.due_date, str) else (task.due_date.isoformat() if task.due_date else None),
         'estimated_hours': float(task.estimated_hours) if task.estimated_hours else None,
         'ai_reasoning': task.ai_reasoning,
+        'assignees': assignees,
         'linked_meeting_id': task.linked_meeting_id,
         'created_at': task.created_at.isoformat(),
         'updated_at': task.updated_at.isoformat(),
@@ -239,13 +386,19 @@ def meeting_list(request):
     if not scheduled_at:
         return Response({'status': 'error', 'message': 'Invalid scheduled_at format. Use ISO 8601.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    meeting_link = request.data.get('meeting_link', '').strip()
+    if not meeting_link:
+        import secrets, string
+        slug = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(10))
+        meeting_link = f'https://meet.jit.si/exec-{slug}'
+
     meeting = ExecutiveMeeting.objects.create(
         organizer=company_user,
         title=title,
         description=request.data.get('description', ''),
         agenda=request.data.get('agenda', []),
         location=request.data.get('location', ''),
-        meeting_link=request.data.get('meeting_link', ''),
+        meeting_link=meeting_link,
         scheduled_at=scheduled_at,
         duration_minutes=int(request.data.get('duration_minutes', 60)),
         timezone_name=request.data.get('timezone_name', 'UTC'),
@@ -269,20 +422,161 @@ def meeting_detail(request, meeting_id):
     if request.method == 'PATCH':
         updatable = ['title', 'description', 'agenda', 'location', 'meeting_link',
                      'duration_minutes', 'timezone_name', 'status', 'recurrence']
+        changed_fields = []
         for field in updatable:
             if field in request.data:
+                if getattr(meeting, field) != request.data[field]:
+                    changed_fields.append(field.replace('_', ' '))
                 setattr(meeting, field, request.data[field])
         if 'scheduled_at' in request.data:
             dt = _parse_datetime(request.data['scheduled_at'])
-            if dt:
+            if dt and dt != meeting.scheduled_at:
+                changed_fields.append('date/time')
                 meeting.scheduled_at = dt
         meeting.save()
+
+        # Notify existing participants about the update
+        if changed_fields:
+            participants = meeting.participants.select_related('company_user').all()
+            for p in participants:
+                cu = p.company_user
+                if cu.email and cu.id != company_user.id:
+                    _send_meeting_update_email(cu, meeting, company_user.full_name, changed_fields)
+
         return Response({'status': 'success', 'meeting': _serialize_meeting(meeting)})
 
     if request.method == 'DELETE':
         meeting.status = 'cancelled'
         meeting.save()
         return Response({'status': 'success', 'message': 'Meeting cancelled.'})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def search_company_users(request):
+    """Search company users by name/email for participant autocomplete.
+
+    Returns both CompanyUser records and UserProfile-backed users that belong
+    to the same company, so users added via the admin 'Add User' panel also
+    appear in the results.
+    """
+    from core.models import CompanyUser, UserProfile
+    company_user = request.user
+    q = request.query_params.get('q', '').strip()
+    if len(q) < 2:
+        return Response({'status': 'success', 'users': []})
+
+    # 1. CompanyUser accounts (self-registered via invitation link)
+    cu_qs = CompanyUser.objects.filter(
+        company=company_user.company,
+        is_active=True,
+    ).filter(
+        models.Q(full_name__icontains=q) | models.Q(email__icontains=q)
+    ).values('id', 'full_name', 'email', 'role')[:10]
+    results = list(cu_qs)
+
+    # 2. UserProfile-backed users created via the admin panel
+    existing_emails = {u['email'] for u in results}
+    up_qs = UserProfile.objects.filter(
+        company=company_user.company,
+    ).filter(
+        models.Q(user__first_name__icontains=q)
+        | models.Q(user__last_name__icontains=q)
+        | models.Q(user__email__icontains=q)
+        | models.Q(user__username__icontains=q)
+    ).select_related('user').exclude(user__email__in=existing_emails)[:10]
+
+    for up in up_qs:
+        u = up.user
+        full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+        results.append({
+            'id': up.id,
+            'full_name': full_name,
+            'email': u.email,
+            'role': up.role or 'team_member',
+            # tag so frontend knows this is a UserProfile, not a CompanyUser
+            'user_type': 'profile',
+        })
+
+    return Response({'status': 'success', 'users': results[:10]})
+
+
+@api_view(['GET', 'POST', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def meeting_participants(request, meeting_id):
+    """List, add, or remove participants from a meeting."""
+    from core.models import CompanyUser
+    company_user = request.user
+    meeting = get_object_or_404(ExecutiveMeeting, id=meeting_id, organizer=company_user)
+
+    if request.method == 'GET':
+        parts = meeting.participants.select_related('company_user').all()
+        return Response({'status': 'success', 'participants': [
+            {'id': p.id, 'user_id': p.company_user.id,
+             'full_name': p.company_user.full_name, 'email': p.company_user.email,
+             'role': p.company_user.role, 'response': p.response}
+            for p in parts
+        ]})
+
+    if request.method == 'POST':
+        from django.contrib.auth.hashers import make_password as _make_password
+        import secrets as _secrets
+        user_id = request.data.get('user_id')
+        user_type = request.data.get('user_type', 'company_user')
+        if not user_id:
+            return Response({'status': 'error', 'message': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user_type == 'profile':
+            # UserProfile-backed user: resolve via UserProfile and create/find a CompanyUser mirror
+            from core.models import UserProfile
+            try:
+                up = UserProfile.objects.select_related('user').get(id=user_id, company=company_user.company)
+            except UserProfile.DoesNotExist:
+                return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+            u = up.user
+            full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+            role = up.role or 'company_user'
+            # Get or create a CompanyUser mirror so we can use it in the participant FK
+            target, _ = CompanyUser.objects.get_or_create(
+                company=company_user.company,
+                email=u.email,
+                defaults={
+                    'full_name': full_name,
+                    'role': role,
+                    'password_hash': _make_password(_secrets.token_urlsafe(16)),
+                    'is_active': True,
+                },
+            )
+        else:
+            try:
+                target = CompanyUser.objects.get(id=user_id, company=company_user.company, is_active=True)
+            except CompanyUser.DoesNotExist:
+                return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
+        if created and target.email:
+            _send_meeting_invite_email(target, meeting, company_user.full_name)
+        return Response({'status': 'success', 'participant': {
+            'id': p.id, 'user_id': target.id, 'full_name': target.full_name,
+            'email': target.email, 'role': target.role, 'response': p.response,
+        }}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    if request.method == 'DELETE':
+        user_id = request.data.get('user_id')
+        # Fetch before deleting so we can notify
+        removed_cu = None
+        try:
+            removed_cu = CompanyUser.objects.get(id=user_id, company=company_user.company)
+        except CompanyUser.DoesNotExist:
+            pass
+        ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user_id=user_id).delete()
+        if removed_cu and removed_cu.email and removed_cu.id != company_user.id:
+            _send_meeting_removal_email(removed_cu, meeting, company_user.full_name)
+        return Response({'status': 'success'})
 
 
 @api_view(['POST'])
@@ -498,6 +792,14 @@ def task_list(request):
         due_date=request.data.get('due_date') or None,
         linked_meeting_id=request.data.get('linked_meeting_id') or None,
     )
+    # assignees — list of {id, user_type} dicts
+    assignee_list = request.data.get('assignees', [])
+    resolved = _resolve_assignees(assignee_list, company_user.company)
+    if resolved:
+        task.assignees.set(resolved)
+        for cu in resolved:
+            if cu.email:
+                _send_task_assignment_email(cu, task, company_user.full_name)
     return Response({'status': 'success', 'task': _serialize_task(task)}, status=status.HTTP_201_CREATED)
 
 
@@ -520,6 +822,20 @@ def task_detail(request, task_id):
         if 'estimated_hours' in request.data:
             task.estimated_hours = request.data['estimated_hours'] or None
         task.save()
+        if 'assignees' in request.data:
+            resolved = _resolve_assignees(request.data['assignees'], company_user.company)
+            existing_qs = list(task.assignees.all())
+            existing_ids = {cu.id for cu in existing_qs}
+            new_ids = {cu.id for cu in resolved}
+            task.assignees.set(resolved)
+            # Email newly added assignees
+            for cu in resolved:
+                if cu.id not in existing_ids and cu.email:
+                    _send_task_assignment_email(cu, task, company_user.full_name)
+            # Email removed assignees
+            for cu in existing_qs:
+                if cu.id not in new_ids and cu.email:
+                    _send_task_removal_email(cu, task, company_user.full_name)
         return Response({'status': 'success', 'task': _serialize_task(task)})
 
     task.delete()
@@ -610,11 +926,19 @@ def calendar_plan_week(request):
     company_user = request.user
     week_start = request.data.get('week_start', timezone.now().strftime('%Y-%m-%d'))
 
-    meetings = list(ExecutiveMeeting.objects.filter(
-        organizer=company_user,
-        scheduled_at__date__gte=week_start,
-        status__in=['scheduled', 'in_progress'],
-    ).values('id', 'title', 'scheduled_at', 'duration_minutes', 'status')[:30])
+    meetings = [
+        {
+            'id': m.id, 'title': m.title,
+            'scheduled_at': m.scheduled_at.isoformat(),
+            'duration_minutes': m.duration_minutes,
+            'status': m.status,
+        }
+        for m in ExecutiveMeeting.objects.filter(
+            organizer=company_user,
+            scheduled_at__date__gte=week_start,
+            status__in=['scheduled', 'in_progress'],
+        )[:30]
+    ]
 
     tasks = [_serialize_task(t) for t in ExecutiveTask.objects.filter(
         company_user=company_user, status__in=['todo', 'in_progress']
@@ -709,10 +1033,13 @@ def document_draft(request):
                     decisions = meeting.note.key_decisions or []
                 except Exception:
                     decisions = []
+            attendees_minutes = request.data.get('attendees', [])
+            if meeting and not attendees_minutes:
+                attendees_minutes = list(meeting.participants.values_list('company_user__full_name', flat=True))
             content = agent.write_minutes(
                 meeting.title if meeting else request.data.get('title', 'Meeting'),
                 request.data.get('date', timezone.now().strftime('%Y-%m-%d')),
-                request.data.get('attendees', []),
+                attendees_minutes,
                 summary, action_items, decisions,
             )
 
@@ -733,16 +1060,27 @@ def document_draft(request):
 
         result = {'status': 'success', 'doc_type': doc_type, 'content': content}
 
+        # Always auto-save as standalone document
+        from meeting_agent.models import ExecStandaloneDocument
+        doc_title = request.data.get('title', '') or (meeting.title if meeting else 'Untitled')
+        standalone = ExecStandaloneDocument.objects.create(
+            company_user=company_user,
+            doc_type=doc_type,
+            title=f"{doc_type.capitalize()} — {doc_title}",
+            content=content,
+            ai_generated=True,
+        )
+        result['document_id'] = standalone.id
+
         if save and meeting:
-            doc = MeetingDocument.objects.create(
+            MeetingDocument.objects.create(
                 meeting=meeting,
                 created_by=company_user,
                 doc_type=doc_type,
-                title=request.data.get('title', f"{doc_type.capitalize()} — {meeting.title}"),
+                title=doc_title,
                 content=content,
                 ai_generated=True,
             )
-            result['document_id'] = doc.id
 
         return Response(result)
     except KeyServiceError:
@@ -766,6 +1104,51 @@ def meeting_documents(request, meeting_id):
          'content': d.content, 'created_at': d.created_at.isoformat()}
         for d in docs
     ]})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def standalone_document_list(request):
+    """List all AI-generated standalone documents for the company user."""
+    from meeting_agent.models import ExecStandaloneDocument
+    company_user = request.user
+    doc_type = request.query_params.get('doc_type')
+    qs = ExecStandaloneDocument.objects.filter(company_user=company_user)
+    if doc_type:
+        qs = qs.filter(doc_type=doc_type)
+    docs = [
+        {
+            'id': d.id, 'doc_type': d.doc_type, 'title': d.title,
+            'content': d.content, 'ai_generated': d.ai_generated,
+            'created_at': d.created_at.isoformat(),
+        }
+        for d in qs[:100]
+    ]
+    return Response({'status': 'success', 'documents': docs, 'count': len(docs)})
+
+
+@api_view(['GET', 'DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def standalone_document_detail(request, doc_id):
+    """Get or delete a standalone document."""
+    from meeting_agent.models import ExecStandaloneDocument
+    company_user = request.user
+    doc = get_object_or_404(ExecStandaloneDocument, id=doc_id, company_user=company_user)
+    if request.method == 'DELETE':
+        doc.delete()
+        return Response({'status': 'success', 'message': 'Document deleted.'})
+    return Response({
+        'status': 'success',
+        'document': {
+            'id': doc.id, 'doc_type': doc.doc_type, 'title': doc.title,
+            'content': doc.content, 'ai_generated': doc.ai_generated,
+            'created_at': doc.created_at.isoformat(),
+        },
+    })
 
 
 # ===========================================================================

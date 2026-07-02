@@ -83,6 +83,7 @@ const AGENT_OPTIONS = [
   { value: 'reply_draft_agent',     label: 'Reply Draft Agent'     },
   { value: 'hr_agent',              label: 'HR Support Agent'      },
   { value: 'ai_sdr_agent',          label: 'AI SDR Agent'          },
+  { value: 'exec_meeting_agent',    label: 'AI Executive Meeting Assistant' },
 ];
 
 const formatTokens = (n) => {
@@ -209,6 +210,7 @@ const AGENT_DEFAULT_PROVIDERS = [
   { agent: 'Frontline Agent',        key: 'frontline_agent',         provider: 'openai', providerLabel: 'OpenAI'          },
   { agent: 'HR Support Agent',       key: 'hr_agent',                provider: 'groq',   providerLabel: 'Groq (Llama)'    },
   { agent: 'AI SDR Agent',           key: 'ai_sdr_agent',            provider: 'groq',   providerLabel: 'Groq (Llama)'    },
+  { agent: 'AI Executive Meeting Assistant', key: 'exec_meeting_agent', provider: 'groq', providerLabel: 'Groq (Llama)'   },
 ];
 
 const PROVIDER_ACCENT = {
