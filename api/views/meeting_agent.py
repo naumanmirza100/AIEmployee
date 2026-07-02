@@ -1386,21 +1386,28 @@ def document_draft(request):
             )
 
         elif doc_type == 'minutes':
-            summary = request.data.get('summary', '')
+            summary = request.data.get('summary', '').strip()
+            user_provided_summary = bool(summary)
             if meeting and not summary:
                 try:
-                    summary = meeting.note.ai_summary
+                    summary = meeting.note.ai_summary or ''
                 except Exception:
                     summary = ''
             action_items = request.data.get('action_items', [])
             decisions = request.data.get('decisions', [])
-            if meeting and not action_items:
+            # Only pull from DB if user did NOT provide a manual summary
+            if meeting and not action_items and not user_provided_summary:
                 action_items = [{'title': a.title, 'assignee_hint': a.assignee.full_name if a.assignee else None, 'due_date': str(a.due_date) if a.due_date else None} for a in meeting.action_items.all()[:15]]
-            if meeting and not decisions:
+            if meeting and not decisions and not user_provided_summary:
                 try:
                     decisions = meeting.note.key_decisions or []
                 except Exception:
                     decisions = []
+            # If user provided a summary but no decisions/action_items, extract them via AI
+            if user_provided_summary and not decisions and not action_items:
+                extracted = agent.extract_decisions_and_actions(summary)
+                decisions = extracted.get('decisions', [])
+                action_items = extracted.get('action_items', [])
             attendees_minutes = request.data.get('attendees', [])
             if meeting and not attendees_minutes:
                 attendees_minutes = list(meeting.participants.values_list('company_user__full_name', flat=True))
