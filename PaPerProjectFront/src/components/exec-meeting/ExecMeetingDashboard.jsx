@@ -995,6 +995,9 @@ const ExecMeetingDashboard = () => {
   const [aiDocMeetingId, setAiDocMeetingId] = useState('');
   const [aiDocTopics, setAiDocTopics] = useState('');
   const [aiDocSummary, setAiDocSummary] = useState('');
+  const [aiDocContext, setAiDocContext] = useState('');
+  const [aiDocAudience, setAiDocAudience] = useState('');
+  const [aiDocPeriod, setAiDocPeriod] = useState('');
   const [savedDocs, setSavedDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [viewDoc, setViewDoc] = useState(null);
@@ -1031,7 +1034,7 @@ const ExecMeetingDashboard = () => {
     if (activeTab === 'tasks' && tasks.length === 0) loadTasks();
     if (activeTab === 'notifications') loadNotifications();
     if (activeTab === 'overview' && !digest) loadDigest();
-    if (activeTab === 'documents') { loadDocuments(); if (meetings.length === 0) loadMeetings(); }
+    if (activeTab === 'documents') { loadDocuments(); loadMeetings(); }
   }, [activeTab]);
 
   const loadStats = async () => {
@@ -1121,7 +1124,7 @@ const ExecMeetingDashboard = () => {
       const resolvedAttendees = linkedMeeting?.attendees || [];
       const resolvedDuration = linkedMeeting?.duration_minutes || 60;
       const resolvedTopics = aiDocTopics.trim()
-        ? aiDocTopics.split(',').map(t => t.trim()).filter(Boolean)
+        ? aiDocTopics.split(',').map(t => t.trim().slice(0, 40)).filter(Boolean)
         : [];
 
       const payload = {
@@ -1137,7 +1140,16 @@ const ExecMeetingDashboard = () => {
         if (linkedMeeting.scheduled_at) payload.scheduled_at = linkedMeeting.scheduled_at;
       }
       if (aiDocType === 'minutes') payload.summary = aiDocSummary.trim();
-      if (aiDocType === 'briefing') payload.topic = resolvedTitle;
+      if (aiDocType === 'briefing') {
+        payload.topic = resolvedTitle;
+        if (aiDocContext.trim()) payload.context = aiDocContext.trim();
+        if (aiDocAudience.trim()) payload.audience = aiDocAudience.trim();
+      }
+      if (aiDocType === 'report') {
+        if (aiDocPeriod.trim()) payload.period = aiDocPeriod.trim();
+        if (aiDocContext.trim()) payload.context = aiDocContext.trim();
+        payload.report_type = resolvedTitle;
+      }
 
       const res = await execMeetingService.generateDocument(payload);
       toast({ title: 'Document generated and saved!' });
@@ -1157,6 +1169,9 @@ const ExecMeetingDashboard = () => {
       setAiDocInput('');
       setAiDocTopics('');
       setAiDocSummary('');
+      setAiDocContext('');
+      setAiDocAudience('');
+      setAiDocPeriod('');
       setAiDocMeetingId('');
     } catch (err) {
       toast({ title: 'AI generation failed', description: err.message, variant: 'destructive' });
@@ -2266,7 +2281,7 @@ const ExecMeetingDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1">
             <Label className="text-white/70 text-xs">Document Type</Label>
-            <Select value={aiDocType} onValueChange={v => { setAiDocType(v); setAiDocTopics(''); setAiDocSummary(''); }}>
+            <Select value={aiDocType} onValueChange={v => { setAiDocType(v); setAiDocTopics(''); setAiDocSummary(''); setAiDocContext(''); setAiDocAudience(''); setAiDocPeriod(''); }}>
               <SelectTrigger className="bg-white/5 border-white/10 text-white">
                 <SelectValue />
               </SelectTrigger>
@@ -2325,6 +2340,9 @@ const ExecMeetingDashboard = () => {
             <Label className="text-white/70 text-xs">
               Topics to Cover <span className="text-white/30">(comma-separated)</span>
             </Label>
+            <p className="text-[11px] text-amber-400/80 leading-snug">
+              ⚠ Use short topic names only (e.g. "UI Review, Budget Update"). Do not paste meeting notes or long sentences — these become agenda headings.
+            </p>
             <Input
               value={aiDocTopics}
               onChange={e => setAiDocTopics(e.target.value)}
@@ -2337,15 +2355,89 @@ const ExecMeetingDashboard = () => {
         {/* Summary — minutes only */}
         {aiDocType === 'minutes' && (
           <div className="space-y-1">
-            <Label className="text-white/70 text-xs">Meeting Summary / Key Discussion Points</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-white/70 text-xs">Meeting Summary / Key Discussion Points</Label>
+              <span className={`text-xs ${aiDocSummary.length > 800 ? 'text-red-400' : aiDocSummary.length > 600 ? 'text-yellow-400' : 'text-white/30'}`}>
+                {aiDocSummary.length}/800
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-400/80 leading-snug">
+              ⚠ This text appears directly in the document as the Discussion Summary. Write only what was discussed in the meeting — do not paste unrelated content.
+            </p>
             <textarea
               value={aiDocSummary}
-              onChange={e => setAiDocSummary(e.target.value)}
+              onChange={e => { if (e.target.value.length <= 800) setAiDocSummary(e.target.value); }}
               rows={3}
               placeholder="Briefly describe what was discussed, decisions made, outcomes…"
               className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
             />
           </div>
+        )}
+
+        {/* Briefing fields */}
+        {aiDocType === 'briefing' && (
+          <>
+            <div className="space-y-1">
+              <Label className="text-white/70 text-xs">Audience <span className="text-white/30">(optional)</span></Label>
+              <Input
+                value={aiDocAudience}
+                onChange={e => setAiDocAudience(e.target.value)}
+                placeholder="e.g. Board of Directors, Executive Team"
+                className="bg-white/5 border-white/10 text-white"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-white/70 text-xs">Background / Context <span className="text-white/30">(optional)</span></Label>
+                <span className={`text-xs ${aiDocContext.length > 800 ? 'text-red-400' : aiDocContext.length > 600 ? 'text-yellow-400' : 'text-white/30'}`}>
+                  {aiDocContext.length}/800
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-400/80 leading-snug">
+                ⚠ This text appears directly in the document. Write only relevant facts — do not paste raw research, chat logs, or unrelated content.
+              </p>
+              <textarea
+                value={aiDocContext}
+                onChange={e => { if (e.target.value.length <= 800) setAiDocContext(e.target.value); }}
+                rows={3}
+                placeholder="Describe the situation, problem, or opportunity. Key facts, risks, or data points to include…"
+                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+          </>
+        )}
+
+        {/* Report fields */}
+        {aiDocType === 'report' && (
+          <>
+            <div className="space-y-1">
+              <Label className="text-white/70 text-xs">Period <span className="text-white/30">(optional)</span></Label>
+              <Input
+                value={aiDocPeriod}
+                onChange={e => setAiDocPeriod(e.target.value)}
+                placeholder="e.g. Q3 2026, Week of 30 Jun, July 2026"
+                className="bg-white/5 border-white/10 text-white"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-white/70 text-xs">Context / Progress Notes <span className="text-white/30">(optional)</span></Label>
+                <span className={`text-xs ${aiDocContext.length > 800 ? 'text-red-400' : aiDocContext.length > 600 ? 'text-yellow-400' : 'text-white/30'}`}>
+                  {aiDocContext.length}/800
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-400/80 leading-snug">
+                ⚠ This text appears directly in the document. Write only relevant facts — do not paste raw research, chat logs, or unrelated content.
+              </p>
+              <textarea
+                value={aiDocContext}
+                onChange={e => { if (e.target.value.length <= 800) setAiDocContext(e.target.value); }}
+                rows={3}
+                placeholder="Describe current status, what was completed, blockers, metrics, key highlights…"
+                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+          </>
         )}
 
         <Button onClick={generateAiDoc} disabled={aiDocLoading}>

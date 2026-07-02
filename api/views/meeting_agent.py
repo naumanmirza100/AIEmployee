@@ -1419,18 +1419,29 @@ def document_draft(request):
             )
 
         elif doc_type == 'briefing':
+            briefing_topic = (
+                request.data.get('topic') or
+                request.data.get('title') or
+                (meeting.title if meeting else 'Executive Briefing')
+            )
             content = agent.create_briefing(
-                request.data.get('topic', ''),
+                briefing_topic,
                 request.data.get('context', ''),
                 request.data.get('key_points'),
-                request.data.get('audience', 'Executive Team'),
+                request.data.get('audience', 'Executive Team') or 'Executive Team',
             )
 
         else:  # report
+            report_type_label = (
+                request.data.get('report_type') or
+                request.data.get('title') or
+                'Status'
+            )
             content = agent.draft_report(
-                request.data.get('report_type', 'Status'),
+                report_type_label,
                 request.data.get('data', {}),
                 request.data.get('period', ''),
+                request.data.get('context', ''),
             )
 
         result = {'status': 'success', 'doc_type': doc_type, 'content': content}

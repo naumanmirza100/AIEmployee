@@ -120,11 +120,27 @@ class DocumentAuthoringAgent(BaseAgent):
 - [Adjourn at {fmt_time(duration_minutes)}]
 """
 
-        topics_for_prompt = topics_text if has_topics else '- [Topic 1]\n- [Topic 2]\n- [Topic 3]'
+        # Pre-compute per-topic time slots in Python so AI cannot skip or merge topics
+        topic_list = topics if has_topics else ['[Topic 1]', '[Topic 2]', '[Topic 3]']
+        welcome_mins = 5
+        remaining = duration_minutes - welcome_mins - 5  # 5 min for closing
+        per_topic = max(5, remaining // len(topic_list)) if topic_list else 10
+        slots = []
+        cursor = welcome_mins  # starts after welcome
+        for t in topic_list:
+            slot_start = fmt_time(cursor)
+            slot_end = fmt_time(cursor + per_topic)
+            slots.append((slot_start, slot_end, t))
+            cursor += per_topic
+        closing_start = fmt_time(cursor)
 
-        prompt = f"""Write a meeting agenda in markdown. Follow the EXACT structure below — no deviations.
+        agenda_lines = f"### {fmt_time(0)} – {fmt_time(welcome_mins)}: Welcome & Introductions\n- Welcome all attendees and review the meeting objectives.\n\n"
+        for (s, e, t) in slots:
+            agenda_lines += f"### {s} – {e}: {{SHORT_TITLE_{t[:20].strip()}}}\n- {{description for: {t}}}\n\n"
+        agenda_lines += f"### {closing_start} – {fmt_time(duration_minutes)}: Next Steps & Closing\n- Recap decisions and confirm action items.\n"
 
----
+        prompt = f"""Write a meeting agenda in markdown. I will give you the EXACT time slots and topics — your only job is to fill in the short heading and description for each slot.
+
 # {meeting_title} — Meeting Agenda
 
 **Date:** {display_datetime or '[DD MMM YYYY at HH:MM]'}
@@ -135,24 +151,17 @@ class DocumentAuthoringAgent(BaseAgent):
 
 ## Objectives
 
-{'- ' + chr(10).join(f'[Goal {i+1}]' for i in range(2)) if not has_topics else '- [State the 1-2 goals of this meeting]'}
+- [1-2 goals of this meeting based on the topics below]
 
 ---
 
 ## Agenda
 
-{f"Each item below is one of the provided topics. Time slots start at {fmt_time(0)} and end at {fmt_time(duration_minutes)}." if has_topics else f"Time slots start at {fmt_time(0)} and end at {fmt_time(duration_minutes)}."}
+{'Below are ALL the topics that MUST appear — do not skip, merge, or add any.' if has_topics else 'Fill in topic names and descriptions.'}
 
-Topics to cover:
-{topics_for_prompt}
-
-For EACH topic write exactly this format:
-### HH:MM – HH:MM: [Topic Name]
-- [What will be discussed or decided]
-
-Also include a Welcome/Introductions item at {fmt_time(0)} (5 min) before the topics.
-{'Use the exact topic names provided. Do not invent or rename them.' if has_topics else 'Replace [Topic Name] with descriptive placeholder text.'}
-No breaks unless duration > 120 minutes.
+{chr(10).join(f'### {s} – {e}: [max 4-word title for: "{t}"]{chr(10)}- [2 sentences: what will be discussed/decided for this topic]{chr(10)}' for s, e, t in [(fmt_time(0), fmt_time(welcome_mins), 'Welcome & Introductions')] + slots)}
+### {closing_start} – {fmt_time(duration_minutes)}: Next Steps & Closing
+- Recap key decisions and confirm action items with owners and deadlines.
 
 ---
 
@@ -171,14 +180,15 @@ No breaks unless duration > 120 minutes.
 
 ---
 
-Rules (STRICT):
-- Output the EXACT sections above in the EXACT order: Objectives, Agenda, Action Items Review, Next Steps & Closing.
-- Use only ##, ### for headings. No === or --- as underlines. No plain text headers.
-- All time slots: HH:MM – HH:MM format. Durations must add up to exactly {duration_minutes} minutes.
-- Do not add extra sections or change section names.
-- Return markdown only, no explanation."""
+STRICT RULES:
+1. Output ONLY the sections above — # heading, ## Objectives, ## Agenda, ## Action Items Review, ## Next Steps & Closing. NO extra sections, NO sub-headings inside Action Items Review or Next Steps.
+2. Every ### time slot listed above MUST appear. Do NOT skip, combine, or add slots.
+3. ### headings: time range + max 4 words. NEVER a full sentence. NEVER a question.
+4. Attendees line: copy EXACTLY as given — "{attendees_for_prompt}". Do NOT add, remove, or invent any names.
+5. Use only ## and ### for headings. No === or --- dividers.
+6. Return markdown only."""
 
-        return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=800)
+        return self._call_llm(prompt, self.system_prompt, temperature=0.1, max_tokens=1000)
 
     def write_minutes(self, meeting_title: str, date: str, attendees: list, summary: str, action_items: list, decisions: list) -> str:
         """Write formal meeting minutes."""
@@ -443,13 +453,72 @@ Rules (STRICT):
 
         return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=800)
 
-    def draft_report(self, report_type: str, data: dict, period: str = '') -> str:
+    def draft_report(self, report_type: str, data: dict, period: str = '', context: str = '') -> str:
         """Generate a status or progress report."""
         self.log_action("draft_report")
         has_data = bool(data)
+        has_context = bool(context and context.strip())
         data_snippet = f'\nData provided:\n{json.dumps(data, indent=2)[:800]}' if has_data else ''
 
-        prompt = f"""Write a {report_type} status report in markdown. Follow the EXACT structure below.
+        # No context and no data — return static template, skip AI
+        if not has_context and not has_data:
+            return f"""# {report_type} Report
+
+**Period:** {period or '[e.g. Q3 2026 / Week of DD MMM]'}
+**Date:** [DD MMM YYYY]
+**Prepared by:** [Name / Team]
+
+---
+
+## Executive Summary
+
+[2-3 sentences: overall status and headline message for this period]
+
+---
+
+## Key Metrics
+
+| Metric | Target | Actual | Status |
+|--------|--------|--------|--------|
+| [Metric 1] | [Target] | [Actual] | [On Track / At Risk] |
+| [Metric 2] | [Target] | [Actual] | [On Track / At Risk] |
+
+---
+
+## Progress Update
+
+- **[Workstream 1]:** [Brief status update]
+- **[Workstream 2]:** [Brief status update]
+
+---
+
+## Issues & Risks
+
+| Issue | Severity | Owner | Mitigation |
+|-------|----------|-------|------------|
+| [Issue 1] | [High/Med/Low] | [Name] | [Action] |
+
+---
+
+## Decisions Required
+
+- [Decision 1 that the reader needs to make]
+
+---
+
+## Next Steps
+
+1. [Action — Owner — Due Date]
+2. [Action — Owner — Due Date]
+
+---
+
+**Next Report Date:** [DD MMM YYYY]
+"""
+
+        context_section = f'\nContext / Progress Notes:\n{context}' if has_context else ''
+
+        prompt = f"""Write a {report_type} status report in markdown using ONLY the information provided below. Follow the EXACT structure.
 
 ---
 # {report_type} Report
@@ -511,10 +580,11 @@ Rules (STRICT):
 Rules (STRICT):
 - Output the EXACT sections above in the EXACT order.
 - Use only # and ## for headings. No === or --- as underlines. No plain text headers.
-- {'Use the provided data to fill in relevant fields. Do not invent figures not in the data.' if has_data else 'Keep [square-bracket placeholders] for all specific content — do not invent metrics or figures.'}
-- Return markdown only, no explanation.{data_snippet}"""
+- Use ONLY the context/data provided. Do NOT invent metrics, names, or figures not mentioned.
+- For any field where no information is provided, use [square-bracket placeholder].
+- Return markdown only, no explanation.{context_section}{data_snippet}"""
 
-        return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=900)
+        return self._call_llm(prompt, self.system_prompt, temperature=0.1, max_tokens=900)
 
     def process(self, action: str = 'agenda', **kwargs) -> dict:
         try:
