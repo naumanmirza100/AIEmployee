@@ -36,7 +36,7 @@ class DocumentAuthoringAgent(BaseAgent):
         self.agent_key_name = 'exec_meeting_agent'
         self.system_prompt = SYSTEM_PROMPT
 
-    def draft_agenda(self, meeting_title: str, duration_minutes: int, topics: list, attendees: list = None, context: str = '') -> str:
+    def draft_agenda(self, meeting_title: str, duration_minutes: int, topics: list, attendees: list = None, context: str = '', scheduled_at: str = '') -> str:
         """Draft a structured meeting agenda."""
         self.log_action("draft_agenda")
         has_topics = bool(topics)
@@ -44,39 +44,73 @@ class DocumentAuthoringAgent(BaseAgent):
         topics_text = '\n'.join([f"- {t}" for t in topics]) if has_topics else ''
         attendees_text = ', '.join(attendees) if has_attendees else ''
 
+        # Parse scheduled_at (handles ISO "2026-07-16T09:00:00+00:00" or "2026-07-16 09:00")
+        start_hour, start_min = 9, 0
+        display_datetime = ''
+        if scheduled_at:
+            try:
+                # Normalise ISO to a plain datetime string
+                clean = scheduled_at.replace('Z', '').replace('T', ' ')
+                # Strip timezone offset (+05:00 etc)
+                import re as _re
+                clean = _re.sub(r'[+-]\d{2}:\d{2}$', '', clean).strip()
+                date_part, time_part = clean[:10], clean[11:16]
+                h, m = time_part.split(':')
+                start_hour, start_min = int(h), int(m)
+                # Format nicely for the AI: "16 Jul 2026 at 09:00"
+                from datetime import datetime as _dt
+                parsed = _dt.strptime(date_part, '%Y-%m-%d')
+                display_datetime = parsed.strftime('%d %b %Y') + f' at {time_part}'
+            except Exception:
+                display_datetime = scheduled_at
+
+        def fmt_time(offset_minutes):
+            total = start_hour * 60 + start_min + offset_minutes
+            return f"{total // 60:02d}:{total % 60:02d}"
+
         if has_topics or has_attendees:
+            slot_guide = f"Meeting starts at {fmt_time(0)}. Time slots must use real clock times (HH:MM format) starting from {fmt_time(0)} and ending at {fmt_time(duration_minutes)}."
             prompt = f"""Create a professional meeting agenda in markdown.
 
 Meeting: {meeting_title}
+Date/Time: {display_datetime or '[date TBD]'}
 Duration: {duration_minutes} minutes
 {f'Attendees: {attendees_text}' if has_attendees else ''}
 {f'Topics: {topics_text}' if has_topics else ''}
 {f'Context: {context}' if context else ''}
 
-Build a structured agenda with realistic time slots for each topic.
-Include: Welcome/Introductions, each topic as its own timed agenda item, Action Items Review, Next Steps/Closing.
-Use the actual topic names provided — do not invent additional topics.
-Format as clean markdown."""
+{slot_guide}
+
+Rules:
+- Use ONLY markdown headings (##, ###), bullet points (- item), and bold (**text**). Do NOT use === or --- underline-style headings or dividers.
+- Time slots must be in HH:MM – HH:MM format (e.g. 09:00 – 09:10), NOT 0:00 – 0:05.
+- Include: Welcome/Introductions, each topic as its own timed section, Action Items Review, Next Steps/Closing.
+- Use only the topics provided — do not invent extras.
+
+Return clean markdown only."""
         else:
+            slot_guide = f"Meeting starts at {fmt_time(0)}. All time slots must use real clock times starting from {fmt_time(0)}."
             prompt = f"""Generate a professional meeting agenda TEMPLATE in markdown for: "{meeting_title}"
 
-IMPORTANT: This is a TEMPLATE — use square-bracket placeholders for all specific details.
-Do NOT invent or assume any discussion points, decisions, or attendee names.
+Date/Time: {display_datetime or '[date TBD]'}
+Duration: {duration_minutes} minutes
 
-The template must have these sections with example placeholder text in brackets:
-1. Meeting header (title, date, time, location, duration)
-2. Attendees (e.g. [Name, Role], [Name, Role])
-3. Objectives (e.g. [State the 1-2 goals of this meeting])
-4. Agenda items with time slots — each item should show:
-   - Time slot (e.g. 00:00 – 00:10)
-   - Agenda item name (e.g. [Topic 1: e.g. Q3 Revenue Review])
-   - Owner (e.g. [Presenter Name])
-   - Brief description (e.g. [What will be covered / decided])
-5. Action Items Review
-6. Next Steps & Closing
+{slot_guide}
 
-Use realistic slot durations that add up to {duration_minutes} minutes.
-Make the placeholders descriptive enough that the user understands exactly what to fill in."""
+IMPORTANT:
+- Use ONLY markdown headings (##, ###) and bullet points. Do NOT use === or --- underline-style dividers.
+- Time slots must be HH:MM – HH:MM format (e.g. 09:00 – 09:10), NOT 0:00 style.
+- This is a TEMPLATE — use [square-bracket placeholders] for all specific content.
+- Do NOT invent discussion points, attendees, or outcomes.
+
+Sections required:
+1. ## Meeting Details — Date: {display_datetime or '[DD MMM YYYY HH:MM]'}, Duration: {duration_minutes} min, Attendees: [Name, Role]
+2. ## Objectives — [State 1-2 goals]
+3. ## Agenda — timed items from {fmt_time(0)} to {fmt_time(duration_minutes)}, each as ### HH:MM – HH:MM: Topic Name
+4. ## Action Items Review
+5. ## Next Steps & Closing
+
+Durations must add up to {duration_minutes} minutes. Return clean markdown only."""
 
         return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=800)
 
@@ -108,29 +142,31 @@ Action Items:
 Key Decisions:
 {decisions_text or 'None recorded'}
 
-Write professional meeting minutes using the information above.
-Do not invent any details not present in the summary, action items, or decisions.
-Format: header with meeting details, attendees list, discussion summary, decisions made, action items table, next steps."""
+Rules:
+- Use ONLY markdown headings (##, ###) and bullet points (- item). Do NOT use === or --- underline-style headings or dividers.
+- Do not invent any details not present in the summary, action items, or decisions.
+- Format: ## header, ## Attendees, ## Discussion Summary, ## Key Decisions, ## Action Items, ## Next Steps.
+
+Return clean markdown only."""
         else:
             prompt = f"""Generate a professional meeting minutes TEMPLATE in markdown for: "{meeting_title}"
 
-IMPORTANT: This is a TEMPLATE — use square-bracket placeholders for all specific content.
-Do NOT invent discussion points, decisions, or outcomes.
+Rules:
+- Use ONLY markdown headings (##, ###) and bullet points. Do NOT use === or --- underline-style dividers.
+- This is a TEMPLATE — use [square-bracket placeholders] for all specific content.
+- Do NOT invent discussion points, decisions, or outcomes.
 
-The template must include these sections with descriptive placeholder text:
-1. Meeting header (Meeting name, Date: [DD/MM/YYYY], Time: [HH:MM], Location: [e.g. Board Room / Zoom])
-2. Attendees table (columns: Name | Role | Present)
-3. Apologies / Absent
-4. Agenda items discussed — for each item show:
-   - Item heading (e.g. [Agenda Item 1: e.g. Budget Review])
-   - Discussion notes (e.g. [Summarise what was discussed])
-   - Decision reached (e.g. [State the decision, or "No decision — deferred to next meeting"])
-5. Key Decisions (bulleted list with placeholders)
-6. Action Items table (columns: # | Action | Owner | Due Date | Status)
-7. Next Meeting (Date: [TBD], Agenda items to carry forward: [List])
-8. Minutes prepared by: [Name] | Approved by: [Name]
+Sections required:
+1. ## Meeting Details — Meeting name, Date: [DD/MM/YYYY], Time: [HH:MM], Location: [Board Room / Zoom]
+2. ## Attendees — table: Name | Role | Present
+3. ## Apologies / Absent
+4. ## Discussion — ### [Agenda Item 1], notes: [what was discussed], Decision: [outcome]
+5. ## Key Decisions — bullet list with placeholders
+6. ## Action Items — table: # | Action | Owner | Due Date | Status
+7. ## Next Meeting — Date: [TBD], Items to carry forward: [list]
+8. ## Sign-off — Minutes by: [Name] | Approved by: [Name]
 
-Make placeholders descriptive so the user knows exactly what to fill in."""
+Make placeholders descriptive. Return clean markdown only."""
 
         return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1000)
 
@@ -149,39 +185,31 @@ Audience: {audience}
 {f'Context: {context}' if has_context else ''}
 {f'Key Points: {points_text}' if has_points else ''}
 
-Write the briefing using only the context and key points provided above.
-Do not invent facts, statistics, or outcomes not mentioned in the context.
-Format:
-- # [Topic] — Executive Briefing
-- **Executive Summary** (2-3 sentences based on provided context)
-- **Background / Context**
-- **Key Points / Analysis**
-- **Implications**
-- **Recommended Actions**
-- **Conclusion**
+Rules:
+- Use ONLY markdown headings (##, ###) and bullet points. Do NOT use === or --- underline-style dividers.
+- Write only from the context and key points provided — do not invent facts or statistics.
+- Keep it under 400 words.
 
-Keep it concise — under 400 words."""
+Sections: # {topic} — Executive Briefing, ## Executive Summary, ## Background, ## Key Points, ## Implications, ## Recommended Actions, ## Conclusion.
+Return clean markdown only."""
         else:
             prompt = f"""Generate a professional executive briefing TEMPLATE in markdown for topic: "{topic}"
 
-IMPORTANT: This is a TEMPLATE — use square-bracket placeholders for all specific content.
-Do NOT invent facts, statistics, outcomes, or analysis.
+Rules:
+- Use ONLY markdown headings (##, ###) and bullet points. Do NOT use === or --- underline-style dividers.
+- This is a TEMPLATE — use [square-bracket placeholders] for all specific content.
+- Do NOT invent facts, statistics, or analysis.
 
-The template must include these sections with descriptive placeholder text:
-1. Document header (Topic, Prepared for: {audience}, Date: [DD/MM/YYYY], Prepared by: [Name/Department])
-2. **Executive Summary** — e.g. [2-3 sentences: What is this briefing about and what is the key message or recommendation?]
-3. **Background / Context** — e.g. [Describe the situation, problem, or opportunity. What led to this briefing?]
-4. **Key Points / Analysis** — bullet list, e.g.:
-   - [Key finding or point 1 — e.g. Current state of X]
-   - [Key finding or point 2 — e.g. Risk or opportunity identified]
-   - [Key finding or point 3 — e.g. Relevant data or comparison]
-5. **Implications** — e.g. [What does this mean for the business / team / decision-makers?]
-6. **Recommended Actions** — numbered list, e.g.:
-   1. [Action 1 — e.g. Approve budget for X by [date]]
-   2. [Action 2 — e.g. Assign owner for Y initiative]
-7. **Conclusion** — e.g. [1-2 sentence wrap-up and call to action]
+Sections required:
+1. # {topic} — Executive Briefing (header line: Prepared for: {audience} | Date: [DD/MM/YYYY] | By: [Name])
+2. ## Executive Summary — [2-3 sentences: key message and recommendation]
+3. ## Background / Context — [situation, problem, or opportunity]
+4. ## Key Points — bullet list: [finding 1], [finding 2], [finding 3]
+5. ## Implications — [what this means for the business/team]
+6. ## Recommended Actions — 1. [Action — Owner — Due date]
+7. ## Conclusion — [1-2 sentence wrap-up]
 
-Make every placeholder descriptive so the user understands exactly what to write there."""
+Make placeholders descriptive. Return clean markdown only."""
 
         return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=800)
 
@@ -191,25 +219,24 @@ Make every placeholder descriptive so the user understands exactly what to write
         has_data = bool(data)
         prompt = f"""Generate a professional {report_type} report TEMPLATE in markdown.
 {f'Period: {period}' if period else ''}
+{f'Data: {json.dumps(data, indent=2)[:800]}' if has_data else ''}
 
-IMPORTANT: This is a TEMPLATE — use square-bracket placeholders for all specific content.
-Do NOT invent metrics, figures, or outcomes.
+Rules:
+- Use ONLY markdown headings (##, ###), bullet points, and tables. Do NOT use === or --- underline-style dividers.
+- This is a TEMPLATE — use [square-bracket placeholders] for all specific content.
+- Do NOT invent metrics or outcomes.
 
-The template must include these sections with descriptive placeholder text:
-1. Report header (Report Type: {report_type} Report, Period: {period or '[e.g. Q3 2026 / Week of DD/MM]'}, Date: [DD/MM/YYYY], Prepared by: [Name/Team])
-2. **Executive Summary** — e.g. [2-3 sentences: Overall status and headline message for this period]
-3. **Key Metrics / Highlights** — table with columns: Metric | Target | Actual | Status (e.g. [Revenue] | [£X] | [£Y] | [On Track / At Risk])
-4. **Progress Update** — bullet list per workstream/project:
-   - [Workstream 1 — e.g. Product Launch]: [Brief status update]
-   - [Workstream 2 — e.g. Hiring]: [Brief status update]
-5. **Issues & Risks** — table: Issue | Severity | Owner | Mitigation
-6. **Decisions Required** — e.g. [List any decisions the reader needs to make based on this report]
-7. **Next Steps** — numbered list:
-   1. [Action — Owner — Due Date]
-8. **Next Report Date**: [DD/MM/YYYY]
-{f'Use the following data to pre-fill relevant placeholders: {json.dumps(data, indent=2)[:1000]}' if has_data else ''}
+Sections required:
+1. # {report_type} Report (sub-line: Period: {period or '[Q / Week]'} | Date: [DD/MM/YYYY] | By: [Name/Team])
+2. ## Executive Summary — [2-3 sentences: overall status]
+3. ## Key Metrics — table: Metric | Target | Actual | Status
+4. ## Progress Update — bullet per workstream: [Workstream]: [status]
+5. ## Issues & Risks — table: Issue | Severity | Owner | Mitigation
+6. ## Decisions Required — [list decisions the reader must make]
+7. ## Next Steps — 1. [Action — Owner — Due Date]
+8. ## Next Report Date: [DD/MM/YYYY]
 
-Make every placeholder descriptive so the user knows exactly what to fill in."""
+Make placeholders descriptive. Return clean markdown only."""
 
         return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=900)
 

@@ -1374,10 +1374,15 @@ def document_draft(request):
                 topics = meeting.agenda or []
             if meeting and not attendees:
                 attendees = list(meeting.participants.values_list('company_user__full_name', flat=True))
+            scheduled_at_str = request.data.get('scheduled_at', '')
+            if not scheduled_at_str and meeting and meeting.scheduled_at:
+                local_dt = timezone.localtime(meeting.scheduled_at)
+                scheduled_at_str = local_dt.strftime('%Y-%m-%d %H:%M')
             content = agent.draft_agenda(
                 meeting.title if meeting else request.data.get('title', 'Meeting'),
                 meeting.duration_minutes if meeting else int(request.data.get('duration_minutes', 60)),
                 topics, attendees, request.data.get('context', ''),
+                scheduled_at=scheduled_at_str,
             )
 
         elif doc_type == 'minutes':

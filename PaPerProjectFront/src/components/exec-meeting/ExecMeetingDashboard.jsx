@@ -1132,7 +1132,10 @@ const ExecMeetingDashboard = () => {
         attendees: resolvedAttendees,
       };
 
-      if (linkedMeeting) payload.meeting_id = linkedMeeting.id;
+      if (linkedMeeting) {
+        payload.meeting_id = linkedMeeting.id;
+        if (linkedMeeting.scheduled_at) payload.scheduled_at = linkedMeeting.scheduled_at;
+      }
       if (aiDocType === 'minutes') payload.summary = aiDocSummary.trim();
       if (aiDocType === 'briefing') payload.topic = resolvedTitle;
 
