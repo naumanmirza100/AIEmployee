@@ -138,6 +138,20 @@ export const createTemplate = async (campaignId, data) => {
 };
 
 /**
+ * AI-generate an email template's subject + HTML/text body from name + description.
+ * Body: { name, description }. Response data: { subject, html_content, text_content }.
+ */
+export const generateTemplateContent = async (campaignId, data) => {
+  try {
+    const response = await companyApi.post(`/marketing/campaigns/${campaignId}/templates/generate`, data);
+    return response;
+  } catch (error) {
+    console.error('Generate template content error:', error);
+    throw error;
+  }
+};
+
+/**
  * Update email template
  */
 export const updateTemplate = async (campaignId, templateId, data) => {
@@ -770,6 +784,7 @@ export default {
   updateSequence,
   deleteSequence,
   createTemplate,
+  generateTemplateContent,
   updateTemplate,
   deleteTemplate,
   testEmailTemplate,

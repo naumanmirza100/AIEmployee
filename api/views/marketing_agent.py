@@ -939,6 +939,11 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                         parts = name_val.split(None, 1)
                         first = parts[0] or ''
                         last = parts[1] if len(parts) > 1 else ''
+                # First and last name are required (directly, or via a "name" column
+                # split into both) — a row with neither is skipped, same as a
+                # missing email, so personalization tokens are never silently blank.
+                if not first and not last:
+                    continue
                 lead, created = Lead.objects.get_or_create(
                     email=email, owner=user,
                     defaults={
@@ -2106,7 +2111,6 @@ def generate_template_content(request, campaign_id):
             )
         data = request.data
         name = (data.get('name') or '').strip()
-        subject = (data.get('subject') or '').strip()
         description = (data.get('description') or '').strip()
         if not description:
             return Response(
@@ -2121,7 +2125,7 @@ def generate_template_content(request, campaign_id):
         except Exception:
             pass
 
-        result = agent.generate_template_content(name, subject, description)
+        result = agent.generate_template_content(name, description)
         if result.get('success') is False:
             return Response(
                 {'status': 'error', 'message': result.get('error') or 'Generation failed', 'error': 'generation_failed'},

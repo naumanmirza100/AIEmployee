@@ -237,46 +237,45 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
             result[str_key] = str(result[str_key]).strip() if result[str_key] else ''
         return result
 
-    def generate_template_content(self, name: str, subject: str, description: str) -> Dict:
+    def generate_template_content(self, name: str, description: str) -> Dict:
         """
-        Generate an email template's HTML (and plain-text) body from just a name,
-        subject, and short description of what the email should say — the user
+        Generate an email template's subject line and HTML (+ plain-text) body from
+        just a name and a short description of what the email should say — the user
         reviews/edits the result before saving, same pattern as auto_fill_campaign.
 
         Args:
             name (str): Template name (context only, not shown in the email)
-            subject (str): Email subject line
             description (str): What the email should say — goals, tone, key points
 
         Returns:
-            Dict: { success, html_content, text_content }
+            Dict: { success, subject, html_content, text_content }
         """
         self.log_action("Generating template content", {"name": name})
 
-        prompt = f"""Write a marketing email body as clean semantic HTML (no markdown, no code fences).
+        prompt = f"""Write a marketing email for the following. Output EXACTLY two sections, in this order, with no extra commentary:
+
+SUBJECT: <the email subject line, one line only>
+BODY:
+<the email body as clean semantic HTML>
 
 Template name: {name or 'Untitled'}
-Subject: {subject or 'Untitled'}
 What the email should say: {description or 'Not provided'}
 
 Rules:
+- The BODY must be plain semantic HTML (e.g. <p>, <a>, <strong> tags) — no <html>/<head>/<body> wrapper, no inline <style> blocks, no markdown asterisks, no code fences.
 - Use merge-field placeholders where natural: {{{{first_name}}}}, {{{{last_name}}}}, {{{{company}}}}, {{{{job_title}}}}. Always greet with {{{{first_name}}}}.
-- Output ONLY the HTML body content (e.g. <p>, <a>, <strong> tags) — no <html>/<head>/<body> wrapper, no inline <style> blocks, no markdown asterisks.
-- Keep it concise: a greeting, 2-4 short paragraphs or a short list, and a clear call to action.
-- Professional but warm tone unless the description says otherwise."""
+- Keep the body concise: a greeting, 2-4 short paragraphs or a short list, and a clear call to action.
+- Professional but warm tone unless the description says otherwise.
+- The SUBJECT line must be plain text (no HTML, no quotes around it)."""
 
         try:
-            html_content = self._call_llm_for_writing(
+            raw = self._call_llm_for_writing(
                 prompt,
                 self.system_prompt,
                 temperature=0.7,
                 max_tokens=1200
             )
-            html_content = (html_content or '').strip()
-            if html_content.startswith('```'):
-                html_content = re.sub(r'^```[a-zA-Z]*\n?', '', html_content)
-                html_content = re.sub(r'\n?```$', '', html_content).strip()
-            text_content = re.sub(r'<[^>]+>', '', html_content).strip()
+            subject, html_content = self._parse_template_generation(raw)
         except Exception as e:
             from core.api_key_service import KeyServiceError
             if isinstance(e, KeyServiceError):
@@ -284,11 +283,52 @@ Rules:
             self.log_action("Error generating template content", {"error": str(e)})
             return {'success': False, 'error': str(e)}
 
+        text_content = re.sub(r'<[^>]+>', '', html_content).strip()
+
         return {
             'success': True,
+            'subject': subject,
             'html_content': html_content,
             'text_content': text_content,
         }
+
+    def _parse_template_generation(self, raw_text: str):
+        """
+        Split the LLM's response into (subject, html_content). Tolerant of the model
+        skipping the 'BODY:' label, wrapping the subject onto a second line, or
+        wrapping the whole thing in a code fence — only 'SUBJECT:' is load-bearing.
+        """
+        text = (raw_text or '').strip()
+        if text.startswith('```'):
+            text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
+            text = re.sub(r'\n?```$', '', text).strip()
+
+        subject_match = re.search(r'SUBJECT:\s*(.*)', text, re.IGNORECASE)
+        if not subject_match:
+            # No recognizable structure at all — treat the whole thing as body.
+            return '', text.strip()
+
+        after_subject = text[subject_match.end():]
+        # Subject ends at "BODY:" if present, otherwise at the first blank line,
+        # otherwise at the first HTML tag (model went straight into markup).
+        body_label = re.search(r'\n\s*BODY:\s*', after_subject, re.IGNORECASE)
+        if body_label:
+            subject_tail = after_subject[:body_label.start()]
+            html_content = after_subject[body_label.end():]
+        else:
+            blank_line = re.search(r'\n\s*\n', after_subject)
+            tag_start = re.search(r'<[a-zA-Z]', after_subject)
+            cut = min([p.start() for p in (blank_line, tag_start) if p] or [len(after_subject)])
+            subject_tail = after_subject[:cut]
+            html_content = after_subject[cut:]
+
+        subject = (subject_match.group(1) + subject_tail).replace('\n', ' ').strip()
+        subject = subject.strip('"').strip("'").strip()
+        html_content = html_content.strip()
+        if html_content.startswith('```'):
+            html_content = re.sub(r'^```[a-zA-Z]*\n?', '', html_content)
+            html_content = re.sub(r'\n?```$', '', html_content).strip()
+        return subject, html_content
 
     def create_multi_channel_campaign(self, user_id: int, campaign_data: Dict,
                                       context: Optional[Dict] = None, leads_file=None) -> Dict:
@@ -496,14 +536,22 @@ Rules:
                 email = str(row['email']).strip().lower()
                 if not email or pd.isna(row['email']):
                     continue
-                
+
+                first_name = str(row.get('first_name', '')).strip() if pd.notna(row.get('first_name')) else ''
+                last_name = str(row.get('last_name', '')).strip() if pd.notna(row.get('last_name')) else ''
+                # First and last name are required — a row with neither is skipped,
+                # same as a missing email, so personalization tokens are never
+                # silently blank.
+                if not first_name and not last_name:
+                    continue
+
                 # Get or create lead
                 lead, created = Lead.objects.get_or_create(
                     email=email,
                     owner=user,
                     defaults={
-                        'first_name': str(row.get('first_name', '')).strip() if pd.notna(row.get('first_name')) else '',
-                        'last_name': str(row.get('last_name', '')).strip() if pd.notna(row.get('last_name')) else '',
+                        'first_name': first_name,
+                        'last_name': last_name,
                         'phone': str(row.get('phone', '')).strip() if pd.notna(row.get('phone')) else '',
                         'company': str(row.get('company', '')).strip() if pd.notna(row.get('company')) else '',
                         'job_title': str(row.get('job_title', '')).strip() if pd.notna(row.get('job_title')) else '',

@@ -20,8 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye, Send, AlertCircle } from 'lucide-react';
+import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye, Send, AlertCircle, Sparkles, Upload } from 'lucide-react';
 import {
   getSequences,
   createSequence,
@@ -29,12 +30,15 @@ import {
   deleteSequence,
   getSequenceDetails,
   createTemplate,
+  generateTemplateContent,
   updateTemplate,
   deleteTemplate,
   testEmailTemplate,
   getCampaign,
+  uploadCampaignLeads,
 } from '@/services/marketingAgentService';
 import AddEmailAccountModal from './AddEmailAccountModal';
+import LeadsUploadFields from './LeadsUploadFields';
 
 const MIN_STEP_GAP_MINUTES = 5;
 
@@ -47,6 +51,23 @@ const TEMPLATE_MERGE_FIELDS = [
   { key: 'job_title', label: 'Job title' },
   // { key: 'phone', label: 'Phone' },
 ];
+
+/** Sample values shown in the rendered preview so {{merge_fields}} aren't left as raw placeholders. */
+const TEMPLATE_PREVIEW_SAMPLE_VALUES = {
+  first_name: 'Alex',
+  last_name: 'Morgan',
+  email: 'alex.morgan@example.com',
+  company: 'Acme Inc.',
+  job_title: 'Marketing Manager',
+};
+
+/** Replace {{key}} placeholders with sample lead data for a human-readable preview. */
+function fillTemplatePreviewValues(text) {
+  if (!text) return '';
+  return text.replace(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g, (match, key) => {
+    return TEMPLATE_PREVIEW_SAMPLE_VALUES[key] ?? match;
+  });
+}
 
 const INTEREST_LEVEL_OPTIONS = [
   { value: 'any', label: 'Any Reply (catches all replies)' },
@@ -129,9 +150,15 @@ const SequenceManagementPage = ({ embedded = false }) => {
   const [loading, setLoading] = useState(true);
   const [noEmailAccountDialogOpen, setNoEmailAccountDialogOpen] = useState(false);
   const [addEmailAccountOpen, setAddEmailAccountOpen] = useState(false);
+  const [leadsCount, setLeadsCount] = useState(null);
+  const [uploadLeadsOpen, setUploadLeadsOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadMessage, setUploadMessage] = useState('');
+  const [uploadLoading, setUploadLoading] = useState(false);
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
   const [viewTemplateOpen, setViewTemplateOpen] = useState(false);
   const [viewTemplate, setViewTemplate] = useState(null);
+  const [showRawHtml, setShowRawHtml] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [createSequenceOpen, setCreateSequenceOpen] = useState(false);
   const [editSequenceOpen, setEditSequenceOpen] = useState(false);
@@ -145,6 +172,8 @@ const SequenceManagementPage = ({ embedded = false }) => {
   const [testSending, setTestSending] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [templateForm, setTemplateForm] = useState({ name: '', subject: '', html_content: '' });
+  const [templateDescription, setTemplateDescription] = useState('');
+  const [generatingTemplate, setGeneratingTemplate] = useState(false);
   const [sequenceForm, setSequenceForm] = useState({
     name: '',
     email_account_id: '',
@@ -154,6 +183,10 @@ const SequenceManagementPage = ({ embedded = false }) => {
     steps: [{ template_id: '', delay_days: 0, delay_hours: 0, delay_minutes: MIN_STEP_GAP_MINUTES }],
   });
   const [stepErrors, setStepErrors] = useState([]);
+  const [sequenceDescription, setSequenceDescription] = useState('');
+  const [sequenceEmailCount, setSequenceEmailCount] = useState('3');
+  const [generatingSequence, setGeneratingSequence] = useState(false);
+  const [sequenceStepLimit, setSequenceStepLimit] = useState(null);
   const [editingSequenceId, setEditingSequenceId] = useState(null);
   const [detailsSequence, setDetailsSequence] = useState(null);
   const templateHtmlRef = useRef(null);
@@ -233,7 +266,141 @@ const SequenceManagementPage = ({ embedded = false }) => {
     fetchData();
   }, [fetchData]);
 
+  const fetchLeadsCount = useCallback(async () => {
+    try {
+      const res = await getCampaign(id, { detail: 1 });
+      if (res?.status === 'success' && res?.data) {
+        setLeadsCount(res.data.leads_count ?? res.data.campaign?.leads_count ?? (res.data.leads?.length ?? 0));
+      }
+    } catch {
+      // Non-critical — the "add leads" prompt just won't show if this fails.
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchLeadsCount();
+  }, [fetchLeadsCount]);
+
+  const handleUploadLeads = async () => {
+    if (!uploadFile) {
+      setUploadMessage('Please select a file');
+      return;
+    }
+    setUploadMessage('');
+    setUploadLoading(true);
+    try {
+      await uploadCampaignLeads(id, uploadFile);
+      toast({ title: 'Success', description: 'Leads uploaded' });
+      setUploadLeadsOpen(false);
+      setUploadFile(null);
+      fetchLeadsCount();
+    } catch (e) {
+      setUploadMessage(e.message || 'Upload failed');
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
   const { campaign, sequences = [], templates = [], email_accounts = [], has_main_sequence } = data || {};
+
+  const handleGenerateTemplateContent = async () => {
+    if (!templateDescription?.trim()) {
+      toast({ title: 'Validation', description: 'Describe what the email should say first.', variant: 'destructive' });
+      return;
+    }
+    setGeneratingTemplate(true);
+    try {
+      const res = await generateTemplateContent(id, {
+        name: templateForm.name?.trim() || '',
+        description: templateDescription.trim(),
+      });
+      if (res?.status === 'success' && res?.data) {
+        setTemplateForm((p) => ({
+          ...p,
+          subject: res.data.subject || p.subject,
+          html_content: res.data.html_content || '',
+        }));
+        toast({ title: 'Generated', description: 'Review and edit the subject/content, then save.' });
+      } else {
+        toast({ title: 'Error', description: res?.message || 'Failed to generate content.', variant: 'destructive' });
+      }
+    } catch (e) {
+      toast({ title: 'Error', description: e?.message || 'Failed to generate content.', variant: 'destructive' });
+    } finally {
+      setGeneratingTemplate(false);
+    }
+  };
+
+  const resetTemplateForm = () => {
+    setEditingTemplateId(null);
+    setTemplateForm({ name: '', subject: '', html_content: '' });
+    setTemplateDescription('');
+  };
+
+  const handleGenerateSequence = async () => {
+    if (!sequenceForm.name?.trim()) {
+      toast({ title: 'Validation', description: 'Sequence name is required.', variant: 'destructive' });
+      return;
+    }
+    const count = parseInt(sequenceEmailCount, 10);
+    if (!Number.isFinite(count) || count < 1) {
+      toast({ title: 'Validation', description: 'Enter how many emails this sequence should have.', variant: 'destructive' });
+      return;
+    }
+    setGeneratingSequence(true);
+    try {
+      const seqName = sequenceForm.name.trim();
+      const goal = sequenceDescription.trim() || seqName;
+      const newSteps = [];
+      let cumulativeMinutes = 0;
+
+      for (let i = 0; i < count; i++) {
+        const stepLabel = `Email ${i + 1} of ${count}`;
+        const genRes = await generateTemplateContent(id, {
+          name: `${seqName} — ${stepLabel}`,
+          description: `${stepLabel} in an email follow-up sequence. Sequence goal: ${goal}. ${
+            i === 0
+              ? 'This is the opening email — introduce the topic.'
+              : i === count - 1
+                ? 'This is the final email — a last, polite call to action.'
+                : 'This is a follow-up/reminder email — build on the previous ones without repeating them verbatim.'
+          }`,
+        });
+        if (genRes?.status !== 'success' || !genRes?.data) {
+          throw new Error(genRes?.message || `Failed to generate ${stepLabel}.`);
+        }
+
+        const createRes = await createTemplate(id, {
+          name: `${seqName} — ${stepLabel}`,
+          subject: genRes.data.subject || seqName,
+          html_content: genRes.data.html_content || '',
+        });
+        if (createRes?.status !== 'success' || !createRes?.data?.template_id) {
+          throw new Error(createRes?.message || `Failed to save template for ${stepLabel}.`);
+        }
+
+        cumulativeMinutes = i === 0 ? MIN_STEP_GAP_MINUTES : cumulativeMinutes + MIN_STEP_GAP_MINUTES;
+        const delay = delayFromTotalMinutes(cumulativeMinutes);
+        newSteps.push({ template_id: String(createRes.data.template_id), ...delay });
+      }
+
+      const defaultAccountId = email_accounts.find((a) => a.is_default)?.id ?? email_accounts?.[0]?.id;
+      setSequenceForm((p) => ({
+        ...p,
+        email_account_id: p.email_account_id || (defaultAccountId ? String(defaultAccountId) : ''),
+        steps: newSteps,
+      }));
+      setSequenceStepLimit(count);
+      setStepErrors([]);
+      await fetchData();
+      toast({ title: 'Generated', description: 'Review the steps below, then create the sequence.' });
+    } catch (e) {
+      toast({ title: 'Error', description: e?.message || 'Failed to generate sequence.', variant: 'destructive' });
+    } finally {
+      setGeneratingSequence(false);
+    }
+  };
 
   const handleCreateTemplate = async (e) => {
     e.preventDefault();
@@ -251,7 +418,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
       if (res?.status === 'success') {
         toast({ title: 'Success', description: res?.data?.message || 'Template created.' });
         setCreateTemplateOpen(false);
-        setTemplateForm({ name: '', subject: '', html_content: '' });
+        resetTemplateForm();
         fetchData();
       } else {
         toast({ title: 'Error', description: res?.message || 'Failed to create template.', variant: 'destructive' });
@@ -274,6 +441,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
       subject: t.subject || '',
       html_content: t.html_content || '',
     });
+    setTemplateDescription('');
     setEditingTemplateId(t.id);
     setCreateTemplateOpen(true);
   };
@@ -338,8 +506,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
       if (res?.status === 'success') {
         toast({ title: 'Success', description: res?.data?.message || 'Template updated.' });
         setCreateTemplateOpen(false);
-        setEditingTemplateId(null);
-        setTemplateForm({ name: '', subject: '', html_content: '' });
+        resetTemplateForm();
         fetchData();
       } else {
         toast({ title: 'Error', description: res?.message || 'Failed to update template.', variant: 'destructive' });
@@ -370,6 +537,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
   };
 
   const addStep = () => {
+    if (sequenceStepLimit != null && sequenceForm.steps.length >= sequenceStepLimit) return;
     setSequenceForm((prev) => {
       const last = prev.steps[prev.steps.length - 1];
       const prevTotal = stepTotalMinutes(last);
@@ -453,6 +621,9 @@ const SequenceManagementPage = ({ embedded = false }) => {
           steps: [{ template_id: '', delay_days: 0, delay_hours: 0, delay_minutes: MIN_STEP_GAP_MINUTES }],
         });
         setStepErrors([]);
+        setSequenceDescription('');
+        setSequenceEmailCount('3');
+        setSequenceStepLimit(null);
         fetchData();
       } else {
         toast({ title: 'Error', description: res?.message || 'Failed to create sequence.', variant: 'destructive' });
@@ -605,6 +776,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                   setNoEmailAccountDialogOpen(true);
                   return;
                 }
+                resetTemplateForm();
                 setCreateTemplateOpen(true);
               }}
               disabled={email_accounts.length === 0}
@@ -629,6 +801,9 @@ const SequenceManagementPage = ({ embedded = false }) => {
                   steps: [{ template_id: '', delay_days: 0, delay_hours: 0, delay_minutes: MIN_STEP_GAP_MINUTES }],
                 });
                 setStepErrors([]);
+                setSequenceDescription('');
+                setSequenceEmailCount('3');
+                setSequenceStepLimit(null);
                 setCreateSequenceOpen(true);
               }}
               disabled={has_main_sequence || email_accounts.length === 0}
@@ -646,6 +821,21 @@ const SequenceManagementPage = ({ embedded = false }) => {
           </div>
         )}
       </div>
+
+      {!noData && leadsCount === 0 && (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="py-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
+              <span>This campaign has no leads yet — sequences won't have anyone to send to.</span>
+            </div>
+            <Button size="sm" onClick={() => { setUploadLeadsOpen(true); setUploadMessage(''); setUploadFile(null); }}>
+              <Upload className="mr-2 h-4 w-4" />
+              Add leads
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {noData ? (
         <Card>
@@ -905,12 +1095,12 @@ const SequenceManagementPage = ({ embedded = false }) => {
         </>
       )}
 
-      {/* View template modal */}
-      <Dialog open={viewTemplateOpen} onOpenChange={(open) => { if (!open) setViewTemplate(null); setViewTemplateOpen(open); }}>
-        <DialogContent className="max-w-lg">
+      {/* View template modal — rendered preview, not raw HTML */}
+      <Dialog open={viewTemplateOpen} onOpenChange={(open) => { if (!open) { setViewTemplate(null); setShowRawHtml(false); } setViewTemplateOpen(open); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
           <DialogHeader>
             <DialogTitle>Email template</DialogTitle>
-            <DialogDescription>View template content.</DialogDescription>
+            <DialogDescription>Preview with sample lead data — this is how the compiled email will look.</DialogDescription>
           </DialogHeader>
           {viewTemplate && (
             <div className="space-y-4 py-2">
@@ -920,13 +1110,36 @@ const SequenceManagementPage = ({ embedded = false }) => {
               </div>
               <div>
                 <Label className="text-muted-foreground text-xs">Subject</Label>
-                <p className="mt-0.5 break-words">{viewTemplate.subject}</p>
+                <p className="mt-0.5 break-words">{fillTemplatePreviewValues(viewTemplate.subject)}</p>
               </div>
               <div>
-                <Label className="text-muted-foreground text-xs">Body (HTML)</Label>
-                <div className="mt-1 rounded border bg-muted/20 p-3 max-h-64 overflow-y-auto text-sm font-mono whitespace-pre-wrap break-words">
-                  {viewTemplate.html_content || <span className="text-muted-foreground">(empty)</span>}
+                <div className="flex items-center justify-between">
+                  <Label className="text-muted-foreground text-xs">Preview</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setShowRawHtml((v) => !v)}
+                  >
+                    {showRawHtml ? 'Show preview' : 'View raw HTML'}
+                  </Button>
                 </div>
+                {showRawHtml ? (
+                  <div className="mt-1 rounded border bg-muted/20 p-3 max-h-80 overflow-y-auto no-scrollbar text-sm font-mono whitespace-pre-wrap break-words">
+                    {viewTemplate.html_content || <span className="text-muted-foreground">(empty)</span>}
+                  </div>
+                ) : viewTemplate.html_content ? (
+                  <iframe
+                    title="Email preview"
+                    sandbox=""
+                    className="mt-1 w-full rounded border bg-white"
+                    style={{ height: '360px' }}
+                    srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>html{scrollbar-width:none;-ms-overflow-style:none;}::-webkit-scrollbar{display:none;width:0;height:0;}body{font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1a1a;margin:16px;}</style></head><body>${fillTemplatePreviewValues(viewTemplate.html_content)}</body></html>`}
+                  />
+                ) : (
+                  <p className="mt-1 text-sm text-muted-foreground">(empty)</p>
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setViewTemplateOpen(false)}>Close</Button>
@@ -989,67 +1202,103 @@ const SequenceManagementPage = ({ embedded = false }) => {
       </Dialog>
 
       {/* Create / Edit template modal */}
-      <Dialog open={createTemplateOpen} onOpenChange={(open) => { if (!open) { setEditingTemplateId(null); setTemplateForm({ name: '', subject: '', html_content: '' }); } setCreateTemplateOpen(open); }}>
-        <DialogContent>
+      <Dialog open={createTemplateOpen} onOpenChange={(open) => { if (!open) resetTemplateForm(); setCreateTemplateOpen(open); }}>
+        <DialogContent className="max-w-4xl w-[95vw]">
           <DialogHeader>
             <DialogTitle>{editingTemplateId ? 'Edit email template' : 'Create email template'}</DialogTitle>
-            <DialogDescription>{editingTemplateId ? 'Update the template. Changes apply to sequence steps using it.' : 'Add a template to use in sequence steps.'}</DialogDescription>
+            <DialogDescription>
+              {editingTemplateId
+                ? 'Update the template. Changes apply to sequence steps using it.'
+                : 'Name the template and describe what the email should say — AI generates the subject and content for you to review and edit.'}
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={editingTemplateId ? handleUpdateTemplate : handleCreateTemplate}>
-            <div className="space-y-4 py-4">
-              <div>
-                <Label htmlFor="t-name">Name</Label>
-                <Input
-                  id="t-name"
-                  value={templateForm.name}
-                  onChange={(e) => setTemplateForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Welcome email"
-                />
-              </div>
-              <div>
-                <Label htmlFor="t-subject">Subject</Label>
-                <Input
-                  id="t-subject"
-                  ref={templateSubjectRef}
-                  value={templateForm.subject}
-                  onChange={(e) => setTemplateForm((p) => ({ ...p, subject: e.target.value }))}
-                  placeholder="e.g. Hello {{first_name}}"
-                />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground mb-1.5">Insert lead field into Subject or Body (click in the field first, then click a button).</p>
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {TEMPLATE_MERGE_FIELDS.map(({ key, label }) => (
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 py-4">
+              {/* Left: name + description + generate */}
+              <div className="space-y-4 lg:col-span-2">
+                <div>
+                  <Label htmlFor="t-name">Name</Label>
+                  <Input
+                    id="t-name"
+                    value={templateForm.name}
+                    onChange={(e) => setTemplateForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="e.g. Welcome email"
+                  />
+                </div>
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                  <Label htmlFor="t-description">Describe what the email should say</Label>
+                  <Textarea
+                    id="t-description"
+                    value={templateDescription}
+                    onChange={(e) => setTemplateDescription(e.target.value)}
+                    placeholder="e.g. Friendly welcome email introducing our product, highlight the free trial, end with a call to book a demo."
+                    rows={6}
+                  />
+                  <div className="flex justify-end">
                     <Button
-                      key={key}
                       type="button"
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
-                      className="text-xs h-7"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        insertMergeField(key);
-                      }}
+                      onClick={handleGenerateTemplateContent}
+                      disabled={generatingTemplate}
                     >
-                      {label}
+                      {generatingTemplate ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+                      ) : (
+                        <><Sparkles className="h-4 w-4 mr-2" /> Generate with AI</>
+                      )}
                     </Button>
-                  ))}
+                  </div>
                 </div>
               </div>
-              <div>
-                <Label htmlFor="t-html">HTML content (optional)</Label>
-                <textarea
-                  id="t-html"
-                  ref={templateHtmlRef}
-                  className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y"
-                  value={templateForm.html_content}
-                  onChange={(e) => setTemplateForm((p) => ({ ...p, html_content: e.target.value }))}
-                  placeholder="<p>Hello {{first_name}},</p><p>...</p>"
-                />
+
+              {/* Right: AI-generated subject + body, editable */}
+              <div className="space-y-4 lg:col-span-3 lg:border-l lg:pl-6">
+                <div>
+                  <Label htmlFor="t-subject">Subject</Label>
+                  <Input
+                    id="t-subject"
+                    ref={templateSubjectRef}
+                    value={templateForm.subject}
+                    onChange={(e) => setTemplateForm((p) => ({ ...p, subject: e.target.value }))}
+                    placeholder="Generated by AI, or write your own — e.g. Hello {{first_name}}"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1.5">Insert lead field into Subject or Body (click in the field first, then click a button).</p>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {TEMPLATE_MERGE_FIELDS.map(({ key, label }) => (
+                      <Button
+                        key={key}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-xs h-7"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          insertMergeField(key);
+                        }}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="t-html">HTML content</Label>
+                  <textarea
+                    id="t-html"
+                    ref={templateHtmlRef}
+                    className="flex min-h-[160px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-y no-scrollbar"
+                    value={templateForm.html_content}
+                    onChange={(e) => setTemplateForm((p) => ({ ...p, html_content: e.target.value }))}
+                    placeholder="Generated by AI, or write your own — e.g. <p>Hello {{first_name}},</p><p>...</p>"
+                  />
+                </div>
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreateTemplateOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => { resetTemplateForm(); setCreateTemplateOpen(false); }}>
                 Cancel
               </Button>
               <Button type="submit" disabled={actionLoading}>
@@ -1061,8 +1310,19 @@ const SequenceManagementPage = ({ embedded = false }) => {
       </Dialog>
 
       {/* Create sequence modal */}
-      <Dialog open={createSequenceOpen} onOpenChange={(open) => { if (!open) setSequenceForm((p) => ({ ...p, parent_sequence_id: '', interest_level: 'any', is_sub_sequence: false })); setCreateSequenceOpen(open); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={createSequenceOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSequenceForm((p) => ({ ...p, parent_sequence_id: '', interest_level: 'any', is_sub_sequence: false }));
+            setSequenceDescription('');
+            setSequenceEmailCount('3');
+            setSequenceStepLimit(null);
+          }
+          setCreateSequenceOpen(open);
+        }}
+      >
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar">
           <DialogHeader>
             <DialogTitle>{sequenceForm.parent_sequence_id ? 'Create Sub-Sequence (Reply Triggered)' : 'Create sequence'}</DialogTitle>
             <DialogDescription>
@@ -1072,77 +1332,132 @@ const SequenceManagementPage = ({ embedded = false }) => {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateSequence}>
-            <div className="space-y-4 py-4">
-              {sequenceForm.parent_sequence_id && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Sub-sequence</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Starts when a lead replies to the main sequence. Main sequence stops; this sequence runs per the delays below.
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 py-4">
+              {/* Left: name, account, AI generation */}
+              <div className="space-y-4 lg:col-span-2">
+                {sequenceForm.parent_sequence_id && (
+                  <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Sub-sequence</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Starts when a lead replies to the main sequence. Main sequence stops; this sequence runs per the delays below.
+                      </p>
+                    </div>
+                    <div>
+                      <Label className="text-foreground">Reply interest level *</Label>
+                      <Select
+                        value={sequenceForm.interest_level || 'any'}
+                        onValueChange={(v) => setSequenceForm((p) => ({ ...p, interest_level: v }))}
+                      >
+                        <SelectTrigger className="mt-1.5">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {INTEREST_LEVEL_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground mt-1.5">Replies are routed to the matching sub-sequence by interest level.</p>
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <Label>Sequence name</Label>
+                  <Input
+                    value={sequenceForm.name}
+                    onChange={(e) => setSequenceForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder={sequenceForm.parent_sequence_id ? 'e.g. Interested follow-up' : 'e.g. Main follow-up sequence'}
+                  />
+                </div>
+                <div>
+                  <Label>Send from (email account)</Label>
+                  <Select
+                    value={sequenceForm.email_account_id || '__none__'}
+                    onValueChange={(v) => setSequenceForm((p) => ({ ...p, email_account_id: v === '__none__' ? '' : v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">
+                        {campaign?.email_account_email
+                          ? `Use campaign default (${campaign.email_account_email})`
+                          : 'No account'}
+                      </SelectItem>
+                      {email_accounts.map((a) => (
+                        <SelectItem key={a.id} value={String(a.id)}>
+                          {a.email} {a.is_default ? '(default)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {!sequenceForm.parent_sequence_id && (
+                  <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                    <div>
+                      <Label htmlFor="seq-description">Sequence goal (optional — for AI generation)</Label>
+                      <Textarea
+                        id="seq-description"
+                        value={sequenceDescription}
+                        onChange={(e) => setSequenceDescription(e.target.value)}
+                        placeholder="e.g. Onboarding follow-up encouraging new users to complete setup and book a demo."
+                        rows={4}
+                      />
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <div className="w-36">
+                        <Label htmlFor="seq-email-count">Number of emails</Label>
+                        <Input
+                          id="seq-email-count"
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={sequenceEmailCount}
+                          onChange={(e) => setSequenceEmailCount(e.target.value)}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleGenerateSequence}
+                        disabled={generatingSequence}
+                      >
+                        {generatingSequence ? (
+                          <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+                        ) : (
+                          <><Sparkles className="h-4 w-4 mr-2" /> Generate with AI</>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      AI writes and saves a template for each email, then assembles the steps with standard spacing. Review and edit before creating.
                     </p>
                   </div>
-                  <div>
-                    <Label className="text-foreground">Reply interest level *</Label>
-                    <Select
-                      value={sequenceForm.interest_level || 'any'}
-                      onValueChange={(v) => setSequenceForm((p) => ({ ...p, interest_level: v }))}
-                    >
-                      <SelectTrigger className="mt-1.5">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {INTEREST_LEVEL_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground mt-1.5">Replies are routed to the matching sub-sequence by interest level.</p>
-                  </div>
-                </div>
-              )}
-              <div>
-                <Label>Sequence name</Label>
-                <Input
-                  value={sequenceForm.name}
-                  onChange={(e) => setSequenceForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder={sequenceForm.parent_sequence_id ? 'e.g. Interested follow-up' : 'e.g. Main follow-up sequence'}
-                />
+                )}
               </div>
-              <div>
-                <Label>Send from (email account)</Label>
-                <Select
-                  value={sequenceForm.email_account_id || '__none__'}
-                  onValueChange={(v) => setSequenceForm((p) => ({ ...p, email_account_id: v === '__none__' ? '' : v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select account" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">
-                      {campaign?.email_account_email
-                        ? `Use campaign default (${campaign.email_account_email})`
-                        : 'No account'}
-                    </SelectItem>
-                    {email_accounts.map((a) => (
-                      <SelectItem key={a.id} value={String(a.id)}>
-                        {a.email} {a.is_default ? '(default)' : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
+
+              {/* Right: steps list */}
+              <div className="space-y-2 lg:col-span-3 lg:border-l lg:pl-6">
                 <div className="flex items-center justify-between mb-2">
                   <Label>Steps</Label>
-                  <Button type="button" variant="outline" size="sm" onClick={addStep}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addStep}
+                    disabled={sequenceStepLimit != null && sequenceForm.steps.length >= sequenceStepLimit}
+                    title={sequenceStepLimit != null && sequenceForm.steps.length >= sequenceStepLimit ? `Limited to ${sequenceStepLimit} emails (as generated).` : ''}
+                  >
                     Add step
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground mb-2">First step: min 5 min total. Each step: at least 5 min after the previous.</p>
-                {sequenceForm.steps.map((step, idx) => (
-                  <div key={idx} className="flex items-end gap-2 mb-3 p-3 rounded border bg-muted/20">
-                    <div className='flex items-center gap-2'>
-                      <div className="w-[180px]">
+                <div className="max-h-[480px] overflow-y-auto no-scrollbar pr-1 space-y-3">
+                  {sequenceForm.steps.map((step, idx) => (
+                    <div key={idx} className="flex items-end gap-2 p-3 rounded border bg-muted/20">
+                      <div className="min-w-0 flex-1">
                         <Label className="text-xs">Template</Label>
                         <Select
                           value={step.template_id || '__none__'}
@@ -1159,7 +1474,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="w-20">
+                      <div className="w-14 shrink-0">
                         <Label className="text-xs">Days</Label>
                         <Input
                           type="number"
@@ -1168,7 +1483,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                           onChange={(e) => updateStep(idx, 'delay_days', parseInt(e.target.value, 10) || 0)}
                         />
                       </div>
-                      <div className="w-20">
+                      <div className="w-14 shrink-0">
                         <Label className="text-xs">Hours</Label>
                         <Input
                           type="number"
@@ -1177,7 +1492,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                           onChange={(e) => updateStep(idx, 'delay_hours', parseInt(e.target.value, 10) || 0)}
                         />
                       </div>
-                      <div className="w-20">
+                      <div className="w-16 shrink-0">
                         <Label className="text-xs">Mins (≥5)</Label>
                         <Input
                           type="number"
@@ -1186,21 +1501,31 @@ const SequenceManagementPage = ({ embedded = false }) => {
                           onChange={(e) => updateStep(idx, 'delay_minutes', parseInt(e.target.value, 10) || 0)}
                         />
                       </div>
+                      <div className="shrink-0">
+                        <Button type="button" variant="destructive" size="sm" onClick={() => removeStep(idx)} disabled={sequenceForm.steps.length <= 1}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      {stepErrors[idx] && (
+                        <p className="w-full text-xs text-destructive mt-1" role="alert">{stepErrors[idx]}</p>
+                      )}
                     </div>
-                    <div className='flex justify-end w-full'>
-                      <Button type="button" variant="destructive"  size="sm" onClick={() => removeStep(idx)} disabled={sequenceForm.steps.length <= 1}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {stepErrors[idx] && (
-                      <p className="w-full text-xs text-destructive mt-1" role="alert">{stepErrors[idx]}</p>
-                    )}
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreateSequenceOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setSequenceForm((p) => ({ ...p, parent_sequence_id: '', interest_level: 'any', is_sub_sequence: false }));
+                  setSequenceDescription('');
+                  setSequenceEmailCount('3');
+                  setSequenceStepLimit(null);
+                  setCreateSequenceOpen(false);
+                }}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={actionLoading}>
@@ -1440,6 +1765,46 @@ const SequenceManagementPage = ({ embedded = false }) => {
           fetchData();
         }}
       />
+
+      {/* Upload leads modal */}
+      <Dialog open={uploadLeadsOpen} onOpenChange={setUploadLeadsOpen}>
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar">
+          <DialogHeader>
+            <DialogTitle>Upload leads</DialogTitle>
+            <DialogDescription>
+              Upload a CSV or Excel file. Match the column headers below — names are
+              case-insensitive and a single space is treated the same as an underscore
+              (so both <code className="font-mono text-[11px] bg-muted px-1 rounded">first_name</code>
+              {' '}and <code className="font-mono text-[11px] bg-muted px-1 rounded">First Name</code> work).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <LeadsUploadFields />
+            <div>
+              <Label>File (CSV, XLSX, XLS)</Label>
+              <Input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                className="mt-1"
+              />
+              {uploadFile && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Selected: <span className="font-medium text-foreground">{uploadFile.name}</span>
+                </p>
+              )}
+            </div>
+            {uploadMessage && <p className="text-sm text-destructive">{uploadMessage}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadLeadsOpen(false)}>Cancel</Button>
+            <Button onClick={handleUploadLeads} disabled={uploadLoading}>
+              {uploadLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Upload
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
