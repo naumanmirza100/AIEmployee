@@ -247,18 +247,19 @@ const StatCard = ({ label, value, icon: Icon, palette }) => {
   const p = STAT_PALETTE[palette] || STAT_PALETTE.violet;
   return (
     <div
-      className="rounded-xl p-4 flex items-center gap-4"
+      className="rounded-2xl p-4 flex items-center gap-4 transition-transform duration-200 hover:scale-[1.03] cursor-default"
       style={{
         background: `linear-gradient(135deg, ${p.from}, ${p.to})`,
         border: `1px solid ${p.border}`,
+        backdropFilter: 'blur(8px)',
       }}
     >
-      <div className="rounded-lg p-2.5 flex-shrink-0" style={{ background: p.bg }}>
+      <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: p.bg, boxShadow: `0 0 12px 0 ${p.color}33` }}>
         <Icon className="h-5 w-5" style={{ color: p.color }} />
       </div>
       <div>
         <p className="text-2xl font-bold text-white">{value ?? '—'}</p>
-        <p className="text-xs text-white/60">{label}</p>
+        <p className="text-xs text-white/50">{label}</p>
       </div>
     </div>
   );
@@ -296,9 +297,9 @@ const statusBadge = (status) => {
 };
 
 const CARD_STYLE = {
-  background: 'rgba(0,0,0,0.2)',
-  border: '1px solid rgba(255,255,255,0.1)',
-  backdropFilter: 'blur(4px)',
+  background: 'rgba(0,0,0,0.25)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  backdropFilter: 'blur(8px)',
 };
 
 const ROW_STYLE = {
@@ -306,9 +307,9 @@ const ROW_STYLE = {
 };
 
 const EmptyState = ({ icon: Icon, label }) => (
-  <div className="flex flex-col items-center justify-center py-16 gap-3 text-white/40">
-    <div className="rounded-xl p-4 bg-white/5">
-      <Icon className="h-8 w-8" />
+  <div className="flex flex-col items-center justify-center py-16 gap-3 text-white/30">
+    <div className="rounded-2xl p-4" style={{ background: 'rgba(162,89,255,0.08)', border: '1px solid rgba(162,89,255,0.15)' }}>
+      <Icon className="h-8 w-8 text-violet-400/40" />
     </div>
     <p className="text-sm">{label}</p>
   </div>
@@ -1458,6 +1459,48 @@ const ExecMeetingDashboard = () => {
           <div className="space-y-3 text-sm">
             {digest.greeting && <p className="text-violet-300 font-medium">{digest.greeting}</p>}
             {digest.summary && <p className="text-white/70">{digest.summary}</p>}
+
+            {/* Pending Action Items */}
+            {Array.isArray(digest.pending_action_items) && digest.pending_action_items.length > 0 && (
+              <div className="rounded-xl p-3 bg-amber-500/10 border border-amber-500/20">
+                <p className="text-amber-300 text-xs font-semibold uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <AlertTriangle className="h-3 w-3" /> Pending Action Items ({digest.pending_action_items.length})
+                </p>
+                <ul className="space-y-1.5">
+                  {digest.pending_action_items.map((a, i) => (
+                    <li key={i} className="flex items-start gap-2 text-white/80 text-xs">
+                      <ChevronRight className="h-3 w-3 mt-0.5 flex-shrink-0 text-amber-400" />
+                      <span>
+                        <span className="font-medium">{a.title}</span>
+                        {a.meeting && <span className="text-white/40 ml-1">· {a.meeting}</span>}
+                        {a.due_date && <span className="text-amber-400/70 ml-1">· due {a.due_date}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Due / Overdue Tasks */}
+            {Array.isArray(digest.due_tasks) && digest.due_tasks.length > 0 && (
+              <div className="rounded-xl p-3 bg-rose-500/10 border border-rose-500/20">
+                <p className="text-rose-300 text-xs font-semibold uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <AlertTriangle className="h-3 w-3" /> Due / Overdue Tasks ({digest.due_tasks.length})
+                </p>
+                <ul className="space-y-1.5">
+                  {digest.due_tasks.map((t, i) => (
+                    <li key={i} className="flex items-start gap-2 text-white/80 text-xs">
+                      <ChevronRight className="h-3 w-3 mt-0.5 flex-shrink-0 text-rose-400" />
+                      <span>
+                        <span className="font-medium">{t.title}</span>
+                        {t.due_date && <span className="text-rose-400/70 ml-1">· due {t.due_date}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {Array.isArray(digest.top_priorities) && digest.top_priorities.length > 0 && (
               <div>
                 <p className="text-white/50 text-xs mb-1 uppercase tracking-wide">Top Priorities</p>
@@ -1514,12 +1557,15 @@ const ExecMeetingDashboard = () => {
   const meetingsPanel = () => (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-white font-semibold">All Meetings</h3>
+        <h3 className="text-white font-semibold flex items-center gap-2">
+          <CalendarClock className="h-4 w-4 text-violet-400" />
+          All Meetings
+        </h3>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={loadMeetings} disabled={meetingsLoading} className="text-white/40 hover:text-white">
             <RefreshCw className={`h-3.5 w-3.5 ${meetingsLoading ? 'animate-spin' : ''}`} />
           </Button>
-          <Button size="sm" onClick={() => setShowMeetingDialog(true)}>
+          <Button size="sm" onClick={() => setShowMeetingDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
             <Plus className="h-4 w-4 mr-1" /> Schedule
           </Button>
         </div>
@@ -1764,7 +1810,10 @@ const ExecMeetingDashboard = () => {
   const tasksPanel = () => (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-white font-semibold">Tasks</h3>
+        <h3 className="text-white font-semibold flex items-center gap-2">
+          <ListChecks className="h-4 w-4 text-sky-400" />
+          Tasks
+        </h3>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={loadTasks} disabled={tasksLoading} className="text-white/40 hover:text-white">
             <RefreshCw className={`h-3.5 w-3.5 ${tasksLoading ? 'animate-spin' : ''}`} />
@@ -1775,7 +1824,7 @@ const ExecMeetingDashboard = () => {
             {prioritizeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             AI Prioritize
           </Button>
-          <Button size="sm" onClick={() => setShowTaskDialog(true)}>
+          <Button size="sm" onClick={() => setShowTaskDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
             <Plus className="h-4 w-4 mr-1" /> Add Task
           </Button>
         </div>
@@ -1788,13 +1837,81 @@ const ExecMeetingDashboard = () => {
             <p className="text-violet-300 text-xs font-semibold flex items-center gap-1.5">
               <Sparkles className="h-3.5 w-3.5" /> AI Prioritization Result
             </p>
-            <button onClick={() => setPrioritizeResult(null)} className="text-white/30 hover:text-white text-xs">✕ Close</button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="ghost" className="text-white/40 hover:text-white h-6 px-2 text-xs gap-1"
+                onClick={async () => {
+                  try {
+                    const { default: jsPDF } = await import('jspdf');
+                    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                    const pageW = pdf.internal.pageSize.getWidth();
+                    const pageH = pdf.internal.pageSize.getHeight();
+                    const margin = 18;
+                    const contentW = pageW - margin * 2;
+
+                    pdf.setFillColor(109, 40, 217);
+                    pdf.rect(0, 0, pageW, 12, 'F');
+
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.setFontSize(18);
+                    pdf.setTextColor(30, 10, 60);
+                    pdf.text('AI Task Prioritization', margin, 24);
+                    let y = 32;
+
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.setFontSize(8.5);
+                    pdf.setTextColor(120, 100, 160);
+                    pdf.text(`Generated by AI Executive Meeting Assistant · ${new Date().toLocaleDateString()}`, margin, y);
+                    y += 5;
+                    pdf.setDrawColor(109, 40, 217); pdf.setLineWidth(0.4);
+                    pdf.line(margin, y, pageW - margin, y); y += 7;
+
+                    prioritizeResult.forEach((t, i) => {
+                      if (y > pageH - 25) { pdf.addPage(); y = 18; }
+                      const priorityColors = { critical: [185,28,28], high: [194,65,12], medium: [161,98,7], low: [21,128,61] };
+                      const [r,g,b] = priorityColors[t.priority] || [109,40,217];
+                      pdf.setFillColor(r, g, b);
+                      pdf.roundedRect(margin, y - 3, 18, 5.5, 1, 1, 'F');
+                      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.setTextColor(255,255,255);
+                      pdf.text((t.priority || 'medium').toUpperCase(), margin + 1.5, y + 1);
+
+                      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.setTextColor(30,10,60);
+                      const titleW = pdf.splitTextToSize(`${i+1}. ${t.title || 'Untitled Task'}`, contentW - 22);
+                      pdf.text(titleW, margin + 21, y + 1);
+                      y += titleW.length * 6 + 2;
+
+                      if (t.ai_reasoning) {
+                        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9.5); pdf.setTextColor(80,60,120);
+                        const rLines = pdf.splitTextToSize(t.ai_reasoning, contentW - 4);
+                        rLines.forEach(l => { if (y > pageH-20){pdf.addPage();y=18;} pdf.text(l, margin+2, y); y+=5; });
+                      }
+                      if (t.suggested_due_date) {
+                        pdf.setFont('helvetica', 'italic'); pdf.setFontSize(8.5); pdf.setTextColor(109,40,217);
+                        pdf.text(`Suggested deadline: ${t.suggested_due_date}`, margin+2, y); y+=5;
+                      }
+                      pdf.setDrawColor(220,210,240); pdf.setLineWidth(0.2);
+                      pdf.line(margin, y, pageW-margin, y); y+=5;
+                    });
+
+                    const totalPages = pdf.internal.getNumberOfPages();
+                    for (let i=1; i<=totalPages; i++) {
+                      pdf.setPage(i); pdf.setFontSize(7.5); pdf.setTextColor(160,140,190);
+                      pdf.text(`Page ${i} of ${totalPages}  ·  AI Executive Meeting Assistant`, margin, pageH-7);
+                    }
+                    pdf.save(`task-prioritization-${new Date().toISOString().slice(0,10)}.pdf`);
+                  } catch(err) {
+                    toast({ title: 'PDF download failed', description: err?.message, variant: 'destructive' });
+                  }
+                }}>
+                <Download className="h-3 w-3" /> PDF
+              </Button>
+              <button onClick={() => setPrioritizeResult(null)} className="text-white/30 hover:text-white text-xs">✕ Close</button>
+            </div>
           </div>
           {prioritizeResult.map((t, i) => (
             <div key={t.id || i} className="rounded-xl p-3 bg-white/5 border border-white/10 space-y-0.5">
               <div className="flex items-center gap-2">
                 {priorityBadge(t.priority)}
-                <p className="text-white text-xs font-medium truncate">{t.title}</p>
+                <p className="text-white text-xs font-medium truncate">{i+1}. {t.title || 'Untitled Task'}</p>
               </div>
               {t.ai_reasoning && <p className="text-white/50 text-xs">{t.ai_reasoning}</p>}
               {t.suggested_due_date && <p className="text-violet-300/60 text-xs">Suggested deadline: {t.suggested_due_date}</p>}
@@ -1932,7 +2049,7 @@ const ExecMeetingDashboard = () => {
               } finally {
                 setWeekPlanLoading(false);
               }
-            }} disabled={weekPlanLoading}>
+            }} disabled={weekPlanLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
               {weekPlanLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarDays className="h-4 w-4 mr-2" />}
               {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
             </Button>
@@ -2393,9 +2510,9 @@ const ExecMeetingDashboard = () => {
             <textarea
               value={aiDocSummary}
               onChange={e => { if (e.target.value.length <= 800) setAiDocSummary(e.target.value); }}
-              rows={3}
+              rows={5}
               placeholder="Briefly describe what was discussed, decisions made, outcomes…"
-              className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+              className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             />
           </div>
         )}
@@ -2425,9 +2542,9 @@ const ExecMeetingDashboard = () => {
               <textarea
                 value={aiDocContext}
                 onChange={e => { if (e.target.value.length <= 800) setAiDocContext(e.target.value); }}
-                rows={3}
+                rows={5}
                 placeholder="Describe the situation, problem, or opportunity. Key facts, risks, or data points to include…"
-                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
               />
             </div>
           </>
@@ -2458,16 +2575,16 @@ const ExecMeetingDashboard = () => {
               <textarea
                 value={aiDocContext}
                 onChange={e => { if (e.target.value.length <= 800) setAiDocContext(e.target.value); }}
-                rows={3}
+                rows={5}
                 placeholder="Describe current status, what was completed, blockers, metrics, key highlights…"
-                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
               />
             </div>
           </>
         )}
 
         <div className="flex justify-end">
-          <Button onClick={generateAiDoc} disabled={aiDocLoading}>
+          <Button onClick={generateAiDoc} disabled={aiDocLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
             {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
             {aiDocLoading ? 'Generating…' : 'Generate & Save'}
           </Button>
@@ -2477,7 +2594,10 @@ const ExecMeetingDashboard = () => {
       {/* Saved documents list */}
       <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-          <h3 className="text-white font-semibold text-sm">Saved Documents</h3>
+          <h3 className="text-white font-semibold text-sm flex items-center gap-2">
+            <FileText className="h-3.5 w-3.5 text-violet-400" />
+            Saved Documents
+          </h3>
           <Button size="sm" variant="ghost" onClick={loadDocuments} disabled={docsLoading} className="text-white/40 hover:text-white">
             <RefreshCw className={`h-3.5 w-3.5 ${docsLoading ? 'animate-spin' : ''}`} />
           </Button>
@@ -2531,7 +2651,10 @@ const ExecMeetingDashboard = () => {
   const notificationsPanel = () => (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-white font-semibold">Notifications</h3>
+        <h3 className="text-white font-semibold flex items-center gap-2">
+          <Bell className="h-4 w-4 text-amber-400" />
+          Notifications
+        </h3>
         <Button size="sm" variant="ghost" onClick={loadNotifications} disabled={notifsLoading} className="text-white/50 hover:text-white">
           <RefreshCw className={`h-4 w-4 ${notifsLoading ? 'animate-spin' : ''}`} />
         </Button>
@@ -2587,19 +2710,20 @@ const ExecMeetingDashboard = () => {
       <div
         className="rounded-2xl p-4 sm:p-6"
         style={{
-          background: 'linear-gradient(135deg, rgba(167,139,250,0.08) 0%, rgba(139,92,246,0.04) 50%, rgba(0,0,0,0) 100%)',
-          border: '1px solid rgba(167,139,250,0.15)',
+          background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+          border: '1px solid rgba(162,89,255,0.13)',
+          boxShadow: '0 0 40px 0 rgba(162,89,255,0.06)',
         }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="rounded-xl p-2.5 bg-violet-500/20">
+            <div className="rounded-xl p-2.5" style={{ background: 'linear-gradient(135deg, rgba(162,89,255,0.25), rgba(124,58,237,0.15))', boxShadow: '0 0 16px 0 rgba(162,89,255,0.2)' }}>
               <CalendarClock className="h-6 w-6 text-violet-400" />
             </div>
             <div>
-              <h1 className="text-white text-xl font-bold">Executive Meeting Assistant</h1>
-              <p className="text-white/50 text-sm">Manage meetings, tasks & get AI-powered insights</p>
+              <h1 className="text-white text-xl font-bold tracking-tight">Executive Meeting Assistant</h1>
+              <p className="text-white/40 text-sm">Manage meetings, tasks & get AI-powered insights</p>
             </div>
           </div>
           {/* Mobile tab menu */}
@@ -2627,12 +2751,18 @@ const ExecMeetingDashboard = () => {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="hidden md:flex flex-wrap gap-1 h-auto p-1 mb-6 bg-white/5 border border-white/10">
+          <TabsList className="hidden md:flex flex-wrap gap-1.5 h-auto p-1.5 mb-6 bg-[#1a1333] border border-[#3a295a] rounded-xl">
             {TAB_ITEMS.map(t => (
               <TabsTrigger
                 key={t.value}
                 value={t.value}
-                className="flex items-center gap-1.5 text-white/60 data-[state=active]:bg-violet-600 data-[state=active]:text-white"
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 data-[state=inactive]:text-white/50 data-[state=inactive]:hover:text-white/80 data-[state=active]:text-white data-[state=active]:border-none data-[state=inactive]:border-[#2d2342] data-[state=inactive]:border"
+                style={activeTab === t.value ? {
+                  background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
+                  boxShadow: '0 0 12px 0 rgba(162,89,255,0.45)',
+                } : {
+                  background: 'rgba(60,30,90,0.22)',
+                }}
               >
                 <t.icon className="h-3.5 w-3.5" />{t.label}
               </TabsTrigger>

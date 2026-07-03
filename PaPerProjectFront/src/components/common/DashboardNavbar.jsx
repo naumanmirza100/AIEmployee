@@ -171,8 +171,8 @@ const DashboardNavbar = ({
                 {/* Notification Dropdown */}
                 {showNotifPanel && (
                   <div
-                    className="absolute right-0 top-11 w-80 max-h-[400px] overflow-y-auto rounded-xl border border-white/10 z-50"
-                    style={{ background: 'linear-gradient(180deg, #0d0b1a 0%, #1a0a2e 100%)', boxShadow: '0 8px 40px rgba(0,0,0,0.5)' }}
+                    className="absolute right-0 top-11 w-80 max-h-[400px] overflow-y-auto scrollbar-none rounded-xl border border-white/10 z-50"
+                    style={{ background: 'linear-gradient(180deg, #0d0b1a 0%, #1a0a2e 100%)', boxShadow: '0 8px 40px rgba(0,0,0,0.5)', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                   >
                     <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                       <span className="text-sm font-semibold text-white">Notifications</span>

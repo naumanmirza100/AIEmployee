@@ -11,6 +11,7 @@ from marketing_agent.performance_sync import sync_campaign_performance
 from django.contrib.auth.models import User
 from datetime import datetime, timedelta
 import json
+import re
 
 
 class OutreachCampaignAgent(MarketingBaseAgent):
@@ -81,6 +82,8 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         
         if action == 'design':
             return self.design_campaign(user_id, campaign_data, context)
+        elif action == 'auto_fill':
+            return self.auto_fill_campaign(user_id, campaign_data, context)
         elif action == 'launch':
             return self.launch_campaign(campaign_id, user_id, campaign_data, context)
         elif action == 'manage':
@@ -94,7 +97,7 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         else:
             return {
                 'success': False,
-                'error': f'Unknown action: {action}. Supported actions: design, launch, manage, optimize, schedule, create_multi_channel'
+                'error': f'Unknown action: {action}. Supported actions: design, auto_fill, launch, manage, optimize, schedule, create_multi_channel'
             }
     
     def design_campaign(self, user_id: int, campaign_data: Optional[Dict] = None,
@@ -132,6 +135,108 @@ class OutreachCampaignAgent(MarketingBaseAgent):
             'recommendations': structured_design.get('recommendations', [])
         }
     
+    def auto_fill_campaign(self, user_id: int, campaign_data: Optional[Dict] = None,
+                           context: Optional[Dict] = None) -> Dict:
+        """
+        Given just a campaign name, description, and duration, ask the AI to infer
+        the rest of the targeting fields (target leads, target conversions, audience
+        demographics) so the user can review/edit them before creating the campaign.
+
+        Args:
+            user_id (int): User ID
+            campaign_data (Dict): Must include 'name', 'description'; may include
+                'start_date', 'end_date' (duration already resolved by the caller)
+            context (Dict): Additional context (unused for now, kept for parity)
+
+        Returns:
+            Dict: Suggested field values (editable by the user before creation)
+        """
+        campaign_data = campaign_data or {}
+        name = (campaign_data.get('name') or '').strip() or 'New Campaign'
+        description = (campaign_data.get('description') or '').strip()
+        start_date = campaign_data.get('start_date') or ''
+        end_date = campaign_data.get('end_date') or ''
+
+        self.log_action("Auto-filling campaign fields", {"user_id": user_id})
+
+        prompt = f"""Based on this email marketing campaign, infer reasonable targeting values.
+
+Campaign name: {name}
+Description: {description or 'Not provided'}
+Duration: {start_date or 'Not specified'} to {end_date or 'Not specified'}
+
+Respond with ONLY a single JSON object (no markdown, no commentary) with exactly these keys:
+{{
+  "target_leads": <integer, realistic number of qualified leads for this duration>,
+  "target_conversions": <integer, realistic number of conversions, smaller than target_leads>,
+  "age_range": "<e.g. 25-45, or empty string if not applicable>",
+  "location": "<likely target location, or empty string>",
+  "industry": "<likely target industry, or empty string>",
+  "company_size": "<one of: 1-10, 11-50, 51-200, 201-1000, 1001-5000, 5000+, or empty string>",
+  "interests": "<comma-separated interests relevant to the audience, or empty string>",
+  "language": "<primary language, e.g. English, or empty string>"
+}}"""
+
+        try:
+            raw = self._call_llm_for_reasoning(
+                prompt,
+                self.system_prompt,
+                temperature=0.4,
+                max_tokens=400
+            )
+            fields = self._parse_auto_fill_json(raw)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            self.log_action("Error auto-filling campaign fields", {"error": str(e)})
+            return {'success': False, 'error': str(e)}
+
+        return {
+            'success': True,
+            'action': 'auto_fill',
+            'suggested_fields': fields
+        }
+
+    def _parse_auto_fill_json(self, raw_text: str) -> Dict:
+        """Parse the LLM's JSON response for auto_fill_campaign, tolerating stray text/markdown fences."""
+        defaults = {
+            'target_leads': None,
+            'target_conversions': None,
+            'age_range': '',
+            'location': '',
+            'industry': '',
+            'company_size': '',
+            'interests': '',
+            'language': '',
+        }
+        if not raw_text:
+            return defaults
+        text = raw_text.strip()
+        if text.startswith('```'):
+            text = text.strip('`')
+            if text.lower().startswith('json'):
+                text = text[4:]
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not match:
+            return defaults
+        try:
+            parsed = json.loads(match.group(0))
+        except (ValueError, TypeError):
+            return defaults
+        result = dict(defaults)
+        for key in defaults:
+            if key in parsed and parsed[key] is not None:
+                result[key] = parsed[key]
+        for int_key in ('target_leads', 'target_conversions'):
+            try:
+                result[int_key] = int(result[int_key]) if result[int_key] not in (None, '') else None
+            except (ValueError, TypeError):
+                result[int_key] = None
+        for str_key in ('age_range', 'location', 'industry', 'company_size', 'interests', 'language'):
+            result[str_key] = str(result[str_key]).strip() if result[str_key] else ''
+        return result
+
     def create_multi_channel_campaign(self, user_id: int, campaign_data: Dict,
                                       context: Optional[Dict] = None, leads_file=None) -> Dict:
         """

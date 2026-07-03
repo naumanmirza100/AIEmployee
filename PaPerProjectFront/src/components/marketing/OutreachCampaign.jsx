@@ -7,7 +7,7 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Megaphone, Send, Upload, CheckCircle } from 'lucide-react';
+import { Loader2, Megaphone, Send, Upload, CheckCircle, Sparkles } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 
@@ -17,6 +17,11 @@ const ACTIONS = [
   { value: 'launch', label: 'Launch Campaign' },
   // { value: 'optimize', label: 'Optimize Campaign' },
   { value: 'schedule', label: 'Schedule Campaign' },
+];
+
+const DURATION_UNITS = [
+  { value: 'week', label: 'Week(s)' },
+  { value: 'month', label: 'Month(s)' },
 ];
 
 const COMPANY_SIZES = [
@@ -328,6 +333,12 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
+  // Quick-create flow: name + description + duration -> AI fills the rest -> editable review
+  const [durationAmount, setDurationAmount] = useState('1');
+  const [durationUnit, setDurationUnit] = useState('week');
+  const [autoFilling, setAutoFilling] = useState(false);
+  const [fieldsRevealed, setFieldsRevealed] = useState(false);
+
   useEffect(() => {
     setShowFullDesign(false);
   }, [result, action]);
@@ -411,6 +422,81 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     setDesignReady(false);
     setResult(null);
     setError(null);
+  };
+
+  const computeDatesFromDuration = () => {
+    const amount = parseInt(durationAmount, 10);
+    const today = new Date();
+    const end = new Date(today);
+    if (Number.isFinite(amount) && amount > 0) {
+      if (durationUnit === 'month') {
+        end.setMonth(end.getMonth() + amount);
+      } else {
+        end.setDate(end.getDate() + amount * 7);
+      }
+    }
+    return { start: formatDateLocal(today), end: formatDateLocal(end) };
+  };
+
+  const handleAutoFill = async () => {
+    if (!name?.trim()) {
+      toast({ title: 'Campaign name required', variant: 'destructive' });
+      return;
+    }
+    const nameTrimmed = name.trim();
+    const duplicate = campaigns.some(
+      (c) => c.name && String(c.name).trim().toLowerCase() === nameTrimmed.toLowerCase()
+    );
+    if (duplicate) {
+      toast({
+        title: 'Duplicate campaign name',
+        description: 'A campaign with this name already exists. Use a different name.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const { start, end } = computeDatesFromDuration();
+    setStartDate(start);
+    setEndDate(end);
+
+    setAutoFilling(true);
+    setError(null);
+    try {
+      const agentResult = await marketingAgentService.outreachCampaign(
+        'auto_fill',
+        {
+          name: nameTrimmed,
+          description: description?.trim() || '',
+          start_date: start,
+          end_date: end,
+        }
+      );
+      if (agentResult?.success === false) {
+        toast({ title: 'Error', description: agentResult.error, variant: 'destructive' });
+        return;
+      }
+      const fields = agentResult?.suggested_fields || {};
+      if (fields.target_leads != null) setTargetLeads(String(fields.target_leads));
+      if (fields.target_conversions != null) setTargetConversions(String(fields.target_conversions));
+      if (fields.age_range) setAgeRange(fields.age_range);
+      if (fields.location) setLocation(fields.location);
+      if (fields.industry) setIndustry(fields.industry);
+      if (fields.company_size) setCompanySize(fields.company_size);
+      if (fields.interests) setInterests(fields.interests);
+      if (fields.language) setLanguage(fields.language);
+      setFieldsRevealed(true);
+      toast({ title: 'Suggestions ready', description: 'Review and edit the details below, then create the campaign.' });
+    } catch (err) {
+      const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block;
+      const msg = isHardBlock
+        ? (err?.data?.message || err?.message || 'API key or token quota issue. Check your API Keys settings.')
+        : (err?.message || 'Request failed');
+      setError(msg);
+      toast({ title: isHardBlock ? 'Request blocked' : 'Error', description: msg, variant: 'destructive' });
+    } finally {
+      setAutoFilling(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -540,7 +626,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 id="camp-name"
                 placeholder="e.g. Summer Sale 2024"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => { setName(e.target.value); if (action === 'create_multi_channel') setFieldsRevealed(false); }}
               />
             </div>
             <div className="space-y-2 md:col-span-2">
@@ -549,107 +635,157 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 id="camp-desc"
                 placeholder="Goals and key messaging..."
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => { setDescription(e.target.value); if (action === 'create_multi_channel') setFieldsRevealed(false); }}
                 rows={2}
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="target-leads">Target leads</Label>
-              <Input
-                id="target-leads"
-                type="number"
-                min={0}
-                placeholder="e.g. 1000"
-                value={targetLeads}
-                onChange={(e) => setTargetLeads(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="target-conv">Target conversions</Label>
-              <Input
-                id="target-conv"
-                type="number"
-                min={0}
-                placeholder="e.g. 500"
-                value={targetConversions}
-                onChange={(e) => setTargetConversions(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* {showLeadsUpload && (
-            <div className="space-y-2">
-              <Label>Leads file (CSV, XLS, XLSX) – optional</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="file"
-                  accept=".csv,.xls,.xlsx"
-                  onChange={(e) => setLeadsFile(e.target.files?.[0] || null)}
-                />
-                <Upload className="h-4 w-4 text-muted-foreground" />
+          {action === 'create_multi_channel' && !fieldsRevealed && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                <div className="space-y-2">
+                  <Label htmlFor="duration-amount">Duration</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="duration-amount"
+                      type="number"
+                      min={1}
+                      className="w-24"
+                      value={durationAmount}
+                      onChange={(e) => setDurationAmount(e.target.value)}
+                    />
+                    <Select value={durationUnit} onValueChange={setDurationUnit}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DURATION_UNITS.map((u) => (
+                          <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">Required columns: Email. Optional: First Name, Last Name, Phone, Company, Job Title.</p>
-            </div>
-          )} */}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="age">Age range</Label>
-              <Input id="age" placeholder="e.g. 25-45" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="loc">Location</Label>
-              <Input id="loc" placeholder="e.g. North America" value={location} onChange={(e) => setLocation(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ind">Industry</Label>
-              <Input id="ind" placeholder="e.g. Technology" value={industry} onChange={(e) => setIndustry(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Company size</Label>
-              <Select value={companySize || '__any__'} onValueChange={setCompanySize}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Any" />
-                </SelectTrigger>
-                <SelectContent>
-                  {COMPANY_SIZES.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="int">Interests</Label>
-              <Input id="int" placeholder="e.g. tech, marketing" value={interests} onChange={(e) => setInterests(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lang">Language</Label>
-              <Input id="lang" placeholder="e.g. English" value={language} onChange={(e) => setLanguage(e.target.value)} />
-            </div>
-          </div>
+              <div className="flex justify-end">
+                <Button type="button" onClick={handleAutoFill} disabled={autoFilling}>
+                  {autoFilling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Generate with AI
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
 
-          {showDates && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="start">Start date</Label>
-                <DatePicker
-                  date={startDate ? parseDateLocal(startDate) : undefined}
-                  setDate={(d) => setStartDate(d ? formatDateLocal(d) : '')}
-                  placeholder="Select start date"
-                />
+          {(action !== 'create_multi_channel' || fieldsRevealed) && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="target-leads">Target leads</Label>
+                  <Input
+                    id="target-leads"
+                    type="number"
+                    min={0}
+                    placeholder="e.g. 1000"
+                    value={targetLeads}
+                    onChange={(e) => setTargetLeads(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="target-conv">Target conversions</Label>
+                  <Input
+                    id="target-conv"
+                    type="number"
+                    min={0}
+                    placeholder="e.g. 500"
+                    value={targetConversions}
+                    onChange={(e) => setTargetConversions(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="end">End date</Label>
-                <DatePicker
-                  date={endDate ? parseDateLocal(endDate) : undefined}
-                  setDate={(d) => setEndDate(d ? formatDateLocal(d) : '')}
-                  placeholder="Select end date"
-                />
+
+              {/* {showLeadsUpload && (
+                <div className="space-y-2">
+                  <Label>Leads file (CSV, XLS, XLSX) – optional</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="file"
+                      accept=".csv,.xls,.xlsx"
+                      onChange={(e) => setLeadsFile(e.target.files?.[0] || null)}
+                    />
+                    <Upload className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Required columns: Email. Optional: First Name, Last Name, Phone, Company, Job Title.</p>
+                </div>
+              )} */}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="age">Age range</Label>
+                  <Input id="age" placeholder="e.g. 25-45" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="loc">Location</Label>
+                  <Input id="loc" placeholder="e.g. North America" value={location} onChange={(e) => setLocation(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ind">Industry</Label>
+                  <Input id="ind" placeholder="e.g. Technology" value={industry} onChange={(e) => setIndustry(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Company size</Label>
+                  <Select value={companySize || '__any__'} onValueChange={setCompanySize}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Any" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COMPANY_SIZES.map((s) => (
+                        <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="int">Interests</Label>
+                  <Input id="int" placeholder="e.g. tech, marketing" value={interests} onChange={(e) => setInterests(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lang">Language</Label>
+                  <Input id="lang" placeholder="e.g. English" value={language} onChange={(e) => setLanguage(e.target.value)} />
+                </div>
               </div>
-            </div>
+
+              {showDates && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="start">Start date</Label>
+                    <DatePicker
+                      date={startDate ? parseDateLocal(startDate) : undefined}
+                      setDate={(d) => setStartDate(d ? formatDateLocal(d) : '')}
+                      placeholder="Select start date"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="end">End date</Label>
+                    <DatePicker
+                      date={endDate ? parseDateLocal(endDate) : undefined}
+                      setDate={(d) => setEndDate(d ? formatDateLocal(d) : '')}
+                      placeholder="Select end date"
+                    />
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {created ? (
