@@ -48,6 +48,17 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
   // Compensation state — fetched lazily; 403 means caller isn't HR-admin.
   const [comp, setComp] = useState({ rows: [], loading: false, allowed: true });
   const [compForm, setCompForm] = useState({ open: false, saving: false, payload: {} });
+  // Leave-balance adjust dialog. Same shape as compForm — pre-populated
+  // when the user clicks a specific balance card, empty (leave_type=vacation)
+  // for the standalone "Add balance" action.
+  const [balanceForm, setBalanceForm] = useState({
+    open: false, saving: false,
+    leaveType: 'vacation',
+    mode: 'delta',           // 'delta' = add/subtract; 'set' = hard-set absolute
+    field: 'accrued_days',   // which field the value applies to
+    value: '',
+    reason: '',
+  });
 
   // Performance reviews — also lazy-fetched per drawer open.
   const [reviews, setReviews] = useState({ rows: [], loading: false });
@@ -344,6 +355,103 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
     }
   };
 
+  const handleDeactivate = async () => {
+    const emp = data?.employee;
+    if (!emp) return;
+    const tag = emp.full_name || emp.work_email || `#${emp.id}`;
+    const reason = prompt(`Deactivate (offboard) ${tag}?\n\nOptional reason for the audit log:`, '');
+    if (reason === null) return; // cancelled
+    try {
+      const res = await hrAgentService.deactivateHREmployee(emp.id, reason);
+      toast({
+        title: 'Employee deactivated',
+        description: res?.data?.already_offboarded
+          ? 'Was already offboarded — no change.'
+          : `Previous status: ${res?.data?.previous_status || '—'}.`,
+      });
+      const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
+      setData(refreshed?.data || null);
+    } catch (e) {
+      toast({
+        title: 'Deactivate failed',
+        description: e?.response?.data?.message || e.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleReactivate = async () => {
+    const emp = data?.employee;
+    if (!emp) return;
+    const tag = emp.full_name || emp.work_email || `#${emp.id}`;
+    const reason = prompt(`Reactivate ${tag}?\n\nOptional reason for the audit log:`, '');
+    if (reason === null) return;
+    try {
+      // Server defaults target_status to 'active'; leave the override alone
+      // unless the operator explicitly wants something else (they can do
+      // that via the general update endpoint if needed).
+      const res = await hrAgentService.reactivateHREmployee(emp.id, { reason });
+      toast({
+        title: 'Employee reactivated',
+        description: `Status now: ${res?.data?.employment_status || 'active'}.`,
+      });
+      const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
+      setData(refreshed?.data || null);
+    } catch (e) {
+      toast({
+        title: 'Reactivate failed',
+        description: e?.response?.data?.message || e.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const openAdjustBalance = (balance) => {
+    setBalanceForm({
+      open: true, saving: false,
+      leaveType: balance?.leave_type || 'vacation',
+      mode: 'delta',
+      field: 'accrued_days',
+      value: '',
+      reason: '',
+    });
+  };
+
+  const handleAdjustBalance = async () => {
+    if (!emp?.id) return;
+    const v = parseFloat(balanceForm.value);
+    if (Number.isNaN(v)) {
+      toast({ title: 'Enter a numeric value', variant: 'destructive' });
+      return;
+    }
+    if (!balanceForm.reason.trim()) {
+      toast({ title: 'A reason is required (audit log).', variant: 'destructive' });
+      return;
+    }
+    setBalanceForm((s) => ({ ...s, saving: true }));
+    try {
+      const payload = {
+        leave_type: balanceForm.leaveType,
+        reason: balanceForm.reason.trim(),
+      };
+      const key = (balanceForm.mode === 'set' ? 'set_' : 'delta_') + balanceForm.field;
+      payload[key] = v;
+      await hrAgentService.adjustHRLeaveBalance(emp.id, payload);
+      toast({ title: 'Balance adjusted' });
+      setBalanceForm((s) => ({ ...s, open: false, saving: false }));
+      // Refresh the drawer so the new balance shows up.
+      const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
+      setData(refreshed?.data || null);
+    } catch (e) {
+      toast({
+        title: 'Adjust failed',
+        description: e?.response?.data?.message || e.message,
+        variant: 'destructive',
+      });
+      setBalanceForm((s) => ({ ...s, saving: false }));
+    }
+  };
+
   const handleUnreleaseReview = async (row) => {
     if (!confirm(`Retract visibility of the "${row.cycle_name || `Cycle #${row.cycle_id}`}" review from this employee?`)) return;
     try {
@@ -413,6 +521,26 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                       title="Download a ZIP of all data we hold about this employee (GDPR Article 15)">
                       <Download className="h-3 w-3 mr-1" /> Export data
                     </Button>
+                    {/* Deactivate / reactivate — distinct audit-log entries
+                        vs. editing employment_status through the general update
+                        endpoint. Deactivate is the standard offboarding flow;
+                        reactivate reverses it. Both are HR-admin only server-side. */}
+                    {!e.anonymized_at && e.employment_status !== 'offboarded' && (
+                      <Button size="sm" variant="outline"
+                        className="h-7 px-2 text-xs text-amber-300 hover:text-amber-200 border-amber-400/30"
+                        onClick={handleDeactivate}
+                        title="Set employment_status to offboarded with a distinct audit-log entry">
+                        Deactivate
+                      </Button>
+                    )}
+                    {!e.anonymized_at && e.employment_status === 'offboarded' && (
+                      <Button size="sm" variant="outline"
+                        className="h-7 px-2 text-xs text-emerald-300 hover:text-emerald-200 border-emerald-400/30"
+                        onClick={handleReactivate}
+                        title="Reverse the offboarding — sets status back to active">
+                        Reactivate
+                      </Button>
+                    )}
                     {!e.anonymized_at && (
                       <Button size="sm" variant="outline"
                         className="h-7 px-2 text-xs text-rose-300 hover:text-rose-200 border-rose-400/30"
@@ -449,20 +577,37 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
 
             {/* LEAVE BALANCES */}
             <section>
-              <SectionTitle icon={ClipboardList} title="Leave balances" count={balances.length} />
+              <div className="flex items-center justify-between mb-2">
+                <SectionTitle icon={ClipboardList} title="Leave balances" count={balances.length} />
+                {/* HR admins can hand-correct balances via a dialog. The
+                    endpoint returns 403 for non-admins, so if a non-admin
+                    somehow triggers this it's caught by the toast in the
+                    submit handler. Keeping the button visible avoids a
+                    role-check round-trip on drawer open. */}
+                <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+                  onClick={() => openAdjustBalance(null)}>
+                  <Plus className="h-3 w-3 mr-1" /> Adjust
+                </Button>
+              </div>
               {balances.length === 0 ? (
-                <Empty text="No balances tracked yet — set up an accrual policy to populate." />
+                <Empty text="No balances tracked yet — set up an accrual policy to populate, or click Adjust to add one manually." />
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {balances.map((b, i) => (
-                    <div key={i} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => openAdjustBalance(b)}
+                      title="Click to adjust this balance"
+                      className="group rounded-lg border border-white/[0.08] bg-white/[0.02] p-3 text-left hover:border-violet-400/30 hover:bg-white/[0.04] transition-colors"
+                    >
                       <div className="text-[10px] uppercase tracking-wider text-white/50">{b.leave_type}</div>
                       <div className="text-xl font-bold text-white mt-0.5">{b.remaining}</div>
                       <div className="text-[10px] text-white/40 mt-0.5">
                         {b.accrued_days} accrued · {b.used_days} used
                         {b.carried_over_days ? ` · ${b.carried_over_days} carry` : ''}
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -1024,6 +1169,93 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
           <Button onClick={handleSaveComp} disabled={compForm.saving}>
             {compForm.saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
             Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* ADJUST LEAVE BALANCE — HR-admin only server-side. The backend
+        requires a `reason` field which is written to the audit log; UI
+        matches that requirement rather than silently sending an empty
+        string. */}
+    <Dialog open={balanceForm.open} onOpenChange={(o) => setBalanceForm((s) => ({ ...s, open: o }))}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Adjust leave balance</DialogTitle>
+          <DialogDescription>
+            HR admins only. Applies to the current period bucket for this leave type.
+            All changes are audit-logged with the reason you provide below.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Leave type</Label>
+              <Select value={balanceForm.leaveType} onValueChange={(v) => setBalanceForm((s) => ({ ...s, leaveType: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="vacation">Vacation / PTO</SelectItem>
+                  <SelectItem value="sick">Sick</SelectItem>
+                  <SelectItem value="parental">Parental</SelectItem>
+                  <SelectItem value="bereavement">Bereavement</SelectItem>
+                  <SelectItem value="unpaid">Unpaid</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Field</Label>
+              <Select value={balanceForm.field} onValueChange={(v) => setBalanceForm((s) => ({ ...s, field: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="accrued_days">Accrued days</SelectItem>
+                  <SelectItem value="used_days">Used days</SelectItem>
+                  <SelectItem value="carried_over_days">Carry-over days</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Mode</Label>
+              <Select value={balanceForm.mode} onValueChange={(v) => setBalanceForm((s) => ({ ...s, mode: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="delta">Add / subtract (delta)</SelectItem>
+                  <SelectItem value="set">Set to (absolute)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Value {balanceForm.mode === 'delta' ? '(negative to subtract)' : ''}</Label>
+              <Input
+                type="number"
+                step="0.25"
+                value={balanceForm.value}
+                placeholder={balanceForm.mode === 'delta' ? '+2 or -1' : '10'}
+                onChange={(e) => setBalanceForm((s) => ({ ...s, value: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Reason (audit log)</Label>
+            <Textarea
+              rows={2}
+              value={balanceForm.reason}
+              placeholder="e.g. Q1 accrual correction — payroll rounded down"
+              onChange={(e) => setBalanceForm((s) => ({ ...s, reason: e.target.value }))}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline"
+            disabled={balanceForm.saving}
+            onClick={() => setBalanceForm((s) => ({ ...s, open: false }))}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdjustBalance} disabled={balanceForm.saving}>
+            {balanceForm.saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+            Apply
           </Button>
         </DialogFooter>
       </DialogContent>

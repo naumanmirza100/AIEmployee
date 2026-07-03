@@ -307,6 +307,31 @@ export const deleteHRReviewCycle = async (cycleId) => {
   }
 };
 
+export const closeHRReviewCycle = async (cycleId, { releaseReviews = false, reason = '' } = {}) => {
+  try {
+    const response = await companyApi.post(`/hr/review-cycles/${cycleId}/close`, {
+      release_reviews: !!releaseReviews,
+      reason: reason || '',
+    });
+    return response;
+  } catch (error) {
+    console.error('Close HR review cycle error:', error);
+    throw error;
+  }
+};
+
+export const reopenHRReviewCycle = async (cycleId, { reason = '' } = {}) => {
+  try {
+    const response = await companyApi.post(`/hr/review-cycles/${cycleId}/reopen`, {
+      reason: reason || '',
+    });
+    return response;
+  } catch (error) {
+    console.error('Reopen HR review cycle error:', error);
+    throw error;
+  }
+};
+
 export const listHREmployeeReviews = async (employeeId) => {
   try {
     const response = await companyApi.get(`/hr/employees/${employeeId}/reviews`);
@@ -605,6 +630,97 @@ export const createHRNotificationTemplate = async (payload) => {
     return response;
   } catch (error) {
     console.error('Create HR notification template error:', error);
+    throw error;
+  }
+};
+
+export const updateHRNotificationTemplate = async (templateId, payload) => {
+  try {
+    const response = await companyApi.patch(`/hr/notifications/templates/${templateId}/update`, payload);
+    return response;
+  } catch (error) {
+    console.error('Update HR notification template error:', error);
+    throw error;
+  }
+};
+
+export const deleteHRNotificationTemplate = async (templateId) => {
+  try {
+    const response = await companyApi.delete(`/hr/notifications/templates/${templateId}/delete`);
+    return response;
+  } catch (error) {
+    console.error('Delete HR notification template error:', error);
+    throw error;
+  }
+};
+
+/** Fire a template right now — tests a template or sends a one-off announcement.
+ * At least one of `recipient_email` / `recipient_employee_id` must be provided
+ * for email-channel templates (Slack/Teams post into the company's channel and
+ * ignore the recipient address). */
+export const sendHRNotificationNow = async ({ template_id, recipient_email = '', recipient_employee_id = null, context = {} }) => {
+  try {
+    const response = await companyApi.post('/hr/notifications/send-now', {
+      template_id,
+      recipient_email,
+      recipient_employee_id,
+      context,
+    });
+    return response;
+  } catch (error) {
+    console.error('Send HR notification now error:', error);
+    throw error;
+  }
+};
+
+/** Dedicated leave-balance read. Employees can read their own; managers
+ * can read their reports'; HR admins can read anyone. */
+export const listHRLeaveBalances = async (employeeId) => {
+  try {
+    const response = await companyApi.get(`/hr/employees/${employeeId}/leave-balances`);
+    return response;
+  } catch (error) {
+    console.error('List HR leave balances error:', error);
+    throw error;
+  }
+};
+
+/** HR-admin only. Adjust one leave_type's balance via deltas OR hard-sets.
+ * `reason` is required and goes to the audit log. */
+export const adjustHRLeaveBalance = async (employeeId, payload) => {
+  try {
+    const response = await companyApi.post(`/hr/employees/${employeeId}/leave-balances/adjust`, payload);
+    return response;
+  } catch (error) {
+    console.error('Adjust HR leave balance error:', error);
+    throw error;
+  }
+};
+
+/** HR-admin only. Set an employee's employment_status to 'offboarded' with
+ * a distinct audit-log entry (as opposed to editing the status via the
+ * generic update endpoint). Idempotent — safe to call twice. */
+export const deactivateHREmployee = async (employeeId, reason = '') => {
+  try {
+    const response = await companyApi.post(`/hr/employees/${employeeId}/deactivate`, { reason });
+    return response;
+  } catch (error) {
+    console.error('Deactivate HR employee error:', error);
+    throw error;
+  }
+};
+
+/** HR-admin only. Reverse a deactivation. `target_status` defaults to
+ * 'active' on the server side; pass explicitly to restore a specific
+ * pre-offboard status (probation / on_leave / notice / etc.). */
+export const reactivateHREmployee = async (employeeId, { target_status = 'active', reason = '' } = {}) => {
+  try {
+    const response = await companyApi.post(`/hr/employees/${employeeId}/reactivate`, {
+      target_status, reason,
+    });
+    return response;
+  } catch (error) {
+    console.error('Reactivate HR employee error:', error);
     throw error;
   }
 };
@@ -935,6 +1051,16 @@ export const cancelLeaveRequest = async (requestId, note = '') => {
   }
 };
 
+export const withdrawLeaveRequest = async (requestId, reason = '') => {
+  try {
+    const response = await companyApi.post(`/hr/leave-requests/${requestId}/withdraw`, { reason });
+    return response;
+  } catch (error) {
+    console.error('Withdraw leave request error:', error);
+    throw error;
+  }
+};
+
 export default {
   getHRDashboard,
   listHREmployees,
@@ -966,11 +1092,20 @@ export default {
   listHRReviewCycles,
   createHRReviewCycle,
   activateHRReviewCycle,
+  closeHRReviewCycle,
+  reopenHRReviewCycle,
   deleteHRReviewCycle,
   listHREmployeeReviews,
   updateHRPerfReview,
   listHRNotificationTemplates,
   createHRNotificationTemplate,
+  updateHRNotificationTemplate,
+  deleteHRNotificationTemplate,
+  sendHRNotificationNow,
+  listHRLeaveBalances,
+  adjustHRLeaveBalance,
+  deactivateHREmployee,
+  reactivateHREmployee,
   listHRScheduledNotifications,
   hrMeetingSchedule,
   listHRMeetingSchedulerChats,
@@ -988,6 +1123,7 @@ export default {
   updateLeaveRequest,
   decideLeaveRequest,
   cancelLeaveRequest,
+  withdrawLeaveRequest,
   listLeaveRequests,
   getHREmployeeDetail,
   listHolidays,

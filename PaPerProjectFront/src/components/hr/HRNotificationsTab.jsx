@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  Loader2, Plus, Bell, Trash2, Pencil, RefreshCw,
+  Loader2, Plus, Bell, Trash2, Pencil, RefreshCw, Send,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 
@@ -61,6 +61,10 @@ export default function HRNotificationsTab() {
 
   const [dialog, setDialog] = useState({ open: false, mode: 'create', tpl: null });
   const [deleteTpl, setDeleteTpl] = useState({ open: false, tpl: null });
+  // "Send now" test-fire dialog. Slack/Teams channels ignore recipient
+  // (they post into the company channel) so we hide the address field for
+  // those and just require a template pick.
+  const [sendNow, setSendNow] = useState({ open: false, tpl: null, recipient: '', busy: false });
 
   const loadTemplates = async () => {
     setTplLoading(true);
@@ -151,17 +155,16 @@ export default function HRNotificationsTab() {
       use_llm_personalization: !!tpl.use_llm_personalization,
     };
     try {
-      // Backend currently only exposes create-template. For an update we'd
-      // need an endpoint; until then, a save in edit mode just creates a new
-      // template — let the user decide if that's OK.
-      if (dialog.mode === 'edit') {
-        toast({
-          title: 'Update endpoint not wired',
-          description: 'Saving creates a new template. Delete the old one if you want to replace it.',
-        });
+      // In edit mode we PATCH the existing template. In create mode we POST
+      // a new one. Both endpoints validate `trigger_config.on` against the
+      // same known-events set on the backend, so bad triggers fail cleanly.
+      if (dialog.mode === 'edit' && tpl.id) {
+        await hrAgentService.updateHRNotificationTemplate(tpl.id, payload);
+        toast({ title: 'Template updated' });
+      } else {
+        await hrAgentService.createHRNotificationTemplate(payload);
+        toast({ title: 'Template created' });
       }
-      await hrAgentService.createHRNotificationTemplate(payload);
-      toast({ title: 'Template saved' });
       setDialog({ open: false, mode: 'create', tpl: null });
       loadTemplates();
     } catch (e) {
@@ -170,13 +173,46 @@ export default function HRNotificationsTab() {
   };
 
   const handleDelete = async () => {
-    // No backend delete endpoint exists yet — gentle no-op with explanation.
-    toast({
-      title: 'Delete endpoint not wired',
-      description: 'Backend lacks a delete-template endpoint; remove via DB or add the route to wire this up.',
-      variant: 'destructive',
-    });
-    setDeleteTpl({ open: false, tpl: null });
+    const tpl = deleteTpl.tpl;
+    if (!tpl?.id) return;
+    try {
+      await hrAgentService.deleteHRNotificationTemplate(tpl.id);
+      toast({ title: 'Template deleted', description: tpl.name });
+      setDeleteTpl({ open: false, tpl: null });
+      loadTemplates();
+    } catch (e) {
+      toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleSendNow = async () => {
+    const tpl = sendNow.tpl;
+    if (!tpl?.id) return;
+    const isEmail = (tpl.channel || 'email') === 'email';
+    if (isEmail && !sendNow.recipient.trim()) {
+      toast({ title: 'Recipient is required for email templates', variant: 'destructive' });
+      return;
+    }
+    setSendNow((s) => ({ ...s, busy: true }));
+    try {
+      const res = await hrAgentService.sendHRNotificationNow({
+        template_id: tpl.id,
+        recipient_email: sendNow.recipient.trim(),
+      });
+      const ok = res?.data?.ok;
+      toast({
+        title: ok ? 'Sent' : 'Dispatch failed',
+        description: ok
+          ? `Delivered via ${res?.data?.channel_used || tpl.channel}.`
+          : `Backend reported a failure via ${res?.data?.channel_used || tpl.channel}. Check the scheduled list for the error.`,
+        variant: ok ? undefined : 'destructive',
+      });
+      setSendNow({ open: false, tpl: null, recipient: '', busy: false });
+      loadScheduled(); // refresh scheduled list so the send-now row shows up
+    } catch (e) {
+      toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
+      setSendNow((s) => ({ ...s, busy: false }));
+    }
   };
 
   return (
@@ -244,6 +280,10 @@ export default function HRNotificationsTab() {
                           : <span className="text-white/40 text-xs">off</span>}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex gap-1 justify-end">
+                            <Button variant="outline" size="sm" className="h-7 text-xs" title="Send this template now"
+                              onClick={() => setSendNow({ open: true, tpl: t, recipient: '', busy: false })}>
+                              <Send className="h-3 w-3" />
+                            </Button>
                             <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openEdit(t)}>
                               <Pencil className="h-3 w-3 mr-1" /> Edit
                             </Button>
@@ -473,6 +513,46 @@ export default function HRNotificationsTab() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTpl({ open: false, tpl: null })}>Keep</Button>
             <Button onClick={handleDelete} className="bg-rose-600 hover:bg-rose-500">Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* SEND NOW — quick test-fire for a template. Slack/Teams templates
+          post into the company channel and the recipient input is hidden
+          (the address is a fallback log field, not a routing key). */}
+      <Dialog open={sendNow.open} onOpenChange={(open) => !sendNow.busy && setSendNow((s) => ({ ...s, open }))}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Send now: {sendNow.tpl?.name}</DialogTitle>
+            <DialogDescription>
+              {(sendNow.tpl?.channel || 'email') === 'email'
+                ? 'Type an address to receive the rendered template right now.'
+                : `This template posts to ${sendNow.tpl?.channel}. Confirm to fire it into the company channel.`}
+            </DialogDescription>
+          </DialogHeader>
+          {(sendNow.tpl?.channel || 'email') === 'email' && (
+            <div className="space-y-2">
+              <Label htmlFor="sendnow-recipient" className="text-xs">Recipient email</Label>
+              <Input
+                id="sendnow-recipient"
+                type="email"
+                value={sendNow.recipient}
+                placeholder="you@example.com"
+                disabled={sendNow.busy}
+                onChange={(e) => setSendNow((s) => ({ ...s, recipient: e.target.value }))}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline"
+              disabled={sendNow.busy}
+              onClick={() => setSendNow({ open: false, tpl: null, recipient: '', busy: false })}>
+              Cancel
+            </Button>
+            <Button onClick={handleSendNow} disabled={sendNow.busy}>
+              {sendNow.busy ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+              Send
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

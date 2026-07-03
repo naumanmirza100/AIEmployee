@@ -438,6 +438,7 @@ urlpatterns = [
 
     # KB coverage + SLA dashboard (KB-C1, S4)
     re_path(r'^frontline/kb-coverage/?$', frontline_agent.kb_coverage_report, name='frontline_kb_coverage'),  # GET
+    re_path(r'^frontline/kb-coverage/dismiss/?$', frontline_agent.dismiss_kb_coverage_gap, name='frontline_dismiss_kb_coverage_gap'),  # POST
     re_path(r'^frontline/sla/dashboard/?$', frontline_agent.sla_dashboard, name='frontline_sla_dashboard'),  # GET
 
     # Document soft-deprecation (D-O2)
@@ -478,6 +479,8 @@ urlpatterns = [
     re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/update/?$', frontline_agent.update_meeting, name='frontline_update_meeting'),  # PATCH
     re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/delete/?$', frontline_agent.delete_meeting, name='frontline_delete_meeting'),  # DELETE
     re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/extract-action-items/?$', frontline_agent.extract_meeting_action_items, name='frontline_extract_meeting_action_items'),  # POST
+    re_path(r'^frontline/meetings/action-items/?$', frontline_agent.list_meeting_action_items, name='frontline_list_meeting_action_items'),  # GET
+    re_path(r'^frontline/meetings/(?P<meeting_id>\d+)/action-items/(?P<item_index>\d+)/toggle-done/?$', frontline_agent.toggle_meeting_action_item, name='frontline_toggle_meeting_action_item'),  # POST
     # Ticket lifecycle (Phase 2 Batch 2)
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/?$', frontline_agent.list_ticket_notes, name='frontline_list_ticket_notes'),  # GET
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/notes/create/?$', frontline_agent.create_ticket_note, name='frontline_create_ticket_note'),  # POST
@@ -752,6 +755,9 @@ urlpatterns = [
     # Notifications
     re_path(r'^hr/notifications/templates/?$', hr_agent.list_hr_notification_templates, name='hr_list_notification_templates'),  # GET
     re_path(r'^hr/notifications/templates/create/?$', hr_agent.create_hr_notification_template, name='hr_create_notification_template'),  # POST
+    re_path(r'^hr/notifications/templates/(?P<template_id>\d+)/update/?$', hr_agent.update_hr_notification_template, name='hr_update_notification_template'),  # PATCH/PUT
+    re_path(r'^hr/notifications/templates/(?P<template_id>\d+)/delete/?$', hr_agent.delete_hr_notification_template, name='hr_delete_notification_template'),  # DELETE
+    re_path(r'^hr/notifications/send-now/?$', hr_agent.send_hr_notification_now, name='hr_send_notification_now'),  # POST
     re_path(r'^hr/notifications/scheduled/?$', hr_agent.list_hr_scheduled_notifications, name='hr_list_scheduled_notifications'),  # GET
 
     # Meetings
@@ -774,6 +780,7 @@ urlpatterns = [
     re_path(r'^hr/leave-requests/submit/?$', hr_agent.submit_leave_request, name='hr_submit_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/update/?$', hr_agent.update_leave_request, name='hr_update_leave_request'),  # PATCH
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/cancel/?$', hr_agent.cancel_leave_request, name='hr_cancel_leave_request'),  # POST
+    re_path(r'^hr/leave-requests/(?P<request_id>\d+)/withdraw/?$', hr_agent.withdraw_leave_request, name='hr_withdraw_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
 
     # Holiday calendar
@@ -789,6 +796,10 @@ urlpatterns = [
     # Employee detail bundle + edit
     re_path(r'^hr/employees/(?P<employee_id>\d+)/?$', hr_agent.get_employee_detail, name='hr_get_employee_detail'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/update/?$', hr_agent.update_employee, name='hr_update_employee'),  # PATCH/POST
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/?$', hr_agent.list_leave_balances, name='hr_list_leave_balances'),  # GET
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/adjust/?$', hr_agent.adjust_leave_balance, name='hr_adjust_leave_balance'),  # POST
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/deactivate/?$', hr_agent.deactivate_employee, name='hr_deactivate_employee'),  # POST
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/reactivate/?$', hr_agent.reactivate_employee, name='hr_reactivate_employee'),  # POST
 
     # Compensation history (HR-admin only)
     re_path(r'^hr/employees/(?P<employee_id>\d+)/compensation/?$', hr_agent.list_compensation_history, name='hr_list_compensation'),  # GET
@@ -799,6 +810,8 @@ urlpatterns = [
     re_path(r'^hr/review-cycles/?$', hr_agent.list_review_cycles, name='hr_list_review_cycles'),  # GET
     re_path(r'^hr/review-cycles/create/?$', hr_agent.create_review_cycle, name='hr_create_review_cycle'),  # POST
     re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/activate/?$', hr_agent.activate_review_cycle, name='hr_activate_review_cycle'),  # POST
+    re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/close/?$', hr_agent.close_review_cycle, name='hr_close_review_cycle'),  # POST
+    re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/reopen/?$', hr_agent.reopen_review_cycle, name='hr_reopen_review_cycle'),  # POST
     re_path(r'^hr/review-cycles/(?P<cycle_id>\d+)/delete/?$', hr_agent.delete_review_cycle, name='hr_delete_review_cycle'),  # POST/DELETE
     re_path(r'^hr/employees/(?P<employee_id>\d+)/reviews/?$', hr_agent.list_employee_reviews, name='hr_list_employee_reviews'),  # GET
     re_path(r'^hr/reviews/(?P<review_id>\d+)/update/?$', hr_agent.update_perf_review, name='hr_update_perf_review'),  # POST/PATCH
