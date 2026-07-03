@@ -57,7 +57,6 @@ Return JSON with these fields:
   "recurrence": "none|daily|weekly|biweekly|monthly",
   "recurrence_end_date": "YYYY-MM-DD or null",
   "participant_hints": ["name or email hints"],
-  "location": "",
   "meeting_link": ""
 }}
 
@@ -171,7 +170,7 @@ If any field is unclear, use sensible defaults. Return ONLY JSON, no explanation
 Title: {meeting_data.get('title', 'Meeting')}
 Date/Time: {meeting_data.get('scheduled_at', 'TBD')}
 Duration: {meeting_data.get('duration_minutes', 60)} minutes
-Location/Link: {meeting_data.get('location') or meeting_data.get('meeting_link') or 'TBD'}
+Link: {meeting_data.get('meeting_link') or 'TBD'}
 Agenda: {json.dumps(meeting_data.get('agenda', []))}
 Description: {meeting_data.get('description', '')}
 

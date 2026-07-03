@@ -948,6 +948,20 @@ const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   );
 };
 
+// Display ISO datetime string as UTC — avoids browser timezone shifting the date
+const fmtUtc = (isoStr) => {
+  if (!isoStr) return '—';
+  const [datePart, timePart] = isoStr.replace('Z', '').replace('+00:00', '').split('T');
+  if (!datePart) return '—';
+  const [y, mo, d] = datePart.split('-');
+  if (!timePart) return `${mo}/${d}/${y}`;
+  const [h, m] = timePart.split(':');
+  const hour = parseInt(h, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const h12 = hour % 12 || 12;
+  return `${mo}/${d}/${y}, ${h12}:${m} ${ampm}`;
+};
+
 // ── Main dashboard ──────────────────────────────────────────────────────────
 const ExecMeetingDashboard = () => {
   const { toast } = useToast();
@@ -970,8 +984,9 @@ const ExecMeetingDashboard = () => {
   const [showMeetingDialog, setShowMeetingDialog] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const [expandedTaskId, setExpandedTaskId] = useState(null); // inline-expanded task
-  const [editingTask, setEditingTask] = useState(null);       // task open in edit modal
-  const [editingMeeting, setEditingMeeting] = useState(null); // meeting open in edit modal
+  const [editingTask, setEditingTask] = useState(null);
+  const [editingMeeting, setEditingMeeting] = useState(null);
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState(null);
 
   // AI Documents
   const [aiDocLoading, setAiDocLoading] = useState(false);
@@ -980,6 +995,9 @@ const ExecMeetingDashboard = () => {
   const [aiDocMeetingId, setAiDocMeetingId] = useState('');
   const [aiDocTopics, setAiDocTopics] = useState('');
   const [aiDocSummary, setAiDocSummary] = useState('');
+  const [aiDocContext, setAiDocContext] = useState('');
+  const [aiDocAudience, setAiDocAudience] = useState('');
+  const [aiDocPeriod, setAiDocPeriod] = useState('');
   const [savedDocs, setSavedDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [viewDoc, setViewDoc] = useState(null);
@@ -987,6 +1005,8 @@ const ExecMeetingDashboard = () => {
   // Calendar plan
   const [weekPlan, setWeekPlan] = useState(null);
   const [weekPlanLoading, setWeekPlanLoading] = useState(false);
+  const [includePastTasks, setIncludePastTasks] = useState(false);
+  const [showPastTasksConfirm, setShowPastTasksConfirm] = useState(false);
 
   // Participants
   const [participantsOpenId, setParticipantsOpenId] = useState(null);
@@ -1014,7 +1034,7 @@ const ExecMeetingDashboard = () => {
     if (activeTab === 'tasks' && tasks.length === 0) loadTasks();
     if (activeTab === 'notifications') loadNotifications();
     if (activeTab === 'overview' && !digest) loadDigest();
-    if (activeTab === 'documents') { loadDocuments(); if (meetings.length === 0) loadMeetings(); }
+    if (activeTab === 'documents') { loadDocuments(); loadMeetings(); }
   }, [activeTab]);
 
   const loadStats = async () => {
@@ -1104,7 +1124,7 @@ const ExecMeetingDashboard = () => {
       const resolvedAttendees = linkedMeeting?.attendees || [];
       const resolvedDuration = linkedMeeting?.duration_minutes || 60;
       const resolvedTopics = aiDocTopics.trim()
-        ? aiDocTopics.split(',').map(t => t.trim()).filter(Boolean)
+        ? aiDocTopics.split(',').map(t => t.trim().slice(0, 40)).filter(Boolean)
         : [];
 
       const payload = {
@@ -1115,9 +1135,21 @@ const ExecMeetingDashboard = () => {
         attendees: resolvedAttendees,
       };
 
-      if (linkedMeeting) payload.meeting_id = linkedMeeting.id;
+      if (linkedMeeting) {
+        payload.meeting_id = linkedMeeting.id;
+        if (linkedMeeting.scheduled_at) payload.scheduled_at = linkedMeeting.scheduled_at;
+      }
       if (aiDocType === 'minutes') payload.summary = aiDocSummary.trim();
-      if (aiDocType === 'briefing') payload.topic = resolvedTitle;
+      if (aiDocType === 'briefing') {
+        payload.topic = resolvedTitle;
+        if (aiDocContext.trim()) payload.context = aiDocContext.trim();
+        if (aiDocAudience.trim()) payload.audience = aiDocAudience.trim();
+      }
+      if (aiDocType === 'report') {
+        if (aiDocPeriod.trim()) payload.period = aiDocPeriod.trim();
+        if (aiDocContext.trim()) payload.context = aiDocContext.trim();
+        payload.report_type = resolvedTitle;
+      }
 
       const res = await execMeetingService.generateDocument(payload);
       toast({ title: 'Document generated and saved!' });
@@ -1137,6 +1169,9 @@ const ExecMeetingDashboard = () => {
       setAiDocInput('');
       setAiDocTopics('');
       setAiDocSummary('');
+      setAiDocContext('');
+      setAiDocAudience('');
+      setAiDocPeriod('');
       setAiDocMeetingId('');
     } catch (err) {
       toast({ title: 'AI generation failed', description: err.message, variant: 'destructive' });
@@ -1150,12 +1185,11 @@ const ExecMeetingDashboard = () => {
     setParticipantsOpenId(meetingId);
     setNotesOpenId(null);
     setUserSearchQ(''); setUserSearchResults([]);
-    if (!participantsMap[meetingId]) {
-      try {
-        const data = await execMeetingService.getParticipants(meetingId);
-        setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
-      } catch { setParticipantsMap(prev => ({ ...prev, [meetingId]: [] })); }
-    }
+    // Always re-fetch to get fresh participant_id values needed for remove
+    try {
+      const data = await execMeetingService.getParticipants(meetingId);
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
+    } catch { setParticipantsMap(prev => ({ ...prev, [meetingId]: [] })); }
   };
 
   const searchUsers = async (q, meetingId) => {
@@ -1171,22 +1205,35 @@ const ExecMeetingDashboard = () => {
   };
 
   const addParticipant = async (meetingId, user) => {
+    // Optimistic update — show instantly, sync with real IDs in background
+    const optimistic = { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending' };
+    setParticipantsMap(prev => ({ ...prev, [meetingId]: [...(prev[meetingId] || []), optimistic] }));
+    setUserSearchQ(''); setUserSearchResults([]);
     try {
       await execMeetingService.addParticipant(meetingId, user.id, user.user_type);
-      // Reload from backend so user_id is always the CompanyUser ID (needed for correct DELETE)
+      // Reload from backend to replace optimistic entry with real CompanyUser ID (needed for correct DELETE)
       const data = await execMeetingService.getParticipants(meetingId);
       setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
-      setUserSearchQ(''); setUserSearchResults([]);
       toast({ title: `${user.full_name} added`, description: 'An invitation email has been sent to them.' });
-    } catch (err) { toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' }); }
+    } catch (err) {
+      // Roll back optimistic update on failure
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.user_id !== user.id) }));
+      toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' });
+    }
   };
 
-  const removeParticipant = async (meetingId, userId, name) => {
+  const removeParticipant = async (meetingId, participantId, userId, name) => {
+    // Optimistic remove — hide instantly
+    setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.id !== participantId && p.user_id !== userId) }));
     try {
-      await execMeetingService.removeParticipant(meetingId, userId);
-      setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.user_id !== userId) }));
-      toast({ title: `${name} removed` });
-    } catch (err) { toast({ title: 'Failed to remove', description: err.message, variant: 'destructive' }); }
+      await execMeetingService.removeParticipant(meetingId, participantId, userId);
+      toast({ title: `${name} removed`, description: 'They have been notified by email.' });
+    } catch (err) {
+      // Roll back on failure
+      const data = await execMeetingService.getParticipants(meetingId).catch(() => ({ participants: [] }));
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
+      toast({ title: 'Failed to remove', description: err.message, variant: 'destructive' });
+    }
   };
 
   const openNotes = async (meetingId) => {
@@ -1217,14 +1264,18 @@ const ExecMeetingDashboard = () => {
     }
   };
 
+  const [deletingTaskId, setDeletingTaskId] = useState(null);
+
   const deleteTask = async (id) => {
+    setDeletingTaskId(id);
     try {
       await execMeetingService.deleteTask(id);
       setTasks(prev => prev.filter(t => t.id !== id));
       setExpandedTaskId(null);
       loadStats();
-      toast({ title: 'Task deleted' });
+      toast({ title: 'Task deleted', description: 'Assignees have been notified by email.' });
     } catch { toast({ title: 'Failed to delete task', variant: 'destructive' }); }
+    finally { setDeletingTaskId(null); }
   };
 
   const runAiPrioritize = async () => {
@@ -1448,7 +1499,7 @@ const ExecMeetingDashboard = () => {
             <div key={m.id} className="flex items-center justify-between py-2.5" style={ROW_STYLE}>
               <div className="min-w-0">
                 <p className="text-white text-sm font-medium truncate">{m.title}</p>
-                <p className="text-white/40 text-xs">{m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : '—'}</p>
+                <p className="text-white/40 text-xs">{fmtUtc(m.scheduled_at)}</p>
               </div>
               {statusBadge(m.status)}
             </div>
@@ -1489,9 +1540,8 @@ const ExecMeetingDashboard = () => {
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{m.title}</p>
                     <p className="text-white/40 text-xs">
-                      {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : '—'}
+                      {fmtUtc(m.scheduled_at)}
                       {m.duration_minutes ? ` · ${m.duration_minutes}min` : ''}
-                      {m.location ? ` · ${m.location}` : ''}
                     </p>
                     {m.meeting_link && (
                       <a href={m.meeting_link} target="_blank" rel="noopener noreferrer"
@@ -1543,12 +1593,21 @@ const ExecMeetingDashboard = () => {
                                 <span className="text-white/40 text-xs ml-2">{p.email}</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="text-white/30 text-[10px]">{p.response}</span>
-                                {confirmRemoveId === p.user_id ? (
+                                {p.response && p.response !== 'pending' && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                    p.response === 'accepted' ? 'bg-emerald-500/20 text-emerald-400' :
+                                    p.response === 'rejected' ? 'bg-red-500/20 text-red-400' :
+                                    p.response === 'tentative' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    'bg-white/10 text-white/40'
+                                  }`}>{p.response}</span>
+                                )}
+                                {!p.id ? (
+                                  <span className="text-white/20 text-[10px]">syncing…</span>
+                                ) : confirmRemoveId === p.id ? (
                                   <div className="flex items-center gap-1">
                                     <span className="text-white/50 text-[10px]">Remove?</span>
                                     <button
-                                      onClick={() => { removeParticipant(m.id, p.user_id, p.full_name); setConfirmRemoveMap(prev => ({ ...prev, [m.id]: null })); }}
+                                      onClick={() => { removeParticipant(m.id, p.id, p.user_id, p.full_name); setConfirmRemoveMap(prev => ({ ...prev, [m.id]: null })); }}
                                       className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">
                                       Yes
                                     </button>
@@ -1560,7 +1619,7 @@ const ExecMeetingDashboard = () => {
                                   </div>
                                 ) : (
                                   <button
-                                    onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: p.user_id }))}
+                                    onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: p.id }))}
                                     className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
                                 )}
                               </div>
@@ -1795,7 +1854,7 @@ const ExecMeetingDashboard = () => {
                       </Button>
                       <Button size="sm" variant="ghost"
                         className="text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs h-7 px-3"
-                        onClick={e => { e.stopPropagation(); deleteTask(t.id); }}>
+                        onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(t.id); }}>
                         <Trash2 className="h-3 w-3 mr-1" /> Delete
                       </Button>
                     </div>
@@ -1817,8 +1876,8 @@ const ExecMeetingDashboard = () => {
 
   const calendarPanel = () => (
     <div className="space-y-5">
-      {/* Generate button */}
-      <div className="rounded-2xl p-5 space-y-3" style={CARD_STYLE}>
+      {/* Generate button + settings */}
+      <div className="rounded-2xl p-5 space-y-4" style={CARD_STYLE}>
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-white font-semibold flex items-center gap-2">
@@ -1831,11 +1890,20 @@ const ExecMeetingDashboard = () => {
           <Button onClick={async () => {
             setWeekPlanLoading(true);
             try {
-              const res = await execMeetingService.planWeek();
-              setWeekPlan(res.plan || res);
-              toast({ title: 'Week plan ready!' });
+              const today = new Date();
+              const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+              const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart });
+              console.log('[WeekPlan] response:', res);
+              const plan = res.plan || res;
+              setWeekPlan(plan);
+              if (!plan || (!plan.daily_plans?.length && !plan.weekly_summary)) {
+                toast({ title: 'Plan generated but empty', description: 'No meetings or tasks found for this week. Add some first!', variant: 'destructive' });
+              } else {
+                toast({ title: 'Week plan ready!' });
+              }
             } catch (err) {
-              toast({ title: 'Planning failed', description: err.message, variant: 'destructive' });
+              console.error('[WeekPlan] error:', err);
+              toast({ title: 'Planning failed', description: err?.data?.message || err.message || 'Unknown error', variant: 'destructive' });
             } finally {
               setWeekPlanLoading(false);
             }
@@ -1844,11 +1912,245 @@ const ExecMeetingDashboard = () => {
             {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
           </Button>
         </div>
+
+        {/* Settings row */}
+        <div className="flex items-center justify-between rounded-xl px-4 py-3 bg-white/5 border border-white/10">
+          <div>
+            <p className="text-white/80 text-sm font-medium">Include overdue / older tasks</p>
+            <p className="text-white/40 text-xs mt-0.5">
+              {includePastTasks
+                ? 'All todo & in-progress tasks included regardless of due date'
+                : 'Only tasks due this week or later are included'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (!includePastTasks) {
+                setShowPastTasksConfirm(true);
+              } else {
+                setIncludePastTasks(false);
+              }
+            }}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+              includePastTasks ? 'bg-violet-600' : 'bg-white/20'
+            }`}
+          >
+            <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+              includePastTasks ? 'translate-x-5' : 'translate-x-0'
+            }`} />
+          </button>
+        </div>
       </div>
 
       {/* Plan results */}
-      {weekPlan && (
+      {weekPlan && !weekPlan.daily_plans?.length && !weekPlan.weekly_summary && (
+        <div className="rounded-2xl p-8 text-center" style={CARD_STYLE}>
+          <CalendarDays className="h-10 w-10 text-white/20 mx-auto mb-3" />
+          <p className="text-white/50 text-sm">No meetings or tasks found for this week.</p>
+          <p className="text-white/30 text-xs mt-1">Schedule some meetings or add tasks first, then try again.</p>
+        </div>
+      )}
+      {weekPlan && (weekPlan.daily_plans?.length > 0 || weekPlan.weekly_summary) && (
         <div className="space-y-4">
+          {/* Download button */}
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10 gap-2"
+              onClick={async () => {
+                try {
+                  const { default: jsPDF } = await import('jspdf');
+                  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                  const pageW = pdf.internal.pageSize.getWidth();
+                  const pageH = pdf.internal.pageSize.getHeight();
+                  const margin = 18;
+                  const contentW = pageW - margin * 2;
+                  const weekLabel = weekPlan.week_start || '';
+
+                  const checkPage = (y, needed = 8) => {
+                    if (y > pageH - needed) { pdf.addPage(); return 18; }
+                    return y;
+                  };
+
+                  // Purple header bar
+                  pdf.setFillColor(109, 40, 217);
+                  pdf.rect(0, 0, pageW, 12, 'F');
+
+                  // Title
+                  pdf.setFont('helvetica', 'bold');
+                  pdf.setFontSize(18);
+                  pdf.setTextColor(30, 10, 60);
+                  const titleText = `AI Weekly Plan${weekLabel ? ' — ' + weekLabel : ''}`;
+                  const titleLines = pdf.splitTextToSize(titleText, contentW);
+                  pdf.text(titleLines, margin, 24);
+                  let y = 24 + titleLines.length * 7;
+
+                  // Meta line
+                  pdf.setFont('helvetica', 'normal');
+                  pdf.setFontSize(8.5);
+                  pdf.setTextColor(120, 100, 160);
+                  pdf.text('Generated by AI Executive Meeting Assistant', margin, y);
+                  y += 5;
+
+                  // Divider
+                  pdf.setDrawColor(109, 40, 217);
+                  pdf.setLineWidth(0.4);
+                  pdf.line(margin, y, pageW - margin, y);
+                  y += 6;
+
+                  // Summary
+                  if (weekPlan.weekly_summary) {
+                    y = checkPage(y, 14);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.setFontSize(10);
+                    pdf.setTextColor(76, 29, 149);
+                    pdf.text('SUMMARY', margin, y);
+                    y += 5;
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.setFontSize(10);
+                    pdf.setTextColor(40, 30, 60);
+                    const sumLines = pdf.splitTextToSize(weekPlan.weekly_summary, contentW);
+                    sumLines.forEach(l => { y = checkPage(y); pdf.text(l, margin, y); y += 5.5; });
+                    y += 3;
+                  }
+
+                  // Conflicts
+                  if (weekPlan.conflicts_detected?.length) {
+                    y = checkPage(y, 14);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.setFontSize(10);
+                    pdf.setTextColor(185, 28, 28);
+                    pdf.text('CONFLICTS DETECTED', margin, y);
+                    y += 5;
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.setFontSize(10);
+                    pdf.setTextColor(40, 30, 60);
+                    weekPlan.conflicts_detected.forEach(c => {
+                      y = checkPage(y);
+                      const wrapped = pdf.splitTextToSize(`• ${c}`, contentW - 4);
+                      pdf.text(wrapped, margin + 3, y); y += wrapped.length * 5.5 + 1;
+                    });
+                    y += 3;
+                  }
+
+                  // Recommendations
+                  if (weekPlan.recommendations?.length) {
+                    y = checkPage(y, 14);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.setFontSize(10);
+                    pdf.setTextColor(76, 29, 149);
+                    pdf.text('RECOMMENDATIONS', margin, y);
+                    y += 5;
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.setFontSize(10);
+                    pdf.setTextColor(40, 30, 60);
+                    weekPlan.recommendations.forEach(r => {
+                      y = checkPage(y);
+                      const wrapped = pdf.splitTextToSize(`› ${r}`, contentW - 4);
+                      pdf.text(wrapped, margin + 3, y); y += wrapped.length * 5.5 + 1;
+                    });
+                    y += 4;
+                  }
+
+                  // Day cards
+                  (weekPlan.daily_plans || []).forEach(day => {
+                    const hasMeetings = day.scheduled_meetings?.length > 0;
+                    const hasTasks = day.suggested_task_slots?.length > 0;
+                    const hasFocus = day.focus_blocks?.length > 0;
+                    if (!hasMeetings && !hasTasks && !hasFocus) return;
+
+                    y = checkPage(y, 20);
+
+                    // Day header bar (light purple)
+                    pdf.setFillColor(237, 233, 254);
+                    pdf.rect(margin, y - 4, contentW, 9, 'F');
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.setFontSize(11);
+                    pdf.setTextColor(45, 27, 105);
+                    pdf.text(`${day.day_name}  ${day.date}`, margin + 2, y + 2);
+                    if (day.workload_level) {
+                      const wlText = day.workload_level.toUpperCase();
+                      pdf.setFontSize(8);
+                      pdf.setTextColor(109, 40, 217);
+                      pdf.text(wlText, pageW - margin - pdf.getTextWidth(wlText), y + 2);
+                    }
+                    y += 8;
+
+                    if (hasMeetings) {
+                      y = checkPage(y, 8);
+                      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5); pdf.setTextColor(109, 40, 217);
+                      pdf.text('MEETINGS', margin + 2, y); y += 4.5;
+                      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(40, 30, 60);
+                      day.scheduled_meetings.forEach(m => {
+                        y = checkPage(y);
+                        const title = typeof m === 'string' ? m : m.title;
+                        const timePart = m.time ? `  ${m.time}` : '';
+                        const durPart = m.duration_minutes ? `  (${m.duration_minutes}min)` : '';
+                        const wrapped = pdf.splitTextToSize(`• ${title}${timePart}${durPart}`, contentW - 6);
+                        pdf.text(wrapped, margin + 4, y); y += wrapped.length * 5.5 + 1;
+                      });
+                      y += 2;
+                    }
+
+                    if (hasTasks) {
+                      y = checkPage(y, 8);
+                      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5); pdf.setTextColor(109, 40, 217);
+                      pdf.text('TASK SLOTS', margin + 2, y); y += 4.5;
+                      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(40, 30, 60);
+                      day.suggested_task_slots.forEach(s => {
+                        y = checkPage(y);
+                        const durPart = s.duration_minutes ? `  (${s.duration_minutes}min)` : '';
+                        const wrapped = pdf.splitTextToSize(`${s.time}  ${s.task}${durPart}`, contentW - 6);
+                        pdf.setTextColor(109, 40, 217);
+                        pdf.text(s.time, margin + 4, y);
+                        pdf.setTextColor(40, 30, 60);
+                        const taskW = pdf.splitTextToSize(`${s.task}${durPart}`, contentW - 6 - 14);
+                        pdf.text(taskW, margin + 18, y); y += Math.max(wrapped.length, taskW.length) * 5.5 + 1;
+                      });
+                      y += 2;
+                    }
+
+                    if (hasFocus) {
+                      y = checkPage(y, 8);
+                      pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5); pdf.setTextColor(109, 40, 217);
+                      pdf.text('FOCUS BLOCKS', margin + 2, y); y += 4.5;
+                      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(40, 30, 60);
+                      day.focus_blocks.forEach(b => {
+                        y = checkPage(y);
+                        pdf.setTextColor(109, 40, 217);
+                        pdf.text(`${b.start}–${b.end}`, margin + 4, y);
+                        pdf.setTextColor(40, 30, 60);
+                        pdf.text(b.label || 'Deep Work', margin + 28, y);
+                        y += 6;
+                      });
+                      y += 2;
+                    }
+
+                    // Thin divider between days
+                    pdf.setDrawColor(200, 190, 220); pdf.setLineWidth(0.2);
+                    pdf.line(margin, y, pageW - margin, y); y += 5;
+                  });
+
+                  // Page numbers
+                  const totalPages = pdf.internal.getNumberOfPages();
+                  for (let i = 1; i <= totalPages; i++) {
+                    pdf.setPage(i);
+                    pdf.setFontSize(7.5); pdf.setTextColor(160, 140, 190);
+                    pdf.text(`Page ${i} of ${totalPages}  ·  AI Executive Meeting Assistant`, margin, pageH - 7);
+                  }
+
+                  pdf.save(`weekly-plan${weekLabel ? '-' + weekLabel : ''}.pdf`);
+                } catch (err) {
+                  toast({ title: 'PDF download failed', description: err?.message || 'Please try again.', variant: 'destructive' });
+                }
+              }}
+            >
+              <Download className="h-4 w-4" /> Download PDF
+            </Button>
+          </div>
+
           {/* Summary + recommendations */}
           {(weekPlan.weekly_summary || weekPlan.recommendations?.length > 0) && (
             <div className="rounded-2xl p-5 space-y-3" style={CARD_STYLE}>
@@ -1875,7 +2177,11 @@ const ExecMeetingDashboard = () => {
           )}
 
           {/* Daily plan cards */}
-          {Array.isArray(weekPlan.daily_plans) && weekPlan.daily_plans.map((day, i) => (
+          {Array.isArray(weekPlan.daily_plans) && weekPlan.daily_plans.filter(day =>
+            day.scheduled_meetings?.length > 0 ||
+            day.suggested_task_slots?.length > 0 ||
+            day.focus_blocks?.length > 0
+          ).map((day, i) => (
             <div key={i} className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
               <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
                 <div className="flex items-center gap-3">
@@ -1903,6 +2209,12 @@ const ExecMeetingDashboard = () => {
                         <div key={j} className="flex items-center gap-2 text-sm">
                           <CalendarClock className="h-3.5 w-3.5 text-sky-400 flex-shrink-0" />
                           <span className="text-white/80">{typeof m === 'string' ? m : m.title}</span>
+                          {typeof m !== 'string' && m.time && (
+                            <span className="text-sky-400/70 font-mono text-xs ml-1">{m.time}</span>
+                          )}
+                          {typeof m !== 'string' && m.duration_minutes > 0 && (
+                            <span className="text-white/30 text-xs ml-auto">{m.duration_minutes}min</span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1969,7 +2281,7 @@ const ExecMeetingDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1">
             <Label className="text-white/70 text-xs">Document Type</Label>
-            <Select value={aiDocType} onValueChange={v => { setAiDocType(v); setAiDocTopics(''); setAiDocSummary(''); }}>
+            <Select value={aiDocType} onValueChange={v => { setAiDocType(v); setAiDocTopics(''); setAiDocSummary(''); setAiDocContext(''); setAiDocAudience(''); setAiDocPeriod(''); }}>
               <SelectTrigger className="bg-white/5 border-white/10 text-white">
                 <SelectValue />
               </SelectTrigger>
@@ -1992,7 +2304,7 @@ const ExecMeetingDashboard = () => {
                 <SelectItem value="none">— None / manual topic —</SelectItem>
                 {Array.isArray(meetings) && meetings.map(m => (
                   <SelectItem key={m.id} value={String(m.id)}>
-                    {m.title}{m.scheduled_at ? ` · ${new Date(m.scheduled_at).toLocaleDateString()}` : ''}
+                    {m.title}{m.scheduled_at ? ` · ${fmtUtc(m.scheduled_at)}` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -2028,6 +2340,9 @@ const ExecMeetingDashboard = () => {
             <Label className="text-white/70 text-xs">
               Topics to Cover <span className="text-white/30">(comma-separated)</span>
             </Label>
+            <p className="text-[11px] text-amber-400/80 leading-snug">
+              ⚠ Use short topic names only (e.g. "UI Review, Budget Update"). Do not paste meeting notes or long sentences — these become agenda headings.
+            </p>
             <Input
               value={aiDocTopics}
               onChange={e => setAiDocTopics(e.target.value)}
@@ -2040,15 +2355,89 @@ const ExecMeetingDashboard = () => {
         {/* Summary — minutes only */}
         {aiDocType === 'minutes' && (
           <div className="space-y-1">
-            <Label className="text-white/70 text-xs">Meeting Summary / Key Discussion Points</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-white/70 text-xs">Meeting Summary / Key Discussion Points</Label>
+              <span className={`text-xs ${aiDocSummary.length > 800 ? 'text-red-400' : aiDocSummary.length > 600 ? 'text-yellow-400' : 'text-white/30'}`}>
+                {aiDocSummary.length}/800
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-400/80 leading-snug">
+              ⚠ This text appears directly in the document as the Discussion Summary. Write only what was discussed in the meeting — do not paste unrelated content.
+            </p>
             <textarea
               value={aiDocSummary}
-              onChange={e => setAiDocSummary(e.target.value)}
+              onChange={e => { if (e.target.value.length <= 800) setAiDocSummary(e.target.value); }}
               rows={3}
               placeholder="Briefly describe what was discussed, decisions made, outcomes…"
               className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
             />
           </div>
+        )}
+
+        {/* Briefing fields */}
+        {aiDocType === 'briefing' && (
+          <>
+            <div className="space-y-1">
+              <Label className="text-white/70 text-xs">Audience <span className="text-white/30">(optional)</span></Label>
+              <Input
+                value={aiDocAudience}
+                onChange={e => setAiDocAudience(e.target.value)}
+                placeholder="e.g. Board of Directors, Executive Team"
+                className="bg-white/5 border-white/10 text-white"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-white/70 text-xs">Background / Context <span className="text-white/30">(optional)</span></Label>
+                <span className={`text-xs ${aiDocContext.length > 800 ? 'text-red-400' : aiDocContext.length > 600 ? 'text-yellow-400' : 'text-white/30'}`}>
+                  {aiDocContext.length}/800
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-400/80 leading-snug">
+                ⚠ This text appears directly in the document. Write only relevant facts — do not paste raw research, chat logs, or unrelated content.
+              </p>
+              <textarea
+                value={aiDocContext}
+                onChange={e => { if (e.target.value.length <= 800) setAiDocContext(e.target.value); }}
+                rows={3}
+                placeholder="Describe the situation, problem, or opportunity. Key facts, risks, or data points to include…"
+                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+          </>
+        )}
+
+        {/* Report fields */}
+        {aiDocType === 'report' && (
+          <>
+            <div className="space-y-1">
+              <Label className="text-white/70 text-xs">Period <span className="text-white/30">(optional)</span></Label>
+              <Input
+                value={aiDocPeriod}
+                onChange={e => setAiDocPeriod(e.target.value)}
+                placeholder="e.g. Q3 2026, Week of 30 Jun, July 2026"
+                className="bg-white/5 border-white/10 text-white"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-white/70 text-xs">Context / Progress Notes <span className="text-white/30">(optional)</span></Label>
+                <span className={`text-xs ${aiDocContext.length > 800 ? 'text-red-400' : aiDocContext.length > 600 ? 'text-yellow-400' : 'text-white/30'}`}>
+                  {aiDocContext.length}/800
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-400/80 leading-snug">
+                ⚠ This text appears directly in the document. Write only relevant facts — do not paste raw research, chat logs, or unrelated content.
+              </p>
+              <textarea
+                value={aiDocContext}
+                onChange={e => { if (e.target.value.length <= 800) setAiDocContext(e.target.value); }}
+                rows={3}
+                placeholder="Describe current status, what was completed, blockers, metrics, key highlights…"
+                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
+              />
+            </div>
+          </>
         )}
 
         <Button onClick={generateAiDoc} disabled={aiDocLoading}>
@@ -2257,6 +2646,76 @@ const ExecMeetingDashboard = () => {
         onClose={() => setEditingMeeting(null)}
         onUpdated={() => { loadMeetings(); loadStats(); }}
       />
+
+      {/* Past tasks confirm dialog */}
+      <Dialog open={showPastTasksConfirm} onOpenChange={open => { if (!open) setShowPastTasksConfirm(false); }}>
+        <DialogContent className="max-w-sm w-full bg-[#0d0b1f] border-white/10 text-white">
+          <div className="flex flex-col items-center gap-4 py-2">
+            <div className="w-14 h-14 rounded-full bg-violet-500/10 flex items-center justify-center">
+              <CalendarDays className="h-7 w-7 text-violet-400" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-semibold text-white mb-1">Include older tasks?</h3>
+              <p className="text-white/50 text-sm">
+                This will include all pending and in-progress tasks from previous weeks and months in your weekly plan, not just tasks due this week.
+              </p>
+            </div>
+            <div className="flex gap-3 w-full mt-2">
+              <Button
+                variant="outline"
+                className="flex-1 border-white/10 text-white/60 hover:bg-white/5"
+                onClick={() => setShowPastTasksConfirm(false)}
+              >
+                No, keep default
+              </Button>
+              <Button
+                className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+                onClick={() => { setIncludePastTasks(true); setShowPastTasksConfirm(false); }}
+              >
+                Yes, include all
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Task delete confirm dialog */}
+      <Dialog open={!!confirmDeleteTaskId} onOpenChange={open => { if (!open) setConfirmDeleteTaskId(null); }}>
+        <DialogContent className="max-w-sm w-full bg-[#0d0b1f] border-white/10 text-white">
+          <div className="flex flex-col items-center gap-4 py-2">
+            <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
+              <Trash2 className="h-7 w-7 text-red-400" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-lg font-semibold text-white mb-1">Delete Task?</h3>
+              <p className="text-white/50 text-sm">
+                This task will be permanently deleted and all assignees will be notified by email.
+              </p>
+            </div>
+            <div className="flex gap-3 w-full mt-2">
+              <Button
+                variant="outline"
+                className="flex-1 border-white/10 text-white/60 hover:bg-white/5"
+                disabled={!!deletingTaskId}
+                onClick={() => setConfirmDeleteTaskId(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white"
+                disabled={!!deletingTaskId}
+                onClick={() => { deleteTask(confirmDeleteTaskId); setConfirmDeleteTaskId(null); }}
+              >
+                {deletingTaskId ? (
+                  <><span className="h-4 w-4 mr-2 rounded-full border-2 border-white/30 border-t-white animate-spin inline-block" /> Deleting…</>
+                ) : (
+                  <><Trash2 className="h-4 w-4 mr-1" /> Delete</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Document viewer modal */}
       <Dialog open={!!viewDoc} onOpenChange={open => { if (!open) setViewDoc(null); }}>

@@ -44,22 +44,81 @@ logger = logging.getLogger(__name__)
 # Email helpers
 # ---------------------------------------------------------------------------
 
-def _send_email_safe(subject, body, recipient_email):
-    """Send a plain-text email; swallow errors so a bad SMTP config never breaks the API."""
+def _email_base_html(content: str, preview_text: str = '') -> str:
+    preview = (
+        f'<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">'
+        f'{preview_text}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>'
+        if preview_text else ''
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Email</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  {preview}
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f4f7;min-width:100%;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:12px 12px 0 0;padding:28px 36px;text-align:center;">
+              <span style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">AI Employee</span>
+              <span style="display:block;color:rgba(255,255,255,0.65);font-size:12px;margin-top:4px;letter-spacing:0.04em;text-transform:uppercase;">Executive Meeting Assistant</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#ffffff;padding:36px 36px 28px;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb;">
+              {content}
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f9fafb;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:18px 36px;text-align:center;">
+              <p style="margin:0;color:#9ca3af;font-size:11px;line-height:1.6;">
+                This is an automated notification from your AI Executive Meeting Assistant.<br/>
+                Please do not reply to this email.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
+def _email_detail_row(label: str, value: str) -> str:
+    return (
+        f'<tr>'
+        f'<td style="padding:6px 0;color:#6b7280;font-size:13px;width:110px;vertical-align:top;">{label}</td>'
+        f'<td style="padding:6px 0;color:#111827;font-size:13px;font-weight:600;vertical-align:top;">{value}</td>'
+        f'</tr>'
+    )
+
+
+def _email_divider() -> str:
+    return '<tr><td colspan="2"><hr style="border:none;border-top:1px solid #f3f4f6;margin:6px 0;"/></td></tr>'
+
+
+def _send_email_safe(subject, html_body, recipient_email, plain_body=''):
     if not recipient_email or '@' not in recipient_email:
         logger.warning("Email skipped — invalid recipient: %r", recipient_email)
         return
     try:
-        from django.core.mail import send_mail
+        from django.core.mail import EmailMultiAlternatives
         from django.conf import settings
         logger.info("Sending email to %s | subject: %s", recipient_email, subject)
-        send_mail(
-            subject,
-            body,
-            settings.DEFAULT_FROM_EMAIL,
-            [recipient_email],
-            fail_silently=False,
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=plain_body or 'Please view this email in an HTML-capable client.',
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[recipient_email],
         )
+        msg.attach_alternative(html_body, 'text/html')
+        msg.send(fail_silently=False)
         logger.info("Email sent OK to %s", recipient_email)
     except Exception as exc:
         logger.error("Email send FAILED to %s: %s", recipient_email, exc)
@@ -68,81 +127,300 @@ def _send_email_safe(subject, body, recipient_email):
 def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_fields):
     scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
     changed_str = ', '.join(changed_fields) if changed_fields else 'details'
-    body = (
-        f"Hi {participant_cu.full_name},\n\n"
-        f"The following meeting has been updated ({changed_str}):\n\n"
-        f"  Title     : {meeting.title}\n"
-        f"  Date/Time : {scheduled}\n"
-        f"  Duration  : {meeting.duration_minutes} minutes\n"
-        f"  Location  : {meeting.location or 'N/A'}\n"
-        f"  Link      : {meeting.meeting_link or 'N/A'}\n"
-        f"  Organizer : {organizer_name}\n"
+    link_row = _email_detail_row('Link', f'<a href="{meeting.meeting_link}" style="color:#7c3aed;">{meeting.meeting_link}</a>') if meeting.meeting_link else ''
+    desc_block = (
+        f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{meeting.description}</p>'
+        if meeting.description else ''
     )
-    if meeting.description:
-        body += f"\nDescription:\n{meeting.description}\n"
-    body += "\nPlease update your calendar accordingly.\n\nBest regards,\nAI Executive Assistant"
-    _send_email_safe(f"Meeting Updated: {meeting.title}", body, participant_cu.email)
+    content = f"""
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;">Meeting Updated</p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">
+        The following details have changed: <strong style="color:#7c3aed;">{changed_str}</strong>
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;margin-bottom:20px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#7c3aed;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Meeting Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Title', meeting.title)}
+              {_email_divider()}
+              {_email_detail_row('Date &amp; Time', scheduled)}
+              {_email_divider()}
+              {_email_detail_row('Duration', f'{meeting.duration_minutes} minutes')}
+              {_email_divider()}
+              {_email_detail_row('Status', meeting.status.replace('_', ' ').capitalize())}
+              {_email_divider()}
+              {_email_detail_row('Organizer', organizer_name)}
+              {(_email_divider() + link_row) if link_row else ''}
+            </table>
+            {desc_block}
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.6;">
+        Please update your calendar accordingly.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"Your meeting '{meeting.title}' has been updated.")
+    _send_email_safe(f"Meeting Updated: {meeting.title}", html, participant_cu.email)
 
 
 def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
     scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
-    body = (
-        f"Hi {participant_cu.full_name},\n\n"
-        f"You have been added as a participant to the following meeting:\n\n"
-        f"  Title     : {meeting.title}\n"
-        f"  Date/Time : {scheduled}\n"
-        f"  Duration  : {meeting.duration_minutes} minutes\n"
-        f"  Location  : {meeting.location or 'N/A'}\n"
-        f"  Link      : {meeting.meeting_link or 'N/A'}\n"
-        f"  Organizer : {organizer_name}\n"
+    first_name = (participant_cu.full_name or '').split()[0] if participant_cu.full_name else 'there'
+    join_block = ''
+    if meeting.meeting_link:
+        join_block = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 0;">
+        <tr>
+          <td align="center">
+            <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
+              <tr>
+                <td style="background:#059669;border-radius:8px;">
+                  <a href="{meeting.meeting_link}" target="_blank"
+                     style="display:inline-block;padding:13px 32px;color:#ffffff;font-size:15px;
+                            font-weight:600;text-decoration:none;white-space:nowrap;">
+                    🎥 Join Meeting
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:8px 0 0;color:#d1d5db;font-size:11px;word-break:break-all;">{meeting.meeting_link}</p>
+          </td>
+        </tr>
+      </table>"""
+    desc_block = (
+        f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{meeting.description}</p>'
+        if meeting.description else ''
     )
-    if meeting.description:
-        body += f"\nDescription:\n{meeting.description}\n"
-    body += "\nPlease make sure to mark this in your calendar.\n\nBest regards,\nAI Executive Assistant"
-    _send_email_safe(f"Meeting Invitation: {meeting.title}", body, participant_cu.email)
+    content = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:20px;">
+            <div style="width:56px;height:56px;background:#faf5ff;border-radius:50%;
+                        font-size:26px;line-height:56px;text-align:center;">📅</div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        You're invited, {first_name}!
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        {organizer_name} has added you to a meeting.
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;margin-bottom:4px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#7c3aed;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Meeting Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Title', meeting.title)}
+              {_email_divider()}
+              {_email_detail_row('Date &amp; Time', scheduled)}
+              {_email_divider()}
+              {_email_detail_row('Duration', f'{meeting.duration_minutes} minutes')}
+              {_email_divider()}
+              {_email_detail_row('Status', meeting.status.replace('_', ' ').capitalize())}
+              {_email_divider()}
+              {_email_detail_row('Organizer', organizer_name)}
+            </table>
+            {desc_block}
+          </td>
+        </tr>
+      </table>
+      {join_block}
+      <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0 20px;"/>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
+        Please mark this in your calendar.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"You've been invited to '{meeting.title}' by {organizer_name}.")
+    _send_email_safe(f"Meeting Invitation: {meeting.title}", html, participant_cu.email)
 
 
 def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
-    body = (
-        f"Hi {assignee_cu.full_name},\n\n"
-        f"You have been assigned a new task:\n\n"
-        f"  Title      : {task.title}\n"
-        f"  Priority   : {task.priority.capitalize()}\n"
-        f"  Status     : {task.status.replace('_', ' ').capitalize()}\n"
-        f"  Due Date   : {task.due_date or 'Not set'}\n"
-        f"  Assigned by: {assigned_by_name}\n"
+    first_name = (assignee_cu.full_name or '').split()[0] if assignee_cu.full_name else 'there'
+    priority_color = {'high': '#ef4444', 'medium': '#f59e0b', 'low': '#10b981'}.get(task.priority, '#6b7280')
+    desc_block = (
+        f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{task.description}</p>'
+        if task.description else ''
     )
-    if task.description:
-        body += f"\nDescription:\n{task.description}\n"
-    body += "\nPlease log in to the platform to view and manage this task.\n\nBest regards,\nAI Executive Assistant"
-    _send_email_safe(f"Task Assigned: {task.title}", body, assignee_cu.email)
+    content = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:20px;">
+            <div style="width:56px;height:56px;background:#f0fdf4;border-radius:50%;
+                        font-size:26px;line-height:56px;text-align:center;">✅</div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        New Task Assigned
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Hi {first_name}, {assigned_by_name} has assigned you a task.
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;margin-bottom:4px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#7c3aed;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Task Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Title', task.title)}
+              {_email_divider()}
+              {_email_detail_row('Priority', f'<span style="color:{priority_color};font-weight:700;">{task.priority.capitalize()}</span>')}
+              {_email_divider()}
+              {_email_detail_row('Status', task.status.replace('_', ' ').capitalize())}
+              {_email_divider()}
+              {_email_detail_row('Due Date', str(task.due_date) if task.due_date else 'Not set')}
+              {_email_divider()}
+              {_email_detail_row('Assigned by', assigned_by_name)}
+            </table>
+            {desc_block}
+          </td>
+        </tr>
+      </table>
+      <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0 20px;"/>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
+        Please log in to the platform to view and manage this task.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"New task assigned: {task.title}")
+    _send_email_safe(f"Task Assigned: {task.title}", html, assignee_cu.email)
 
 
 def _send_meeting_removal_email(cu, meeting, removed_by_name):
     scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
-    body = (
-        f"Hi {cu.full_name},\n\n"
-        f"You have been removed from the following meeting:\n\n"
-        f"  Title     : {meeting.title}\n"
-        f"  Date/Time : {scheduled}\n"
-        f"  Organizer : {removed_by_name}\n\n"
-        f"If you believe this was a mistake, please contact the organizer.\n\n"
-        f"Best regards,\nAI Executive Assistant"
-    )
-    _send_email_safe(f"Removed from Meeting: {meeting.title}", body, cu.email)
+    first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
+    content = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:20px;">
+            <div style="width:56px;height:56px;background:#fef2f2;border-radius:50%;
+                        font-size:26px;line-height:56px;text-align:center;">🚫</div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        Removed from Meeting
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Hi {first_name}, you have been removed from this meeting.
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#fff7f7;border:1px solid #fecaca;border-radius:10px;margin-bottom:20px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#ef4444;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Meeting Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Title', meeting.title)}
+              {_email_divider()}
+              {_email_detail_row('Date &amp; Time', scheduled)}
+              {_email_divider()}
+              {_email_detail_row('Removed by', removed_by_name)}
+            </table>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.6;">
+        If you believe this was a mistake, please contact the organizer.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"You have been removed from '{meeting.title}'.")
+    _send_email_safe(f"Removed from Meeting: {meeting.title}", html, cu.email)
 
 
 def _send_task_removal_email(cu, task, removed_by_name):
-    body = (
-        f"Hi {cu.full_name},\n\n"
-        f"You have been removed from the following task:\n\n"
-        f"  Title      : {task.title}\n"
-        f"  Priority   : {task.priority.capitalize()}\n"
-        f"  Removed by : {removed_by_name}\n\n"
-        f"If you believe this was a mistake, please contact the task owner.\n\n"
-        f"Best regards,\nAI Executive Assistant"
-    )
-    _send_email_safe(f"Removed from Task: {task.title}", body, cu.email)
+    first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
+    content = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:20px;">
+            <div style="width:56px;height:56px;background:#fef2f2;border-radius:50%;
+                        font-size:26px;line-height:56px;text-align:center;">🚫</div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        Removed from Task
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Hi {first_name}, you have been removed from this task.
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#fff7f7;border:1px solid #fecaca;border-radius:10px;margin-bottom:20px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#ef4444;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Task Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Title', task.title)}
+              {_email_divider()}
+              {_email_detail_row('Priority', task.priority.capitalize())}
+              {_email_divider()}
+              {_email_detail_row('Removed by', removed_by_name)}
+            </table>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.6;">
+        If you believe this was a mistake, please contact the task owner.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"You have been removed from task '{task.title}'.")
+    _send_email_safe(f"Removed from Task: {task.title}", html, cu.email)
+
+
+def _send_task_deleted_email(cu, task_title, task_priority, deleted_by_name):
+    first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
+    content = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:20px;">
+            <div style="width:56px;height:56px;background:#fef2f2;border-radius:50%;
+                        font-size:26px;line-height:56px;text-align:center;">🗑️</div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        Task Deleted
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Hi {first_name}, a task you were assigned to has been deleted.
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#fff7f7;border:1px solid #fecaca;border-radius:10px;margin-bottom:20px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#ef4444;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Task Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Title', task_title)}
+              {_email_divider()}
+              {_email_detail_row('Priority', task_priority.capitalize())}
+              {_email_divider()}
+              {_email_detail_row('Deleted by', deleted_by_name)}
+            </table>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.6;">
+        This task has been permanently removed from the system.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"Task '{task_title}' has been deleted.")
+    _send_email_safe(f"Task Deleted: {task_title}", html, cu.email)
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +478,6 @@ def _serialize_meeting(meeting, include_participants=False):
         'title': meeting.title,
         'description': meeting.description,
         'agenda': meeting.agenda,
-        'location': meeting.location,
         'meeting_link': meeting.meeting_link,
         'scheduled_at': meeting.scheduled_at.isoformat(),
         'duration_minutes': meeting.duration_minutes,
@@ -341,7 +618,6 @@ def schedule_meeting_ai(request):
                     title=parsed.get('title', 'Executive Meeting'),
                     description=parsed.get('description', ''),
                     agenda=parsed.get('agenda', []),
-                    location=parsed.get('location', ''),
                     meeting_link=parsed.get('meeting_link', ''),
                     scheduled_at=scheduled_at,
                     duration_minutes=duration,
@@ -397,7 +673,6 @@ def meeting_list(request):
         title=title,
         description=request.data.get('description', ''),
         agenda=request.data.get('agenda', []),
-        location=request.data.get('location', ''),
         meeting_link=meeting_link,
         scheduled_at=scheduled_at,
         duration_minutes=int(request.data.get('duration_minutes', 60)),
@@ -420,7 +695,7 @@ def meeting_detail(request, meeting_id):
         return Response({'status': 'success', 'meeting': _serialize_meeting(meeting, include_participants=True)})
 
     if request.method == 'PATCH':
-        updatable = ['title', 'description', 'agenda', 'location', 'meeting_link',
+        updatable = ['title', 'description', 'agenda', 'meeting_link',
                      'duration_minutes', 'timezone_name', 'status', 'recurrence']
         changed_fields = []
         for field in updatable:
@@ -435,13 +710,30 @@ def meeting_detail(request, meeting_id):
                 meeting.scheduled_at = dt
         meeting.save()
 
-        # Notify existing participants about the update
-        if changed_fields:
-            participants = meeting.participants.select_related('company_user').all()
-            for p in participants:
-                cu = p.company_user
-                if cu.email and cu.id != company_user.id:
-                    _send_meeting_update_email(cu, meeting, company_user.full_name, changed_fields)
+        # Notify existing participants only when calendar-relevant fields change.
+        # Run in a background thread with a short delay so any concurrent
+        # participant-remove requests finish writing to DB first.
+        calendar_fields = {'date/time', 'duration minutes', 'meeting link', 'title', 'status'}
+        if any(f in calendar_fields for f in changed_fields):
+            import threading as _threading
+            meeting_id_snap = meeting.id
+            organizer_name_snap = company_user.full_name
+            changed_snap = list(changed_fields)
+
+            def _notify():
+                import time as _time
+                _time.sleep(2)  # let any in-flight DELETE requests commit first
+                from meeting_agent.models import ExecutiveMeeting as _EM
+                try:
+                    _meeting = _EM.objects.get(id=meeting_id_snap)
+                    for _p in _meeting.participants.select_related('company_user').all():
+                        _cu = _p.company_user
+                        if _cu.email and _cu.id != company_user.id:
+                            _send_meeting_update_email(_cu, _meeting, organizer_name_snap, changed_snap)
+                except Exception as _e:
+                    logger.error("Meeting update notify error: %s", _e)
+
+            _threading.Thread(target=_notify, daemon=True).start()
 
         return Response({'status': 'success', 'meeting': _serialize_meeting(meeting)})
 
@@ -558,7 +850,7 @@ def meeting_participants(request, meeting_id):
                 return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
         p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
-        if created and target.email:
+        if target.email:
             _send_meeting_invite_email(target, meeting, company_user.full_name)
         return Response({'status': 'success', 'participant': {
             'id': p.id, 'user_id': target.id, 'full_name': target.full_name,
@@ -567,15 +859,31 @@ def meeting_participants(request, meeting_id):
 
     if request.method == 'DELETE':
         user_id = request.data.get('user_id')
-        # Fetch before deleting so we can notify
+        participant_id = request.data.get('participant_id')
+        logger.info("Participant remove: meeting=%s user_id=%s participant_id=%s by=%s", meeting.id, user_id, participant_id, company_user.id)
+        # Look up the participant record (prefer participant_id for reliability)
         removed_cu = None
         try:
-            removed_cu = CompanyUser.objects.get(id=user_id, company=company_user.company)
-        except CompanyUser.DoesNotExist:
-            pass
-        ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user_id=user_id).delete()
+            if participant_id:
+                p_obj = ExecutiveMeetingParticipant.objects.select_related('company_user').get(id=participant_id, meeting=meeting)
+                removed_cu = p_obj.company_user
+            elif user_id:
+                p_obj = ExecutiveMeetingParticipant.objects.select_related('company_user').get(meeting=meeting, company_user_id=user_id)
+                removed_cu = p_obj.company_user
+            if removed_cu:
+                logger.info("Participant remove: found cu=%s email=%s", removed_cu.id, removed_cu.email)
+        except ExecutiveMeetingParticipant.DoesNotExist:
+            logger.warning("Participant remove: participant record not found (user_id=%s participant_id=%s)", user_id, participant_id)
+        # Delete the record
+        if participant_id:
+            ExecutiveMeetingParticipant.objects.filter(id=participant_id, meeting=meeting).delete()
+        elif user_id:
+            ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user_id=user_id).delete()
+        # Send removal email
         if removed_cu and removed_cu.email and removed_cu.id != company_user.id:
             _send_meeting_removal_email(removed_cu, meeting, company_user.full_name)
+        elif removed_cu and removed_cu.id == company_user.id:
+            logger.info("Participant remove: skipping email — user removed themselves")
         return Response({'status': 'success'})
 
 
@@ -838,7 +1146,13 @@ def task_detail(request, task_id):
                     _send_task_removal_email(cu, task, company_user.full_name)
         return Response({'status': 'success', 'task': _serialize_task(task)})
 
+    # Snapshot before delete so we can reference after
+    task_title = task.title
+    task_priority = task.priority
+    assignees_to_notify = [cu for cu in task.assignees.all() if cu.email and cu.id != company_user.id]
     task.delete()
+    for cu in assignees_to_notify:
+        _send_task_deleted_email(cu, task_title, task_priority, company_user.full_name)
     return Response({'status': 'success', 'message': 'Task deleted.'})
 
 
@@ -925,28 +1239,77 @@ def calendar_plan_week(request):
     """Generate an AI weekly calendar plan."""
     company_user = request.user
     week_start = request.data.get('week_start', timezone.now().strftime('%Y-%m-%d'))
+    include_past_tasks = bool(request.data.get('include_past_tasks', False))
 
-    meetings = [
-        {
-            'id': m.id, 'title': m.title,
-            'scheduled_at': m.scheduled_at.isoformat(),
-            'duration_minutes': m.duration_minutes,
-            'status': m.status,
-        }
-        for m in ExecutiveMeeting.objects.filter(
-            organizer=company_user,
-            scheduled_at__date__gte=week_start,
-            status__in=['scheduled', 'in_progress'],
-        )[:30]
-    ]
+    from datetime import date as _date, timedelta as _td
+    try:
+        _week_start_date = datetime.strptime(week_start, '%Y-%m-%d').date()
+    except ValueError:
+        _week_start_date = timezone.now().date()
+    _week_end_date = _week_start_date + _td(days=6)
 
-    tasks = [_serialize_task(t) for t in ExecutiveTask.objects.filter(
+    meetings = []
+    for m in ExecutiveMeeting.objects.filter(
+        organizer=company_user,
+        status__in=['scheduled', 'in_progress'],
+    ):
+        # Convert to local date using the meeting's stored datetime
+        local_date = timezone.localtime(m.scheduled_at).date() if timezone.is_aware(m.scheduled_at) else m.scheduled_at.date()
+        if _week_start_date <= local_date <= _week_end_date:
+            meetings.append({
+                'id': m.id, 'title': m.title,
+                'scheduled_at': local_date.isoformat() + 'T' + timezone.localtime(m.scheduled_at).strftime('%H:%M:%S'),
+                'duration_minutes': m.duration_minutes,
+                'status': m.status,
+            })
+
+    tasks_qs = ExecutiveTask.objects.filter(
         company_user=company_user, status__in=['todo', 'in_progress']
-    )[:30]]
+    )
+    if include_past_tasks:
+        # Past + this week only — never show future (next week+) tasks
+        tasks_qs = tasks_qs.filter(
+            models.Q(due_date__isnull=True) |
+            models.Q(due_date__lte=_week_end_date)
+        )
+    else:
+        # Only tasks due within this week or with no due date
+        tasks_qs = tasks_qs.filter(
+            models.Q(due_date__isnull=True) |
+            models.Q(due_date__gte=_week_start_date, due_date__lte=_week_end_date)
+        )
+    tasks = [_serialize_task(t) for t in tasks_qs[:30]]
+
+    logger.info("calendar_plan_week: user=%s week_start=%s meetings=%d tasks=%d include_past=%s",
+                company_user.id, week_start, len(meetings), len(tasks), include_past_tasks)
+
+    # Also include meetings where user is a participant (not just organizer)
+    participant_meeting_ids = set(m['id'] for m in meetings)
+    from meeting_agent.models import ExecutiveMeetingParticipant as _EMP
+    for p in _EMP.objects.select_related('meeting').filter(
+        company_user=company_user,
+        meeting__status__in=['scheduled', 'in_progress'],
+    ):
+        m = p.meeting
+        if m.id not in participant_meeting_ids:
+            local_date = timezone.localtime(m.scheduled_at).date() if timezone.is_aware(m.scheduled_at) else m.scheduled_at.date()
+            if _week_start_date <= local_date <= _week_end_date:
+                meetings.append({
+                    'id': m.id, 'title': m.title,
+                    'scheduled_at': local_date.isoformat() + 'T' + timezone.localtime(m.scheduled_at).strftime('%H:%M:%S'),
+                    'duration_minutes': m.duration_minutes,
+                    'status': m.status,
+                })
+                participant_meeting_ids.add(m.id)
+
+    logger.info("calendar_plan_week: after participant merge meetings=%d", len(meetings))
 
     try:
         agent = _get_agent('calendar_planner', company_user)
         plan = agent.plan_week(meetings, tasks, week_start)
+        logger.info("calendar_plan_week: plan keys=%s daily_plans=%s",
+                    list(plan.keys()) if plan else None,
+                    len(plan.get('daily_plans', [])) if plan else 0)
         return Response({'status': 'success', 'plan': plan})
     except KeyServiceError:
         raise
@@ -1011,28 +1374,40 @@ def document_draft(request):
                 topics = meeting.agenda or []
             if meeting and not attendees:
                 attendees = list(meeting.participants.values_list('company_user__full_name', flat=True))
+            scheduled_at_str = request.data.get('scheduled_at', '')
+            if not scheduled_at_str and meeting and meeting.scheduled_at:
+                local_dt = timezone.localtime(meeting.scheduled_at)
+                scheduled_at_str = local_dt.strftime('%Y-%m-%d %H:%M')
             content = agent.draft_agenda(
                 meeting.title if meeting else request.data.get('title', 'Meeting'),
                 meeting.duration_minutes if meeting else int(request.data.get('duration_minutes', 60)),
                 topics, attendees, request.data.get('context', ''),
+                scheduled_at=scheduled_at_str,
             )
 
         elif doc_type == 'minutes':
-            summary = request.data.get('summary', '')
+            summary = request.data.get('summary', '').strip()
+            user_provided_summary = bool(summary)
             if meeting and not summary:
                 try:
-                    summary = meeting.note.ai_summary
+                    summary = meeting.note.ai_summary or ''
                 except Exception:
                     summary = ''
             action_items = request.data.get('action_items', [])
             decisions = request.data.get('decisions', [])
-            if meeting and not action_items:
+            # Only pull from DB if user did NOT provide a manual summary
+            if meeting and not action_items and not user_provided_summary:
                 action_items = [{'title': a.title, 'assignee_hint': a.assignee.full_name if a.assignee else None, 'due_date': str(a.due_date) if a.due_date else None} for a in meeting.action_items.all()[:15]]
-            if meeting and not decisions:
+            if meeting and not decisions and not user_provided_summary:
                 try:
                     decisions = meeting.note.key_decisions or []
                 except Exception:
                     decisions = []
+            # If user provided a summary but no decisions/action_items, extract them via AI
+            if user_provided_summary and not decisions and not action_items:
+                extracted = agent.extract_decisions_and_actions(summary)
+                decisions = extracted.get('decisions', [])
+                action_items = extracted.get('action_items', [])
             attendees_minutes = request.data.get('attendees', [])
             if meeting and not attendees_minutes:
                 attendees_minutes = list(meeting.participants.values_list('company_user__full_name', flat=True))
@@ -1044,18 +1419,29 @@ def document_draft(request):
             )
 
         elif doc_type == 'briefing':
+            briefing_topic = (
+                request.data.get('topic') or
+                request.data.get('title') or
+                (meeting.title if meeting else 'Executive Briefing')
+            )
             content = agent.create_briefing(
-                request.data.get('topic', ''),
+                briefing_topic,
                 request.data.get('context', ''),
                 request.data.get('key_points'),
-                request.data.get('audience', 'Executive Team'),
+                request.data.get('audience', 'Executive Team') or 'Executive Team',
             )
 
         else:  # report
+            report_type_label = (
+                request.data.get('report_type') or
+                request.data.get('title') or
+                'Status'
+            )
             content = agent.draft_report(
-                request.data.get('report_type', 'Status'),
+                report_type_label,
                 request.data.get('data', {}),
                 request.data.get('period', ''),
+                request.data.get('context', ''),
             )
 
         result = {'status': 'success', 'doc_type': doc_type, 'content': content}
