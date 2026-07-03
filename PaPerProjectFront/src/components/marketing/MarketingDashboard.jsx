@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -110,6 +110,13 @@ const SMTP_DEFAULTS = {
   smtp: { host: '', port: 587, useTLS: true, useSSL: false },
 };
 
+const IMAP_DEFAULTS = {
+  gmail: { host: 'imap.gmail.com', port: 993, useSSL: true },
+  outlook: { host: 'outlook.office365.com', port: 993, useSSL: true },
+  hostinger: { host: 'imap.hostinger.com', port: 993, useSSL: true },
+  smtp: { host: '', port: 993, useSSL: true },
+};
+
 const defaultEmailForm = () => ({
   name: '',
   account_type: 'smtp',
@@ -123,7 +130,6 @@ const defaultEmailForm = () => ({
   is_gmail_app_password: false,
   is_active: true,
   is_default: false,
-  enable_imap_sync: false,
   imap_host: '',
   imap_port: 993,
   imap_username: '',
@@ -133,7 +139,9 @@ const defaultEmailForm = () => ({
 
 const MarketingDashboard = () => {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [searchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(tabFromUrl || 'dashboard');
   const [loading, setLoading] = useState(true);
   const [campaignsLoading, setCampaignsLoading] = useState(true);
   const [emailAccountsLoading, setEmailAccountsLoading] = useState(false);
@@ -156,7 +164,11 @@ const MarketingDashboard = () => {
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [emailForm, setEmailForm] = useState(defaultEmailForm());
   const [emailFormLoading, setEmailFormLoading] = useState(false);
-  const [showImap, setShowImap] = useState(false);
+  // Auto-fill SMTP username / IMAP host & username from account type + email;
+  // stop overwriting a field the moment the user edits it directly.
+  const [usernameTouched, setUsernameTouched] = useState(false);
+  const [imapHostTouched, setImapHostTouched] = useState(false);
+  const [imapUsernameTouched, setImapUsernameTouched] = useState(false);
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testAccountId, setTestAccountId] = useState(null);
   const [testEmailTo, setTestEmailTo] = useState('');
@@ -178,6 +190,12 @@ const MarketingDashboard = () => {
   useEffect(() => {
     fetchStats();
   }, []);
+
+  // Deep-link support: /marketing/dashboard?tab=email jumps straight to that tab,
+  // including when navigating here again while already mounted on this route.
+  useEffect(() => {
+    if (tabFromUrl) setActiveTab(tabFromUrl);
+  }, [tabFromUrl]);
 
   const fetchSavedGraphPrompts = async (page = savedGraphsPage) => {
     try {
@@ -346,6 +364,7 @@ const MarketingDashboard = () => {
 
   const applyEmailTypeDefaults = (accountType) => {
     const d = SMTP_DEFAULTS[accountType] || SMTP_DEFAULTS.smtp;
+    const imapD = IMAP_DEFAULTS[accountType] || IMAP_DEFAULTS.smtp;
     setEmailForm((prev) => ({
       ...prev,
       account_type: accountType,
@@ -354,14 +373,28 @@ const MarketingDashboard = () => {
       use_tls: d.useTLS,
       use_ssl: d.useSSL,
       is_gmail_app_password: accountType === 'gmail',
+      imap_host: imapHostTouched ? prev.imap_host : imapD.host,
+      imap_port: imapD.port,
+      imap_use_ssl: imapD.useSSL,
+    }));
+  };
+
+  const handleEmailFieldChange = (value) => {
+    setEmailForm((prev) => ({
+      ...prev,
+      email: value,
+      smtp_username: usernameTouched ? prev.smtp_username : value,
+      imap_username: imapUsernameTouched ? prev.imap_username : value,
     }));
   };
 
   const openAddEmailAccount = () => {
     setEditingAccountId(null);
     setEmailForm(defaultEmailForm());
+    setUsernameTouched(false);
+    setImapHostTouched(false);
+    setImapUsernameTouched(false);
     applyEmailTypeDefaults('smtp');
-    setShowImap(false);
     setAddOrEditModalOpen(true);
   };
 
@@ -385,14 +418,17 @@ const MarketingDashboard = () => {
           is_gmail_app_password: d.is_gmail_app_password ?? false,
           is_active: d.is_active ?? true,
           is_default: d.is_default ?? false,
-          enable_imap_sync: d.enable_imap_sync ?? false,
           imap_host: d.imap_host || '',
           imap_port: d.imap_port ?? 993,
           imap_username: d.imap_username || '',
           imap_password: '',
           imap_use_ssl: d.imap_use_ssl ?? true,
         });
-        setShowImap(d.enable_imap_sync ?? false);
+        // Existing account already has these filled in — don't let a later
+        // account-type/email edit during this session silently overwrite them.
+        setUsernameTouched(!!d.smtp_username);
+        setImapHostTouched(!!d.imap_host);
+        setImapUsernameTouched(!!d.imap_username);
       }
     } catch (e) {
       toast({ title: 'Error', description: e?.message || 'Failed to load account', variant: 'destructive' });
@@ -417,6 +453,18 @@ const MarketingDashboard = () => {
       toast({ title: 'Validation', description: 'SMTP password is required for new account.', variant: 'destructive' });
       return;
     }
+    if (!emailForm.imap_host?.trim()) {
+      toast({ title: 'Validation', description: 'IMAP host is required (needed for reply detection).', variant: 'destructive' });
+      return;
+    }
+    if (!emailForm.imap_username?.trim()) {
+      toast({ title: 'Validation', description: 'IMAP username is required (needed for reply detection).', variant: 'destructive' });
+      return;
+    }
+    if (!editingAccountId && !emailForm.imap_password) {
+      toast({ title: 'Validation', description: 'IMAP password is required (needed for reply detection).', variant: 'destructive' });
+      return;
+    }
     setEmailFormLoading(true);
     try {
       const payload = {
@@ -431,7 +479,7 @@ const MarketingDashboard = () => {
         is_gmail_app_password: emailForm.is_gmail_app_password,
         is_active: emailForm.is_active,
         is_default: emailForm.is_default,
-        enable_imap_sync: emailForm.enable_imap_sync,
+        enable_imap_sync: true,
         imap_host: emailForm.imap_host || '',
         imap_port: emailForm.imap_port ? Number(emailForm.imap_port) : null,
         imap_username: emailForm.imap_username || '',
@@ -1366,7 +1414,7 @@ const MarketingDashboard = () => {
                         <Input
                           type="email"
                           value={emailForm.email}
-                          onChange={(e) => setEmailForm((p) => ({ ...p, email: e.target.value }))}
+                          onChange={(e) => handleEmailFieldChange(e.target.value)}
                           placeholder="your@email.com"
                         />
                       </div>
@@ -1414,7 +1462,10 @@ const MarketingDashboard = () => {
                           <Label>SMTP username *</Label>
                           <Input
                             value={emailForm.smtp_username}
-                            onChange={(e) => setEmailForm((p) => ({ ...p, smtp_username: e.target.value }))}
+                            onChange={(e) => {
+                              setUsernameTouched(true);
+                              setEmailForm((p) => ({ ...p, smtp_username: e.target.value }));
+                            }}
                             placeholder="Usually same as email"
                           />
                         </div>
@@ -1441,34 +1492,47 @@ const MarketingDashboard = () => {
                     </div>
                   </div>
 
-                  {/* IMAP — full width below the two columns */}
+                  {/* IMAP — full width below the two columns. Always on: reply
+                      detection requires it, so there's no toggle — just editable
+                      fields, pre-filled from the account type + email. */}
                   <div className="mt-6 pt-4 border-t">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={emailForm.enable_imap_sync}
-                        onChange={(e) => {
-                          setEmailForm((p) => ({ ...p, enable_imap_sync: e.target.checked }));
-                          setShowImap(e.target.checked);
-                        }}
-                      />
-                      <span className="text-sm font-medium">Enable IMAP sync (reply detection)</span>
-                    </label>
-                    {showImap && (
-                      <div className="mt-3 space-y-3">
-                        <Label>IMAP (optional)</Label>
-                        <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-                          <Input placeholder="IMAP host" value={emailForm.imap_host} onChange={(e) => setEmailForm((p) => ({ ...p, imap_host: e.target.value }))} />
-                          <Input type="number" placeholder="Port" value={emailForm.imap_port} onChange={(e) => setEmailForm((p) => ({ ...p, imap_port: e.target.value }))} />
-                          <Input placeholder="IMAP username" value={emailForm.imap_username} onChange={(e) => setEmailForm((p) => ({ ...p, imap_username: e.target.value }))} />
-                          <Input type="password" placeholder="IMAP password" value={emailForm.imap_password} onChange={(e) => setEmailForm((p) => ({ ...p, imap_password: e.target.value }))} />
-                        </div>
-                        <label className="flex items-center gap-2">
-                          <input type="checkbox" checked={emailForm.imap_use_ssl} onChange={(e) => setEmailForm((p) => ({ ...p, imap_use_ssl: e.target.checked }))} />
-                          <span className="text-sm">IMAP use SSL</span>
-                        </label>
+                    <Label className="text-sm font-medium">IMAP settings (reply detection)</Label>
+                    <div className="mt-3 space-y-3">
+                      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+                        <Input
+                          placeholder="IMAP host *"
+                          value={emailForm.imap_host}
+                          onChange={(e) => {
+                            setImapHostTouched(true);
+                            setEmailForm((p) => ({ ...p, imap_host: e.target.value }));
+                          }}
+                        />
+                        <Input
+                          type="number"
+                          placeholder="Port"
+                          value={emailForm.imap_port}
+                          onChange={(e) => setEmailForm((p) => ({ ...p, imap_port: e.target.value }))}
+                        />
+                        <Input
+                          placeholder="IMAP username *"
+                          value={emailForm.imap_username}
+                          onChange={(e) => {
+                            setImapUsernameTouched(true);
+                            setEmailForm((p) => ({ ...p, imap_username: e.target.value }));
+                          }}
+                        />
+                        <Input
+                          type="password"
+                          placeholder={editingAccountId ? 'IMAP password (leave blank to keep)' : 'IMAP password *'}
+                          value={emailForm.imap_password}
+                          onChange={(e) => setEmailForm((p) => ({ ...p, imap_password: e.target.value }))}
+                        />
                       </div>
-                    )}
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={emailForm.imap_use_ssl} onChange={(e) => setEmailForm((p) => ({ ...p, imap_use_ssl: e.target.checked }))} />
+                        <span className="text-sm">IMAP use SSL</span>
+                      </label>
+                    </div>
                   </div>
                 </div>
                 <DialogFooter>

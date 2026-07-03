@@ -357,6 +357,7 @@ urlpatterns = [
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/sequences/(?P<sequence_id>\d+)/update/?$', marketing_agent.update_sequence, name='marketing_update_sequence'),  # PUT/PATCH
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/sequences/(?P<sequence_id>\d+)/delete/?$', marketing_agent.delete_sequence, name='marketing_delete_sequence'),  # POST
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/?$', marketing_agent.create_template, name='marketing_create_template'),  # POST
+    re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/generate/?$', marketing_agent.generate_template_content, name='marketing_generate_template_content'),  # POST
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/update/?$', marketing_agent.update_template, name='marketing_update_template'),  # PUT/PATCH
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/delete/?$', marketing_agent.delete_template, name='marketing_delete_template'),  # POST
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/templates/(?P<template_id>\d+)/test/?$', marketing_agent.test_email_template, name='marketing_test_email_template'),  # POST

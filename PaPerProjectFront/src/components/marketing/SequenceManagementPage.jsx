@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye, Send } from 'lucide-react';
+import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye, Send, AlertCircle } from 'lucide-react';
 import {
   getSequences,
   createSequence,
@@ -34,6 +34,7 @@ import {
   testEmailTemplate,
   getCampaign,
 } from '@/services/marketingAgentService';
+import AddEmailAccountModal from './AddEmailAccountModal';
 
 const MIN_STEP_GAP_MINUTES = 5;
 
@@ -126,6 +127,8 @@ const SequenceManagementPage = ({ embedded = false }) => {
   const { toast } = useToast();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [noEmailAccountDialogOpen, setNoEmailAccountDialogOpen] = useState(false);
+  const [addEmailAccountOpen, setAddEmailAccountOpen] = useState(false);
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
   const [viewTemplateOpen, setViewTemplateOpen] = useState(false);
   const [viewTemplate, setViewTemplate] = useState(null);
@@ -213,6 +216,9 @@ const SequenceManagementPage = ({ embedded = false }) => {
       const res = await getSequences(id);
       if (res?.status === 'success' && res?.data) {
         setData(res.data);
+        if ((res.data.email_accounts?.length ?? 0) === 0) {
+          setNoEmailAccountDialogOpen(true);
+        }
       } else {
         setData({ campaign: null, sequences: [], templates: [], email_accounts: [], has_main_sequence: false });
       }
@@ -592,13 +598,28 @@ const SequenceManagementPage = ({ embedded = false }) => {
         </div>
         {!noData && (
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => setCreateTemplateOpen(true)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (email_accounts.length === 0) {
+                  setNoEmailAccountDialogOpen(true);
+                  return;
+                }
+                setCreateTemplateOpen(true);
+              }}
+              disabled={email_accounts.length === 0}
+              title={email_accounts.length === 0 ? 'Add an email account before creating a template.' : ''}
+            >
               <Mail className="mr-2 h-4 w-4" />
               Create email template
             </Button>
             <Button
               variant="default"
               onClick={() => {
+                if (email_accounts.length === 0) {
+                  setNoEmailAccountDialogOpen(true);
+                  return;
+                }
                 setSequenceForm({
                   name: '',
                   email_account_id: email_accounts?.[0]?.id ? String(email_accounts[0].id) : '',
@@ -610,8 +631,14 @@ const SequenceManagementPage = ({ embedded = false }) => {
                 setStepErrors([]);
                 setCreateSequenceOpen(true);
               }}
-              disabled={has_main_sequence}
-              title={has_main_sequence ? 'Only one main sequence per campaign. Edit or delete the existing one first.' : ''}
+              disabled={has_main_sequence || email_accounts.length === 0}
+              title={
+                email_accounts.length === 0
+                  ? 'Add an email account before creating a sequence.'
+                  : has_main_sequence
+                    ? 'Only one main sequence per campaign. Edit or delete the existing one first.'
+                    : ''
+              }
             >
               <Plus className="mr-2 h-4 w-4" />
               Create sequence
@@ -1374,6 +1401,45 @@ const SequenceManagementPage = ({ embedded = false }) => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* No email accounts at all — block templates/sequences until one is added */}
+      <Dialog
+        open={noEmailAccountDialogOpen}
+        onOpenChange={(open) => {
+          // Not dismissable by clicking away while there's truly no account —
+          // otherwise the user can bypass the block via outside-click/Esc.
+          if (!open && email_accounts.length === 0) return;
+          setNoEmailAccountDialogOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-md" onEscapeKeyDown={(e) => email_accounts.length === 0 && e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              Add an email account first
+            </DialogTitle>
+            <DialogDescription>
+              This campaign has no sender email accounts yet. Add one before creating email
+              templates or sequences — sends need an account to go out from.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setAddEmailAccountOpen(true)}>
+              <Mail className="mr-2 h-4 w-4" />
+              Add email account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AddEmailAccountModal
+        open={addEmailAccountOpen}
+        onOpenChange={setAddEmailAccountOpen}
+        onCreated={() => {
+          setNoEmailAccountDialogOpen(false);
+          fetchData();
+        }}
+      />
     </div>
   );
 };

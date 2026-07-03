@@ -54,6 +54,7 @@ import marketingAgentService from '@/services/marketingAgentService';
 import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 import SequenceManagementPage from './SequenceManagementPage';
 import EmailSendingStatusPage from './EmailSendingStatusPage';
+import AddEmailAccountModal from './AddEmailAccountModal';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
@@ -315,6 +316,8 @@ const CampaignDetail = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const [deleteLeadConfirm, setDeleteLeadConfirm] = useState(null);
+  const [noEmailAccountDialogOpen, setNoEmailAccountDialogOpen] = useState(false);
+  const [addEmailAccountOpen, setAddEmailAccountOpen] = useState(false);
 
   const fetchDetail = useCallback(async (silent = false) => {
     if (!id) return;
@@ -354,6 +357,17 @@ const CampaignDetail = () => {
   useEffect(() => {
     fetchDetail();
   }, [fetchDetail]);
+
+  // Warn immediately on opening a campaign if the company has no sender email
+  // accounts at all — don't wait for the user to hit Launch and discover it there.
+  useEffect(() => {
+    marketingAgentService.listEmailAccounts().then((res) => {
+      if (res?.status === 'success' && Array.isArray(res.data)) {
+        setEmailAccounts(res.data);
+        if (res.data.length === 0) setNoEmailAccountDialogOpen(true);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Auto-refresh Analytics & dashboard every 30 seconds (silent refresh, no loading spinner)
   const POLL_INTERVAL_MS = 30 * 1000;
@@ -1200,6 +1214,49 @@ const CampaignDetail = () => {
         </DialogContent>
       </Dialog>
 
+      {/* No email accounts at all — warn as soon as the campaign page opens */}
+      <Dialog open={noEmailAccountDialogOpen} onOpenChange={setNoEmailAccountDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              Add an email account first
+            </DialogTitle>
+            <DialogDescription>
+              You don't have any sender email accounts yet. An email account is required to
+              launch or schedule this campaign — add one before continuing.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setNoEmailAccountDialogOpen(false)}>
+              Not now
+            </Button>
+            <Button
+              onClick={() => {
+                setNoEmailAccountDialogOpen(false);
+                setAddEmailAccountOpen(true);
+              }}
+            >
+              <Mail className="mr-2 h-4 w-4" />
+              Add email account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AddEmailAccountModal
+        open={addEmailAccountOpen}
+        onOpenChange={setAddEmailAccountOpen}
+        onCreated={(created) => {
+          marketingAgentService.listEmailAccounts().then((res) => {
+            if (res?.status === 'success' && Array.isArray(res.data)) {
+              setEmailAccounts(res.data);
+              if (created?.account_id) setAccountDraftId(String(created.account_id));
+            }
+          }).catch(() => {});
+        }}
+      />
+
       {/* Sending account modal */}
       <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
         <DialogContent className="sm:max-w-md">
@@ -1217,9 +1274,13 @@ const CampaignDetail = () => {
             {emailAccounts.length === 0 ? (
               <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                 No email accounts yet.{' '}
-                <Link to="/marketing/email-accounts" className="underline text-primary">
+                <button
+                  type="button"
+                  className="underline text-primary"
+                  onClick={() => { setAccountOpen(false); setAddEmailAccountOpen(true); }}
+                >
                   Add one first
-                </Link>
+                </button>
                 .
               </div>
             ) : (

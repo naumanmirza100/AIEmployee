@@ -124,7 +124,11 @@
       "Bash(python manage.py makemigrations meeting_agent --name remove_location_from_executivemeeting)",
       "Bash(python manage.py migrate meeting_agent)",
       "Bash(python manage.py shell -c ' *)",
-      "PowerShell(Get-Process python | Where-Object {$_.MainWindowTitle -eq \"\" } | Select-Object Id, ProcessName, CPU)"
+      "PowerShell(Get-Process python | Where-Object {$_.MainWindowTitle -eq \"\" } | Select-Object Id, ProcessName, CPU)",
+      "Bash(node -e ' *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('marketing_agent/agents/outreach_campaign_agent.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('api/views/marketing_agent.py', encoding='utf-8'\\).read\\(\\)\\)\")"
     ]
   }
 }

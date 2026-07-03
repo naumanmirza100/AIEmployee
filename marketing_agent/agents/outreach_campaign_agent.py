@@ -6,7 +6,7 @@ social, paid ads, and partnerships, ensuring consistent messaging and timely exe
 
 from .marketing_base_agent import MarketingBaseAgent
 from typing import Dict, Optional, List
-from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, Lead, EmailSendHistory, Reply
+from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, Lead, EmailSendHistory, Reply, EmailAccount
 from marketing_agent.performance_sync import sync_campaign_performance
 from django.contrib.auth.models import User
 from datetime import datetime, timedelta
@@ -237,6 +237,59 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
             result[str_key] = str(result[str_key]).strip() if result[str_key] else ''
         return result
 
+    def generate_template_content(self, name: str, subject: str, description: str) -> Dict:
+        """
+        Generate an email template's HTML (and plain-text) body from just a name,
+        subject, and short description of what the email should say — the user
+        reviews/edits the result before saving, same pattern as auto_fill_campaign.
+
+        Args:
+            name (str): Template name (context only, not shown in the email)
+            subject (str): Email subject line
+            description (str): What the email should say — goals, tone, key points
+
+        Returns:
+            Dict: { success, html_content, text_content }
+        """
+        self.log_action("Generating template content", {"name": name})
+
+        prompt = f"""Write a marketing email body as clean semantic HTML (no markdown, no code fences).
+
+Template name: {name or 'Untitled'}
+Subject: {subject or 'Untitled'}
+What the email should say: {description or 'Not provided'}
+
+Rules:
+- Use merge-field placeholders where natural: {{{{first_name}}}}, {{{{last_name}}}}, {{{{company}}}}, {{{{job_title}}}}. Always greet with {{{{first_name}}}}.
+- Output ONLY the HTML body content (e.g. <p>, <a>, <strong> tags) — no <html>/<head>/<body> wrapper, no inline <style> blocks, no markdown asterisks.
+- Keep it concise: a greeting, 2-4 short paragraphs or a short list, and a clear call to action.
+- Professional but warm tone unless the description says otherwise."""
+
+        try:
+            html_content = self._call_llm_for_writing(
+                prompt,
+                self.system_prompt,
+                temperature=0.7,
+                max_tokens=1200
+            )
+            html_content = (html_content or '').strip()
+            if html_content.startswith('```'):
+                html_content = re.sub(r'^```[a-zA-Z]*\n?', '', html_content)
+                html_content = re.sub(r'\n?```$', '', html_content).strip()
+            text_content = re.sub(r'<[^>]+>', '', html_content).strip()
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            self.log_action("Error generating template content", {"error": str(e)})
+            return {'success': False, 'error': str(e)}
+
+        return {
+            'success': True,
+            'html_content': html_content,
+            'text_content': text_content,
+        }
+
     def create_multi_channel_campaign(self, user_id: int, campaign_data: Dict,
                                       context: Optional[Dict] = None, leads_file=None) -> Dict:
         """
@@ -299,7 +352,18 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
                     'success': False,
                     'error': 'A campaign with this name already exists. Please choose a different name.',
                 }
-            
+
+            email_account = None
+            email_account_id = campaign_data.get('email_account_id')
+            if email_account_id:
+                try:
+                    email_account = EmailAccount.objects.get(id=email_account_id, owner=user)
+                except EmailAccount.DoesNotExist:
+                    return {
+                        'success': False,
+                        'error': 'Email account not found or not owned by you.',
+                    }
+
             # Create campaign in database with all fields
             campaign = Campaign.objects.create(
                 name=campaign_name,
@@ -322,6 +386,7 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
                 target_audience=campaign_data.get('target_audience', {}),
                 goals=campaign_data.get('goals', {}),
                 channels=campaign_data.get('channels', ['email']),
+                email_account=email_account,
                 owner=user
             )
             

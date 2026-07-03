@@ -2093,6 +2093,55 @@ def delete_sequence(request, campaign_id, sequence_id):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+def generate_template_content(request, campaign_id):
+    """AI-generate an email template's HTML/text body from name + subject + description."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        if not campaign:
+            return Response(
+                {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        data = request.data
+        name = (data.get('name') or '').strip()
+        subject = (data.get('subject') or '').strip()
+        description = (data.get('description') or '').strip()
+        if not description:
+            return Response(
+                {'status': 'error', 'message': 'Description is required.', 'error': 'validation'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        agent = AgentRegistry.get_agent("outreach_campaign")
+        try:
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
+
+        result = agent.generate_template_content(name, subject, description)
+        if result.get('success') is False:
+            return Response(
+                {'status': 'error', 'message': result.get('error') or 'Generation failed', 'error': 'generation_failed'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        return Response({'status': 'success', 'data': result}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.exception("generate_template_content failed")
+        err_msg = _normalize_error_message(e)
+        return Response(
+            {'status': 'error', 'message': err_msg if err_msg == RATE_LIMIT_MESSAGE else 'Template generation failed', 'error': err_msg},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def create_template(request, campaign_id):
     """Create an email template for a campaign."""
     try:

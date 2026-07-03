@@ -6,10 +6,19 @@ import { Label } from '@/components/ui/label';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Megaphone, Send, Upload, CheckCircle, Sparkles } from 'lucide-react';
+import { Loader2, Megaphone, Send, Upload, CheckCircle, Sparkles, Mail, AlertTriangle } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import { parseDateLocal, formatDateLocal } from '@/lib/utils';
+import AddEmailAccountModal from './AddEmailAccountModal';
 
 const ACTIONS = [
   { value: 'design', label: 'Design Campaign' },
@@ -339,6 +348,12 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   const [autoFilling, setAutoFilling] = useState(false);
   const [fieldsRevealed, setFieldsRevealed] = useState(false);
 
+  const [emailAccounts, setEmailAccounts] = useState([]);
+  const [emailAccountsLoading, setEmailAccountsLoading] = useState(true);
+  const [emailAccountId, setEmailAccountId] = useState('');
+  const [noEmailAccountDialogOpen, setNoEmailAccountDialogOpen] = useState(false);
+  const [addEmailAccountOpen, setAddEmailAccountOpen] = useState(false);
+
   useEffect(() => {
     setShowFullDesign(false);
   }, [result, action]);
@@ -357,6 +372,31 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       }
     };
     load();
+  }, []);
+
+  const loadEmailAccounts = async () => {
+    try {
+      const res = await marketingAgentService.listEmailAccounts();
+      const list = res?.status === 'success' && res?.data ? res.data : [];
+      setEmailAccounts(list);
+      if (list.length === 0) {
+        setNoEmailAccountDialogOpen(true);
+      } else {
+        const def = list.find((a) => a.is_default) || list[0];
+        setEmailAccountId(String(def.id));
+      }
+      return list;
+    } catch (e) {
+      console.error('Load email accounts:', e);
+      setEmailAccounts([]);
+      return [];
+    } finally {
+      setEmailAccountsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadEmailAccounts();
   }, []);
 
   useEffect(() => {
@@ -403,6 +443,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     if (language) data.language = language.trim();
     if (startDate) data.start_date = startDate;
     if (endDate) data.end_date = endDate;
+    if (emailAccountId) data.email_account_id = Number(emailAccountId);
     data.goals = {};
     if (data.target_leads) data.goals.leads = data.target_leads;
     if (data.target_conversions) data.goals.conversions = data.target_conversions;
@@ -422,6 +463,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     setDesignReady(false);
     setResult(null);
     setError(null);
+    setFieldsRevealed(true);
   };
 
   const computeDatesFromDuration = () => {
@@ -439,6 +481,23 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   };
 
   const handleAutoFill = async () => {
+    if (campaignSelectRequired && !campaignId) {
+      toast({ title: 'Select a campaign', description: 'Choose a campaign first.', variant: 'destructive' });
+      return;
+    }
+
+    // An existing campaign is selected (Launch/Optimize/Schedule): its fields already
+    // loaded via the effect above — just reveal them for editing, no AI call needed.
+    if (showCampaignSelect && campaignId) {
+      if (showDates) {
+        const { start, end } = computeDatesFromDuration();
+        if (!startDate) setStartDate(start);
+        if (!endDate) setEndDate(end);
+      }
+      setFieldsRevealed(true);
+      return;
+    }
+
     if (!name?.trim()) {
       toast({ title: 'Campaign name required', variant: 'destructive' });
       return;
@@ -457,8 +516,10 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     }
 
     const { start, end } = computeDatesFromDuration();
-    setStartDate(start);
-    setEndDate(end);
+    if (showDates) {
+      setStartDate(start);
+      setEndDate(end);
+    }
 
     setAutoFilling(true);
     setError(null);
@@ -468,8 +529,8 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
         {
           name: nameTrimmed,
           description: description?.trim() || '',
-          start_date: start,
-          end_date: end,
+          start_date: start || '',
+          end_date: end || '',
         }
       );
       if (agentResult?.success === false) {
@@ -486,7 +547,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       if (fields.interests) setInterests(fields.interests);
       if (fields.language) setLanguage(fields.language);
       setFieldsRevealed(true);
-      toast({ title: 'Suggestions ready', description: 'Review and edit the details below, then create the campaign.' });
+      toast({ title: 'Suggestions ready', description: 'Review and edit the details below, then continue.' });
     } catch (err) {
       const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block;
       const msg = isHardBlock
@@ -504,14 +565,16 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     setError(null);
     setResult(null);
 
-    if (action === 'launch' || action === 'optimize' || action === 'schedule') {
-      if (!campaignId) {
-        toast({ title: 'Select a campaign', description: 'Choose a campaign first.', variant: 'destructive' });
-        return;
-      }
+    // Launch/Optimize/Schedule: an existing campaign is optional now — if none is
+    // selected, a new campaign is created from Name/Description/Duration first,
+    // then immediately launched/scheduled.
+    const needsNewCampaign = (action === 'launch' || action === 'schedule') && !campaignId;
+    if (action === 'optimize' && !campaignId) {
+      toast({ title: 'Select a campaign', description: 'Choose a campaign first.', variant: 'destructive' });
+      return;
     }
 
-    if (action === 'design' || action === 'create_multi_channel') {
+    if (action === 'design' || action === 'create_multi_channel' || needsNewCampaign) {
       if (!name?.trim()) {
         toast({ title: 'Campaign name required', variant: 'destructive' });
         return;
@@ -533,7 +596,25 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     setLoading(true);
     try {
       const campaignData = buildCampaignData();
-      const cid = campaignId ? Number(campaignId) : null;
+      let cid = campaignId ? Number(campaignId) : null;
+
+      if (needsNewCampaign) {
+        const createResult = await marketingAgentService.outreachCampaign(
+          'create_multi_channel',
+          campaignData,
+          null,
+          {},
+          leadsFile || undefined
+        );
+        if (createResult?.success === false) {
+          setError(createResult.error || 'Campaign creation failed');
+          toast({ title: 'Error', description: createResult.error, variant: 'destructive' });
+          return;
+        }
+        cid = createResult?.campaign_id;
+        if (onCampaignCreated) onCampaignCreated();
+      }
+
       const file = action === 'create_multi_channel' || action === 'launch' ? leadsFile : null;
 
       const agentResult = await marketingAgentService.outreachCampaign(
@@ -541,7 +622,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
         campaignData,
         cid,
         {},
-        file || undefined
+        needsNewCampaign ? undefined : (file || undefined)
       );
 
       if (agentResult?.success === false) {
@@ -566,6 +647,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   };
 
   const showCampaignSelect = action === 'launch' || action === 'optimize' || action === 'schedule';
+  const campaignSelectRequired = action === 'optimize';
   const showLeadsUpload = action === 'create_multi_channel' || action === 'launch';
   const showDates = action === 'create_multi_channel' || action === 'schedule';
 
@@ -590,7 +672,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label>Action</Label>
-            <Select value={action} onValueChange={(v) => { setAction(v); setResult(null); setError(null); setDesignReady(false); }}>
+            <Select value={action} onValueChange={(v) => { setAction(v); setResult(null); setError(null); setDesignReady(false); setFieldsRevealed(false); }}>
               <SelectTrigger>
                 <SelectValue placeholder="Select action" />
               </SelectTrigger>
@@ -604,12 +686,19 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
 
           {showCampaignSelect && (
             <div className="space-y-2">
-              <Label>Campaign (required)</Label>
-              <Select value={campaignId} onValueChange={setCampaignId} disabled={loadingCampaigns}>
+              <Label>Existing campaign {campaignSelectRequired ? '(required)' : '(optional — leave blank to create a new one)'}</Label>
+              <Select
+                value={campaignId || (campaignSelectRequired ? '' : '__new__')}
+                onValueChange={(v) => { setCampaignId(v === '__new__' ? '' : v); setFieldsRevealed(false); }}
+                disabled={loadingCampaigns}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder={loadingCampaigns ? 'Loading...' : 'Select campaign'} />
                 </SelectTrigger>
                 <SelectContent>
+                  {!campaignSelectRequired && (
+                    <SelectItem value="__new__">Create a new campaign</SelectItem>
+                  )}
                   {campaigns.map((c) => (
                     <SelectItem key={c.id} value={String(c.id)}>{c.name} ({c.status})</SelectItem>
                   ))}
@@ -626,7 +715,8 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 id="camp-name"
                 placeholder="e.g. Summer Sale 2024"
                 value={name}
-                onChange={(e) => { setName(e.target.value); if (action === 'create_multi_channel') setFieldsRevealed(false); }}
+                onChange={(e) => { setName(e.target.value); setFieldsRevealed(false); }}
+                disabled={campaignSelectRequired && !campaignId}
               />
             </div>
             <div className="space-y-2 md:col-span-2">
@@ -635,13 +725,32 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 id="camp-desc"
                 placeholder="Goals and key messaging..."
                 value={description}
-                onChange={(e) => { setDescription(e.target.value); if (action === 'create_multi_channel') setFieldsRevealed(false); }}
+                onChange={(e) => { setDescription(e.target.value); setFieldsRevealed(false); }}
                 rows={2}
+                disabled={campaignSelectRequired && !campaignId}
               />
             </div>
           </div>
 
-          {action === 'create_multi_channel' && !fieldsRevealed && (
+          {emailAccounts.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="email-account">Send from</Label>
+              <Select value={emailAccountId} onValueChange={setEmailAccountId} disabled={emailAccountsLoading}>
+                <SelectTrigger id="email-account">
+                  <SelectValue placeholder="Select email account" />
+                </SelectTrigger>
+                <SelectContent>
+                  {emailAccounts.map((acc) => (
+                    <SelectItem key={acc.id} value={String(acc.id)}>
+                      {acc.name} ({acc.email}){acc.is_default ? ' — Default' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {!fieldsRevealed && (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                 <div className="space-y-2">
@@ -670,11 +779,20 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
               </div>
 
               <div className="flex justify-end">
-                <Button type="button" onClick={handleAutoFill} disabled={autoFilling}>
+                <Button
+                  type="button"
+                  onClick={handleAutoFill}
+                  disabled={autoFilling || (campaignSelectRequired && !campaignId)}
+                >
                   {autoFilling ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       Generating...
+                    </>
+                  ) : showCampaignSelect && campaignId ? (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Show details
                     </>
                   ) : (
                     <>
@@ -687,7 +805,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
             </>
           )}
 
-          {(action !== 'create_multi_channel' || fieldsRevealed) && (
+          {fieldsRevealed && (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -819,7 +937,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 Create Campaign
               </Button>
             </div>
-          ) : (
+          ) : fieldsRevealed ? (
             <div className="flex justify-end">
               <Button type="submit" disabled={loading}>
                 {loading ? (
@@ -830,12 +948,18 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 ) : (
                   <>
                     <Send className="h-4 w-4 mr-2" />
-                    Execute
+                    {action === 'create_multi_channel'
+                      ? 'Create Campaign'
+                      : action === 'launch' && !campaignId
+                        ? 'Create & Launch'
+                        : action === 'schedule' && !campaignId
+                          ? 'Create & Schedule'
+                          : 'Execute'}
                   </>
                 )}
               </Button>
             </div>
-          )}
+          ) : null}
 
         </form>
 
@@ -860,6 +984,45 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
           </div>
         )}
       </CardContent>
+
+      <Dialog open={noEmailAccountDialogOpen} onOpenChange={setNoEmailAccountDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Add an email account first
+            </DialogTitle>
+            <DialogDescription>
+              You don't have any sender email accounts yet. An email account is required to send
+              campaign emails — add one before creating or launching a campaign.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setNoEmailAccountDialogOpen(false)}>
+              Not now
+            </Button>
+            <Button
+              onClick={() => {
+                setNoEmailAccountDialogOpen(false);
+                setAddEmailAccountOpen(true);
+              }}
+            >
+              <Mail className="mr-2 h-4 w-4" />
+              Add email account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AddEmailAccountModal
+        open={addEmailAccountOpen}
+        onOpenChange={setAddEmailAccountOpen}
+        onCreated={(created) => {
+          loadEmailAccounts().then(() => {
+            if (created?.account_id) setEmailAccountId(String(created.account_id));
+          });
+        }}
+      />
     </Card>
   );
 };
