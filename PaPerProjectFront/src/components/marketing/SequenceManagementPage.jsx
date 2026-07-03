@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye, Send, AlertCircle, Sparkles, Upload } from 'lucide-react';
+import { Loader2, ArrowLeft, ListOrdered, Mail, Plus, Pencil, Trash2, BarChart3, Eye, Send, AlertCircle, Sparkles, Upload, ChevronUp, ChevronDown } from 'lucide-react';
 import {
   getSequences,
   createSequence,
@@ -41,6 +41,7 @@ import AddEmailAccountModal from './AddEmailAccountModal';
 import LeadsUploadFields from './LeadsUploadFields';
 
 const MIN_STEP_GAP_MINUTES = 5;
+const DEFAULT_SEQUENCE_EMAIL_COUNT = 3;
 
 /** Merge fields for email templates (lead data). Keys match placeholders e.g. {{first_name}}. */
 const TEMPLATE_MERGE_FIELDS = [
@@ -184,9 +185,27 @@ const SequenceManagementPage = ({ embedded = false }) => {
   });
   const [stepErrors, setStepErrors] = useState([]);
   const [sequenceDescription, setSequenceDescription] = useState('');
-  const [sequenceEmailCount, setSequenceEmailCount] = useState('3');
+  const [sequenceEmailCount, setSequenceEmailCount] = useState(String(DEFAULT_SEQUENCE_EMAIL_COUNT));
   const [generatingSequence, setGeneratingSequence] = useState(false);
   const [sequenceStepLimit, setSequenceStepLimit] = useState(null);
+  // One entry per email slot in the count above. '' means "generate a new
+  // template with AI"; any other value is an existing template's id to reuse
+  // for that slot instead of generating.
+  const [sequenceSlotTemplates, setSequenceSlotTemplates] = useState(
+    Array(DEFAULT_SEQUENCE_EMAIL_COUNT).fill('')
+  );
+  // Once steps are generated, collapse the input panel behind an arrow so the
+  // generated sequence is easy to review — still reopenable to tweak inputs.
+  const [inputPanelOpen, setInputPanelOpen] = useState(true);
+  // Preview of each step's template content (subject/HTML) — each step has its
+  // own independent expand/collapse arrow, tracked by step index.
+  const [expandedStepPreviews, setExpandedStepPreviews] = useState(() => new Set());
+  // Same collapse/expand pattern for the Edit sequence modal — name/account
+  // inputs vs. steps, never shown together.
+  const [editInputPanelOpen, setEditInputPanelOpen] = useState(false);
+  // When generating with AI from the Edit modal: add the new steps after the
+  // existing ones, or replace the existing steps entirely.
+  const [editGenerateMode, setEditGenerateMode] = useState('append');
   const [editingSequenceId, setEditingSequenceId] = useState(null);
   const [detailsSequence, setDetailsSequence] = useState(null);
   const templateHtmlRef = useRef(null);
@@ -266,6 +285,19 @@ const SequenceManagementPage = ({ embedded = false }) => {
     fetchData();
   }, [fetchData]);
 
+  // Keep one slot-template selector per requested email, preserving existing
+  // choices when the count grows/shrinks.
+  useEffect(() => {
+    const count = parseInt(sequenceEmailCount, 10);
+    if (!Number.isFinite(count) || count < 1) return;
+    setSequenceSlotTemplates((prev) => {
+      if (prev.length === count) return prev;
+      const next = prev.slice(0, count);
+      while (next.length < count) next.push('');
+      return next;
+    });
+  }, [sequenceEmailCount]);
+
   const fetchLeadsCount = useCallback(async () => {
     try {
       const res = await getCampaign(id, { detail: 1 });
@@ -304,6 +336,12 @@ const SequenceManagementPage = ({ embedded = false }) => {
 
   const { campaign, sequences = [], templates = [], email_accounts = [], has_main_sequence } = data || {};
 
+  // Sub-sequences are manual-only (no AI step), so their steps show immediately.
+  // A fresh main sequence hides the whole Steps panel/column until AI has
+  // generated them, keeping the create-sequence modal to just the input
+  // fields until then.
+  const stepsVisible = !!sequenceForm.parent_sequence_id || sequenceStepLimit != null;
+
   const handleGenerateTemplateContent = async () => {
     if (!templateDescription?.trim()) {
       toast({ title: 'Validation', description: 'Describe what the email should say first.', variant: 'destructive' });
@@ -338,65 +376,95 @@ const SequenceManagementPage = ({ embedded = false }) => {
     setTemplateDescription('');
   };
 
-  const handleGenerateSequence = async () => {
+  const handleGenerateSequence = async ({ mode = 'replace', silent = false } = {}) => {
     if (!sequenceForm.name?.trim()) {
       toast({ title: 'Validation', description: 'Sequence name is required.', variant: 'destructive' });
-      return;
+      return null;
     }
     const count = parseInt(sequenceEmailCount, 10);
     if (!Number.isFinite(count) || count < 1) {
       toast({ title: 'Validation', description: 'Enter how many emails this sequence should have.', variant: 'destructive' });
-      return;
+      return null;
     }
     setGeneratingSequence(true);
     try {
       const seqName = sequenceForm.name.trim();
       const goal = sequenceDescription.trim() || seqName;
+      const existingSteps = mode === 'append' ? sequenceForm.steps : [];
       const newSteps = [];
-      let cumulativeMinutes = 0;
+      let cumulativeMinutes = existingSteps.length > 0 ? stepTotalMinutes(existingSteps[existingSteps.length - 1]) : 0;
 
       for (let i = 0; i < count; i++) {
         const stepLabel = `Email ${i + 1} of ${count}`;
-        const genRes = await generateTemplateContent(id, {
-          name: `${seqName} — ${stepLabel}`,
-          description: `${stepLabel} in an email follow-up sequence. Sequence goal: ${goal}. ${
-            i === 0
-              ? 'This is the opening email — introduce the topic.'
-              : i === count - 1
-                ? 'This is the final email — a last, polite call to action.'
-                : 'This is a follow-up/reminder email — build on the previous ones without repeating them verbatim.'
-          }`,
-        });
-        if (genRes?.status !== 'success' || !genRes?.data) {
-          throw new Error(genRes?.message || `Failed to generate ${stepLabel}.`);
+        const chosenExistingId = sequenceSlotTemplates[i];
+
+        let templateId;
+        if (chosenExistingId) {
+          // User picked an existing template for this slot — reuse it as-is,
+          // no AI call, no new template created.
+          templateId = chosenExistingId;
+        } else {
+          const genRes = await generateTemplateContent(id, {
+            name: '',
+            description: `${stepLabel} in an email follow-up sequence. Sequence goal: ${goal}. ${
+              i === 0
+                ? 'This is the opening email — introduce the topic.'
+                : i === count - 1
+                  ? 'This is the final email — a last, polite call to action.'
+                  : 'This is a follow-up/reminder email — build on the previous ones without repeating them verbatim.'
+            }`,
+          });
+          if (genRes?.status !== 'success' || !genRes?.data) {
+            throw new Error(genRes?.message || `Failed to generate ${stepLabel}.`);
+          }
+
+          // Derive the template's name from the AI-written subject (same as a
+          // user naming a template after seeing its subject) rather than a
+          // generic sequence-based label — editable afterward either way.
+          const suggestedSubject = (genRes.data.subject || '').trim();
+          const suggestedName = suggestedSubject
+            ? suggestedSubject.slice(0, 60)
+            : `${seqName} — ${stepLabel}`;
+
+          const createRes = await createTemplate(id, {
+            name: suggestedName,
+            subject: suggestedSubject || seqName,
+            html_content: genRes.data.html_content || '',
+          });
+          if (createRes?.status !== 'success' || !createRes?.data?.template_id) {
+            throw new Error(createRes?.message || `Failed to save template for ${stepLabel}.`);
+          }
+          templateId = createRes.data.template_id;
         }
 
-        const createRes = await createTemplate(id, {
-          name: `${seqName} — ${stepLabel}`,
-          subject: genRes.data.subject || seqName,
-          html_content: genRes.data.html_content || '',
-        });
-        if (createRes?.status !== 'success' || !createRes?.data?.template_id) {
-          throw new Error(createRes?.message || `Failed to save template for ${stepLabel}.`);
-        }
-
-        cumulativeMinutes = i === 0 ? MIN_STEP_GAP_MINUTES : cumulativeMinutes + MIN_STEP_GAP_MINUTES;
+        cumulativeMinutes += MIN_STEP_GAP_MINUTES;
         const delay = delayFromTotalMinutes(cumulativeMinutes);
-        newSteps.push({ template_id: String(createRes.data.template_id), ...delay });
+        newSteps.push({ template_id: String(templateId), ...delay });
       }
 
+      const combinedSteps = [...existingSteps, ...newSteps];
       const defaultAccountId = email_accounts.find((a) => a.is_default)?.id ?? email_accounts?.[0]?.id;
+      const resolvedAccountId = sequenceForm.email_account_id || (defaultAccountId ? String(defaultAccountId) : '');
       setSequenceForm((p) => ({
         ...p,
-        email_account_id: p.email_account_id || (defaultAccountId ? String(defaultAccountId) : ''),
-        steps: newSteps,
+        email_account_id: resolvedAccountId,
+        steps: combinedSteps,
       }));
-      setSequenceStepLimit(count);
+      if (mode === 'replace') {
+        setSequenceStepLimit(count);
+        setInputPanelOpen(false);
+      } else {
+        setEditInputPanelOpen(false);
+      }
       setStepErrors([]);
       await fetchData();
-      toast({ title: 'Generated', description: 'Review the steps below, then create the sequence.' });
+      if (!silent) {
+        toast({ title: 'Generated', description: 'Review the steps below, then save.' });
+      }
+      return { steps: combinedSteps, email_account_id: resolvedAccountId };
     } catch (e) {
       toast({ title: 'Error', description: e?.message || 'Failed to generate sequence.', variant: 'destructive' });
+      return null;
     } finally {
       setGeneratingSequence(false);
     }
@@ -579,14 +647,30 @@ const SequenceManagementPage = ({ embedded = false }) => {
       toast({ title: 'Validation', description: 'Sequence name is required.', variant: 'destructive' });
       return;
     }
-    const steps = sequenceForm.steps
+    let rawSteps = sequenceForm.steps;
+    let rawEmailAccountId = sequenceForm.email_account_id;
+    let steps = rawSteps
       .map((s) => ({ ...s, template_id: Number(s.template_id) || null }))
       .filter((s) => s.template_id);
+
+    // User hit "Create sequence" without generating first — auto-generate
+    // using whatever goal/count/slot choices are already filled in, then
+    // continue straight into creating, instead of just erroring out.
+    if (steps.length === 0 && !sequenceForm.parent_sequence_id) {
+      const generated = await handleGenerateSequence({ mode: 'replace', silent: true });
+      if (!generated) return;
+      rawSteps = generated.steps;
+      rawEmailAccountId = generated.email_account_id;
+      steps = rawSteps
+        .map((s) => ({ ...s, template_id: Number(s.template_id) || null }))
+        .filter((s) => s.template_id);
+    }
+
     if (steps.length === 0) {
       toast({ title: 'Validation', description: 'Add at least one step with a template.', variant: 'destructive' });
       return;
     }
-    const { valid, errors } = validateStepDelays(sequenceForm.steps);
+    const { valid, errors } = validateStepDelays(rawSteps);
     if (!valid) {
       setStepErrors(errors);
       const firstMsg = errors.find((e) => e);
@@ -599,7 +683,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
       const isSub = !!sequenceForm.parent_sequence_id;
       const payload = {
         name: sequenceForm.name.trim(),
-        email_account_id: sequenceForm.email_account_id ? Number(sequenceForm.email_account_id) : null,
+        email_account_id: rawEmailAccountId ? Number(rawEmailAccountId) : null,
         is_active: true,
         steps: steps,
       };
@@ -622,8 +706,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
         });
         setStepErrors([]);
         setSequenceDescription('');
-        setSequenceEmailCount('3');
+        setSequenceEmailCount(String(DEFAULT_SEQUENCE_EMAIL_COUNT));
         setSequenceStepLimit(null);
+        setSequenceSlotTemplates(Array(DEFAULT_SEQUENCE_EMAIL_COUNT).fill(''));
+        setInputPanelOpen(true);
+        setExpandedStepPreviews(new Set());
         fetchData();
       } else {
         toast({ title: 'Error', description: res?.message || 'Failed to create sequence.', variant: 'destructive' });
@@ -639,6 +726,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
   const openEditSequence = async (sequenceId) => {
     setEditingSequenceId(sequenceId);
     setEditSequenceOpen(true);
+    setEditInputPanelOpen(false);
+    setEditGenerateMode('append');
+    setSequenceDescription('');
+    setSequenceEmailCount(String(DEFAULT_SEQUENCE_EMAIL_COUNT));
+    setSequenceSlotTemplates(Array(DEFAULT_SEQUENCE_EMAIL_COUNT).fill(''));
     setStepErrors([]);
     try {
       const res = await getSequenceDetails(id, sequenceId);
@@ -673,14 +765,29 @@ const SequenceManagementPage = ({ embedded = false }) => {
       toast({ title: 'Validation', description: 'Sequence name is required.', variant: 'destructive' });
       return;
     }
-    const steps = sequenceForm.steps
+    let rawSteps = sequenceForm.steps;
+    let rawEmailAccountId = sequenceForm.email_account_id;
+    let steps = rawSteps
       .map((s) => ({ ...s, template_id: Number(s.template_id) || null }))
       .filter((s) => s.template_id);
+
+    // Saved with no steps left — auto-generate using whatever goal/count/slot
+    // choices are already filled in, then continue straight into saving.
+    if (steps.length === 0 && !sequenceForm.is_sub_sequence) {
+      const generated = await handleGenerateSequence({ mode: 'append', silent: true });
+      if (!generated) return;
+      rawSteps = generated.steps;
+      rawEmailAccountId = generated.email_account_id;
+      steps = rawSteps
+        .map((s) => ({ ...s, template_id: Number(s.template_id) || null }))
+        .filter((s) => s.template_id);
+    }
+
     if (steps.length === 0) {
       toast({ title: 'Validation', description: 'Add at least one step with a template.', variant: 'destructive' });
       return;
     }
-    const { valid, errors } = validateStepDelays(sequenceForm.steps);
+    const { valid, errors } = validateStepDelays(rawSteps);
     if (!valid) {
       setStepErrors(errors);
       const firstMsg = errors.find((e) => e);
@@ -692,7 +799,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
     try {
       const payload = {
         name: sequenceForm.name.trim(),
-        email_account_id: sequenceForm.email_account_id ? Number(sequenceForm.email_account_id) : null,
+        email_account_id: rawEmailAccountId ? Number(rawEmailAccountId) : null,
         is_active: true,
         steps: steps,
       };
@@ -802,8 +909,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
                 });
                 setStepErrors([]);
                 setSequenceDescription('');
-                setSequenceEmailCount('3');
+                setSequenceEmailCount(String(DEFAULT_SEQUENCE_EMAIL_COUNT));
                 setSequenceStepLimit(null);
+                setSequenceSlotTemplates(Array(DEFAULT_SEQUENCE_EMAIL_COUNT).fill(''));
+                setInputPanelOpen(true);
+                setExpandedStepPreviews(new Set());
                 setCreateSequenceOpen(true);
               }}
               disabled={has_main_sequence || email_accounts.length === 0}
@@ -1316,8 +1426,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
           if (!open) {
             setSequenceForm((p) => ({ ...p, parent_sequence_id: '', interest_level: 'any', is_sub_sequence: false }));
             setSequenceDescription('');
-            setSequenceEmailCount('3');
+            setSequenceEmailCount(String(DEFAULT_SEQUENCE_EMAIL_COUNT));
             setSequenceStepLimit(null);
+            setSequenceSlotTemplates(Array(DEFAULT_SEQUENCE_EMAIL_COUNT).fill(''));
+            setInputPanelOpen(true);
+            setExpandedStepPreviews(new Set());
           }
           setCreateSequenceOpen(open);
         }}
@@ -1332,9 +1445,25 @@ const SequenceManagementPage = ({ embedded = false }) => {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateSequence}>
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 py-4">
-              {/* Left: name, account, AI generation */}
-              <div className="space-y-4 lg:col-span-2">
+            <div className="grid grid-cols-1 gap-6 py-4">
+              {/* Left: name, account, AI generation — collapses behind an
+                  arrow once steps are generated, so the generated sequence
+                  is easy to review. Reopening it shows the inputs full-width
+                  again (same as before generation) and hides the steps, so
+                  the two never share the row. */}
+              {stepsVisible && (
+                <div className="-mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setInputPanelOpen((v) => !v)}
+                    className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {inputPanelOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    {inputPanelOpen ? 'Hide inputs' : 'Show inputs'}
+                  </button>
+                </div>
+              )}
+              <div className={`space-y-4 ${stepsVisible && !inputPanelOpen ? 'hidden' : ''}`}>
                 {sequenceForm.parent_sequence_id && (
                   <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
                     <div>
@@ -1362,13 +1491,31 @@ const SequenceManagementPage = ({ embedded = false }) => {
                     </div>
                   </div>
                 )}
-                <div>
-                  <Label>Sequence name</Label>
-                  <Input
-                    value={sequenceForm.name}
-                    onChange={(e) => setSequenceForm((p) => ({ ...p, name: e.target.value }))}
-                    placeholder={sequenceForm.parent_sequence_id ? 'e.g. Interested follow-up' : 'e.g. Main follow-up sequence'}
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Sequence name</Label>
+                    <Input
+                      value={sequenceForm.name}
+                      onChange={(e) => setSequenceForm((p) => ({ ...p, name: e.target.value }))}
+                      placeholder={sequenceForm.parent_sequence_id ? 'e.g. Interested follow-up' : 'e.g. Main follow-up sequence'}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="seq-email-count">Number of emails</Label>
+                    <Input
+                      id="seq-email-count"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={sequenceEmailCount}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === '') { setSequenceEmailCount(raw); return; }
+                        const n = parseInt(raw, 10);
+                        if (Number.isFinite(n)) setSequenceEmailCount(String(Math.min(10, Math.max(1, n))));
+                      }}
+                    />
+                  </div>
                 </div>
                 <div>
                   <Label>Send from (email account)</Label>
@@ -1406,113 +1553,173 @@ const SequenceManagementPage = ({ embedded = false }) => {
                         rows={4}
                       />
                     </div>
-                    <div className="flex items-end gap-3">
-                      <div className="w-36">
-                        <Label htmlFor="seq-email-count">Number of emails</Label>
-                        <Input
-                          id="seq-email-count"
-                          type="number"
-                          min={1}
-                          max={10}
-                          value={sequenceEmailCount}
-                          onChange={(e) => setSequenceEmailCount(e.target.value)}
-                        />
+                   
+
+                    {templates.length > 0 && (
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">For each email, use an existing template or let AI write a new one</Label>
+                        {sequenceSlotTemplates.map((slotValue, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-14 shrink-0">Email {i + 1}</span>
+                            <Select
+                              value={slotValue || '__generate_new__'}
+                              onValueChange={(v) =>
+                                setSequenceSlotTemplates((prev) =>
+                                  prev.map((s, idx) => (idx === i ? (v === '__generate_new__' ? '' : v) : s))
+                                )
+                              }
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__generate_new__">✨ Generate new with AI</SelectItem>
+                                {templates.map((t) => (
+                                  <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ))}
                       </div>
+                    )}
+
+                    <div className="flex justify-end">
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={handleGenerateSequence}
+                        onClick={() => handleGenerateSequence({ mode: 'replace' })}
                         disabled={generatingSequence}
                       >
                         {generatingSequence ? (
                           <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+                        ) : sequenceStepLimit != null ? (
+                          <><Sparkles className="h-4 w-4 mr-2" /> Re-generate with AI</>
                         ) : (
                           <><Sparkles className="h-4 w-4 mr-2" /> Generate with AI</>
                         )}
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      AI writes and saves a template for each email, then assembles the steps with standard spacing. Review and edit before creating.
+                      For any email left on "Generate new", AI writes and saves a template, then assembles the steps with standard spacing. Review and edit before creating.
                     </p>
                   </div>
                 )}
               </div>
 
-              {/* Right: steps list */}
-              <div className="space-y-2 lg:col-span-3 lg:border-l lg:pl-6">
-                <div className="flex items-center justify-between mb-2">
-                  <Label>Steps</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={addStep}
-                    disabled={sequenceStepLimit != null && sequenceForm.steps.length >= sequenceStepLimit}
-                    title={sequenceStepLimit != null && sequenceForm.steps.length >= sequenceStepLimit ? `Limited to ${sequenceStepLimit} emails (as generated).` : ''}
-                  >
-                    Add step
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mb-2">First step: min 5 min total. Each step: at least 5 min after the previous.</p>
-                <div className="max-h-[480px] overflow-y-auto no-scrollbar pr-1 space-y-3">
-                  {sequenceForm.steps.map((step, idx) => (
-                    <div key={idx} className="flex items-end gap-2 p-3 rounded border bg-muted/20">
-                      <div className="min-w-0 flex-1">
-                        <Label className="text-xs">Template</Label>
-                        <Select
-                          value={step.template_id || '__none__'}
-                          onValueChange={(v) => updateStep(idx, 'template_id', v === '__none__' ? '' : v)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Template" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">—</SelectItem>
-                            {templates.map((t) => (
-                              <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="w-14 shrink-0">
-                        <Label className="text-xs">Days</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={step.delay_days}
-                          onChange={(e) => updateStep(idx, 'delay_days', parseInt(e.target.value, 10) || 0)}
-                        />
-                      </div>
-                      <div className="w-14 shrink-0">
-                        <Label className="text-xs">Hours</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={step.delay_hours}
-                          onChange={(e) => updateStep(idx, 'delay_hours', parseInt(e.target.value, 10) || 0)}
-                        />
-                      </div>
-                      <div className="w-16 shrink-0">
-                        <Label className="text-xs">Mins (≥5)</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={step.delay_minutes}
-                          onChange={(e) => updateStep(idx, 'delay_minutes', parseInt(e.target.value, 10) || 0)}
-                        />
-                      </div>
-                      <div className="shrink-0">
-                        <Button type="button" variant="destructive" size="sm" onClick={() => removeStep(idx)} disabled={sequenceForm.steps.length <= 1}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {stepErrors[idx] && (
-                        <p className="w-full text-xs text-destructive mt-1" role="alert">{stepErrors[idx]}</p>
-                      )}
+              {/* Steps list — absent for a fresh main sequence until AI has
+                  generated them, and hidden again whenever the input panel is
+                  reopened via "Show inputs" (the two are never shown together,
+                  each takes the full width in turn). */}
+              {stepsVisible && !inputPanelOpen && (
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <Label>Steps</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={addStep}
+                        disabled={sequenceStepLimit != null && sequenceForm.steps.length >= sequenceStepLimit}
+                        title={sequenceStepLimit != null && sequenceForm.steps.length >= sequenceStepLimit ? `Limited to ${sequenceStepLimit} emails (as generated).` : ''}
+                      >
+                        Add step
+                      </Button>
                     </div>
-                  ))}
+                    <p className="text-xs text-muted-foreground mb-2">First step: min 5 min total. Each step: at least 5 min after the previous.</p>
+                    <div className="max-h-[480px] overflow-y-auto no-scrollbar pr-1 space-y-3">
+                      {sequenceForm.steps.map((step, idx) => {
+                        const stepTemplate = templates.find((t) => String(t.id) === String(step.template_id));
+                        const isExpanded = expandedStepPreviews.has(idx);
+                        const toggleExpanded = () =>
+                          setExpandedStepPreviews((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(idx)) next.delete(idx);
+                            else next.add(idx);
+                            return next;
+                          });
+                        return (
+                        <div key={idx} className="p-3 rounded border bg-muted/20">
+                          <div className="flex items-end gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <Label className="text-xs">Template</Label>
+                                {stepTemplate && (
+                                  <button
+                                    type="button"
+                                    onClick={toggleExpanded}
+                                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                                  >
+                                    {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                    {isExpanded ? 'Hide' : 'Show'} content
+                                  </button>
+                                )}
+                              </div>
+                              <Select
+                                value={step.template_id || '__none__'}
+                                onValueChange={(v) => updateStep(idx, 'template_id', v === '__none__' ? '' : v)}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Template" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">—</SelectItem>
+                                  {templates.map((t) => (
+                                    <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="w-14 shrink-0">
+                              <Label className="text-xs">Days</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={step.delay_days}
+                                onChange={(e) => updateStep(idx, 'delay_days', parseInt(e.target.value, 10) || 0)}
+                              />
+                            </div>
+                            <div className="w-14 shrink-0">
+                              <Label className="text-xs">Hours</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={step.delay_hours}
+                                onChange={(e) => updateStep(idx, 'delay_hours', parseInt(e.target.value, 10) || 0)}
+                              />
+                            </div>
+                            <div className="w-16 shrink-0">
+                              <Label className="text-xs">Mins (≥5)</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={step.delay_minutes}
+                                onChange={(e) => updateStep(idx, 'delay_minutes', parseInt(e.target.value, 10) || 0)}
+                              />
+                            </div>
+                            <div className="shrink-0">
+                              <Button type="button" variant="destructive" size="sm" onClick={() => removeStep(idx)} disabled={sequenceForm.steps.length <= 1}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          {stepErrors[idx] && (
+                            <p className="text-xs text-destructive mt-1" role="alert">{stepErrors[idx]}</p>
+                          )}
+                          {isExpanded && stepTemplate && (
+                            <div className="mt-2 pt-2 border-t border-border text-xs space-y-1">
+                              <p><span className="text-muted-foreground">Subject:</span> {stepTemplate.subject}</p>
+                              <div className="rounded bg-background/50 p-2 max-h-32 overflow-y-auto no-scrollbar font-mono whitespace-pre-wrap break-words text-muted-foreground">
+                                {stepTemplate.html_content || '(empty)'}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        );
+                      })}
+                    </div>
                 </div>
-              </div>
+              )}
             </div>
             <DialogFooter>
               <Button
@@ -1521,8 +1728,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
                 onClick={() => {
                   setSequenceForm((p) => ({ ...p, parent_sequence_id: '', interest_level: 'any', is_sub_sequence: false }));
                   setSequenceDescription('');
-                  setSequenceEmailCount('3');
+                  setSequenceEmailCount(String(DEFAULT_SEQUENCE_EMAIL_COUNT));
                   setSequenceStepLimit(null);
+                  setSequenceSlotTemplates(Array(DEFAULT_SEQUENCE_EMAIL_COUNT).fill(''));
+                  setInputPanelOpen(true);
+                  setExpandedStepPreviews(new Set());
                   setCreateSequenceOpen(false);
                 }}
               >
@@ -1537,7 +1747,13 @@ const SequenceManagementPage = ({ embedded = false }) => {
       </Dialog>
 
       {/* Edit sequence modal */}
-      <Dialog open={editSequenceOpen} onOpenChange={(open) => { if (!open) setEditingSequenceId(null); setEditSequenceOpen(open); }}>
+      <Dialog
+        open={editSequenceOpen}
+        onOpenChange={(open) => {
+          if (!open) { setEditingSequenceId(null); setEditInputPanelOpen(false); }
+          setEditSequenceOpen(open);
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{sequenceForm.is_sub_sequence ? 'Edit sub-sequence' : 'Edit sequence'}</DialogTitle>
@@ -1549,58 +1765,164 @@ const SequenceManagementPage = ({ embedded = false }) => {
           </DialogHeader>
           <form onSubmit={handleUpdateSequence}>
             <div className="space-y-4 py-4">
-              {sequenceForm.is_sub_sequence && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4">
-                  <p className="text-sm font-medium text-foreground">Sub-sequence</p>
-                  <p className="text-xs text-muted-foreground mt-1 mb-3">Parent: main sequence (triggered by replies).</p>
-                  <div>
-                    <Label className="text-foreground">Reply interest level</Label>
-                    <Select
-                      value={sequenceForm.interest_level || 'any'}
-                      onValueChange={(v) => setSequenceForm((p) => ({ ...p, interest_level: v }))}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {INTEREST_LEVEL_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {/* Inputs vs. steps toggle — same collapse pattern as Create
+                  sequence: only one of the two shows at a time, full width. */}
+              <button
+                type="button"
+                onClick={() => setEditInputPanelOpen((v) => !v)}
+                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {editInputPanelOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {editInputPanelOpen ? 'Hide inputs' : 'Show inputs'}
+              </button>
+
+              <div className={editInputPanelOpen ? 'space-y-4' : 'hidden'}>
+                {sequenceForm.is_sub_sequence && (
+                  <div className="rounded-lg border border-border bg-muted/30 p-4">
+                    <p className="text-sm font-medium text-foreground">Sub-sequence</p>
+                    <p className="text-xs text-muted-foreground mt-1 mb-3">Parent: main sequence (triggered by replies).</p>
+                    <div>
+                      <Label className="text-foreground">Reply interest level</Label>
+                      <Select
+                        value={sequenceForm.interest_level || 'any'}
+                        onValueChange={(v) => setSequenceForm((p) => ({ ...p, interest_level: v }))}
+                      >
+                        <SelectTrigger className="mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {INTEREST_LEVEL_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
+                )}
+                <div>
+                  <Label>Sequence name</Label>
+                  <Input
+                    value={sequenceForm.name}
+                    onChange={(e) => setSequenceForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="Sequence name"
+                  />
                 </div>
-              )}
-              <div>
-                <Label>Sequence name</Label>
-                <Input
-                  value={sequenceForm.name}
-                  onChange={(e) => setSequenceForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="Sequence name"
-                />
+                <div>
+                  <Label>Send from (email account)</Label>
+                  <Select
+                    value={sequenceForm.email_account_id || '__none__'}
+                    onValueChange={(v) => setSequenceForm((p) => ({ ...p, email_account_id: v === '__none__' ? '' : v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">
+                        {campaign?.email_account_email
+                          ? `Use campaign default (${campaign.email_account_email})`
+                          : 'No account'}
+                      </SelectItem>
+                      {email_accounts.map((a) => (
+                        <SelectItem key={a.id} value={String(a.id)}>{a.email}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {!sequenceForm.is_sub_sequence && (
+                  <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                    <div>
+                      <Label htmlFor="edit-seq-description">Sequence goal (optional — for AI generation)</Label>
+                      <Textarea
+                        id="edit-seq-description"
+                        value={sequenceDescription}
+                        onChange={(e) => setSequenceDescription(e.target.value)}
+                        placeholder="e.g. Onboarding follow-up encouraging new users to complete setup and book a demo."
+                        rows={4}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label htmlFor="edit-seq-email-count">Number of new emails</Label>
+                        <Input
+                          id="edit-seq-email-count"
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={sequenceEmailCount}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (raw === '') { setSequenceEmailCount(raw); return; }
+                            const n = parseInt(raw, 10);
+                            if (Number.isFinite(n)) setSequenceEmailCount(String(Math.min(10, Math.max(1, n))));
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="edit-seq-mode">Add or replace</Label>
+                        <Select value={editGenerateMode} onValueChange={setEditGenerateMode}>
+                          <SelectTrigger id="edit-seq-mode">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="append">Add after existing steps</SelectItem>
+                            <SelectItem value="replace">Replace existing steps</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {templates.length > 0 && (
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">For each new email, use an existing template or let AI write a new one</Label>
+                        {sequenceSlotTemplates.map((slotValue, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-14 shrink-0">Email {i + 1}</span>
+                            <Select
+                              value={slotValue || '__generate_new__'}
+                              onValueChange={(v) =>
+                                setSequenceSlotTemplates((prev) =>
+                                  prev.map((s, idx) => (idx === i ? (v === '__generate_new__' ? '' : v) : s))
+                                )
+                              }
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__generate_new__">✨ Generate new with AI</SelectItem>
+                                {templates.map((t) => (
+                                  <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => handleGenerateSequence({ mode: editGenerateMode })}
+                        disabled={generatingSequence}
+                      >
+                        {generatingSequence ? (
+                          <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+                        ) : (
+                          <><Sparkles className="h-4 w-4 mr-2" /> Generate with AI</>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      For any email left on "Generate new", AI writes and saves a template, then assembles the steps with standard spacing. Review and edit before saving.
+                    </p>
+                  </div>
+                )}
               </div>
-              <div>
-                <Label>Send from (email account)</Label>
-                <Select
-                  value={sequenceForm.email_account_id || '__none__'}
-                  onValueChange={(v) => setSequenceForm((p) => ({ ...p, email_account_id: v === '__none__' ? '' : v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select account" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">
-                      {campaign?.email_account_email
-                        ? `Use campaign default (${campaign.email_account_email})`
-                        : 'No account'}
-                    </SelectItem>
-                    {email_accounts.map((a) => (
-                      <SelectItem key={a.id} value={String(a.id)}>{a.email}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
+
+              <div className={editInputPanelOpen ? 'hidden' : ''}>
                 <div className="flex items-center justify-between mb-2">
                   <Label>Steps</Label>
                   <Button type="button" variant="outline" size="sm" onClick={addStep}>
@@ -1665,7 +1987,15 @@ const SequenceManagementPage = ({ embedded = false }) => {
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditSequenceOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingSequenceId(null);
+                  setEditInputPanelOpen(false);
+                  setEditSequenceOpen(false);
+                }}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={actionLoading}>
