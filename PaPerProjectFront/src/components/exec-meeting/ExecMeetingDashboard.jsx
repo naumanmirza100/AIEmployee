@@ -1515,9 +1515,14 @@ const ExecMeetingDashboard = () => {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-white font-semibold">All Meetings</h3>
-        <Button size="sm" onClick={() => setShowMeetingDialog(true)}>
-          <Plus className="h-4 w-4 mr-1" /> Schedule
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={loadMeetings} disabled={meetingsLoading} className="text-white/40 hover:text-white">
+            <RefreshCw className={`h-3.5 w-3.5 ${meetingsLoading ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button size="sm" onClick={() => setShowMeetingDialog(true)}>
+            <Plus className="h-4 w-4 mr-1" /> Schedule
+          </Button>
+        </div>
       </div>
       {meetingsLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
@@ -1761,6 +1766,9 @@ const ExecMeetingDashboard = () => {
       <div className="flex items-center justify-between">
         <h3 className="text-white font-semibold">Tasks</h3>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={loadTasks} disabled={tasksLoading} className="text-white/40 hover:text-white">
+            <RefreshCw className={`h-3.5 w-3.5 ${tasksLoading ? 'animate-spin' : ''}`} />
+          </Button>
           <Button size="sm" variant="outline"
             onClick={runAiPrioritize} disabled={prioritizeLoading || tasks.length === 0}
             className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs gap-1.5">
@@ -1887,30 +1895,48 @@ const ExecMeetingDashboard = () => {
               AI analyses your meetings and tasks and builds an optimized schedule for the week.
             </p>
           </div>
-          <Button onClick={async () => {
-            setWeekPlanLoading(true);
-            try {
-              const today = new Date();
-              const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-              const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart });
-              console.log('[WeekPlan] response:', res);
-              const plan = res.plan || res;
-              setWeekPlan(plan);
-              if (!plan || (!plan.daily_plans?.length && !plan.weekly_summary)) {
-                toast({ title: 'Plan generated but empty', description: 'No meetings or tasks found for this week. Add some first!', variant: 'destructive' });
-              } else {
-                toast({ title: 'Week plan ready!' });
+          <div className="flex items-center gap-2">
+            {weekPlan && (
+              <Button size="sm" variant="ghost" onClick={async () => {
+                setWeekPlanLoading(true);
+                try {
+                  const today = new Date();
+                  const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+                  const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart });
+                  setWeekPlan(res.plan || res);
+                  toast({ title: 'Plan refreshed!' });
+                } catch (err) {
+                  toast({ title: 'Refresh failed', description: err.message, variant: 'destructive' });
+                } finally { setWeekPlanLoading(false); }
+              }} disabled={weekPlanLoading} className="text-white/40 hover:text-white">
+                <RefreshCw className={`h-3.5 w-3.5 ${weekPlanLoading ? 'animate-spin' : ''}`} />
+              </Button>
+            )}
+            <Button onClick={async () => {
+              setWeekPlanLoading(true);
+              try {
+                const today = new Date();
+                const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+                const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart });
+                console.log('[WeekPlan] response:', res);
+                const plan = res.plan || res;
+                setWeekPlan(plan);
+                if (!plan || (!plan.daily_plans?.length && !plan.weekly_summary)) {
+                  toast({ title: 'Plan generated but empty', description: 'No meetings or tasks found for this week. Add some first!', variant: 'destructive' });
+                } else {
+                  toast({ title: 'Week plan ready!' });
+                }
+              } catch (err) {
+                console.error('[WeekPlan] error:', err);
+                toast({ title: 'Planning failed', description: err?.data?.message || err.message || 'Unknown error', variant: 'destructive' });
+              } finally {
+                setWeekPlanLoading(false);
               }
-            } catch (err) {
-              console.error('[WeekPlan] error:', err);
-              toast({ title: 'Planning failed', description: err?.data?.message || err.message || 'Unknown error', variant: 'destructive' });
-            } finally {
-              setWeekPlanLoading(false);
-            }
-          }} disabled={weekPlanLoading}>
-            {weekPlanLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarDays className="h-4 w-4 mr-2" />}
-            {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
-          </Button>
+            }} disabled={weekPlanLoading}>
+              {weekPlanLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarDays className="h-4 w-4 mr-2" />}
+              {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
+            </Button>
+          </div>
         </div>
 
         {/* Settings row */}
@@ -2440,10 +2466,12 @@ const ExecMeetingDashboard = () => {
           </>
         )}
 
-        <Button onClick={generateAiDoc} disabled={aiDocLoading}>
-          {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
-          {aiDocLoading ? 'Generating…' : 'Generate & Save'}
-        </Button>
+        <div className="flex justify-end">
+          <Button onClick={generateAiDoc} disabled={aiDocLoading}>
+            {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
+            {aiDocLoading ? 'Generating…' : 'Generate & Save'}
+          </Button>
+        </div>
       </div>
 
       {/* Saved documents list */}
