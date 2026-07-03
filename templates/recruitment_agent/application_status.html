@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Status</title>
+    <style>
+        :root {
+            --bg-primary: #0f0f23;
+            --bg-card: #1a1a2e;
+            --bg-panel: #16213e;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --text-muted: #707070;
+            --purple-primary: #6366f1;
+            --purple-light: #818cf8;
+            --purple-dark: #4f46e5;
+            --border-color: #2d2d44;
+            --accent-success: #10b981;
+            --accent-danger: #ef4444;
+            --accent-warning: #f59e0b;
+            --accent-blue: #3b82f6;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 32px 16px 64px;
+        }
+        .container { width: 100%; max-width: 600px; }
+
+        /* Header */
+        .page-header { text-align: center; margin-bottom: 32px; }
+        .logo-icon {
+            width: 64px; height: 64px;
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            border-radius: 16px;
+            display: inline-flex; align-items: center; justify-content: center;
+            margin-bottom: 16px;
+            font-size: 28px;
+        }
+        .page-header h1 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+        .page-header p { font-size: 14px; color: var(--text-secondary); }
+
+        /* Card */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 16px;
+        }
+        .card-title {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1px; color: var(--purple-light); margin-bottom: 18px;
+        }
+
+        /* Candidate info */
+        .info-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .info-value { font-size: 14px; color: var(--text-primary); font-weight: 500; text-align: right; }
+
+        /* Status badge */
+        .status-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 16px; border-radius: 999px;
+            font-size: 13px; font-weight: 600;
+        }
+        .status-badge .dot { width: 7px; height: 7px; border-radius: 50%; }
+        .status-blue  { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+        .status-blue  .dot { background: #60a5fa; }
+        .status-green { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+        .status-green .dot { background: #34d399; }
+        .status-yellow{ background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+        .status-yellow .dot { background: #fbbf24; }
+        .status-red   { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+        .status-red   .dot { background: #f87171; }
+
+        /* Timeline */
+        .timeline { list-style: none; position: relative; padding-left: 24px; }
+        .timeline::before { content:''; position:absolute; left:7px; top:0; bottom:0; width:2px; background: var(--border-color); }
+        .timeline-item { position: relative; padding-bottom: 20px; }
+        .timeline-item:last-child { padding-bottom: 0; }
+        .timeline-dot {
+            position: absolute; left: -20px; top: 3px;
+            width: 14px; height: 14px; border-radius: 50%;
+            background: var(--border-color); border: 2px solid var(--bg-card);
+        }
+        .timeline-dot.active { background: var(--purple-primary); }
+        .timeline-dot.done   { background: var(--accent-success); }
+        .timeline-label { font-size: 13px; color: var(--text-secondary); }
+        .timeline-label.active { color: var(--text-primary); font-weight: 600; }
+        .timeline-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+        /* Interview card */
+        .interview-card {
+            background: rgba(99,102,241,0.08);
+            border: 1px solid rgba(99,102,241,0.25);
+            border-radius: 12px; padding: 18px;
+        }
+        .interview-card .label { font-size: 11px; color: var(--purple-light); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; font-weight: 700; }
+
+        /* Error state */
+        .error-card { text-align: center; padding: 48px 28px; }
+        .error-icon { font-size: 48px; margin-bottom: 16px; }
+        .error-card h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+        .error-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+
+        /* Refresh note */
+        .refresh-note { text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 20px; }
+        .refresh-note a { color: var(--purple-light); text-decoration: none; }
+        .refresh-note a:hover { text-decoration: underline; }
+
+        @media (max-width: 480px) {
+            .info-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+            .info-value { text-align: left; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="logo-icon">📋</div>
+        <h1>Application Tracker</h1>
+        <p>Track your job application status in real time</p>
+    </div>
+
+    {% if invalid_token %}
+    <!-- Invalid Token -->
+    <div class="card error-card">
+        <div class="error-icon">🔗</div>
+        <h2>Invalid Link</h2>
+        <p>{{ error }}</p>
+    </div>
+
+    {% else %}
+    <!-- Candidate & Job Info -->
+    <div class="card">
+        <div class="card-title">Your Application</div>
+        <div class="info-row">
+            <span class="info-label">Name</span>
+            <span class="info-value">{{ application.first_name }} {{ application.last_name }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Email</span>
+            <span class="info-value">{{ application.email }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Position</span>
+            <span class="info-value">{{ job.title }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Applied On</span>
+            <span class="info-value">{{ application.applied_at|date:"d M Y" }}</span>
+        </div>
+        <div class="info-row" style="border-bottom:none;">
+            <span class="info-label">Status</span>
+            <span>
+                <span class="status-badge status-{{ status_color }}">
+                    <span class="dot"></span>{{ status_label }}
+                </span>
+            </span>
+        </div>
+    </div>
+
+    <!-- Progress Timeline -->
+    <div class="card">
+        <div class="card-title">Application Journey</div>
+        <ul class="timeline">
+            <li class="timeline-item">
+                <span class="timeline-dot done"></span>
+                <div class="timeline-label active">Application Submitted</div>
+                <div class="timeline-sub">{{ application.applied_at|date:"d M Y, g:i A" }}</div>
+            </li>
+            <li class="timeline-item">
+                <span class="timeline-dot {% if application.status != 'pending' %}done{% elif application.status == 'pending' %}active{% endif %}"></span>
+                <div class="timeline-label {% if application.status != 'pending' %}active{% endif %}">
+                    Under Review
+                </div>
+                <div class="timeline-sub">CV being reviewed by recruiter</div>
+            </li>
+            <li class="timeline-item">
+                <span class="timeline-dot {% if application.status == 'shortlisted' or interview %}done{% endif %}"></span>
+                <div class="timeline-label {% if application.status == 'shortlisted' or interview %}active{% endif %}">
+                    Shortlisted
+                </div>
+                <div class="timeline-sub">Selected for further evaluation</div>
+            </li>
+            <li class="timeline-item">
+                <span class="timeline-dot {% if interview %}{% if interview.status == 'SCHEDULED' or interview.status == 'COMPLETED' %}done{% else %}active{% endif %}{% endif %}"></span>
+                <div class="timeline-label {% if interview %}active{% endif %}">Interview</div>
+                <div class="timeline-sub">
+                    {% if interview %}
+                        {{ interview_status_label }}
+                        {% if interview.scheduled_datetime %} — {{ interview.scheduled_datetime|date:"d M Y, g:i A" }}{% endif %}
+                    {% else %}
+                        Pending shortlisting
+                    {% endif %}
+                </div>
+            </li>
+            <li class="timeline-item">
+                <span class="timeline-dot {% if interview and interview.status == 'COMPLETED' %}done{% endif %}"></span>
+                <div class="timeline-label">Final Decision</div>
+                <div class="timeline-sub">Offer or outcome communicated</div>
+            </li>
+        </ul>
+    </div>
+
+    <!-- Interview Details (if exists) -->
+    {% if interview %}
+    <div class="card">
+        <div class="card-title">Interview Details</div>
+        <div class="interview-card">
+            <div class="label">Interview</div>
+            <div class="info-row" style="border-bottom:none;padding:0;">
+                <span class="info-label">Type</span>
+                <span class="info-value">{{ interview.interview_type|default:"—" }}</span>
+            </div>
+            {% if interview.scheduled_datetime %}
+            <div class="info-row" style="padding-top:8px;border-bottom:none;">
+                <span class="info-label">Scheduled</span>
+                <span class="info-value">{{ interview.scheduled_datetime|date:"d M Y, g:i A" }}</span>
+            </div>
+            {% endif %}
+            {% if interview.meeting_link %}
+            <div style="margin-top:14px;">
+                <a href="{{ interview.meeting_link }}" target="_blank" style="display:inline-block;background:var(--purple-primary);color:#fff;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;">
+                    Join Meeting
+                </a>
+            </div>
+            {% endif %}
+            {% if interview.status == 'PENDING' and interview.confirmation_token %}
+            <div style="margin-top:14px;">
+                <a href="/recruitment/interview/select/{{ interview.confirmation_token }}/" style="display:inline-block;background:var(--accent-success);color:#fff;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;">
+                    Select Interview Slot
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <p class="refresh-note">
+        Status is updated automatically. <a href="">Refresh this page</a> to see the latest status.
+    </p>
+    {% endif %}
+
+</div>
+</body>
+</html>

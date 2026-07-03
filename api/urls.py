@@ -54,6 +54,9 @@ urlpatterns = [
     # Public Job Application (no auth required)
     re_path(r'^public/jobs/(?P<job_id>\d+)/?$', public_jobs.public_job_detail, name='public_job_detail'),
     re_path(r'^public/jobs/(?P<job_id>\d+)/apply/?$', public_jobs.public_job_apply, name='public_job_apply'),
+    re_path(r'^public/applications/track/(?P<token>[^/]+)/?$', public_jobs.public_track_application, name='public_track_application'),
+    re_path(r'^public/candidate/request-access/?$', public_jobs.request_candidate_portal_access, name='request_candidate_portal_access'),
+    re_path(r'^public/candidate/portal/(?P<token>[^/]+)/?$', public_jobs.candidate_portal_data, name='candidate_portal_data'),
     
     # Authentication endpoints
     re_path(r'^auth/register/?$', auth.register, name='register'),

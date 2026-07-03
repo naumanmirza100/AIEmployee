@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Received</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f0f5;font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f0f5;padding:40px 16px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="background:linear-gradient(135deg,#6366f1,#4f46e5);padding:40px 40px 32px;text-align:center;">
+                            <div style="width:64px;height:64px;background:rgba(255,255,255,0.2);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;">
+                                <img src="https://img.icons8.com/fluency/48/ok--v1.png" alt="" width="36" height="36" style="display:block;" />
+                            </div>
+                            <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.3px;">Application Received!</h1>
+                            <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:14px;">We've got your application and will review it shortly</p>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding:36px 40px 20px;">
+                            <p style="margin:0 0 20px;font-size:16px;color:#1a1a2e;line-height:1.6;">Dear <strong>{{ candidate_name }}</strong>,</p>
+                            <p style="margin:0 0 24px;font-size:15px;color:#444;line-height:1.7;">
+                                Thank you for applying for the <strong style="color:#4f46e5;">{{ job_title }}</strong> position. Your application has been received and is currently under review by our team.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Details Card -->
+                    <tr>
+                        <td style="padding:0 40px 24px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8f7ff;border-radius:12px;border:1px solid #e8e5ff;">
+                                <tr>
+                                    <td style="padding:20px 24px 8px;">
+                                        <p style="margin:0;font-size:13px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:0.8px;">Application Details</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:12px 24px 20px;">
+                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td style="padding:8px 0;border-bottom:1px solid #ede9fe;">
+                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Position Applied For</span>
+                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ job_title }}</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:8px 0;">
+                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Current Status</span>
+                                                    <span style="font-size:15px;color:#10b981;font-weight:600;display:block;margin-top:2px;">Under Review</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Track Button -->
+                    {% if tracking_url %}
+                    <tr>
+                        <td style="padding:4px 40px 32px;text-align:center;">
+                            <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
+                                Use the button below to track your application status at any time — no login required.
+                            </p>
+                            <a href="{{ tracking_url }}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 32px;border-radius:10px;letter-spacing:0.2px;">
+                                Track My Application
+                            </a>
+                            <p style="margin:16px 0 0;font-size:12px;color:#999;">
+                                Or copy this link: <a href="{{ tracking_url }}" style="color:#6366f1;word-break:break-all;">{{ tracking_url }}</a>
+                            </p>
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- What's Next -->
+                    <tr>
+                        <td style="padding:0 40px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border-radius:12px;border:1px solid #bbf7d0;">
+                                <tr>
+                                    <td style="padding:20px 24px;">
+                                        <p style="margin:0 0 12px;font-size:13px;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:0.8px;">What happens next?</p>
+                                        <ul style="margin:0;padding-left:20px;font-size:14px;color:#444;line-height:1.9;">
+                                            <li>Our team will review your application</li>
+                                            <li>If shortlisted, you will receive an interview invitation email</li>
+                                            <li>You can track your status anytime using the link above</li>
+                                        </ul>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background:#f8f7ff;padding:20px 40px;text-align:center;border-top:1px solid #ede9fe;">
+                            <p style="margin:0;font-size:12px;color:#999;line-height:1.6;">
+                                This is an automated confirmation. Please do not reply to this email.<br>
+                                If you have questions, contact the recruiter directly.
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>

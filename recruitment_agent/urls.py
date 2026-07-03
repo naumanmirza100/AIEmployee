@@ -22,6 +22,8 @@ urlpatterns = [
     path('api/job-descriptions/<int:job_description_id>/delete/', views.delete_job_description, name='delete_job_description'),
     # Public candidate slot selection page (no auth required)
     path('interview/select/<str:token>/', views.candidate_select_slot, name='candidate_select_slot'),
+    # Public application status / tracking page (no auth required)
+    path('application/track/<str:token>/', views.candidate_application_status, name='candidate_application_status'),
     path('api/interview/available-slots/<str:token>/', views.get_available_slots_for_interview, name='get_available_slots_for_interview'),
     # Debug: View parsed CV data
     path('debug/parsed/<int:cv_id>/', views.view_parsed_cv, name='view_parsed_cv'),
