@@ -767,12 +767,29 @@ const SequenceManagementPage = ({ embedded = false }) => {
     }
     let rawSteps = sequenceForm.steps;
     let rawEmailAccountId = sequenceForm.email_account_id;
+
+    // The per-slot "use existing template" pickers only ever get applied when
+    // "Generate with AI" is clicked — but any slot pointed at an existing
+    // template needs no AI call at all. Apply those picks directly here so
+    // hitting Save alone (without Generate) still uses them, instead of
+    // silently discarding the selection.
+    const chosenExistingIds = sequenceSlotTemplates.filter(Boolean);
+    if (chosenExistingIds.length > 0 && !sequenceForm.is_sub_sequence) {
+      const existingSteps = editGenerateMode === 'append' ? rawSteps.filter((s) => s.template_id) : [];
+      let cumulativeMinutes = existingSteps.length > 0 ? stepTotalMinutes(existingSteps[existingSteps.length - 1]) : 0;
+      const pickedSteps = chosenExistingIds.map((templateId) => {
+        cumulativeMinutes += MIN_STEP_GAP_MINUTES;
+        return { template_id: templateId, ...delayFromTotalMinutes(cumulativeMinutes) };
+      });
+      rawSteps = [...existingSteps, ...pickedSteps];
+    }
+
     let steps = rawSteps
       .map((s) => ({ ...s, template_id: Number(s.template_id) || null }))
       .filter((s) => s.template_id);
 
-    // Saved with no steps left — auto-generate using whatever goal/count/slot
-    // choices are already filled in, then continue straight into saving.
+    // Still nothing to save — auto-generate (AI writes new templates) using
+    // whatever goal/count is already filled in, then continue into saving.
     if (steps.length === 0 && !sequenceForm.is_sub_sequence) {
       const generated = await handleGenerateSequence({ mode: 'append', silent: true });
       if (!generated) return;
@@ -1931,8 +1948,8 @@ const SequenceManagementPage = ({ embedded = false }) => {
                 </div>
                 <p className="text-xs text-muted-foreground mb-2">First step: min 5 min total. Each step: at least 5 min after the previous.</p>
                 {sequenceForm.steps.map((step, idx) => (
-                  <div key={idx} className="flex flex-wrap items-end gap-2 mb-3 p-3 rounded border bg-muted/20">
-                    <div className="w-[180px]">
+                  <div key={idx} className="flex items-end gap-2 mb-3 p-3 rounded border bg-muted/20">
+                    <div className="min-w-0 flex-1">
                       <Label className="text-xs">Template</Label>
                       <Select
                         value={step.template_id || '__none__'}
@@ -1949,7 +1966,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="w-20">
+                    <div className="w-14 shrink-0">
                       <Label className="text-xs">Days</Label>
                       <Input
                         type="number"
@@ -1958,7 +1975,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                         onChange={(e) => updateStep(idx, 'delay_days', parseInt(e.target.value, 10) || 0)}
                       />
                     </div>
-                    <div className="w-20">
+                    <div className="w-14 shrink-0">
                       <Label className="text-xs">Hours</Label>
                       <Input
                         type="number"
@@ -1967,7 +1984,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                         onChange={(e) => updateStep(idx, 'delay_hours', parseInt(e.target.value, 10) || 0)}
                       />
                     </div>
-                    <div className="w-20">
+                    <div className="w-16 shrink-0">
                       <Label className="text-xs">Mins (≥5)</Label>
                       <Input
                         type="number"
@@ -1976,9 +1993,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
                         onChange={(e) => updateStep(idx, 'delay_minutes', parseInt(e.target.value, 10) || 0)}
                       />
                     </div>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => removeStep(idx)} disabled={sequenceForm.steps.length <= 1}>
-                      Remove
-                    </Button>
+                    <div className="shrink-0">
+                      <Button type="button" variant="destructive" size="sm" onClick={() => removeStep(idx)} disabled={sequenceForm.steps.length <= 1}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                     {stepErrors[idx] && (
                       <p className="w-full text-xs text-destructive mt-1" role="alert">{stepErrors[idx]}</p>
                     )}

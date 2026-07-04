@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +21,7 @@ const PAGE_SIZE = 10;
 
 const Campaigns = ({ onRefresh }) => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -173,11 +175,15 @@ const Campaigns = ({ onRefresh }) => {
               const isActive = campaign.status === 'active';
               const isChecked = selected.has(campaign.id);
               return (
-                <Card key={campaign.id} className={`border-white/10 bg-black/20 backdrop-blur-sm transition-colors ${isChecked ? 'ring-1 ring-primary' : ''}`}>
+                <Card
+                  key={campaign.id}
+                  onClick={() => navigate(`/marketing/dashboard/campaign/${campaign.id}`)}
+                  className={`border-white/10 bg-black/20 backdrop-blur-sm transition-colors cursor-pointer hover:bg-white/[0.03] ${isChecked ? 'ring-1 ring-primary' : ''}`}
+                >
                   <CardHeader>
                     <div className="flex justify-between items-start">
                       <div className="flex items-start gap-3">
-                        <div className="pt-1">
+                        <div className="pt-1" onClick={(e) => e.stopPropagation()}>
                           <Checkbox
                             checked={isChecked}
                             onCheckedChange={() => toggleSelect(campaign.id)}

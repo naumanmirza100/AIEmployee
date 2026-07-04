@@ -129,7 +129,8 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('marketing_agent/agents/outreach_campaign_agent.py', encoding='utf-8'\\).read\\(\\)\\)\")",
       "Bash(python -c ' *)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('api/views/marketing_agent.py', encoding='utf-8'\\).read\\(\\)\\)\")",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(python manage.py shell)"
     ]
   }
 }
