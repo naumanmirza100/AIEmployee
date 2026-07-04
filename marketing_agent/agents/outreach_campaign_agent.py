@@ -6,11 +6,12 @@ social, paid ads, and partnerships, ensuring consistent messaging and timely exe
 
 from .marketing_base_agent import MarketingBaseAgent
 from typing import Dict, Optional, List
-from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, Lead, EmailSendHistory, Reply
+from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch, Lead, EmailSendHistory, Reply, EmailAccount
 from marketing_agent.performance_sync import sync_campaign_performance
 from django.contrib.auth.models import User
 from datetime import datetime, timedelta
 import json
+import re
 
 
 class OutreachCampaignAgent(MarketingBaseAgent):
@@ -81,6 +82,8 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         
         if action == 'design':
             return self.design_campaign(user_id, campaign_data, context)
+        elif action == 'auto_fill':
+            return self.auto_fill_campaign(user_id, campaign_data, context)
         elif action == 'launch':
             return self.launch_campaign(campaign_id, user_id, campaign_data, context)
         elif action == 'manage':
@@ -94,7 +97,7 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         else:
             return {
                 'success': False,
-                'error': f'Unknown action: {action}. Supported actions: design, launch, manage, optimize, schedule, create_multi_channel'
+                'error': f'Unknown action: {action}. Supported actions: design, auto_fill, launch, manage, optimize, schedule, create_multi_channel'
             }
     
     def design_campaign(self, user_id: int, campaign_data: Optional[Dict] = None,
@@ -132,6 +135,201 @@ class OutreachCampaignAgent(MarketingBaseAgent):
             'recommendations': structured_design.get('recommendations', [])
         }
     
+    def auto_fill_campaign(self, user_id: int, campaign_data: Optional[Dict] = None,
+                           context: Optional[Dict] = None) -> Dict:
+        """
+        Given just a campaign name, description, and duration, ask the AI to infer
+        the rest of the targeting fields (target leads, target conversions, audience
+        demographics) so the user can review/edit them before creating the campaign.
+
+        Args:
+            user_id (int): User ID
+            campaign_data (Dict): Must include 'name', 'description'; may include
+                'start_date', 'end_date' (duration already resolved by the caller)
+            context (Dict): Additional context (unused for now, kept for parity)
+
+        Returns:
+            Dict: Suggested field values (editable by the user before creation)
+        """
+        campaign_data = campaign_data or {}
+        name = (campaign_data.get('name') or '').strip() or 'New Campaign'
+        description = (campaign_data.get('description') or '').strip()
+        start_date = campaign_data.get('start_date') or ''
+        end_date = campaign_data.get('end_date') or ''
+
+        self.log_action("Auto-filling campaign fields", {"user_id": user_id})
+
+        prompt = f"""Based on this email marketing campaign, infer reasonable targeting values.
+
+Campaign name: {name}
+Description: {description or 'Not provided'}
+Duration: {start_date or 'Not specified'} to {end_date or 'Not specified'}
+
+Respond with ONLY a single JSON object (no markdown, no commentary) with exactly these keys:
+{{
+  "target_leads": <integer, realistic number of qualified leads for this duration>,
+  "target_conversions": <integer, realistic number of conversions, smaller than target_leads>,
+  "age_range": "<e.g. 25-45, or empty string if not applicable>",
+  "location": "<likely target location, or empty string>",
+  "industry": "<likely target industry, or empty string>",
+  "company_size": "<one of: 1-10, 11-50, 51-200, 201-1000, 1001-5000, 5000+, or empty string>",
+  "interests": "<comma-separated interests relevant to the audience, or empty string>",
+  "language": "<primary language, e.g. English, or empty string>"
+}}"""
+
+        try:
+            raw = self._call_llm_for_reasoning(
+                prompt,
+                self.system_prompt,
+                temperature=0.4,
+                max_tokens=400
+            )
+            fields = self._parse_auto_fill_json(raw)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            self.log_action("Error auto-filling campaign fields", {"error": str(e)})
+            return {'success': False, 'error': str(e)}
+
+        return {
+            'success': True,
+            'action': 'auto_fill',
+            'suggested_fields': fields
+        }
+
+    def _parse_auto_fill_json(self, raw_text: str) -> Dict:
+        """Parse the LLM's JSON response for auto_fill_campaign, tolerating stray text/markdown fences."""
+        defaults = {
+            'target_leads': None,
+            'target_conversions': None,
+            'age_range': '',
+            'location': '',
+            'industry': '',
+            'company_size': '',
+            'interests': '',
+            'language': '',
+        }
+        if not raw_text:
+            return defaults
+        text = raw_text.strip()
+        if text.startswith('```'):
+            text = text.strip('`')
+            if text.lower().startswith('json'):
+                text = text[4:]
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not match:
+            return defaults
+        try:
+            parsed = json.loads(match.group(0))
+        except (ValueError, TypeError):
+            return defaults
+        result = dict(defaults)
+        for key in defaults:
+            if key in parsed and parsed[key] is not None:
+                result[key] = parsed[key]
+        for int_key in ('target_leads', 'target_conversions'):
+            try:
+                result[int_key] = int(result[int_key]) if result[int_key] not in (None, '') else None
+            except (ValueError, TypeError):
+                result[int_key] = None
+        for str_key in ('age_range', 'location', 'industry', 'company_size', 'interests', 'language'):
+            result[str_key] = str(result[str_key]).strip() if result[str_key] else ''
+        return result
+
+    def generate_template_content(self, name: str, description: str) -> Dict:
+        """
+        Generate an email template's subject line and HTML (+ plain-text) body from
+        just a name and a short description of what the email should say — the user
+        reviews/edits the result before saving, same pattern as auto_fill_campaign.
+
+        Args:
+            name (str): Template name (context only, not shown in the email)
+            description (str): What the email should say — goals, tone, key points
+
+        Returns:
+            Dict: { success, subject, html_content, text_content }
+        """
+        self.log_action("Generating template content", {"name": name})
+
+        prompt = f"""Write a marketing email for the following. Output EXACTLY two sections, in this order, with no extra commentary:
+
+SUBJECT: <the email subject line, one line only>
+BODY:
+<the email body as clean semantic HTML>
+
+Template name: {name or 'Untitled'}
+What the email should say: {description or 'Not provided'}
+
+Rules:
+- The BODY must be plain semantic HTML (e.g. <p>, <a>, <strong> tags) — no <html>/<head>/<body> wrapper, no inline <style> blocks, no markdown asterisks, no code fences.
+- Use merge-field placeholders where natural: {{{{first_name}}}}, {{{{last_name}}}}, {{{{company}}}}, {{{{job_title}}}}. Always greet with {{{{first_name}}}}.
+- Keep the body concise: a greeting, 2-4 short paragraphs or a short list, and a clear call to action.
+- Professional but warm tone unless the description says otherwise.
+- The SUBJECT line must be plain text (no HTML, no quotes around it)."""
+
+        try:
+            raw = self._call_llm_for_writing(
+                prompt,
+                self.system_prompt,
+                temperature=0.7,
+                max_tokens=1200
+            )
+            subject, html_content = self._parse_template_generation(raw)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            self.log_action("Error generating template content", {"error": str(e)})
+            return {'success': False, 'error': str(e)}
+
+        text_content = re.sub(r'<[^>]+>', '', html_content).strip()
+
+        return {
+            'success': True,
+            'subject': subject,
+            'html_content': html_content,
+            'text_content': text_content,
+        }
+
+    def _parse_template_generation(self, raw_text: str):
+        """
+        Split the LLM's response into (subject, html_content). Tolerant of the model
+        skipping the 'BODY:' label, wrapping the subject onto a second line, or
+        wrapping the whole thing in a code fence — only 'SUBJECT:' is load-bearing.
+        """
+        text = (raw_text or '').strip()
+        if text.startswith('```'):
+            text = re.sub(r'^```[a-zA-Z]*\n?', '', text)
+            text = re.sub(r'\n?```$', '', text).strip()
+
+        subject_match = re.search(r'SUBJECT:\s*(.*)', text, re.IGNORECASE)
+        if not subject_match:
+            # No recognizable structure at all — treat the whole thing as body.
+            return '', text.strip()
+
+        after_subject = text[subject_match.end():]
+        # Subject ends at "BODY:" if present, otherwise at the first blank line,
+        # otherwise at the first HTML tag (model went straight into markup).
+        body_label = re.search(r'\n\s*BODY:\s*', after_subject, re.IGNORECASE)
+        if body_label:
+            subject_tail = after_subject[:body_label.start()]
+            html_content = after_subject[body_label.end():]
+        else:
+            blank_line = re.search(r'\n\s*\n', after_subject)
+            tag_start = re.search(r'<[a-zA-Z]', after_subject)
+            cut = min([p.start() for p in (blank_line, tag_start) if p] or [len(after_subject)])
+            subject_tail = after_subject[:cut]
+            html_content = after_subject[cut:]
+
+        subject = (subject_match.group(1) + subject_tail).replace('\n', ' ').strip()
+        subject = subject.strip('"').strip("'").strip()
+        html_content = html_content.strip()
+        if html_content.startswith('```'):
+            html_content = re.sub(r'^```[a-zA-Z]*\n?', '', html_content)
+            html_content = re.sub(r'\n?```$', '', html_content).strip()
+        return subject, html_content
+
     def create_multi_channel_campaign(self, user_id: int, campaign_data: Dict,
                                       context: Optional[Dict] = None, leads_file=None) -> Dict:
         """
@@ -194,7 +392,18 @@ class OutreachCampaignAgent(MarketingBaseAgent):
                     'success': False,
                     'error': 'A campaign with this name already exists. Please choose a different name.',
                 }
-            
+
+            email_account = None
+            email_account_id = campaign_data.get('email_account_id')
+            if email_account_id:
+                try:
+                    email_account = EmailAccount.objects.get(id=email_account_id, owner=user)
+                except EmailAccount.DoesNotExist:
+                    return {
+                        'success': False,
+                        'error': 'Email account not found or not owned by you.',
+                    }
+
             # Create campaign in database with all fields
             campaign = Campaign.objects.create(
                 name=campaign_name,
@@ -217,6 +426,7 @@ class OutreachCampaignAgent(MarketingBaseAgent):
                 target_audience=campaign_data.get('target_audience', {}),
                 goals=campaign_data.get('goals', {}),
                 channels=campaign_data.get('channels', ['email']),
+                email_account=email_account,
                 owner=user
             )
             
@@ -326,14 +536,22 @@ class OutreachCampaignAgent(MarketingBaseAgent):
                 email = str(row['email']).strip().lower()
                 if not email or pd.isna(row['email']):
                     continue
-                
+
+                first_name = str(row.get('first_name', '')).strip() if pd.notna(row.get('first_name')) else ''
+                last_name = str(row.get('last_name', '')).strip() if pd.notna(row.get('last_name')) else ''
+                # First and last name are required — a row with neither is skipped,
+                # same as a missing email, so personalization tokens are never
+                # silently blank.
+                if not first_name and not last_name:
+                    continue
+
                 # Get or create lead
                 lead, created = Lead.objects.get_or_create(
                     email=email,
                     owner=user,
                     defaults={
-                        'first_name': str(row.get('first_name', '')).strip() if pd.notna(row.get('first_name')) else '',
-                        'last_name': str(row.get('last_name', '')).strip() if pd.notna(row.get('last_name')) else '',
+                        'first_name': first_name,
+                        'last_name': last_name,
                         'phone': str(row.get('phone', '')).strip() if pd.notna(row.get('phone')) else '',
                         'company': str(row.get('company', '')).strip() if pd.notna(row.get('company')) else '',
                         'job_title': str(row.get('job_title', '')).strip() if pd.notna(row.get('job_title')) else '',

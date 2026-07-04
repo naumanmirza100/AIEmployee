@@ -54,6 +54,8 @@ import marketingAgentService from '@/services/marketingAgentService';
 import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 import SequenceManagementPage from './SequenceManagementPage';
 import EmailSendingStatusPage from './EmailSendingStatusPage';
+import AddEmailAccountModal from './AddEmailAccountModal';
+import LeadsUploadFields from './LeadsUploadFields';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
@@ -92,89 +94,6 @@ const LEAD_STATUS_LABELS = {
   qualified: 'Qualified',
   converted: 'Converted',
   lost: 'Lost',
-};
-
-// Schema reference for the leads upload modal. Mirrors the parser in
-// api/views/marketing_agent.py:_upload_leads_from_file — column names
-// here MUST stay aligned with the keys that helper looks up. Headers
-// match case-insensitively and a single space is interchangeable with
-// an underscore (so "First Name" and "first_name" both resolve to the
-// first_name field).
-const LEAD_UPLOAD_COLUMNS = {
-  required: [
-    {
-      key: 'email',
-      label: 'email',
-      example: 'lead@example.com',
-      hint: 'The lead\'s email address. Rows without this are skipped.',
-    },
-  ],
-  optional: [
-    {
-      key: 'first_name',
-      label: 'first_name',
-      altLabel: 'first name',
-      example: 'John',
-      hint: 'Used for personalization tokens like {{first_name}}.',
-    },
-    {
-      key: 'last_name',
-      label: 'last_name',
-      altLabel: 'last name',
-      example: 'Doe',
-      hint: 'Used for personalization tokens like {{last_name}}.',
-    },
-    {
-      key: 'name',
-      label: 'name',
-      example: 'John Doe',
-      hint: 'Single-name fallback. Used only when first_name and last_name are both blank — split on the first space.',
-    },
-    {
-      key: 'phone',
-      label: 'phone',
-      example: '+1 555 010 0100',
-      hint: 'Optional contact number; not used for sending.',
-    },
-    {
-      key: 'company',
-      label: 'company',
-      example: 'Acme Inc.',
-      hint: 'Available as {{company}} in templates.',
-    },
-    {
-      key: 'job_title',
-      label: 'job_title',
-      altLabel: 'job title',
-      example: 'Sales Manager',
-      hint: 'Available as {{job_title}} in templates.',
-    },
-    {
-      key: 'source',
-      label: 'source',
-      example: 'LinkedIn',
-      hint: 'Free-form attribution label (where the lead came from).',
-    },
-  ],
-};
-
-// Build a downloadable CSV template with a header row + one example
-// row. Lets the user open it in Excel, fill in their data, and upload
-// without guessing the column names. Stays in sync with
-// LEAD_UPLOAD_COLUMNS so the template never drifts from the docs.
-const buildLeadsTemplateCsv = () => {
-  const cols = [
-    ...LEAD_UPLOAD_COLUMNS.required,
-    ...LEAD_UPLOAD_COLUMNS.optional.filter((c) => c.key !== 'name'), // 'name' is a fallback, not a primary header
-  ];
-  const headers = cols.map((c) => c.label).join(',');
-  // Single example row so a fresh file isn't a confusing one-line CSV.
-  // CSV-quote anything containing a comma; example values here don't, but
-  // future additions might — quoting unconditionally is the safe rule.
-  const exampleRow = cols
-    .map((c) => `"${(c.example || '').replace(/"/g, '""')}"`)
-    .join(',');
-  return `${headers}\n${exampleRow}\n`;
 };
 
 const formatDate = (iso) => {
@@ -315,6 +234,8 @@ const CampaignDetail = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const [deleteLeadConfirm, setDeleteLeadConfirm] = useState(null);
+  const [noEmailAccountDialogOpen, setNoEmailAccountDialogOpen] = useState(false);
+  const [addEmailAccountOpen, setAddEmailAccountOpen] = useState(false);
 
   const fetchDetail = useCallback(async (silent = false) => {
     if (!id) return;
@@ -354,6 +275,17 @@ const CampaignDetail = () => {
   useEffect(() => {
     fetchDetail();
   }, [fetchDetail]);
+
+  // Warn immediately on opening a campaign if the company has no sender email
+  // accounts at all — don't wait for the user to hit Launch and discover it there.
+  useEffect(() => {
+    marketingAgentService.listEmailAccounts().then((res) => {
+      if (res?.status === 'success' && Array.isArray(res.data)) {
+        setEmailAccounts(res.data);
+        if (res.data.length === 0) setNoEmailAccountDialogOpen(true);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Auto-refresh Analytics & dashboard every 30 seconds (silent refresh, no loading spinner)
   const POLL_INTERVAL_MS = 30 * 1000;
@@ -743,6 +675,25 @@ const CampaignDetail = () => {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant={campaign.email_account_email ? 'outline' : 'default'}
+              onClick={openAccountModal}
+              title={campaign.email_account_email ? `Sending from ${campaign.email_account_email}` : 'No sending account set'}
+            >
+              <Mail className="mr-2 h-4 w-4" />
+              {campaign.email_account_email ? `Email: ${campaign.email_account_email}` : 'Add email account'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => { setUploadLeadsOpen(true); setUploadMessage(''); setUploadFile(null); }}
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Add campaign leads
+            </Button>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
@@ -1200,6 +1151,49 @@ const CampaignDetail = () => {
         </DialogContent>
       </Dialog>
 
+      {/* No email accounts at all — warn as soon as the campaign page opens */}
+      <Dialog open={noEmailAccountDialogOpen} onOpenChange={setNoEmailAccountDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              Add an email account first
+            </DialogTitle>
+            <DialogDescription>
+              You don't have any sender email accounts yet. An email account is required to
+              launch or schedule this campaign — add one before continuing.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setNoEmailAccountDialogOpen(false)}>
+              Not now
+            </Button>
+            <Button
+              onClick={() => {
+                setNoEmailAccountDialogOpen(false);
+                setAddEmailAccountOpen(true);
+              }}
+            >
+              <Mail className="mr-2 h-4 w-4" />
+              Add email account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AddEmailAccountModal
+        open={addEmailAccountOpen}
+        onOpenChange={setAddEmailAccountOpen}
+        onCreated={(created) => {
+          marketingAgentService.listEmailAccounts().then((res) => {
+            if (res?.status === 'success' && Array.isArray(res.data)) {
+              setEmailAccounts(res.data);
+              if (created?.account_id) setAccountDraftId(String(created.account_id));
+            }
+          }).catch(() => {});
+        }}
+      />
+
       {/* Sending account modal */}
       <Dialog open={accountOpen} onOpenChange={setAccountOpen}>
         <DialogContent className="sm:max-w-md">
@@ -1217,9 +1211,13 @@ const CampaignDetail = () => {
             {emailAccounts.length === 0 ? (
               <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                 No email accounts yet.{' '}
-                <Link to="/marketing/email-accounts" className="underline text-primary">
+                <button
+                  type="button"
+                  className="underline text-primary"
+                  onClick={() => { setAccountOpen(false); setAddEmailAccountOpen(true); }}
+                >
                   Add one first
-                </Link>
+                </button>
                 .
               </div>
             ) : (
@@ -1288,89 +1286,7 @@ const CampaignDetail = () => {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* Column reference — required */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="bg-destructive/10 border-b border-border px-3 py-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-destructive">Required column</span>
-                  <Badge variant="destructive" className="h-5 text-[10px]">Must include</Badge>
-                </div>
-              </div>
-              <div className="divide-y divide-border">
-                {LEAD_UPLOAD_COLUMNS.required.map((col) => (
-                  <div key={col.key} className="px-3 py-2 grid grid-cols-12 gap-3 items-start">
-                    <div className="col-span-4 sm:col-span-3">
-                      <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                        {col.label}
-                      </code>
-                    </div>
-                    <div className="col-span-4 sm:col-span-3 text-xs text-muted-foreground font-mono truncate">
-                      {col.example}
-                    </div>
-                    <div className="col-span-12 sm:col-span-6 text-xs text-muted-foreground">
-                      {col.hint}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Column reference — optional */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="bg-muted border-b border-border px-3 py-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold">Optional columns</span>
-                  <Badge variant="secondary" className="h-5 text-[10px]">Skip any you don't need</Badge>
-                </div>
-              </div>
-              <div className="divide-y divide-border max-h-64 overflow-y-auto no-scrollbar">
-                {LEAD_UPLOAD_COLUMNS.optional.map((col) => (
-                  <div key={col.key} className="px-3 py-2 grid grid-cols-12 gap-3 items-start">
-                    <div className="col-span-4 sm:col-span-3">
-                      <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                        {col.label}
-                      </code>
-                      {col.altLabel && (
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">
-                          or <code className="font-mono">{col.altLabel}</code>
-                        </div>
-                      )}
-                    </div>
-                    <div className="col-span-4 sm:col-span-3 text-xs text-muted-foreground font-mono truncate">
-                      {col.example}
-                    </div>
-                    <div className="col-span-12 sm:col-span-6 text-xs text-muted-foreground">
-                      {col.hint}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Download template — gets the user a working starter file
-                so they don't have to type the headers manually. */}
-            <div className="flex items-center justify-between rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2">
-              <div className="text-xs text-muted-foreground">
-                Not sure where to start? Grab a CSV with all the headers pre-filled.
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const csv = buildLeadsTemplateCsv();
-                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-                  const a = document.createElement('a');
-                  a.href = URL.createObjectURL(blob);
-                  a.download = 'campaign_leads_template.csv';
-                  a.click();
-                  URL.revokeObjectURL(a.href);
-                }}
-              >
-                <Download className="h-4 w-4 mr-1.5" />
-                Template CSV
-              </Button>
-            </div>
+            <LeadsUploadFields />
 
             {/* File picker */}
             <div>

@@ -939,6 +939,11 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                         parts = name_val.split(None, 1)
                         first = parts[0] or ''
                         last = parts[1] if len(parts) > 1 else ''
+                # First and last name are required (directly, or via a "name" column
+                # split into both) — a row with neither is skipped, same as a
+                # missing email, so personalization tokens are never silently blank.
+                if not first and not last:
+                    continue
                 lead, created = Lead.objects.get_or_create(
                     email=email, owner=user,
                     defaults={
@@ -2086,6 +2091,54 @@ def delete_sequence(request, campaign_id, sequence_id):
         logger.exception("delete_sequence failed")
         return Response(
             {'status': 'error', 'message': str(e), 'error': 'failed'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def generate_template_content(request, campaign_id):
+    """AI-generate an email template's HTML/text body from name + subject + description."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        if not campaign:
+            return Response(
+                {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        data = request.data
+        name = (data.get('name') or '').strip()
+        description = (data.get('description') or '').strip()
+        if not description:
+            return Response(
+                {'status': 'error', 'message': 'Description is required.', 'error': 'validation'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        agent = AgentRegistry.get_agent("outreach_campaign")
+        try:
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
+
+        result = agent.generate_template_content(name, description)
+        if result.get('success') is False:
+            return Response(
+                {'status': 'error', 'message': result.get('error') or 'Generation failed', 'error': 'generation_failed'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        return Response({'status': 'success', 'data': result}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.exception("generate_template_content failed")
+        err_msg = _normalize_error_message(e)
+        return Response(
+            {'status': 'error', 'message': err_msg if err_msg == RATE_LIMIT_MESSAGE else 'Template generation failed', 'error': err_msg},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

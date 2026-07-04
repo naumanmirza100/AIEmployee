@@ -189,10 +189,27 @@ Be direct and actionable. No fluff."""
             due_date=today,
         ).count()
 
-        pending_actions = MeetingActionItem.objects.filter(
+        pending_action_qs = MeetingActionItem.objects.filter(
             meeting__organizer_id=company_user_id,
             status__in=['open', 'in_progress'],
-        ).count()
+        ).select_related('meeting')[:10]
+        pending_actions_list = [
+            {
+                'title': a.title,
+                'meeting': a.meeting.title if a.meeting else '',
+                'due_date': str(a.due_date) if a.due_date else None,
+                'priority': a.priority,
+            }
+            for a in pending_action_qs
+        ]
+        pending_actions_count = len(pending_action_qs)
+
+        # Also get executive tasks due today or overdue
+        due_tasks_list = list(ExecutiveTask.objects.filter(
+            company_user_id=company_user_id,
+            status__in=['todo', 'in_progress'],
+            due_date__lte=today,
+        ).values('title', 'priority', 'due_date', 'status')[:10])
 
         prompt = f"""Generate a brief executive daily digest.
 
@@ -204,7 +221,11 @@ Today's meetings: {len(todays_meetings)} scheduled
 
 Overdue tasks: {overdue_tasks}
 Tasks due today: {due_today_count}
-Pending action items: {pending_actions}
+Pending action items ({pending_actions_count}):
+{json.dumps(pending_actions_list, indent=2, default=str)}
+
+Due/overdue executive tasks:
+{json.dumps(due_tasks_list, indent=2, default=str)}
 
 Return ONLY a JSON object:
 {{
@@ -216,14 +237,16 @@ Return ONLY a JSON object:
 }}
 
 Return ONLY the JSON."""
-        raw = self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=400)
+        raw = self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=500)
         result = self._extract_json(raw)
         result['stats'] = {
             'meetings_today': len(todays_meetings),
             'overdue_tasks': overdue_tasks,
             'due_today': due_today_count,
-            'pending_actions': pending_actions,
+            'pending_actions': pending_actions_count,
         }
+        result['pending_action_items'] = pending_actions_list
+        result['due_tasks'] = due_tasks_list
         return result
 
     def process(self, action: str = 'scan', **kwargs) -> dict:
