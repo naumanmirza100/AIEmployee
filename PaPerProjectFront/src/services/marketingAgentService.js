@@ -152,6 +152,20 @@ export const generateTemplateContent = async (campaignId, data) => {
 };
 
 /**
+ * AI-classify a free-form reply-scenario description into an interest_level key.
+ * Body: { description }. Response data: { interest_level }.
+ */
+export const classifyInterestLevel = async (campaignId, data) => {
+  try {
+    const response = await companyApi.post(`/marketing/campaigns/${campaignId}/sequences/classify-interest-level`, data);
+    return response;
+  } catch (error) {
+    console.error('Classify interest level error:', error);
+    throw error;
+  }
+};
+
+/**
  * Update email template
  */
 export const updateTemplate = async (campaignId, templateId, data) => {
@@ -785,6 +799,7 @@ export default {
   deleteSequence,
   createTemplate,
   generateTemplateContent,
+  classifyInterestLevel,
   updateTemplate,
   deleteTemplate,
   testEmailTemplate,
