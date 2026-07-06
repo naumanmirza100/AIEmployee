@@ -237,7 +237,7 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
             result[str_key] = str(result[str_key]).strip() if result[str_key] else ''
         return result
 
-    def generate_template_content(self, name: str, description: str) -> Dict:
+    def generate_template_content(self, name: str, description: str, company_name: str = '') -> Dict:
         """
         Generate an email template's subject line and HTML (+ plain-text) body from
         just a name and a short description of what the email should say — the user
@@ -246,12 +246,14 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
         Args:
             name (str): Template name (context only, not shown in the email)
             description (str): What the email should say — goals, tone, key points
+            company_name (str): Sender's company name, signed at the email's close
 
         Returns:
             Dict: { success, subject, html_content, text_content }
         """
         self.log_action("Generating template content", {"name": name})
 
+        sign_off = f'"Best regards,\\n{company_name}"' if company_name else '"Best regards,\\n[Sender\'s company name]"'
         prompt = f"""Write a marketing email for the following. Output EXACTLY two sections, in this order, with no extra commentary:
 
 SUBJECT: <the email subject line, one line only>
@@ -264,6 +266,7 @@ What the email should say: {description or 'Not provided'}
 Rules:
 - The BODY must be plain semantic HTML (e.g. <p>, <a>, <strong> tags) — no <html>/<head>/<body> wrapper, no inline <style> blocks, no markdown asterisks, no code fences.
 - Use merge-field placeholders where natural: {{{{first_name}}}}, {{{{last_name}}}}, {{{{company}}}}, {{{{job_title}}}}. Always greet with {{{{first_name}}}}.
+- End the email with a sign-off closing as {sign_off} — sign with the company name, not a person's name, and never leave a "[Your Name]"-style placeholder.
 - Keep the body concise: a greeting, 2-4 short paragraphs or a short list, and a clear call to action.
 - Professional but warm tone unless the description says otherwise.
 - The SUBJECT line must be plain text (no HTML, no quotes around it)."""

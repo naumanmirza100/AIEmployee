@@ -2202,7 +2202,8 @@ def generate_template_content(request, campaign_id):
         except Exception:
             pass
 
-        result = agent.generate_template_content(name, description)
+        company_name = (company_user.company.name or '').strip() if company_user.company else ''
+        result = agent.generate_template_content(name, description, company_name)
         if result.get('success') is False:
             return Response(
                 {'status': 'error', 'message': result.get('error') or 'Generation failed', 'error': 'generation_failed'},

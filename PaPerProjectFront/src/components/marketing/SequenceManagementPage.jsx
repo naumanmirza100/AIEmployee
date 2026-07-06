@@ -833,28 +833,14 @@ const SequenceManagementPage = ({ embedded = false }) => {
       toast({ title: 'Validation', description: 'Sequence name is required.', variant: 'destructive' });
       return;
     }
-    let rawSteps = sequenceForm.steps;
-    let rawEmailAccountId = sequenceForm.email_account_id;
-    let steps = rawSteps
+    const rawSteps = sequenceForm.steps;
+    const rawEmailAccountId = sequenceForm.email_account_id;
+    const steps = rawSteps
       .map((s) => ({ ...s, template_id: Number(s.template_id) || null }))
       .filter((s) => s.template_id);
 
-    // User hit "Create sequence" without generating first — auto-generate
-    // using whatever goal/count/slot choices are already filled in (for a
-    // sub-sequence, the goal was already auto-derived from the interest
-    // level), then continue straight into creating, instead of erroring out.
     if (steps.length === 0) {
-      const generated = await handleGenerateSequence({ mode: 'replace', silent: true });
-      if (!generated) return;
-      rawSteps = generated.steps;
-      rawEmailAccountId = generated.email_account_id;
-      steps = rawSteps
-        .map((s) => ({ ...s, template_id: Number(s.template_id) || null }))
-        .filter((s) => s.template_id);
-    }
-
-    if (steps.length === 0) {
-      toast({ title: 'Validation', description: 'Add at least one step with a template.', variant: 'destructive' });
+      toast({ title: 'Validation', description: 'Click "Generate with AI" first to create the email content.', variant: 'destructive' });
       return;
     }
     const { valid, errors } = validateStepDelays(rawSteps);
@@ -2041,6 +2027,8 @@ const SequenceManagementPage = ({ embedded = false }) => {
                       >
                         {generatingSequence ? (
                           <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+                        ) : sequenceSlotTemplates.every((s) => s) ? (
+                          'Use selected templates'
                         ) : sequenceStepLimit != null ? (
                           <><Sparkles className="h-4 w-4 mr-2" /> Re-generate with AI</>
                         ) : (
@@ -2288,6 +2276,37 @@ const SequenceManagementPage = ({ embedded = false }) => {
                     </div>
                   </div>
                 )}
+                {sequenceForm.is_sub_sequence && (
+                  <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                    <div>
+                      <Label htmlFor="edit-sub-seq-description">Describe the reply this sub-sequence handles (optional — for AI generation)</Label>
+                      <Textarea
+                        id="edit-sub-seq-description"
+                        value={sequenceDescription}
+                        onChange={(e) => setSequenceDescription(e.target.value)}
+                        placeholder="e.g. when the lead says they're not interested right now"
+                        rows={4}
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => handleGenerateSequence({ mode: 'replace' })}
+                        disabled={generatingSequence}
+                      >
+                        {generatingSequence ? (
+                          <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+                        ) : (
+                          <><Sparkles className="h-4 w-4 mr-2" /> Generate with AI</>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Replaces this sub-sequence's single email. Review and edit before saving.
+                    </p>
+                  </div>
+                )}
                 <div>
                   <Label>Sequence name</Label>
                   <Input
@@ -2361,35 +2380,6 @@ const SequenceManagementPage = ({ embedded = false }) => {
                       </div>
                     </div>
 
-                    {templates.length > 0 && (
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">For each new email, use an existing template or let AI write a new one</Label>
-                        {sequenceSlotTemplates.map((slotValue, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-14 shrink-0">Email {i + 1}</span>
-                            <Select
-                              value={slotValue || '__generate_new__'}
-                              onValueChange={(v) =>
-                                setSequenceSlotTemplates((prev) =>
-                                  prev.map((s, idx) => (idx === i ? (v === '__generate_new__' ? '' : v) : s))
-                                )
-                              }
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__generate_new__">✨ Generate new with AI</SelectItem>
-                                {templates.map((t) => (
-                                  <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
                     <div className="flex justify-end">
                       <Button
                         type="button"
@@ -2405,7 +2395,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      For any email left on "Generate new", AI writes and saves a template, then assembles the steps with standard spacing. Review and edit before saving.
+                      AI writes and saves a new template for each email, then assembles the steps with standard spacing. Review and edit before saving.
                     </p>
                   </div>
                 )}
