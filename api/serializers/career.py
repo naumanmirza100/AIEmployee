@@ -61,6 +61,21 @@ class JobDescriptionSerializer(serializers.ModelSerializer):
             return _validate_meaningful_text(value, 'Department')
         return value
 
+    def validate(self, attrs):
+        # Applications close date must be strictly after the open date.
+        # For partial updates, fall back to the existing instance values.
+        open_date = attrs.get('application_open_date')
+        close_date = attrs.get('application_close_date')
+        if open_date is None and self.instance is not None:
+            open_date = self.instance.application_open_date
+        if close_date is None and self.instance is not None:
+            close_date = self.instance.application_close_date
+        if open_date and close_date and close_date <= open_date:
+            raise serializers.ValidationError(
+                {'application_close_date': 'Applications close date must be after the open date.'}
+            )
+        return attrs
+
 
 class CareerApplicationSerializer(serializers.ModelSerializer):
     """Serializer for Career Application"""

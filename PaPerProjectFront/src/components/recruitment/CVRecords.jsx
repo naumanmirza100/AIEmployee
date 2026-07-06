@@ -19,13 +19,34 @@ import {
   Loader2, FileText, Calendar, ChevronLeft, ChevronRight,
   Mail, Briefcase, Percent, Printer, MapPin, DollarSign,
   GraduationCap, Building2, Link2, Phone, ExternalLink,
-  User, Star, CheckCircle2, Clock, Search, X,
+  User, Star, CheckCircle2, Clock, Search, X, Info, ArrowDown,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { getCVRecords, getJobDescriptions, bulkUpdateCVRecords } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
 const PAGE_SIZES = [10, 25, 50];
+
+// Always-visible highlighted hint explaining the bulk status-change actions.
+// Sits near the "select all" controls so users always know what bulk select does.
+const BulkSelectHint = () => (
+  <div
+    className="flex items-start gap-2 rounded-lg px-3 py-2 animate-pulse-slow"
+    style={{
+      background: 'linear-gradient(90deg, rgba(162,89,255,0.14) 0%, rgba(96,165,250,0.10) 100%)',
+      border: '1px solid rgba(162,89,255,0.40)',
+    }}
+  >
+    <Info className="h-4 w-4 text-violet-300 shrink-0 mt-0.5" />
+    <p className="text-xs leading-relaxed text-white/80">
+      <span className="font-semibold text-white">Tip:</span> Bulk select candidates with the checkboxes,
+      then change their status to{' '}
+      <span className="text-green-400 font-semibold">Interview</span>,{' '}
+      <span className="text-yellow-400 font-semibold">Hold</span>, or{' '}
+      <span className="text-red-400 font-semibold">Reject</span> — all at once.
+    </p>
+  </div>
+);
 
 export const getDecisionBadge = (decision) => {
   switch (decision) {
@@ -292,10 +313,21 @@ const CVRecords = () => {
         </Card>
       ) : (
         <>
+          {/* Always-on hint about bulk status changes (hidden once a selection
+              is active, since the bulk actions bar then takes over). */}
+          {selectedIds.size === 0 && <BulkSelectHint />}
+
           {/* Mobile Card View */}
           <div className="block md:hidden space-y-3">
-            <div className="flex items-center gap-2 px-1">
-              <Checkbox checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false} onCheckedChange={handleSelectAll} aria-label="Select all on page" />
+            <div className="flex items-center gap-2 px-1 pt-6">
+              <div className="relative inline-flex items-center justify-center">
+                {selectedIds.size === 0 && (
+                  <span className="absolute left-1/2 -translate-x-1/2 -top-6 text-violet-400 animate-bounce pointer-events-none">
+                    <ArrowDown className="h-4 w-4" />
+                  </span>
+                )}
+                <Checkbox checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false} onCheckedChange={handleSelectAll} aria-label="Select all on page" />
+              </div>
               <span className="text-sm text-muted-foreground">Select all</span>
             </div>
             {records.map((record) => {
@@ -342,8 +374,15 @@ const CVRecords = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-12 pr-0">
-                      <Checkbox checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false} onCheckedChange={handleSelectAll} aria-label="Select all on page" className="translate-y-0.5" />
+                    <TableHead className="w-12 pr-0 overflow-visible pt-7">
+                      <div className="relative inline-flex items-center justify-center">
+                        {selectedIds.size === 0 && (
+                          <span className="absolute left-1/2 -translate-x-1/2 -top-6 text-violet-400 animate-bounce pointer-events-none">
+                            <ArrowDown className="h-4 w-4" />
+                          </span>
+                        )}
+                        <Checkbox checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false} onCheckedChange={handleSelectAll} aria-label="Select all on page" className="translate-y-0.5" />
+                      </div>
                     </TableHead>
                     <TableHead className="w-14">#</TableHead>
                     <TableHead>Name</TableHead>

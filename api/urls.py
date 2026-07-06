@@ -183,6 +183,9 @@ urlpatterns = [
     re_path(r'^company/register/?$', company_auth.register_company_user, name='register_company_user'),
     re_path(r'^company/login/?$', company_auth.login_company_user, name='login_company_user'),
     re_path(r'^company/logout/?$', company_auth.logout_company_user, name='logout_company_user'),
+    re_path(r'^company/forgot-password/?$', company_auth.forgot_password, name='company_forgot_password'),
+    re_path(r'^company/verify-otp/?$', company_auth.verify_reset_otp, name='company_verify_reset_otp'),
+    re_path(r'^company/reset-password/?$', company_auth.reset_password, name='company_reset_password'),
     
     # Career endpoints
     re_path(r'^careers/positions/?$', career.list_job_positions, name='list_job_positions'),

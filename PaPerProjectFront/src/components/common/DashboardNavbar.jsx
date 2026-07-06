@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { LogOut, Bell, Key } from 'lucide-react';
 import { API_BASE_URL } from '@/config/apiConfig';
@@ -145,6 +145,13 @@ const DashboardNavbar = ({
           {/* Header Row */}
           <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+              <Link to="/" className="shrink-0" title="Pay Per Project — Home">
+                <img
+                  src="/logo.jpg"
+                  alt="Pay Per Project logo"
+                  className="h-9 w-9 sm:h-11 sm:w-11 rounded-md object-contain"
+                />
+              </Link>
               {Icon && <Icon className="h-6 w-6 sm:h-8 sm:w-8 text-violet-400 shrink-0" />}
               <div className="min-w-0">
                 <h1 className="text-lg sm:text-2xl font-bold truncate text-white">{title}</h1>

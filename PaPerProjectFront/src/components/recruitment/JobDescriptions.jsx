@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle, Wand2, Settings, X, ArrowRight, Copy, Check, Eye, MapPin, Building2, Clock, ExternalLink, Users, FileText, BrainCircuit, Download, ChevronDown, ChevronUp, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle, Wand2, Settings, X, ArrowRight, ArrowDown, Copy, Check, Eye, MapPin, Building2, Clock, ExternalLink, Users, FileText, BrainCircuit, Download, ChevronDown, ChevronUp, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
 import {
   getJobDescriptions,
@@ -61,6 +61,9 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   const [generating, setGenerating] = useState(false);
   const [showSettingsBanner, setShowSettingsBanner] = useState(false);
   const [configuredJobIds, setConfiguredJobIds] = useState(new Set());
+  // Id of a freshly created job whose "Setup" badge we pulse/point at until
+  // the user opens its settings.
+  const [highlightSetupJobId, setHighlightSetupJobId] = useState(null);
   const [copiedJobId, setCopiedJobId] = useState(null);
   const [viewingJob, setViewingJob] = useState(null);
   const [viewingApplicationsJob, setViewingApplicationsJob] = useState(null);
@@ -103,6 +106,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
               }
             });
             setConfiguredJobIds(ids);
+            // If the freshly-created job is now configured, stop highlighting it.
+            setHighlightSetupJobId((cur) => (cur != null && ids.has(cur) ? null : cur));
           });
         }
       }
@@ -135,15 +140,27 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
     return () => clearTimeout(searchDebounceRef.current);
   }, [search, statusFilter, typeFilter, page]);
 
-  const handleCreate = async () => {
+  // Shared field validation for create & update. Returns true if valid,
+  // otherwise shows a toast and returns false.
+  const validateJobForm = () => {
     if (!formData.title || !formData.description) {
       toast({ title: 'Validation Error', description: 'Title and description are required', variant: 'destructive' });
-      return;
+      return false;
     }
     if (!formData.application_open_date || !formData.application_close_date) {
       toast({ title: 'Validation Error', description: 'Applications open date and close date are required', variant: 'destructive' });
-      return;
+      return false;
     }
+    // Close date must be strictly after the open date.
+    if (formData.application_close_date <= formData.application_open_date) {
+      toast({ title: 'Validation Error', description: 'Applications close date must be after the open date', variant: 'destructive' });
+      return false;
+    }
+    return true;
+  };
+
+  const handleCreate = async () => {
+    if (!validateJobForm()) return;
 
     try {
       setSubmitting(true);
@@ -159,6 +176,10 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         resetForm();
         refreshJobs();
         setShowSettingsBanner(true);
+        // Highlight this new job's "Setup" badge with a pulse + arrow so the
+        // user immediately sees where to configure its settings.
+        const newJobId = response.data?.id ?? response.job_description?.id ?? null;
+        if (newJobId != null) setHighlightSetupJobId(newJobId);
         if (onUpdate) onUpdate();
       }
     } catch (error) {
@@ -191,14 +212,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   };
 
   const handleUpdate = async () => {
-    if (!formData.title || !formData.description) {
-      toast({ title: 'Validation Error', description: 'Title and description are required', variant: 'destructive' });
-      return;
-    }
-    if (!formData.application_open_date || !formData.application_close_date) {
-      toast({ title: 'Validation Error', description: 'Applications open date and close date are required', variant: 'destructive' });
-      return;
-    }
+    if (!validateJobForm()) return;
 
     try {
       setSubmitting(true);
@@ -519,17 +533,31 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                           Configured
                         </button>
                       ) : (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onGoToSettings(job.id); }}
-                          title="Complete email, interview & qualification settings"
-                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
-                          style={{ background: 'rgba(251,191,36,0.12)', borderColor: 'rgba(251,191,36,0.35)', color: '#fbbf24' }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(251,191,36,0.24)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(251,191,36,0.12)'; }}
-                        >
-                          <Settings className="h-3 w-3" />
-                          Setup
-                        </button>
+                        <span className="relative inline-flex">
+                          {highlightSetupJobId === job.id && (
+                            <>
+                              {/* pulsing ring around the Setup badge */}
+                              <span className="absolute inset-0 rounded-full animate-ping pointer-events-none" style={{ background: 'rgba(251,191,36,0.45)' }} />
+                              {/* bouncing arrow pointing down at the badge */}
+                              <span className="absolute left-1/2 -translate-x-1/2 -top-6 text-amber-400 animate-bounce pointer-events-none">
+                                <ArrowDown className="h-4 w-4" />
+                              </span>
+                            </>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setHighlightSetupJobId(null); onGoToSettings(job.id); }}
+                            title="Complete email, interview & qualification settings"
+                            className="relative inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
+                            style={highlightSetupJobId === job.id
+                              ? { background: 'rgba(251,191,36,0.28)', borderColor: '#fbbf24', color: '#fbbf24', boxShadow: '0 0 10px 0 rgba(251,191,36,0.6)' }
+                              : { background: 'rgba(251,191,36,0.12)', borderColor: 'rgba(251,191,36,0.35)', color: '#fbbf24' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(251,191,36,0.24)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = highlightSetupJobId === job.id ? 'rgba(251,191,36,0.28)' : 'rgba(251,191,36,0.12)'; }}
+                          >
+                            <Settings className="h-3 w-3" />
+                            Setup
+                          </button>
+                        </span>
                       )
                     )}
                     {job.is_active ? (
@@ -1141,6 +1169,10 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
               application_close_date: date ? toLocaleDateStr(date) : '',
             })}
             placeholder="Select close date"
+            // Disable any day on or before the open date — close must be after open.
+            fromDate={formData.application_open_date
+              ? new Date(new Date(formData.application_open_date + 'T00:00:00').getTime() + 86400000)
+              : undefined}
           />
         </div>
       </div>

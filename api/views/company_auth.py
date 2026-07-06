@@ -1,3 +1,7 @@
+import logging
+import secrets
+from datetime import timedelta
+
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes, throttle_classes
 from rest_framework.response import Response
@@ -5,12 +9,26 @@ from rest_framework.permissions import AllowAny
 from rest_framework.throttling import AnonRateThrottle
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.conf import settings
+from django.core.mail import send_mail
 from django.contrib.auth.hashers import make_password, check_password
 from rest_framework.authtoken.models import Token
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import Company, CompanyUser, CompanyRegistrationToken, CompanyUserToken
+
+logger = logging.getLogger(__name__)
+
+# Password reset OTP settings
+OTP_TTL_MINUTES = 10
+
+
+def _find_login_company_user(email):
+    """Resolve the CompanyUser that would be used for login with this email.
+    Mirrors login_company_user's lookup (most recently active when duplicated)."""
+    qs = CompanyUser.objects.filter(email=email).order_by('-last_login')
+    return qs.first()
 
 
 class CompanyAuthThrottle(AnonRateThrottle):
@@ -256,4 +274,157 @@ def logout_company_user(request):
     except Exception:
         pass
     return Response({'status': 'success', 'message': 'Logged out successfully.'}, status=status.HTTP_200_OK)
+
+
+# Generic response so an attacker can't tell whether an email exists (avoids
+# account enumeration). Used for the forgot-password entrypoint.
+_FORGOT_GENERIC = {
+    'status': 'success',
+    'message': 'If an account exists for that email, a verification code has been sent.',
+}
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([CompanyAuthThrottle])
+def forgot_password(request):
+    """Step 1: user submits their email. If a company account exists, generate
+    a 6-digit OTP, store it (hashed lifetime via expiry) and email it.
+    Always returns a generic success to prevent email enumeration."""
+    try:
+        email = (request.data.get('email') or '').strip()
+        if not email:
+            return Response({
+                'status': 'error',
+                'message': 'Email is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        company_user = _find_login_company_user(email)
+
+        # Only actually send if the account exists and is active.
+        if company_user and company_user.is_active:
+            otp = f"{secrets.randbelow(1_000_000):06d}"
+            company_user.reset_otp = otp
+            company_user.reset_otp_expires = timezone.now() + timedelta(minutes=OTP_TTL_MINUTES)
+            company_user.save(update_fields=['reset_otp', 'reset_otp_expires'])
+
+            subject = 'Your password reset code'
+            message = (
+                f"Hi {company_user.full_name or 'there'},\n\n"
+                f"Your password reset code is: {otp}\n\n"
+                f"This code expires in {OTP_TTL_MINUTES} minutes. "
+                f"If you didn't request this, you can safely ignore this email.\n\n"
+                f"— {company_user.company.name if company_user.company else 'Pay Per Project'}"
+            )
+            try:
+                send_mail(
+                    subject,
+                    message,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [company_user.email],
+                    fail_silently=False,
+                )
+            except Exception as mail_exc:
+                logger.error(f"Failed to send reset OTP to {email}: {mail_exc}", exc_info=True)
+                # Don't leak mail failures to the client; still return generic.
+
+        return Response(_FORGOT_GENERIC, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"forgot_password error: {e}", exc_info=True)
+        # Still return generic success to avoid leaking anything.
+        return Response(_FORGOT_GENERIC, status=status.HTTP_200_OK)
+
+
+def _validate_otp(company_user):
+    """Return True if the stored OTP exists and hasn't expired."""
+    if not company_user or not company_user.reset_otp or not company_user.reset_otp_expires:
+        return False
+    return company_user.reset_otp_expires >= timezone.now()
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([CompanyAuthThrottle])
+def verify_reset_otp(request):
+    """Step 2: verify the emailed OTP for the given email."""
+    try:
+        email = (request.data.get('email') or '').strip()
+        otp = (request.data.get('otp') or '').strip()
+
+        if not email or not otp:
+            return Response({
+                'status': 'error',
+                'message': 'Email and code are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        company_user = _find_login_company_user(email)
+
+        if not _validate_otp(company_user) or company_user.reset_otp != otp:
+            return Response({
+                'status': 'error',
+                'message': 'Invalid or expired code'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'status': 'success',
+            'message': 'Code verified. You can now set a new password.'
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"verify_reset_otp error: {e}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': 'Failed to verify code'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([CompanyAuthThrottle])
+def reset_password(request):
+    """Step 3: with a valid OTP, set the new password and clear the OTP."""
+    try:
+        email = (request.data.get('email') or '').strip()
+        otp = (request.data.get('otp') or '').strip()
+        new_password = request.data.get('password') or request.data.get('newPassword') or ''
+
+        if not email or not otp or not new_password:
+            return Response({
+                'status': 'error',
+                'message': 'Email, code, and new password are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(new_password) < 8:
+            return Response({
+                'status': 'error',
+                'message': 'Password must be at least 8 characters long'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        company_user = _find_login_company_user(email)
+
+        if not _validate_otp(company_user) or company_user.reset_otp != otp:
+            return Response({
+                'status': 'error',
+                'message': 'Invalid or expired code'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update password and invalidate the OTP + any existing sessions.
+        company_user.password_hash = make_password(new_password)
+        company_user.reset_otp = None
+        company_user.reset_otp_expires = None
+        company_user.save(update_fields=['password_hash', 'reset_otp', 'reset_otp_expires'])
+        CompanyUserToken.objects.filter(company_user=company_user).delete()
+
+        return Response({
+            'status': 'success',
+            'message': 'Password reset successfully. Please log in with your new password.'
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.error(f"reset_password error: {e}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': 'Failed to reset password'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

@@ -1,9 +1,10 @@
 
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Layers, Twitter, Github, Linkedin } from 'lucide-react';
+import { Twitter, Github, Linkedin } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useTranslation } from 'react-i18next';
+import Logo from '@/components/layout/Logo';
 
 const Footer = () => {
   const { t } = useTranslation();
@@ -22,9 +23,8 @@ const Footer = () => {
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
           <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
-            <Link to="/" className="flex items-center gap-2">
-              <Layers className="h-8 w-8 text-primary" />
-              <span className="text-xl font-heading font-semibold text-foreground tracking-wide">Pay Per Project</span>
+            <Link to="/">
+              <Logo imgClassName="h-11 w-11" textSizeClassName="text-xl" className="gap-3" />
             </Link>
             <p className="mt-4 max-w-xs text-muted-foreground">
               {t('footer_platform_description')}

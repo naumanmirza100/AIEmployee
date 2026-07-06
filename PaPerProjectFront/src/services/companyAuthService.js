@@ -168,6 +168,43 @@ export const loginCompany = async (email, password) => {
 };
 
 /**
+ * Shared helper for the public (unauthenticated) password-reset endpoints.
+ */
+const postPublic = async (endpoint, body) => {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    const error = new Error(data.message || `HTTP error! status: ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+};
+
+/**
+ * Step 1 — request a password reset OTP for the given email.
+ * Backend always returns a generic success (no email enumeration).
+ */
+export const requestPasswordReset = async (email) =>
+  postPublic('/company/forgot-password', { email });
+
+/**
+ * Step 2 — verify the emailed OTP.
+ */
+export const verifyResetOtp = async (email, otp) =>
+  postPublic('/company/verify-otp', { email, otp });
+
+/**
+ * Step 3 — set a new password using a verified OTP.
+ */
+export const resetPassword = async (email, otp, password) =>
+  postPublic('/company/reset-password', { email, otp, password });
+
+/**
  * Company API helper for authenticated requests
  */
 export const companyApi = {
@@ -235,5 +272,8 @@ export default {
   getCompanyToken,
   getCompanyUser,
   companyApi,
+  requestPasswordReset,
+  verifyResetOtp,
+  resetPassword,
 };
 
