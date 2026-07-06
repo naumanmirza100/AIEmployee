@@ -168,10 +168,10 @@ export default function HRMeetingScheduler() {
     }
   };
 
-  const handleSend = async () => {
-    const msg = input.trim();
+  const handleSend = async (overrideMsg = null) => {
+    const msg = (typeof overrideMsg === 'string' ? overrideMsg : input).trim();
     if (!msg || loading) return;
-    setInput('');
+    if (typeof overrideMsg !== 'string') setInput('');
     setLoading(true);
 
     // Optimistic user bubble
@@ -194,7 +194,13 @@ export default function HRMeetingScheduler() {
       const assistantMsg = {
         role: 'assistant',
         content: reply,
-        responseData: { meeting: data.meeting, parsed: data.parsed },
+        responseData: {
+          meeting: data.meeting,
+          parsed: data.parsed,
+          action: data.action,
+          needsTime: !!data.needs_time,
+          pendingIntent: data.pending_intent || null,
+        },
       };
       // Drop optimistic before persisting
       if (selectedChat) {
@@ -519,6 +525,24 @@ export default function HRMeetingScheduler() {
                             <>
                               <div className="prose prose-invert max-w-none"
                                    dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.content) }} />
+                              {msg.responseData?.needsTime && idx === currentMessages.length - 1 && (
+                                <NeedsTimePicker
+                                  pendingIntent={msg.responseData.pendingIntent}
+                                  disabled={loading}
+                                  onConfirm={(datetimeIso) => {
+                                    const pi = msg.responseData.pendingIntent || {};
+                                    const names = pi.participant_names || pi.invitee_names || [];
+                                    const dt = new Date(datetimeIso);
+                                    const pretty = dt.toLocaleString(undefined, {
+                                      weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+                                      hour: 'numeric', minute: '2-digit',
+                                    });
+                                    const who = names.length ? ` with ${names.join(', ')}` : '';
+                                    const dur = pi.duration_minutes ? ` for ${pi.duration_minutes} minutes` : '';
+                                    handleSend(`Schedule the meeting${who} on ${pretty} (${datetimeIso})${dur}.`);
+                                  }}
+                                />
+                              )}
                               {msg.responseData?.meeting && (
                                 <div className="mt-3 pt-2 border-t border-white/10 text-xs text-white/70">
                                   <div className="font-medium text-emerald-300 flex items-center gap-1">
@@ -787,3 +811,52 @@ const StatCard = ({ label, value }) => (
     <div className="text-2xl font-semibold mt-0.5">{value}</div>
   </div>
 );
+
+// Inline date/time picker rendered inside the assistant bubble when the
+// backend responds with `needs_time`. Sensible default: tomorrow, next
+// half-hour slot; caller re-submits the message via handleSend on confirm.
+function NeedsTimePicker({ pendingIntent, disabled, onConfirm }) {
+  const [datetime, setDatetime] = useState(() => {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    t.setMinutes(t.getMinutes() < 30 ? 30 : 0);
+    if (t.getMinutes() === 0) t.setHours(t.getHours() + 1);
+    t.setSeconds(0);
+    t.setMilliseconds(0);
+    // <input type="datetime-local"> wants local YYYY-MM-DDTHH:MM without seconds
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
+  });
+  const names = pendingIntent?.participant_names || pendingIntent?.invitee_names || [];
+  return (
+    <div className="mt-3 pt-2 border-t border-white/10 space-y-2">
+      <div className="text-xs font-medium text-violet-300 flex items-center gap-1">
+        <Calendar className="h-3 w-3" /> Pick a date &amp; time
+      </div>
+      {names.length > 0 && (
+        <div className="text-xs text-white/60">With: {names.join(', ')}</div>
+      )}
+      <div className="flex items-center gap-2">
+        <Input
+          type="datetime-local"
+          value={datetime}
+          disabled={disabled}
+          onChange={(e) => setDatetime(e.target.value)}
+          className="h-8 text-xs bg-white/[0.03] border-white/[0.08]"
+        />
+        <Button
+          size="sm"
+          disabled={disabled || !datetime}
+          onClick={() => {
+            // Convert local datetime string back to a real ISO to send to backend.
+            const iso = new Date(datetime).toISOString();
+            onConfirm(iso);
+          }}
+          className="h-8 text-xs"
+        >
+          Schedule
+        </Button>
+      </div>
+    </div>
+  );
+}

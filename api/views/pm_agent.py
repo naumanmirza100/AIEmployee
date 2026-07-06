@@ -5130,14 +5130,18 @@ def meeting_schedule(request):
             }, status=status.HTTP_200_OK)
 
         # For non-schedule actions (error, not found, etc.), just return the response
-        return Response({
-            "status": "success",
-            "data": {
-                "action": action,
-                "response": result["response"],
-                "meeting": None,
-            }
-        }, status=status.HTTP_200_OK)
+        payload = {
+            "action": action,
+            "response": result["response"],
+            "meeting": None,
+        }
+        # Surface needs_time + pending_intent so the frontend can render an
+        # inline date/time picker when the user didn't supply a time.
+        if result.get("needs_time"):
+            payload["needs_time"] = True
+        if result.get("pending_intent"):
+            payload["pending_intent"] = result["pending_intent"]
+        return Response({"status": "success", "data": payload}, status=status.HTTP_200_OK)
 
     except KeyServiceError:
         raise

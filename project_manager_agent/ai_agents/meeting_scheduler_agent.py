@@ -691,6 +691,45 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             "data": None,
         }
 
+    # Time-reference tokens the user might use to indicate a date/time. If
+    # the raw message contains none of these, we treat any LLM-emitted
+    # `proposed_time` as a hallucination and null it out.
+    _TIME_TOKENS = (
+        'today', 'tomorrow', 'tonight', 'this morning', 'this afternoon',
+        'this evening', 'this week', 'next week', 'next month', 'next year',
+        'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+        'mon ', 'tue ', 'wed ', 'thu ', 'fri ', 'sat ', 'sun ',
+        'january', 'february', 'march', 'april', 'may', 'june', 'july',
+        'august', 'september', 'october', 'november', 'december',
+        ' jan ', ' feb ', ' mar ', ' apr ', ' jun ', ' jul ',
+        ' aug ', ' sep ', ' oct ', ' nov ', ' dec ',
+        ' am', ' pm', 'a.m', 'p.m',
+        "o'clock", 'oclock', 'noon', 'midnight',
+        ':00', ':15', ':30', ':45',
+        'in an hour', 'in a hour', 'in half an hour',
+    )
+    _TIME_REGEX = re.compile(
+        r'\b('
+        r'\d{1,2}\s*[:.]\s*\d{2}'
+        r'|\d{1,2}\s*(am|pm|a\.m|p\.m)'
+        r'|\d{4}-\d{2}-\d{2}'
+        r'|\d{1,2}/\d{1,2}(/\d{2,4})?'
+        r'|\d{1,2}(st|nd|rd|th)'
+        r'|in\s+\d+\s+(min|minute|hour|day|week|month)'
+        r')\b',
+        re.IGNORECASE,
+    )
+
+    def _message_has_time_reference(self, message: str) -> bool:
+        """Cheap heuristic: does the raw user message contain any temporal
+        reference? Used to catch LLM-hallucinated `proposed_time` values."""
+        if not message:
+            return False
+        low = message.lower()
+        if any(tok in low for tok in self._TIME_TOKENS):
+            return True
+        return bool(self._TIME_REGEX.search(message))
+
     def _is_reschedule_request(self, message: str) -> bool:
         """Check if the message is about rescheduling an existing meeting."""
         msg_lower = message.lower()
@@ -778,6 +817,15 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         # ── Step 2: LLM parsing for date/time and other details ──
         parsed = self.parse_meeting_request(message, company_users, current_time)
 
+        # ── Step 2b: Time-hallucination guard ──
+        # The LLM will sometimes invent a `proposed_time` (e.g. "tomorrow at
+        # midnight") even when the user said nothing about when. If the raw
+        # message has no temporal token at all, drop the LLM's time and
+        # force the "no time specified" path below.
+        if parsed.get("proposed_time") and not self._message_has_time_reference(message):
+            logger.info("[MEETING] LLM invented proposed_time; dropping since raw message has no time tokens")
+            parsed["proposed_time"] = None
+
         if not parsed.get("is_meeting_request"):
             response = self.generate_response("not_meeting_request", parsed, company_users)
             return {"action": "not_meeting_request", "response": response, "data": None}
@@ -835,21 +883,36 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             except Exception:
                 pass
 
+            # Ship a `pending_intent` blob so the frontend datetime picker
+            # can call back with the missing time and everything else
+            # (title, participants, duration) is already known.
+            pending_intent = {
+                "invitee_ids": invitee_ids,
+                "invitee_names": invitee_names,
+                "duration_minutes": duration,
+                "title": parsed.get("title") or None,
+                "description": parsed.get("description") or "",
+                "agenda": parsed.get("agenda") or [],
+            }
             if suggestions_text:
                 return {
                     "action": "suggest_times",
                     "response": (
-                        f"I'd like to help schedule a meeting with {names_str}, but I need a specific time.\n\n"
-                        f"Here are some available slots:{suggestions_text}\n\n"
-                        f"Just say something like *\"schedule it for {(timezone.now() + timedelta(days=1)).strftime('%A')} at 2 PM\"*"
+                        f"When should the meeting with {names_str} happen? "
+                        "Please pick a date and time.\n\n"
+                        f"Suggested available slots:{suggestions_text}"
                     ),
                     "data": None,
+                    "needs_time": True,
+                    "pending_intent": pending_intent,
                 }
             else:
                 return {
-                    "action": "parse_error",
-                    "response": f"I understood you want to meet with {names_str}, but I couldn't determine the date/time. Please specify when, e.g., *\"tomorrow at 2 PM\"* or *\"Friday at 10 AM\"*.",
+                    "action": "needs_time",
+                    "response": f"When should the meeting with {names_str} happen? Please pick a date and time.",
                     "data": None,
+                    "needs_time": True,
+                    "pending_intent": pending_intent,
                 }
 
         # Validate proposed time is in the future

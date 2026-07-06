@@ -1836,6 +1836,54 @@ function HandoffQueueTab() {
       <MacroPickerDialog open={macroOpen}
         onOpenChange={setMacroOpen}
         onInsert={handleMacroInsert} />
+
+      {/* Reassign-handoff picker. Opens when "Reassign…" is clicked in the
+          drawer; lists company users and assigns the ticket directly to the
+          picked one. */}
+      <Dialog open={reassignPopover.open} onOpenChange={(open) => !open && !reassigningHandoff && setReassignPopover({ open: false, candidates: [], loading: false })}>
+        <DialogContent className="max-w-md max-h-[70vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <User className="h-4 w-4" /> Reassign hand-off
+            </DialogTitle>
+            <DialogDescription>
+              Pick the agent to hand this ticket to. They'll see it in their own queue immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="overflow-y-auto min-h-0 flex-1 space-y-1">
+            {reassignPopover.loading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading agents…
+              </div>
+            ) : reassignPopover.candidates.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No agents available in your company.</p>
+            ) : (
+              reassignPopover.candidates.map((cu) => (
+                <Button
+                  key={cu.id}
+                  variant="ghost"
+                  size="sm"
+                  disabled={reassigningHandoff}
+                  className="w-full justify-start"
+                  onClick={() => handleReassignHandoff(cu)}
+                >
+                  <User className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="truncate">{cu.full_name || cu.username || cu.email}</div>
+                    {cu.email && <div className="text-xs text-muted-foreground truncate">{cu.email}</div>}
+                  </div>
+                  {reassigningHandoff && <Loader2 className="h-3 w-3 animate-spin ml-2" />}
+                </Button>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignPopover({ open: false, candidates: [], loading: false })} disabled={reassigningHandoff}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -4973,54 +5021,6 @@ const FrontlineDashboard = () => {
             <Button variant="destructive" onClick={handleDeleteContact} disabled={deleteContactConfirm.busy}>
               {deleteContactConfirm.busy ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />}
               Delete contact
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reassign-handoff picker. Opens when "Reassign…" is clicked in the
-          drawer; lists company users and assigns the ticket directly to the
-          picked one. */}
-      <Dialog open={reassignPopover.open} onOpenChange={(open) => !open && !reassigningHandoff && setReassignPopover({ open: false, candidates: [], loading: false })}>
-        <DialogContent className="max-w-md max-h-[70vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <User className="h-4 w-4" /> Reassign hand-off
-            </DialogTitle>
-            <DialogDescription>
-              Pick the agent to hand this ticket to. They'll see it in their own queue immediately.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="overflow-y-auto min-h-0 flex-1 space-y-1">
-            {reassignPopover.loading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading agents…
-              </div>
-            ) : reassignPopover.candidates.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No agents available in your company.</p>
-            ) : (
-              reassignPopover.candidates.map((cu) => (
-                <Button
-                  key={cu.id}
-                  variant="ghost"
-                  size="sm"
-                  disabled={reassigningHandoff}
-                  className="w-full justify-start"
-                  onClick={() => handleReassignHandoff(cu)}
-                >
-                  <User className="h-3.5 w-3.5 mr-2 text-muted-foreground shrink-0" />
-                  <div className="flex-1 min-w-0 text-left">
-                    <div className="truncate">{cu.full_name || cu.username || cu.email}</div>
-                    {cu.email && <div className="text-xs text-muted-foreground truncate">{cu.email}</div>}
-                  </div>
-                  {reassigningHandoff && <Loader2 className="h-3 w-3 animate-spin ml-2" />}
-                </Button>
-              ))
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReassignPopover({ open: false, candidates: [], loading: false })} disabled={reassigningHandoff}>
-              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
