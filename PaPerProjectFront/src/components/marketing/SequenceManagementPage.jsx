@@ -1065,6 +1065,19 @@ const SequenceManagementPage = ({ embedded = false }) => {
     setFn(currentSelected.size === allIds.length ? new Set() : new Set(allIds));
   };
 
+  // Like toggleSelectAll, but only adds/removes this group's ids — safe when
+  // the same selection Set is shared across multiple independent groups
+  // (e.g. sub-sequences nested under different parent sequences).
+  const toggleSelectAllInGroup = (setFn, groupIds) => {
+    setFn((prev) => {
+      const allSelected = groupIds.length > 0 && groupIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) groupIds.forEach((id) => next.delete(id));
+      else groupIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
   const handleBulkDeleteTemplates = async () => {
     if (selectedTemplateIds.size === 0) return;
     setBulkDeleting(true);
@@ -1462,7 +1475,17 @@ const SequenceManagementPage = ({ embedded = false }) => {
                       </div>
                       {(seq.sub_sequences?.length ?? 0) > 0 && (
                         <div className="mt-4 pt-4 border-t border-border">
-                          <h4 className="text-sm font-medium text-foreground mb-2">Sub-sequences (triggered by replies)</h4>
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-medium text-foreground">Sub-sequences (triggered by replies)</h4>
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                checked={seq.sub_sequences.length > 0 && seq.sub_sequences.every((sub) => selectedSubSequenceIds.has(sub.id))}
+                                onCheckedChange={() => toggleSelectAllInGroup(setSelectedSubSequenceIds, seq.sub_sequences.map((sub) => sub.id))}
+                                id={`select-all-sub-sequences-${seq.id}`}
+                              />
+                              <Label htmlFor={`select-all-sub-sequences-${seq.id}`} className="text-xs text-muted-foreground cursor-pointer">Select all</Label>
+                            </div>
+                          </div>
                           <div className="space-y-3">
                             {seq.sub_sequences.map((sub) => (
                               <div key={sub.id} className="rounded-lg border-l-4 border-violet-500 bg-[rgba(245,255,255,0.14)] p-3">
@@ -1868,19 +1891,21 @@ const SequenceManagementPage = ({ embedded = false }) => {
                               {detectedInterestLevels.map((l) => INTEREST_LEVEL_OPTIONS.find((o) => o.value === l)?.label || l).join(', ')}
                             </span>
                           </p>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={handleCreateMultipleSubSequences}
-                            disabled={creatingMultiSequences}
-                          >
-                            {creatingMultiSequences ? (
-                              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating sub-sequences…</>
-                            ) : (
-                              <><Sparkles className="h-4 w-4 mr-2" /> Create sub-sequences</>
-                            )}
-                          </Button>
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="default"
+                              size="sm"
+                              onClick={handleCreateMultipleSubSequences}
+                              disabled={creatingMultiSequences}
+                            >
+                              {creatingMultiSequences ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating sub-sequences…</>
+                              ) : (
+                                <><Sparkles className="h-4 w-4 mr-2" /> Create sub-sequences</>
+                              )}
+                            </Button>
+                          </div>
                           <p className="text-xs text-muted-foreground">
                             Each gets one AI-generated email using the "Send from" setting below.
                           </p>
@@ -2200,9 +2225,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={actionLoading}>
-                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : (sequenceForm.parent_sequence_id ? 'Create sub-sequence' : 'Create sequence')}
-              </Button>
+              {!(sequenceForm.parent_sequence_id && (detectedInterestLevels?.length > 1 || !subSequenceScenario.trim())) && (
+                <Button type="submit" disabled={actionLoading}>
+                  {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : (sequenceForm.parent_sequence_id ? 'Create sub-sequence' : 'Create sequence')}
+                </Button>
+              )}
             </DialogFooter>
           </form>
         </DialogContent>
