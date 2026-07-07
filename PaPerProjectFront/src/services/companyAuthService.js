@@ -186,6 +186,13 @@ const postPublic = async (endpoint, body) => {
 };
 
 /**
+ * Public company self-signup. Creates the company and emails a setup link.
+ * @param {object} companyData - name, email, phone, address, website, industry, company_size, description
+ */
+export const signupCompany = async (companyData) =>
+  postPublic('/company/signup', companyData);
+
+/**
  * Step 1 — request a password reset OTP for the given email.
  * Backend always returns a generic success (no email enumeration).
  */
@@ -259,6 +266,9 @@ const logoutCompany = async () => {
     localStorage.removeItem('company_auth_token');
     localStorage.removeItem('company_user');
     localStorage.removeItem('company_purchased_modules');
+    // Reset per-session UI flags so the next login is treated as fresh
+    // (e.g. the recruitment "Create Job with AI" auto-open modal).
+    sessionStorage.removeItem('recruitment_ai_modal_shown');
   }
 };
 
@@ -272,6 +282,7 @@ export default {
   getCompanyToken,
   getCompanyUser,
   companyApi,
+  signupCompany,
   requestPasswordReset,
   verifyResetOtp,
   resetPassword,

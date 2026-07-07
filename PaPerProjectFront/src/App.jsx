@@ -38,6 +38,7 @@ import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import SuperAdminApiKeysPage from '@/pages/SuperAdminApiKeysPage';
 import CompanyRegisterPage from '@/pages/CompanyRegisterPage';
 import CompanyLoginPage from '@/pages/CompanyLoginPage';
+import CompanySignupPage from '@/pages/CompanySignupPage';
 import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
 import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
@@ -120,6 +121,7 @@ import { useTranslation } from 'react-i18next';
             {/* Company routes without header/footer */}
             <Route path="/company/register" element={<CompanyRegisterPage />} />
             <Route path="/company/login" element={<CompanyLoginPage />} />
+            <Route path="/company/signup" element={<CompanySignupPage />} />
             <Route path="/company/dashboard" element={<CompanyDashboardPage />} />
             <Route path="/company/settings/api-keys" element={<AgentKeysSettingsPage />} />
             
@@ -151,7 +153,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/candidate-portal/:token" element={<CandidatePortalPage />} />
 
             {/* Recruitment Agent routes without header/footer */}
-            <Route path="/recruitment" element={<Navigate to="/recruitment/dashboard" replace />} />
+            <Route path="/recruitment" element={<Navigate to="/recruitment/job-descriptions" replace />} />
             <Route path="/recruitment/dashboard" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/cvprocessing" element={<RecruitmentAgentPage />} />
             <Route path="/recruitment/analytics" element={<RecruitmentAgentPage />} />

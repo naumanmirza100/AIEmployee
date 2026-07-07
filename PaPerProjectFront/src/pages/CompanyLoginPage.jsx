@@ -216,6 +216,17 @@ const CompanyLoginPage = () => {
             )}
           </Button>
         </form>
+
+        <div className="mt-4 text-center text-sm text-muted-foreground">
+          Don't have an account?{' '}
+          <button
+            type="button"
+            onClick={() => navigate('/company/signup')}
+            className="font-medium text-primary hover:underline"
+          >
+            Sign up
+          </button>
+        </div>
       </CardContent>
     </>
   );

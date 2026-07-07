@@ -6,6 +6,7 @@ import DashboardNavbar from '@/components/common/DashboardNavbar';
 import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
+import { logoutCompany } from '@/services/companyAuthService';
 import { Target, Loader2 } from 'lucide-react';
 
 const AiSdrAgentPage = () => {
@@ -54,10 +55,9 @@ const AiSdrAgentPage = () => {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('company_auth_token');
-    localStorage.removeItem('company_user');
-    localStorage.removeItem('company_purchased_modules');
+  const handleLogout = async () => {
+    // Use the shared logout so server token + all local/session flags get cleared consistently.
+    await logoutCompany();
     navigate('/company/login');
   };
 

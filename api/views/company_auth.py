@@ -1,5 +1,6 @@
 import logging
 import secrets
+import string
 from datetime import timedelta
 
 from rest_framework import status
@@ -16,12 +17,21 @@ from rest_framework.authtoken.models import Token
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
+from api.serializers.company import CompanySerializer
 from core.models import Company, CompanyUser, CompanyRegistrationToken, CompanyUserToken
 
 logger = logging.getLogger(__name__)
 
 # Password reset OTP settings
 OTP_TTL_MINUTES = 10
+
+
+def _generate_registration_token():
+    """Generate a unique 64-char registration token."""
+    while True:
+        token = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(64))
+        if not CompanyRegistrationToken.objects.filter(token=token).exists():
+            return token
 
 
 def _find_login_company_user(email):
@@ -180,6 +190,92 @@ def register_company_user(request):
             'status': 'error',
             'message': 'Failed to register company account',
             'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([CompanyAuthThrottle])
+def company_signup(request):
+    """Public company self-signup.
+
+    The company fills the same details an admin would, then a registration
+    token is generated and a setup link is emailed to the company's address.
+    Opening that link lets them set a password and receive login credentials
+    (handled by the existing register/verify-token flow).
+    """
+    try:
+        serializer = CompanySerializer(data=request.data)
+        if not serializer.is_valid():
+            # Surface the first specific validation message.
+            first_msg = 'Validation error'
+            for field, msgs in serializer.errors.items():
+                if isinstance(msgs, (list, tuple)) and msgs:
+                    first_msg = str(msgs[0])
+                    break
+            return Response({
+                'status': 'error',
+                'message': first_msg,
+                'errors': serializer.errors,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        company = serializer.save()
+
+        # Generate a registration token (valid 7 days).
+        token_value = _generate_registration_token()
+        expires_at = timezone.now() + timedelta(days=7)
+        CompanyRegistrationToken.objects.create(
+            company=company,
+            token=token_value,
+            expires_at=expires_at,
+        )
+
+        # Build the setup link to the frontend register page.
+        frontend_base = (getattr(settings, 'FRONTEND_URL', None) or '').strip().rstrip('/')
+        setup_link = f"{frontend_base}/company/register?token={token_value}"
+
+        # Email the setup link to the company address.
+        email_sent = False
+        try:
+            subject = 'Complete your Pay Per Project account setup'
+            message = (
+                f"Hi {company.name},\n\n"
+                f"Thanks for signing up! To finish setting up your account, "
+                f"open the link below and choose a password:\n\n"
+                f"{setup_link}\n\n"
+                f"This link expires in 7 days.\n\n"
+                f"— Pay Per Project"
+            )
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [company.email],
+                fail_silently=False,
+            )
+            email_sent = True
+        except Exception as mail_exc:
+            logger.error(f"Failed to send signup setup link to {company.email}: {mail_exc}", exc_info=True)
+
+        return Response({
+            'status': 'success',
+            'message': (
+                'Account created! Check your email for a setup link to choose your password.'
+                if email_sent else
+                'Account created, but we could not send the setup email. Please contact support.'
+            ),
+            'data': {
+                'company': CompanySerializer(company).data,
+                'emailSent': email_sent,
+            },
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"company_signup error: {e}", exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': 'Failed to create account',
+            'error': str(e),
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

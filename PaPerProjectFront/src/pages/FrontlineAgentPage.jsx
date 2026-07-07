@@ -6,6 +6,7 @@ import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
+import { logoutCompany } from '@/services/companyAuthService';
 import { Headphones, Loader2, Lock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -67,10 +68,9 @@ const FrontlineAgentPage = () => {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('company_auth_token');
-    localStorage.removeItem('company_user');
-    localStorage.removeItem('company_purchased_modules');
+  const handleLogout = async () => {
+    // Use the shared logout so server token + all local/session flags get cleared consistently.
+    await logoutCompany();
     navigate('/company/login');
   };
 

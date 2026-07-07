@@ -218,8 +218,8 @@ const CompanyDashboardPage = () => {
       const urlParams = new URLSearchParams(window.location.search);
       const section = urlParams.get('section');
       if (section === 'recruitment') {
-        // Redirect to recruitment dashboard
-        navigate('/recruitment/dashboard', { replace: true });
+        // Open recruitment agent on the Job Descriptions page
+        navigate('/recruitment/job-descriptions', { replace: true });
         return;
       } else if (section === 'project-manager') {
         // Redirect to project manager dashboard
@@ -2349,7 +2349,7 @@ const CompanyDashboardPage = () => {
                                     </Button>
                                     {/* Open Agent Dashboard button */}
                                     {({
-                                      recruitment_agent:     '/recruitment/dashboard',
+                                      recruitment_agent:     '/recruitment/job-descriptions',
                                       marketing_agent:       '/marketing/dashboard',
                                       project_manager_agent: '/project-manager/dashboard',
                                       frontline_agent:       '/frontline/dashboard',
@@ -2362,7 +2362,7 @@ const CompanyDashboardPage = () => {
                                         className="w-full"
                                         style={{ background: 'linear-gradient(90deg,#7c3aed,#4f46e5)', border: 'none' }}
                                         onClick={() => navigate(({
-                                          recruitment_agent:     '/recruitment/dashboard',
+                                          recruitment_agent:     '/recruitment/job-descriptions',
                                           marketing_agent:       '/marketing/dashboard',
                                           project_manager_agent: '/project-manager/dashboard',
                                           frontline_agent:       '/frontline/dashboard',

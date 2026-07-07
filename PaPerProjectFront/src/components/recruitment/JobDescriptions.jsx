@@ -38,7 +38,15 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showCreateWithAiModal, setShowCreateWithAiModal] = useState(false);
+  // Auto-open the "Create Job with AI" modal the first time the page opens
+  // this session. Using a lazy initializer avoids effect-timing issues.
+  const [showCreateWithAiModal, setShowCreateWithAiModal] = useState(() => {
+    if (typeof window !== 'undefined' && !sessionStorage.getItem('recruitment_ai_modal_shown')) {
+      sessionStorage.setItem('recruitment_ai_modal_shown', '1');
+      return true;
+    }
+    return false;
+  });
   const [createWithAiStep, setCreateWithAiStep] = useState('prompt'); // 'prompt' | 'form'
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -343,6 +351,22 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
     setCreateWithAiStep('prompt');
     setAiPrompt('');
     resetForm();
+  };
+
+  // Switch from the manual create modal to the AI modal.
+  const switchToAiModal = () => {
+    setShowCreateModal(false);
+    setAiPrompt('');
+    setCreateWithAiStep('prompt');
+    resetForm();
+    setShowCreateWithAiModal(true);
+  };
+
+  // Switch from the AI modal to the manual create modal.
+  // Keeps any form data (e.g. AI-generated fields) so nothing is lost.
+  const switchToManualModal = () => {
+    setShowCreateWithAiModal(false);
+    setShowCreateModal(true);
   };
 
   const handleViewApplications = async (job) => {
@@ -953,10 +977,22 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
       <Dialog open={showCreateModal} onOpenChange={(open) => { setShowCreateModal(open); if (!open) resetForm(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create Job Description</DialogTitle>
-            <DialogDescription>
-              Fill in the details below and save.
-            </DialogDescription>
+            <div className="flex items-start justify-between gap-3 pr-6">
+              <div>
+                <DialogTitle>Create Job Description</DialogTitle>
+                <DialogDescription>
+                  Fill in the details below and save.
+                </DialogDescription>
+              </div>
+              <button
+                type="button"
+                onClick={switchToAiModal}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 px-3 py-1.5 text-sm font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
+              >
+                <Wand2 className="h-4 w-4" />
+                Create with AI
+              </button>
+            </div>
           </DialogHeader>
           <JobForm
             formData={formData}
@@ -972,12 +1008,24 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
       <Dialog open={showCreateWithAiModal} onOpenChange={(open) => { if (!open) closeCreateWithAi(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create Job with AI</DialogTitle>
-            <DialogDescription>
-              {createWithAiStep === 'prompt'
-                ? 'Write a prompt to generate your job description (e.g. role, skills, responsibilities).'
-                : 'Review and edit the generated job, then Save to create it.'}
-            </DialogDescription>
+            <div className="flex items-start justify-between gap-3 pr-6">
+              <div>
+                <DialogTitle>Create Job with AI</DialogTitle>
+                <DialogDescription>
+                  {createWithAiStep === 'prompt'
+                    ? 'Write a prompt to generate your job description (e.g. role, skills, responsibilities).'
+                    : 'Review and edit the generated job, then Save to create it.'}
+                </DialogDescription>
+              </div>
+              <button
+                type="button"
+                onClick={switchToManualModal}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
+              >
+                <FileText className="h-4 w-4" />
+                Create manually
+              </button>
+            </div>
           </DialogHeader>
 
           {createWithAiStep === 'prompt' ? (

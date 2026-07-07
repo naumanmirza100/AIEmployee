@@ -17,7 +17,7 @@ import {
  */
 const ALL_AGENTS = [
   { key: 'project_manager_agent', label: 'Project Manager Agent', icon: BrainCircuit, section: 'project-manager', path: '/project-manager/dashboard' },
-  { key: 'recruitment_agent',     label: 'Recruitment Agent',     icon: UserCheck,    section: 'recruitment',      path: '/recruitment/dashboard' },
+  { key: 'recruitment_agent',     label: 'Recruitment Agent',     icon: UserCheck,    section: 'recruitment',      path: '/recruitment/job-descriptions' },
   { key: 'marketing_agent',       label: 'Marketing Agent',       icon: Megaphone,    section: 'marketing',        path: '/marketing/dashboard' },
   { key: 'frontline_agent',       label: 'Frontline Agent',       icon: Headphones,   section: 'frontline',        path: '/frontline/dashboard' },
   { key: 'operations_agent',      label: 'Operations Agent',      icon: FileSearch,   section: 'operations',       path: '/operations/dashboard' },
