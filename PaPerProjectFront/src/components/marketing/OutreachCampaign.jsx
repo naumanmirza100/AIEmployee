@@ -660,8 +660,10 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   return (
     <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
       <CardHeader>
-        <CardTitle className="text-white flex items-center gap-2">
-          <Megaphone className="h-5 w-5 text-violet-400" />
+        <CardTitle className="text-white flex items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 ring-1 ring-violet-400/30">
+            <Megaphone className="h-[18px] w-[18px] text-violet-400" />
+          </span>
           Outreach & Campaign Agent
         </CardTitle>
         <CardDescription className="text-white/60">
@@ -669,103 +671,61 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Action</Label>
-            <Select value={action} onValueChange={(v) => { setAction(v); setResult(null); setError(null); setDesignReady(false); setFieldsRevealed(false); }}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select action" />
-              </SelectTrigger>
-              <SelectContent>
-                {ACTIONS.map((a) => (
-                  <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div className={`grid grid-cols-1 gap-4 items-end ${showCampaignSelect ? 'md:grid-cols-3' : !fieldsRevealed ? 'md:grid-cols-2' : ''}`}>
+              <div className="space-y-2">
+                <Label className="text-white/90">Action</Label>
+                <Select value={action} onValueChange={(v) => { setAction(v); setResult(null); setError(null); setDesignReady(false); setFieldsRevealed(false); }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select action" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ACTIONS.map((a) => (
+                      <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          {showCampaignSelect && (
-            <div className="space-y-2">
-              <Label>Existing campaign {campaignSelectRequired ? '(required)' : '(optional — leave blank to create a new one)'}</Label>
-              <Select
-                value={campaignId || (campaignSelectRequired ? '' : '__new__')}
-                onValueChange={(v) => { setCampaignId(v === '__new__' ? '' : v); setFieldsRevealed(false); }}
-                disabled={loadingCampaigns}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={loadingCampaigns ? 'Loading...' : 'Select campaign'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {!campaignSelectRequired && (
-                    <SelectItem value="__new__">Create a new campaign</SelectItem>
-                  )}
-                  {campaigns.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>{c.name} ({c.status})</SelectItem>
-                  ))}
-                  {/* Radix Select requires non-empty value; when no campaigns, only placeholder is shown */}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="camp-name">Campaign name</Label>
-              <Input
-                id="camp-name"
-                placeholder="e.g. Summer Sale 2024"
-                value={name}
-                onChange={(e) => { setName(e.target.value); setFieldsRevealed(false); }}
-                disabled={campaignSelectRequired && !campaignId}
-              />
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="camp-desc">Description</Label>
-              <Textarea
-                id="camp-desc"
-                placeholder="Goals and key messaging..."
-                value={description}
-                onChange={(e) => { setDescription(e.target.value); setFieldsRevealed(false); }}
-                rows={2}
-                disabled={campaignSelectRequired && !campaignId}
-              />
-            </div>
-          </div>
-
-          {emailAccounts.length > 0 && (
-            <div className="space-y-2">
-              <Label htmlFor="email-account">Send from</Label>
-              <Select value={emailAccountId} onValueChange={setEmailAccountId} disabled={emailAccountsLoading}>
-                <SelectTrigger id="email-account">
-                  <SelectValue placeholder="Select email account" />
-                </SelectTrigger>
-                <SelectContent>
-                  {emailAccounts.map((acc) => (
-                    <SelectItem key={acc.id} value={String(acc.id)}>
-                      {acc.name} ({acc.email}){acc.is_default ? ' — Default' : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {!fieldsRevealed && (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+              {showCampaignSelect && (
                 <div className="space-y-2">
-                  <Label htmlFor="duration-amount">Duration</Label>
+                  <Label className="text-white/90">Existing campaign {campaignSelectRequired ? '(required)' : '(optional)'}</Label>
+                  <Select
+                    value={campaignId || (campaignSelectRequired ? '' : '__new__')}
+                    onValueChange={(v) => { setCampaignId(v === '__new__' ? '' : v); setFieldsRevealed(false); }}
+                    disabled={loadingCampaigns}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingCampaigns ? 'Loading...' : 'Select campaign'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {!campaignSelectRequired && (
+                        <SelectItem value="__new__">Create a new campaign</SelectItem>
+                      )}
+                      {campaigns.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>{c.name} ({c.status})</SelectItem>
+                      ))}
+                      {/* Radix Select requires non-empty value; when no campaigns, only placeholder is shown */}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {!fieldsRevealed && (
+                <div className="space-y-2">
                   <div className="flex gap-2">
                     <Input
                       id="duration-amount"
                       type="number"
                       min={1}
-                      className="w-24"
+                      placeholder="Duration"
+                      className="w-30 h-10 shrink-0"
                       value={durationAmount}
                       onChange={(e) => setDurationAmount(e.target.value)}
                     />
                     <Select value={durationUnit} onValueChange={setDurationUnit}>
-                      <SelectTrigger>
+                      <SelectTrigger className="flex-1">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -776,11 +736,14 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                     </Select>
                   </div>
                 </div>
-              </div>
+              )}
+            </div>
 
-              <div className="flex justify-end">
+            {!fieldsRevealed && (
+              <div className="flex justify-end pt-1">
                 <Button
                   type="button"
+                  className="bg-violet-600 hover:bg-violet-700 text-white border-0"
                   onClick={handleAutoFill}
                   disabled={autoFilling || (campaignSelectRequired && !campaignId)}
                 >
@@ -802,14 +765,63 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                   )}
                 </Button>
               </div>
-            </>
-          )}
+            )}
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="camp-name" className="text-white/90">Campaign name</Label>
+                <Input
+                  id="camp-name"
+                  placeholder="e.g. Summer Sale 2024"
+                  value={name}
+                  onChange={(e) => { setName(e.target.value); setFieldsRevealed(false); }}
+                  disabled={campaignSelectRequired && !campaignId}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="camp-desc" className="text-white/90">Description</Label>
+                <Textarea
+                  id="camp-desc"
+                  placeholder="Goals and key messaging..."
+                  value={description}
+                  onChange={(e) => { setDescription(e.target.value); setFieldsRevealed(false); }}
+                  rows={2}
+                  disabled={campaignSelectRequired && !campaignId}
+                />
+              </div>
+            </div>
+
+            {emailAccounts.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="email-account" className="text-white/90">Send from</Label>
+                <Select value={emailAccountId} onValueChange={setEmailAccountId} disabled={emailAccountsLoading}>
+                  <SelectTrigger id="email-account">
+                    <SelectValue placeholder="Select email account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {emailAccounts.map((acc) => (
+                      <SelectItem key={acc.id} value={String(acc.id)}>
+                        {acc.name} ({acc.email}){acc.is_default ? ' — Default' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
 
           {fieldsRevealed && (
-            <>
+            <div className="space-y-5 rounded-xl border border-violet-400/20 bg-violet-500/[0.06] p-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-violet-400" />
+                <span className="text-sm font-medium text-white/90">Campaign details</span>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="target-leads">Target leads</Label>
+                  <Label htmlFor="target-leads" className="text-white/90">Target leads</Label>
                   <Input
                     id="target-leads"
                     type="number"
@@ -820,7 +832,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="target-conv">Target conversions</Label>
+                  <Label htmlFor="target-conv" className="text-white/90">Target conversions</Label>
                   <Input
                     id="target-conv"
                     type="number"
@@ -847,68 +859,76 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 </div>
               )} */}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="age">Age range</Label>
-                  <Input id="age" placeholder="e.g. 25-45" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="loc">Location</Label>
-                  <Input id="loc" placeholder="e.g. North America" value={location} onChange={(e) => setLocation(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ind">Industry</Label>
-                  <Input id="ind" placeholder="e.g. Technology" value={industry} onChange={(e) => setIndustry(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Company size</Label>
-                  <Select value={companySize || '__any__'} onValueChange={setCompanySize}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Any" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {COMPANY_SIZES.map((s) => (
-                        <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="int">Interests</Label>
-                  <Input id="int" placeholder="e.g. tech, marketing" value={interests} onChange={(e) => setInterests(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lang">Language</Label>
-                  <Input id="lang" placeholder="e.g. English" value={language} onChange={(e) => setLanguage(e.target.value)} />
+              <div className="h-px bg-white/10" />
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-white/40 mb-3">Target audience</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="age" className="text-white/90">Age range</Label>
+                    <Input id="age" placeholder="e.g. 25-45" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="loc" className="text-white/90">Location</Label>
+                    <Input id="loc" placeholder="e.g. North America" value={location} onChange={(e) => setLocation(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ind" className="text-white/90">Industry</Label>
+                    <Input id="ind" placeholder="e.g. Technology" value={industry} onChange={(e) => setIndustry(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-white/90">Company size</Label>
+                    <Select value={companySize || '__any__'} onValueChange={setCompanySize}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Any" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {COMPANY_SIZES.map((s) => (
+                          <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="int" className="text-white/90">Interests</Label>
+                    <Input id="int" placeholder="e.g. tech, marketing" value={interests} onChange={(e) => setInterests(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="lang" className="text-white/90">Language</Label>
+                    <Input id="lang" placeholder="e.g. English" value={language} onChange={(e) => setLanguage(e.target.value)} />
+                  </div>
                 </div>
               </div>
 
               {showDates && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="start">Start date</Label>
-                    <DatePicker
-                      date={startDate ? parseDateLocal(startDate) : undefined}
-                      setDate={(d) => setStartDate(d ? formatDateLocal(d) : '')}
-                      placeholder="Select start date"
-                    />
+                <>
+                  <div className="h-px bg-white/10" />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="start" className="text-white/90">Start date</Label>
+                      <DatePicker
+                        date={startDate ? parseDateLocal(startDate) : undefined}
+                        setDate={(d) => setStartDate(d ? formatDateLocal(d) : '')}
+                        placeholder="Select start date"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="end" className="text-white/90">End date</Label>
+                      <DatePicker
+                        date={endDate ? parseDateLocal(endDate) : undefined}
+                        setDate={(d) => setEndDate(d ? formatDateLocal(d) : '')}
+                        placeholder="Select end date"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="end">End date</Label>
-                    <DatePicker
-                      date={endDate ? parseDateLocal(endDate) : undefined}
-                      setDate={(d) => setEndDate(d ? formatDateLocal(d) : '')}
-                      placeholder="Select end date"
-                    />
-                  </div>
-                </div>
+                </>
               )}
-            </>
+            </div>
           )}
 
           {created ? (
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-200 p-4">
-              <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.08] p-4">
+              <div className="flex items-center gap-2 text-emerald-400">
                 <CheckCircle className="h-5 w-5 shrink-0" />
                 <span className="font-medium">Created.</span>
               </div>
@@ -921,13 +941,13 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
               </Button>
             </div>
           ) : designReady ? (
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-violet-200 p-4">
-              <div className="flex flex-col items-start gap-2 text-green-700 dark:text-green-400">
-                <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.08] p-4">
+              <div className="flex flex-col items-start gap-2">
+                <div className="flex items-center gap-2 text-emerald-400">
                   <CheckCircle className="h-5 w-5 shrink-0" />
                   <span className="font-medium">Campaign design ready</span>
                 </div>
-                <p className="text-sm text-muted-foreground">Use the form below to create, launch, or schedule this campaign.</p>
+                <p className="text-sm text-white/60">Use the form below to create, launch, or schedule this campaign.</p>
               </div>
               <Button
                 type="button"
@@ -939,7 +959,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
             </div>
           ) : fieldsRevealed ? (
             <div className="flex justify-end">
-              <Button type="submit" disabled={loading}>
+              <Button type="submit" className="bg-violet-600 hover:bg-violet-700 text-white border-0" disabled={loading}>
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

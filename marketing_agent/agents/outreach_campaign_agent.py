@@ -237,7 +237,7 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
             result[str_key] = str(result[str_key]).strip() if result[str_key] else ''
         return result
 
-    def generate_template_content(self, name: str, description: str) -> Dict:
+    def generate_template_content(self, name: str, description: str, company_name: str = '') -> Dict:
         """
         Generate an email template's subject line and HTML (+ plain-text) body from
         just a name and a short description of what the email should say — the user
@@ -246,12 +246,14 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
         Args:
             name (str): Template name (context only, not shown in the email)
             description (str): What the email should say — goals, tone, key points
+            company_name (str): Sender's company name, signed at the email's close
 
         Returns:
             Dict: { success, subject, html_content, text_content }
         """
         self.log_action("Generating template content", {"name": name})
 
+        sign_off = f'"Best regards,\\n{company_name}"' if company_name else '"Best regards,\\n[Sender\'s company name]"'
         prompt = f"""Write a marketing email for the following. Output EXACTLY two sections, in this order, with no extra commentary:
 
 SUBJECT: <the email subject line, one line only>
@@ -264,6 +266,7 @@ What the email should say: {description or 'Not provided'}
 Rules:
 - The BODY must be plain semantic HTML (e.g. <p>, <a>, <strong> tags) — no <html>/<head>/<body> wrapper, no inline <style> blocks, no markdown asterisks, no code fences.
 - Use merge-field placeholders where natural: {{{{first_name}}}}, {{{{last_name}}}}, {{{{company}}}}, {{{{job_title}}}}. Always greet with {{{{first_name}}}}.
+- End the email with a sign-off closing as {sign_off} — sign with the company name, not a person's name, and never leave a "[Your Name]"-style placeholder.
 - Keep the body concise: a greeting, 2-4 short paragraphs or a short list, and a clear call to action.
 - Professional but warm tone unless the description says otherwise.
 - The SUBJECT line must be plain text (no HTML, no quotes around it)."""
@@ -329,6 +332,88 @@ Rules:
             html_content = re.sub(r'^```[a-zA-Z]*\n?', '', html_content)
             html_content = re.sub(r'\n?```$', '', html_content).strip()
         return subject, html_content
+
+    # Valid interest_level values a sub-sequence can be routed by — must match
+    # the frontend's INTEREST_LEVEL_OPTIONS and the reply-classification logic
+    # elsewhere in the reply-processing pipeline.
+    INTEREST_LEVELS = ['any', 'positive', 'negative', 'neutral', 'requested_info', 'objection', 'unsubscribe']
+
+    def classify_interest_level(self, description: str) -> Dict:
+        """
+        Map a free-form description of a reply scenario (e.g. "when the lead
+        says they're not interested right now") to the closest matching
+        interest_level(s), so the user doesn't have to pick from the dropdown
+        manually when creating a sub-sequence.
+
+        A description can legitimately name more than one category at once
+        (e.g. "email for interested leads and email for negative leads") —
+        since one sub-sequence can only route on one interest_level, this
+        returns ALL categories detected so the caller can offer to create one
+        sub-sequence per category instead of collapsing them to "any".
+
+        Args:
+            description (str): Free-form text describing the reply scenario
+
+        Returns:
+            Dict: { success, interest_level, interest_levels }
+                  interest_level is the first/primary match (back-compat);
+                  interest_levels is the full ordered list of distinct matches.
+        """
+        self.log_action("Classifying interest level", {"description": description[:100]})
+
+        prompt = f"""Classify the following description of a lead's email reply into ONE OR MORE of these categories. The description may name more than one category — if so, list ALL of them. Respond with ONLY comma-separated category keys, nothing else — no punctuation besides commas, no explanation.
+
+Categories:
+- any: catches any/all replies regardless of sentiment (use ONLY if no specific category applies)
+- positive: the lead is interested / responded positively
+- negative: the lead is not interested / declined
+- neutral: a neutral acknowledgment with no clear sentiment
+- requested_info: the lead asked for more information or details
+- objection: the lead raised an objection, concern, or pushback
+- unsubscribe: the lead asked to stop receiving emails / unsubscribe
+
+Description: {description}
+
+Respond with comma-separated category keys only (from: any, positive, negative, neutral, requested_info, objection, unsubscribe). Example for a description naming two categories: "positive,negative"."""
+
+        try:
+            raw = self._call_llm_for_reasoning(
+                prompt,
+                self.system_prompt,
+                temperature=0.0,
+                max_tokens=40
+            )
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            self.log_action("Error classifying interest level", {"error": str(e)})
+            return {'success': False, 'error': str(e)}
+
+        cleaned = (raw or '').strip().lower()
+        # Tolerate the model wrapping keys in a short sentence or extra
+        # punctuation — scan for every known category mentioned, in the order
+        # they first appear, and dedupe.
+        matched = []
+        for part in re.split(r'[,\n]', cleaned):
+            part = part.strip().strip('.').strip('"').strip("'")
+            lvl = next((lvl for lvl in self.INTEREST_LEVELS if lvl == part or lvl in part), None)
+            if lvl and lvl not in matched:
+                matched.append(lvl)
+        # Fallback: scan the whole cleaned string in case comma-splitting
+        # didn't line up with how the model actually responded.
+        if not matched:
+            for lvl in self.INTEREST_LEVELS:
+                if lvl in cleaned and lvl not in matched:
+                    matched.append(lvl)
+        # If "any" was matched alongside specific categories, the specific
+        # categories are more useful — drop "any" unless it's the only match.
+        if len(matched) > 1 and 'any' in matched:
+            matched = [lvl for lvl in matched if lvl != 'any']
+        if not matched:
+            matched = ['any']
+
+        return {'success': True, 'interest_level': matched[0], 'interest_levels': matched}
 
     def create_multi_channel_campaign(self, user_id: int, campaign_data: Dict,
                                       context: Optional[Dict] = None, leads_file=None) -> Dict:

@@ -229,6 +229,9 @@ const CampaignDetail = () => {
   const [accountDraftId, setAccountDraftId] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMessage, setUploadMessage] = useState('');
+  // Persists the last upload's row breakdown so it stays visible on the Leads
+  // tab (not just a toast that disappears) until the next upload replaces it.
+  const [lastUploadSummary, setLastUploadSummary] = useState(null);
   const [editingLead, setEditingLead] = useState(null);
   const [editLeadForm, setEditLeadForm] = useState({});
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -335,7 +338,7 @@ const CampaignDetail = () => {
       }
       toast({ title: 'Success', description: result?.message || 'Campaign launched' });
       setLaunchOpen(false);
-      fetchDetail();
+      fetchDetail(true);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Launch failed', variant: 'destructive' });
     } finally {
@@ -356,7 +359,7 @@ const CampaignDetail = () => {
       }, id);
       toast({ title: 'Success', description: 'Campaign scheduled' });
       setScheduleOpen(false);
-      fetchDetail();
+      fetchDetail(true);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Schedule failed', variant: 'destructive' });
     } finally {
@@ -370,7 +373,7 @@ const CampaignDetail = () => {
     try {
       await marketingAgentService.campaignStop(id);
       toast({ title: 'Success', description: 'Campaign stopped' });
-      fetchDetail();
+      fetchDetail(true);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Stop failed', variant: 'destructive' });
     } finally {
@@ -397,7 +400,7 @@ const CampaignDetail = () => {
       await marketingAgentService.updateCampaign(id, editForm);
       toast({ title: 'Success', description: 'Campaign updated' });
       setEditOpen(false);
-      fetchDetail();
+      fetchDetail(true);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Update failed', variant: 'destructive' });
     } finally {
@@ -423,7 +426,7 @@ const CampaignDetail = () => {
       });
       toast({ title: 'Success', description: 'Sending account updated' });
       setAccountOpen(false);
-      fetchDetail();
+      fetchDetail(true);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to update sending account', variant: 'destructive' });
     } finally {
@@ -439,11 +442,28 @@ const CampaignDetail = () => {
     setUploadMessage('');
     setActionLoading('upload');
     try {
-      await marketingAgentService.uploadCampaignLeads(id, uploadFile);
-      toast({ title: 'Success', description: 'Leads uploaded' });
+      const res = await marketingAgentService.uploadCampaignLeads(id, uploadFile);
+      const d = res?.data;
+      if (d && typeof d.total_rows === 'number') {
+        const reasons = d.rejected_reasons || {};
+        const reasonParts = [];
+        if (reasons.missing_email) reasonParts.push(`${reasons.missing_email} missing email`);
+        if (reasons.missing_name) reasonParts.push(`${reasons.missing_name} missing name`);
+        if (reasons.other) reasonParts.push(`${reasons.other} error(s)`);
+        toast({
+          title: d.rejected_count ? 'Leads uploaded with some rejected' : 'Leads uploaded',
+          description: `${d.total_rows} row(s) found — ${d.created_count} added as lead(s)${
+            d.rejected_count ? `, ${d.rejected_count} rejected (${reasonParts.join(', ')}).` : '.'
+          }`,
+        });
+        setLastUploadSummary({ ...d, reasonParts });
+      } else {
+        toast({ title: 'Success', description: 'Leads uploaded' });
+        setLastUploadSummary(null);
+      }
       setUploadLeadsOpen(false);
       setUploadFile(null);
-      fetchDetail();
+      fetchDetail(true);
     } catch (e) {
       setUploadMessage(e.message || 'Upload failed');
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
@@ -460,7 +480,7 @@ const CampaignDetail = () => {
       toast({ title: 'Success', description: 'Lead updated' });
       setEditLeadOpen(false);
       setEditingLead(null);
-      fetchDetail();
+      fetchDetail(true);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Update failed', variant: 'destructive' });
     } finally {
@@ -475,7 +495,7 @@ const CampaignDetail = () => {
     try {
       await marketingAgentService.deleteCampaignLead(id, leadId);
       toast({ title: 'Success', description: 'Lead removed' });
-      fetchDetail();
+      fetchDetail(true);
     } catch (e) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
     }
@@ -969,8 +989,23 @@ const CampaignDetail = () => {
               </div>
             </CardHeader>
             <CardContent>
+              {lastUploadSummary && (
+                <div className="rounded-md border bg-muted/30 p-3 mb-3 text-sm">
+                  <p className="text-foreground">
+                    Last upload: <strong>{lastUploadSummary.total_rows}</strong> row{lastUploadSummary.total_rows !== 1 ? 's' : ''} found — <strong>{lastUploadSummary.created_count}</strong> added as lead{lastUploadSummary.created_count !== 1 ? 's' : ''}
+                    {lastUploadSummary.rejected_count > 0 && (
+                      <>, <strong>{lastUploadSummary.rejected_count}</strong> rejected ({lastUploadSummary.reasonParts.join(', ')})</>
+                    )}
+                    .
+                  </p>
+                </div>
+              )}
               {leads.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">No leads yet. Upload a CSV/Excel file to get started.</p>
+                <p className="text-muted-foreground text-center py-8">
+                  {lastUploadSummary
+                    ? 'No leads matched the required fields in that file. Upload a corrected CSV/Excel file to try again.'
+                    : 'No leads yet. Upload a CSV/Excel file to get started.'}
+                </p>
               ) : (
                 <div className="rounded-md border overflow-x-auto">
                   <table className="w-full text-sm">

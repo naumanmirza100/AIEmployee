@@ -900,36 +900,51 @@ def delete_campaign_lead(request, campaign_id, lead_id):
 
 
 def _upload_leads_from_file(campaign, user, uploaded_file):
-    """Process CSV/Excel and add leads to campaign. Returns (created_count, error_message)."""
+    """
+    Process CSV/Excel and add leads to campaign.
+
+    Returns (result_dict, error_message). On a file-level error (bad format,
+    empty file, missing email column) result_dict is None and error_message
+    is set. Otherwise result_dict is:
+        {
+            'total_rows': int,
+            'created_count': int,        # rows successfully added/updated
+            'rejected_count': int,       # rows skipped — missing required fields
+            'rejected_reasons': {'missing_email': int, 'missing_name': int, 'other': int},
+        }
+    """
     try:
         import pandas as pd
     except ImportError:
-        return (0, 'pandas is required for Excel files. For CSV only, use csv module.')
+        return (None, 'pandas is required for Excel files. For CSV only, use csv module.')
     file_extension = (uploaded_file.name or '').split('.')[-1].lower()
     if file_extension not in ['csv', 'xlsx', 'xls']:
-        return (0, 'Invalid file format. Please upload CSV, XLSX, or XLS files.')
+        return (None, 'Invalid file format. Please upload CSV, XLSX, or XLS files.')
     from django.db import transaction
     if file_extension == 'csv':
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
     if df.empty:
-        return (0, 'File is empty')
+        return (None, 'File is empty')
     df.columns = df.columns.str.lower().str.strip()
     if 'email' not in df.columns:
-        return (0, 'Email column is required in the file')
+        return (None, 'Email column is required in the file')
     # Support "first name"/"last name" (with space) and "name" columns
     def _get(row, *keys):
         for k in keys:
             if k in row and pd.notna(row.get(k)) and str(row.get(k)).strip():
                 return str(row.get(k)).strip()
         return ''
+    total_rows = len(df)
     created_count = 0
+    rejected_reasons = {'missing_email': 0, 'missing_name': 0, 'other': 0}
     with transaction.atomic():
         for index, row in df.iterrows():
             try:
                 email = str(row['email']).strip().lower()
                 if not email or pd.isna(row['email']) or email == 'nan':
+                    rejected_reasons['missing_email'] += 1
                     continue
                 first = _get(row, 'first_name', 'first name')
                 last = _get(row, 'last_name', 'last name')
@@ -943,6 +958,7 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                 # split into both) — a row with neither is skipped, same as a
                 # missing email, so personalization tokens are never silently blank.
                 if not first and not last:
+                    rejected_reasons['missing_name'] += 1
                     continue
                 lead, created = Lead.objects.get_or_create(
                     email=email, owner=user,
@@ -985,8 +1001,15 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                     }
                 )
             except Exception:
+                rejected_reasons['other'] += 1
                 continue
-    return (created_count, None)
+    rejected_count = sum(rejected_reasons.values())
+    return ({
+        'total_rows': total_rows,
+        'created_count': created_count,
+        'rejected_count': rejected_count,
+        'rejected_reasons': rejected_reasons,
+    }, None)
 
 
 @api_view(["POST"])
@@ -1009,16 +1032,23 @@ def upload_campaign_leads(request, campaign_id):
                 status=status.HTTP_400_BAD_REQUEST
             )
         uploaded_file = request.FILES['file']
-        created_count, err = _upload_leads_from_file(campaign, user, uploaded_file)
+        result, err = _upload_leads_from_file(campaign, user, uploaded_file)
         if err:
             return Response(
                 {'status': 'error', 'message': err, 'error': 'upload_failed'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        created_count = result['created_count']
+        rejected_count = result['rejected_count']
+        message = f"{result['total_rows']} row(s) found — {created_count} added as lead(s)"
+        if rejected_count:
+            message += f", {rejected_count} rejected (missing required fields)."
+        else:
+            message += '.'
         return Response({
             'status': 'success',
-            'message': f'Successfully added {created_count} lead(s) to the campaign.',
-            'data': {'created_count': created_count}
+            'message': message,
+            'data': result
         }, status=status.HTTP_200_OK)
     except KeyServiceError:
         raise
@@ -2098,6 +2128,53 @@ def delete_sequence(request, campaign_id, sequence_id):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+def classify_interest_level(request, campaign_id):
+    """AI-classify a free-form reply-scenario description into an interest_level key."""
+    try:
+        company_user = request.user
+        user = _get_or_create_user_for_company_user(company_user)
+        campaign = Campaign.objects.filter(id=campaign_id, owner=user).first()
+        if not campaign:
+            return Response(
+                {'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        data = request.data
+        description = (data.get('description') or '').strip()
+        if not description:
+            return Response(
+                {'status': 'error', 'message': 'Description is required.', 'error': 'validation'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        agent = AgentRegistry.get_agent("outreach_campaign")
+        try:
+            agent.company_id = company_user.company_id
+            agent.agent_key_name = 'marketing_agent'
+        except Exception:
+            pass
+
+        result = agent.classify_interest_level(description)
+        if result.get('success') is False:
+            return Response(
+                {'status': 'error', 'message': result.get('error') or 'Classification failed', 'error': 'classification_failed'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        return Response({'status': 'success', 'data': result}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.exception("classify_interest_level failed")
+        err_msg = _normalize_error_message(e)
+        return Response(
+            {'status': 'error', 'message': err_msg if err_msg == RATE_LIMIT_MESSAGE else 'Classification failed', 'error': err_msg},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def generate_template_content(request, campaign_id):
     """AI-generate an email template's HTML/text body from name + subject + description."""
     try:
@@ -2125,7 +2202,8 @@ def generate_template_content(request, campaign_id):
         except Exception:
             pass
 
-        result = agent.generate_template_content(name, description)
+        company_name = (company_user.company.name or '').strip() if company_user.company else ''
+        result = agent.generate_template_content(name, description, company_name)
         if result.get('success') is False:
             return Response(
                 {'status': 'error', 'message': result.get('error') or 'Generation failed', 'error': 'generation_failed'},

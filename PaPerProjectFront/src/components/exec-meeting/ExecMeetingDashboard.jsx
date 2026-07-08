@@ -458,28 +458,23 @@ const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
           <DialogTitle>Schedule Meeting</DialogTitle>
           <DialogDescription className="text-white/50">Fill in the meeting details below.</DialogDescription>
         </DialogHeader>
-
         {/* Two-column layout */}
         <div className="grid grid-cols-2 gap-6 py-2">
-
           {/* LEFT column — core meeting fields */}
           <div className="space-y-4">
             <div className="space-y-1">
               <Label>Title *</Label>
               <Input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Q3 Strategy Review" className="bg-white/5 border-white/10 text-white" />
             </div>
-
             <div className="space-y-1">
               <Label>Description</Label>
               <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Meeting agenda..." rows={3}
                 className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
             </div>
-
             <div className="space-y-1">
               <Label>Date & Time *</Label>
               <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} />
             </div>
-
             <div className="space-y-1">
               <Label>Duration</Label>
               <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
