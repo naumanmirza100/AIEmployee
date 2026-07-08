@@ -20,10 +20,8 @@ const CompanyRegisterPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [companyData, setCompanyData] = useState(null);
   const [formData, setFormData] = useState({
-    email: '',
     password: '',
     confirmPassword: '',
-    fullName: '',
   });
 
   useEffect(() => {
@@ -52,6 +50,7 @@ const CompanyRegisterPage = () => {
         setCompanyData({
           name: response.data.companyName,
           id: response.data.companyId,
+          email: response.data.companyEmail,
         });
       } else {
         throw new Error(response.message || 'Invalid token');
@@ -94,9 +93,7 @@ const CompanyRegisterPage = () => {
       setSubmitting(true);
       const response = await companyAuthService.registerCompany({
         token,
-        email: formData.email,
         password: formData.password,
-        fullName: formData.fullName,
         role: 'admin',
       });
 
@@ -175,36 +172,21 @@ const CompanyRegisterPage = () => {
           <Card>
             <CardHeader className="text-center">
               <Building2 className="h-12 w-12 mx-auto text-primary mb-4" />
-              <CardTitle>Register Company Account</CardTitle>
+              <CardTitle>Set your password</CardTitle>
               <CardDescription>
-                Complete your registration for <strong>{companyData.name}</strong>
+                Choose a password to finish setting up <strong>{companyData.name}</strong>
               </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
+                {companyData.email && (
+                  <div className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm">
+                    <span className="text-muted-foreground">Account email: </span>
+                    <span className="font-medium text-foreground">{companyData.email}</span>
+                  </div>
+                )}
                 <div className="space-y-2">
-                  <Label htmlFor="fullName">Full Name *</Label>
-                  <Input
-                    id="fullName"
-                    value={formData.fullName}
-                    onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                    required
-                    placeholder="John Doe"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email Address *</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    required
-                    placeholder="your@email.com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password *</Label>
+                  <Label htmlFor="password">New Password *</Label>
                   <Input
                     id="password"
                     type="password"

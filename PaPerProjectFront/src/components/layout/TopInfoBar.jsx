@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Cpu, BadgePoundSterling, Gift, Briefcase, Rocket, UserPlus, LogIn, LayoutDashboard, LogOut, User } from 'lucide-react';
+import { Cpu, BadgePoundSterling, Gift, Briefcase, Rocket, UserPlus, LogIn, LayoutDashboard, LogOut, User, Key } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 
 const TopInfoBar = () => {
@@ -20,6 +29,8 @@ const TopInfoBar = () => {
     const { toast } = useToast();
     const navigate = useNavigate();
     const [companyUser, setCompanyUser] = useState(() => getCompanyUser());
+    const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+    const [loggingOut, setLoggingOut] = useState(false);
 
     // Keep login state in sync across tabs / when returning to this tab.
     useEffect(() => {
@@ -32,10 +43,19 @@ const TopInfoBar = () => {
       };
     }, []);
 
-    const handleLogout = async () => {
-      await logoutCompany();
-      setCompanyUser(null);
-      navigate('/company/login');
+    // Ask for confirmation before logging out.
+    const handleLogout = () => setShowLogoutConfirm(true);
+
+    const confirmLogout = async () => {
+      try {
+        setLoggingOut(true);
+        await logoutCompany();
+        setCompanyUser(null);
+        setShowLogoutConfirm(false);
+        navigate('/company/login');
+      } finally {
+        setLoggingOut(false);
+      }
     };
 
     const infoItems = [
@@ -148,6 +168,7 @@ const TopInfoBar = () => {
   };
 
   return (
+    <>
     <motion.div
       initial={{ y: -100, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
@@ -200,9 +221,21 @@ const TopInfoBar = () => {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
+                  <Link to="/company/profile" className="cursor-pointer">
+                    <User className="mr-2 h-4 w-4" />
+                    {t('top_bar_profile', 'Profile')}
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
                   <Link to="/company/dashboard" className="cursor-pointer">
                     <LayoutDashboard className="mr-2 h-4 w-4" />
                     {t('top_bar_dashboard', 'Dashboard')}
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/company/settings/api-keys" className="cursor-pointer">
+                    <Key className="mr-2 h-4 w-4" />
+                    {t('top_bar_api_keys', 'API Keys')}
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -219,6 +252,28 @@ const TopInfoBar = () => {
         </div>
       </div>
     </motion.div>
+
+    {/* Logout confirmation */}
+    <Dialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Log out?</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to log out of your company account?
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowLogoutConfirm(false)} disabled={loggingOut}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={confirmLogout} disabled={loggingOut}>
+            <LogOut className="mr-2 h-4 w-4" />
+            {loggingOut ? 'Logging out...' : 'Log out'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 
