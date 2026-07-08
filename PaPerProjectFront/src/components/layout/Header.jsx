@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, Menu, X, BrainCircuit, ChevronDown, Wrench, ArrowRight, Briefcase, Wand2, HeartHandshake as Handshake, BookOpen, Users, Video, GraduationCap, LifeBuoy, FileText, Sparkles, Cpu, Lightbulb, Rocket } from 'lucide-react';
+import { Layers, Menu, X, BrainCircuit, ChevronDown, Wrench, ArrowRight, Briefcase, Wand2, HeartHandshake as Handshake, BookOpen, Users, Video, GraduationCap, LifeBuoy, FileText, Sparkles, Cpu, Lightbulb, Rocket, LogIn, LogOut, LayoutDashboard, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
+import Logo from '@/components/layout/Logo';
+import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
 import { cn } from '@/lib/utils';
 import {
   NavigationMenu,
@@ -180,8 +182,10 @@ const NavItem = ({ to, label, onClick, isHome = false }) => {
 
 const Header = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [companyUser, setCompanyUser] = useState(() => getCompanyUser());
 
   const navLinks = [
     { to: '/', label: t('nav_home', 'Home'), isHome: true },
@@ -198,23 +202,31 @@ const Header = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // Keep the login/profile state in sync if auth changes in another tab or
+  // when the user returns to this tab (e.g. after logging in elsewhere).
+  useEffect(() => {
+    const refreshUser = () => setCompanyUser(getCompanyUser());
+    window.addEventListener('storage', refreshUser);
+    window.addEventListener('focus', refreshUser);
+    return () => {
+      window.removeEventListener('storage', refreshUser);
+      window.removeEventListener('focus', refreshUser);
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    await logoutCompany();
+    setCompanyUser(null);
+    setIsOpen(false);
+    navigate('/company/login');
+  };
+
   return (
     <header className={`sticky top-0 z-50 transition-all duration-300 ${isScrolled ? 'bg-background/80 backdrop-blur-xl border-b' : 'bg-transparent'}`}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-20 items-center justify-between">
-          <Link to="/" className="flex items-center gap-2" onClick={() => setIsOpen(false)}>
-            <motion.div
-              animate={{ rotate: isScrolled ? 360 : 0 }}
-              transition={{
-                duration: 2,
-                repeat: Infinity,
-                repeatType: 'reverse',
-                ease: 'linear',
-              }}
-            >
-              <Layers className="h-8 w-8 text-primary" />
-            </motion.div>
-            <span className="text-xl font-heading font-semibold text-foreground tracking-wide">Pay Per Project</span>
+          <Link to="/" onClick={() => setIsOpen(false)} className="-ml-2 sm:-ml-4">
+            <Logo imgClassName="h-11 w-11" textSizeClassName="text-xl" className="gap-3" />
           </Link>
           <nav className="hidden md:block">
             <NavigationMenu>
@@ -410,6 +422,37 @@ const Header = () => {
                       Apply for Projects
                     </Link>
                   </Button>
+                  {companyUser ? (
+                    <>
+                      {companyUser.email && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground max-w-xs w-full justify-center">
+                          <User className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{companyUser.email}</span>
+                        </div>
+                      )}
+                      <Button variant="outline" asChild className="w-full max-w-xs">
+                        <Link to="/company/dashboard" onClick={() => setIsOpen(false)}>
+                          <LayoutDashboard className="mr-2 h-4 w-4" />
+                          Dashboard
+                        </Link>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleLogout}
+                        className="w-full max-w-xs text-red-500 hover:text-red-500"
+                      >
+                        <LogOut className="mr-2 h-4 w-4" />
+                        Logout
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="outline" asChild className="w-full max-w-xs">
+                      <Link to="/company/login" onClick={() => setIsOpen(false)}>
+                        <LogIn className="mr-2 h-4 w-4" />
+                        Company Login
+                      </Link>
+                    </Button>
+                  )}
               </div>
             </div>
           </motion.div>

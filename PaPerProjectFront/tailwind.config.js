@@ -64,11 +64,16 @@ module.exports = {
         "accordion-up": {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" }
+        },
+        "pulse-slow": {
+          "0%, 100%": { opacity: "1", boxShadow: "0 0 12px 0 rgba(162,89,255,0.25)" },
+          "50%": { opacity: "0.75", boxShadow: "0 0 18px 2px rgba(162,89,255,0.45)" }
         }
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
-        "accordion-up": "accordion-up 0.2s ease-out"
+        "accordion-up": "accordion-up 0.2s ease-out",
+        "pulse-slow": "pulse-slow 2.4s ease-in-out infinite"
       },
       fontFamily: {
         sans: ["Inter", "sans-serif"],

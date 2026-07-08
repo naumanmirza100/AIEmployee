@@ -23,6 +23,23 @@ from api.views.recruitment_agent import _make_agents
 logger = logging.getLogger(__name__)
 
 
+def _first_error_message(errors, default='Validation error'):
+    """Pull the first human-readable message out of a DRF serializer.errors dict."""
+    try:
+        for field, msgs in errors.items():
+            if isinstance(msgs, (list, tuple)) and msgs:
+                return str(msgs[0])
+            if isinstance(msgs, dict):
+                nested = _first_error_message(msgs, default=None)
+                if nested:
+                    return nested
+            if isinstance(msgs, str):
+                return msgs
+    except Exception:
+        pass
+    return default
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -86,10 +103,10 @@ def create_company_job(request):
         
         return Response({
             'status': 'error',
-            'message': 'Validation error',
+            'message': _first_error_message(serializer.errors),
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     except Exception as e:
         logger.error(f"Error creating company job: {str(e)}", exc_info=True)
         return Response({
@@ -180,10 +197,10 @@ def update_company_job(request, id):
         
         return Response({
             'status': 'error',
-            'message': 'Validation error',
+            'message': _first_error_message(serializer.errors),
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     except Exception as e:
         logger.error(f"Error updating company job: {str(e)}", exc_info=True)
         return Response({

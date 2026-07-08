@@ -640,7 +640,11 @@ class CompanyUser(models.Model):
     is_active = models.BooleanField(default=True)
     last_login = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
+    # Password reset via emailed OTP
+    reset_otp = models.CharField(max_length=6, null=True, blank=True)
+    reset_otp_expires = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         unique_together = ['company', 'email']
         ordering = ['-created_at']

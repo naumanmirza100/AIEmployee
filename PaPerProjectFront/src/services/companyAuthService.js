@@ -168,6 +168,50 @@ export const loginCompany = async (email, password) => {
 };
 
 /**
+ * Shared helper for the public (unauthenticated) password-reset endpoints.
+ */
+const postPublic = async (endpoint, body) => {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    const error = new Error(data.message || `HTTP error! status: ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+};
+
+/**
+ * Public company self-signup. Creates the company and emails a setup link.
+ * @param {object} companyData - name, email, phone, address, website, industry, company_size, description
+ */
+export const signupCompany = async (companyData) =>
+  postPublic('/company/signup', companyData);
+
+/**
+ * Step 1 — request a password reset OTP for the given email.
+ * Backend always returns a generic success (no email enumeration).
+ */
+export const requestPasswordReset = async (email) =>
+  postPublic('/company/forgot-password', { email });
+
+/**
+ * Step 2 — verify the emailed OTP.
+ */
+export const verifyResetOtp = async (email, otp) =>
+  postPublic('/company/verify-otp', { email, otp });
+
+/**
+ * Step 3 — set a new password using a verified OTP.
+ */
+export const resetPassword = async (email, otp, password) =>
+  postPublic('/company/reset-password', { email, otp, password });
+
+/**
  * Company API helper for authenticated requests
  */
 export const companyApi = {
@@ -222,6 +266,9 @@ const logoutCompany = async () => {
     localStorage.removeItem('company_auth_token');
     localStorage.removeItem('company_user');
     localStorage.removeItem('company_purchased_modules');
+    // Reset per-session UI flags so the next login is treated as fresh
+    // (e.g. the recruitment "Create Job with AI" auto-open modal).
+    sessionStorage.removeItem('recruitment_ai_modal_shown');
   }
 };
 
@@ -235,5 +282,9 @@ export default {
   getCompanyToken,
   getCompanyUser,
   companyApi,
+  signupCompany,
+  requestPasswordReset,
+  verifyResetOtp,
+  resetPassword,
 };
 
