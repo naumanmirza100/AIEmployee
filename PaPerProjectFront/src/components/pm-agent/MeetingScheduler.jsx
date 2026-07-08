@@ -144,10 +144,10 @@ export default function MeetingScheduler() {
     setTimeout(scrollToBottom, 100);
   };
 
-  const handleSend = async () => {
-    const msg = input.trim();
+  const handleSend = async (overrideMsg = null) => {
+    const msg = (typeof overrideMsg === 'string' ? overrideMsg : input).trim();
     if (!msg || loading) return;
-    setInput('');
+    if (typeof overrideMsg !== 'string') setInput('');
     setLoading(true);
 
     // Optimistic: show user message immediately
@@ -168,7 +168,12 @@ export default function MeetingScheduler() {
       const assistantMsg = {
         role: 'assistant',
         content: response,
-        responseData: { meeting: data.meeting, action: data.action },
+        responseData: {
+          meeting: data.meeting,
+          action: data.action,
+          needsTime: !!data.needs_time,
+          pendingIntent: data.pending_intent || null,
+        },
       };
 
       // Remove optimistic message before saving to avoid duplicates
@@ -499,6 +504,24 @@ export default function MeetingScheduler() {
                         ) : (
                           <div>
                             <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.content) }} />
+                            {msg.responseData?.needsTime && i === currentMessages.length - 1 && (
+                              <NeedsTimePicker
+                                pendingIntent={msg.responseData.pendingIntent}
+                                disabled={loading}
+                                onConfirm={(datetimeIso) => {
+                                  const pi = msg.responseData.pendingIntent || {};
+                                  const names = pi.invitee_names || pi.participant_names || [];
+                                  const dt = new Date(datetimeIso);
+                                  const pretty = dt.toLocaleString(undefined, {
+                                    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+                                    hour: 'numeric', minute: '2-digit',
+                                  });
+                                  const who = names.length ? ` with ${names.join(', ')}` : '';
+                                  const dur = pi.duration_minutes ? ` for ${pi.duration_minutes} minutes` : '';
+                                  handleSend(`Schedule the meeting${who} on ${pretty} (${datetimeIso})${dur}.`);
+                                }}
+                              />
+                            )}
                             {msg.responseData?.meeting && (
                               <div className="mt-3 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
                                 <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
@@ -727,6 +750,54 @@ export default function MeetingScheduler() {
             )}
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+// Inline date/time picker rendered inside the assistant bubble when the
+// backend responds with `needs_time`. On confirm we synthesise a message
+// that includes the participants + duration so the LLM doesn't have to
+// remember the previous turn.
+function NeedsTimePicker({ pendingIntent, disabled, onConfirm }) {
+  const [datetime, setDatetime] = useState(() => {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    t.setMinutes(t.getMinutes() < 30 ? 30 : 0);
+    if (t.getMinutes() === 0) t.setHours(t.getHours() + 1);
+    t.setSeconds(0);
+    t.setMilliseconds(0);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
+  });
+  const names = pendingIntent?.invitee_names || pendingIntent?.participant_names || [];
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-violet-500/5 border border-violet-500/20 space-y-2">
+      <div className="text-xs font-medium text-violet-300 flex items-center gap-1">
+        <Calendar className="h-3.5 w-3.5" /> Pick a date &amp; time
+      </div>
+      {names.length > 0 && (
+        <div className="text-xs text-white/60">With: {names.join(', ')}</div>
+      )}
+      <div className="flex items-center gap-2">
+        <input
+          type="datetime-local"
+          value={datetime}
+          disabled={disabled}
+          onChange={(e) => setDatetime(e.target.value)}
+          className="flex-1 h-9 rounded-md border border-white/10 bg-white/[0.03] px-3 text-xs text-white/90 focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+        />
+        <Button
+          size="sm"
+          disabled={disabled || !datetime}
+          onClick={() => {
+            const iso = new Date(datetime).toISOString();
+            onConfirm(iso);
+          }}
+          className="h-9 text-xs bg-violet-600 hover:bg-violet-700"
+        >
+          Schedule
+        </Button>
       </div>
     </div>
   );

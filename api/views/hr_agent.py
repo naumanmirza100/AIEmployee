@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -2590,6 +2591,172 @@ def _parse_iso_dt(s: str):
         return None
 
 
+def _is_int(v) -> bool:
+    try:
+        int(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+# Time-reference tokens the user might use to indicate a date/time. If the
+# raw message contains none of these, we know the LLM invented a time and
+# override to `needs_time`.
+_HR_TIME_TOKENS = (
+    'today', 'tomorrow', 'tonight', 'this morning', 'this afternoon',
+    'this evening', 'this week', 'next week', 'next month', 'next year',
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'mon ', 'tue ', 'wed ', 'thu ', 'fri ', 'sat ', 'sun ',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july',
+    'august', 'september', 'october', 'november', 'december',
+    ' jan ', ' feb ', ' mar ', ' apr ', ' jun ', ' jul ',
+    ' aug ', ' sep ', ' oct ', ' nov ', ' dec ',
+    ' am', ' pm', 'a.m', 'p.m',
+    "o'clock", 'oclock', 'noon', 'midnight',
+    ':00', ':15', ':30', ':45',
+    'in an hour', 'in a hour', 'in half an hour',
+)
+_HR_TIME_REGEX = re.compile(
+    r'\b('
+    r'\d{1,2}\s*[:.]\s*\d{2}'         # 14:30, 2.30
+    r'|\d{1,2}\s*(am|pm|a\.m|p\.m)'  # 3pm, 10 am
+    r'|\d{4}-\d{2}-\d{2}'             # 2026-07-08
+    r'|\d{1,2}/\d{1,2}(/\d{2,4})?'    # 7/8, 7/8/26
+    r'|\d{1,2}(st|nd|rd|th)'          # 5th, 21st
+    r'|in\s+\d+\s+(min|minute|hour|day|week|month)'
+    r')\b',
+    re.IGNORECASE,
+)
+
+
+def _hr_message_has_time_reference(message: str) -> bool:
+    """Cheap heuristic: does the user's message contain any temporal
+    reference at all? Used to catch cases where the LLM invents a time
+    ("tomorrow at midnight") that the user never asked for."""
+    if not message:
+        return False
+    low = message.lower()
+    if any(tok in low for tok in _HR_TIME_TOKENS):
+        return True
+    return bool(_HR_TIME_REGEX.search(message))
+
+
+def _hr_find_users_in_message(message: str, all_emps):
+    """Deterministically scan the raw user message for employee references.
+    Mirrors the two-pass algorithm from the PM meeting scheduler agent so
+    HR gets the same quality of matching. Returns::
+
+        {
+          'all_matched': [Employee, ...],   # every user unambiguously found
+          'ambiguous_token': str|None,      # a token that matched multiple people
+          'ambiguous_candidates': [Employee, ...],
+        }
+
+    Matching cascade per pass:
+      Pass 1 (strong, consumes tokens): full name, work email, email prefix.
+      Pass 2 (partial, uses only unconsumed tokens): any name-token whose
+      length ≥ 3 characters and hasn't already been claimed by a pass-1 hit.
+
+    "Consumed" tokens keep us from double-matching users whose names are
+    anagrams or share tokens (the PM code's example: "Fatima Noor" vs
+    "Noor Fatima")."""
+    if not message:
+        return {'all_matched': [], 'ambiguous_token': None, 'ambiguous_candidates': []}
+
+    msg_lower = message.lower()
+
+    def _name_tokens(full_name: str):
+        return [p for p in (full_name or '').lower().split() if len(p) >= 3]
+
+    found_ids = set()
+    found = []
+    consumed = set()
+
+    # ── Pass 1a: strongest — full-name matches across ALL employees first.
+    # We do this before email/prefix so that a full-name hit gets to consume
+    # its tokens before another employee's email prefix (which might be one
+    # of those same tokens) can match. Prevents "fatima noor" from double-
+    # matching both "Fatima Noor" (full name) and "Noor Fatima" (whose email
+    # prefix "noor" would otherwise hit).
+    for e in all_emps:
+        full = (e.full_name or '').strip().lower()
+        if full and re.search(r'\b' + re.escape(full) + r'\b', msg_lower):
+            if e.id not in found_ids:
+                found.append(e)
+                found_ids.add(e.id)
+                consumed.update(_name_tokens(e.full_name))
+
+    # Precompute which name-tokens are shared across employees. We use
+    # this to reject an email-prefix match if the prefix is also somebody
+    # else's first/last name (would otherwise silently pick the wrong Ali).
+    from collections import Counter as _Counter
+    token_counts = _Counter()
+    for e in all_emps:
+        for t in _name_tokens(e.full_name):
+            token_counts[t] += 1
+
+    # ── Pass 1b: full email / email prefix matches. Full email is always
+    # strong; email prefix is strong only if no other employee shares it
+    # as a name-token AND it isn't already consumed by a pass-1a hit.
+    for e in all_emps:
+        if e.id in found_ids:
+            continue
+        email = (e.work_email or '').strip().lower()
+        if not email:
+            continue
+        prefix = email.split('@')[0] if '@' in email else email
+
+        strong = False
+        if email in msg_lower:
+            strong = True
+        elif (len(prefix) >= 3
+              and prefix not in consumed
+              and token_counts.get(prefix, 0) <= 1
+              and re.search(r'\b' + re.escape(prefix) + r'\b', msg_lower)):
+            strong = True
+
+        if strong:
+            found.append(e)
+            found_ids.add(e.id)
+            consumed.update(_name_tokens(e.full_name))
+
+    # ── Pass 2: partial matches on unconsumed tokens (first/last/middle name). ──
+    # Track ambiguity: if a token matches multiple people, we bubble that up
+    # so the caller can ask the user to disambiguate.
+    ambiguous_token = None
+    ambiguous_candidates = []
+    for e in all_emps:
+        if e.id in found_ids:
+            continue
+        tokens = _name_tokens(e.full_name)
+        useful = [t for t in tokens if t not in consumed]
+        if not useful:
+            continue
+        for tok in useful:
+            if re.search(r'\b' + re.escape(tok) + r'\b', msg_lower):
+                # Check other unmatched employees for the same token → ambiguity.
+                same_token = [
+                    other for other in all_emps
+                    if other.id not in found_ids
+                    and tok in _name_tokens(other.full_name)
+                    and tok not in consumed
+                ]
+                if len(same_token) > 1:
+                    ambiguous_token = tok
+                    ambiguous_candidates = same_token[:5]
+                    # Don't add any — ambiguous.
+                else:
+                    found.append(e)
+                    found_ids.add(e.id)
+                break
+
+    return {
+        'all_matched': found,
+        'ambiguous_token': ambiguous_token,
+        'ambiguous_candidates': ambiguous_candidates,
+    }
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2601,6 +2768,11 @@ def hr_meeting_schedule(request):
     we materialise that into an `HRMeeting` row and reply in chat.
 
     Returns ``{reply: str, meeting: serialized | None, parsed: {...}}``.
+
+    Participant safety: names the LLM extracts are resolved SERVER-SIDE
+    against the real employee table. If a mentioned participant doesn't
+    exist (or is ambiguous), we override the LLM's reply and refuse to
+    create the meeting — the LLM otherwise happily hallucinates people.
     """
     try:
         company_user = request.user
@@ -2617,6 +2789,12 @@ def hr_meeting_schedule(request):
             f"- id={e['id']}, name={e['full_name']!r}, email={e['work_email']}, role={e['job_title'] or 'n/a'}"
             for e in emp_rows
         ]
+        # Cache the full Employee objects for our own name resolver below.
+        all_emps = list(Employee.objects.filter(company=company))
+        directory_hint = "\n".join(
+            f"  • {e['full_name']} ({e['job_title'] or 'no title'})"
+            for e in emp_rows[:15]
+        ) + (f"\n  … and {len(emp_rows) - 15} more" if len(emp_rows) > 15 else '')
 
         # Resolve the asking employee (organizer default).
         asker = (Employee.objects.filter(company=company, company_user=company_user).first()
@@ -2650,9 +2828,16 @@ def hr_meeting_schedule(request):
             "                              mid_year_check_in, exit_interview, grievance_hearing,\n"
             "                              training_session, benefits_consult, other]|null,\n"
             "   \"scheduled_at\": ISO-8601 UTC datetime|null, \"duration_minutes\": int|null,\n"
-            "   \"participant_ids\": [int]|null,  // pick ids from the directory below by name match\n"
+            "   \"participant_names\": [str]|null,  // raw names from the user's message, verbatim.\n"
+            "                          //   ALWAYS include this when the user mentions people, even if\n"
+            "                          //   the name is not in the directory.\n"
+            "   \"participant_ids\": [int]|null,  // pick ids ONLY from the directory below by\n"
+            "                          //   exact/first-name match. If unsure, leave null and the\n"
+            "                          //   server will resolve or ask for clarification.\n"
             "   \"location\": str|null, \"meeting_link\": str|null,\n"
-            "   \"reply\": str  // friendly natural-language reply to show the user\n"
+            "   \"reply\": str  // friendly natural-language reply. NEVER claim to have scheduled\n"
+            "                   //   a meeting — the server decides that. If a mentioned name is\n"
+            "                   //   not in the directory below, set intent='clarify' and say so.\n"
             "  }\n"
             "Default duration_minutes=30 when unspecified. Default meeting_type='one_on_one'.\n"
             f"Visibility for exit_interview/grievance_hearing/performance_review will be set to private automatically.\n\n"
@@ -2695,14 +2880,126 @@ def hr_meeting_schedule(request):
         intent = (parsed.get('intent') or 'clarify').lower()
         meeting_payload = None
 
+        # ---- Deterministic participant resolution ------------------------
+        # We do NOT trust the LLM's participant_names or participant_ids for
+        # the initial resolve — we scan the RAW USER MESSAGE ourselves using
+        # the same two-pass algorithm the PM scheduler uses. The LLM's
+        # extracted names are only used as a fallback for the "not-found"
+        # error message.
+        det = _hr_find_users_in_message(message, all_emps)
+        all_matched_emps = det['all_matched']
+
+        # Ambiguous single-token match (e.g. two employees both named "Ali").
+        # We surface this even if other participants matched cleanly — the
+        # user has to pick before we can schedule, otherwise the wrong
+        # Fatima ends up in the invite.
+        if det['ambiguous_candidates']:
+            cand_lines = "\n".join(
+                f"  • {e.full_name} ({e.job_title or 'no title'}, {e.work_email})"
+                for e in det['ambiguous_candidates']
+            )
+            override_reply = (
+                f"I found more than one match for \"{det['ambiguous_token']}\". "
+                f"Which one did you mean?\n\n{cand_lines}"
+            )
+            return Response({'status': 'success', 'data': {
+                'reply': override_reply,
+                'meeting': None,
+                'parsed': parsed,
+                'action': 'ambiguous_user',
+                'unresolved': {
+                    'ambiguous_token': det['ambiguous_token'],
+                    'ambiguous_candidates': [
+                        {'id': e.id, 'full_name': e.full_name,
+                         'work_email': e.work_email, 'job_title': e.job_title}
+                        for e in det['ambiguous_candidates']
+                    ],
+                },
+            }})
+
+        # ---- User-not-found: only apply when the user clearly intended to
+        # name someone but none of them exist. We look for LLM-extracted
+        # participant_names as evidence of intent — if the user said
+        # "schedule with X" and we found no X in the directory, we ask.
+        raw_names = parsed.get('participant_names') or []
+        if not isinstance(raw_names, list):
+            raw_names = []
+        if not all_matched_emps and raw_names:
+            names_str = ', '.join(f'"{n}"' for n in raw_names)
+            override_reply = (
+                f"I couldn't find {names_str} in your company directory. "
+                f"Please pick from these employees:\n\n{directory_hint}"
+            )
+            return Response({'status': 'success', 'data': {
+                'reply': override_reply,
+                'meeting': None,
+                'parsed': parsed,
+                'action': 'user_not_found',
+                'unresolved': {
+                    'not_found': raw_names,
+                    'directory': [{'id': e['id'], 'full_name': e['full_name'],
+                                   'job_title': e['job_title']} for e in emp_rows[:25]],
+                },
+            }})
+
+        # ---- Combine deterministic matches with any explicit IDs the LLM
+        # extracted (drop any that don't map to a real company employee). ---
+        validated_ids = {e.id for e in all_matched_emps}
+        llm_ids = parsed.get('participant_ids') or []
+        if isinstance(llm_ids, list):
+            allowed = set(Employee.objects.filter(
+                pk__in=[int(x) for x in llm_ids if _is_int(x)], company=company,
+            ).values_list('id', flat=True))
+            validated_ids.update(allowed)
+
         if intent == 'create':
-            sched = _parse_iso_dt(parsed.get('scheduled_at'))
+            # ---- Time resolution + hallucination guard -------------------
+            # The LLM will sometimes invent a time ("tomorrow at midnight")
+            # even when the user said nothing about when. If the raw message
+            # has no temporal reference at all, we treat the LLM's
+            # `scheduled_at` as bogus and ask for a real time.
+            sched = None
+            if _hr_message_has_time_reference(message):
+                sched = _parse_iso_dt(parsed.get('scheduled_at'))
+
             if not sched:
-                # No valid time → reply only, don't create.
+                # We still know who this meeting is (probably) with — return
+                # that context so the frontend can render a date/time picker
+                # with the participants pre-filled.
+                names_display = ', '.join(e.full_name for e in all_matched_emps) or 'the participants'
                 return Response({'status': 'success', 'data': {
-                    'reply': parsed.get('reply') or 'Could you specify the date and time?',
-                    'meeting': None, 'parsed': parsed,
+                    'reply': (
+                        f"When should the meeting with **{names_display}** happen? "
+                        "Please pick a date and time."
+                    ),
+                    'meeting': None,
+                    'parsed': parsed,
+                    'action': 'needs_time',
+                    'needs_time': True,
+                    'pending_intent': {
+                        'title': parsed.get('title') or None,
+                        'description': parsed.get('description') or '',
+                        'meeting_type': parsed.get('meeting_type') or 'one_on_one',
+                        'duration_minutes': int(parsed.get('duration_minutes') or 30),
+                        'participant_ids': sorted(validated_ids),
+                        'participant_names': [e.full_name for e in all_matched_emps],
+                        'location': parsed.get('location') or '',
+                        'meeting_link': parsed.get('meeting_link') or None,
+                    },
                 }})
+
+            # Require at least one resolved participant OR the asker themselves,
+            # otherwise the meeting has no one to meet with.
+            if not validated_ids:
+                return Response({'status': 'success', 'data': {
+                    'reply': (
+                        "Who should this meeting be with? Please tell me the participant's "
+                        f"name from the directory:\n\n{directory_hint}"
+                    ),
+                    'meeting': None, 'parsed': parsed,
+                    'action': 'user_not_found',
+                }})
+
             mtype = (parsed.get('meeting_type') or 'one_on_one')
             visibility = ('private'
                           if mtype in ('exit_interview', 'grievance_hearing', 'performance_review')
@@ -2723,16 +3020,40 @@ def hr_meeting_schedule(request):
                 meeting_link=parsed.get('meeting_link') or None,
                 location=parsed.get('location') or '',
             )
-            pids = parsed.get('participant_ids') or []
-            if isinstance(pids, list) and pids:
-                valid = Employee.objects.filter(pk__in=pids, company=company)
-                m.participants.set(valid)
+            valid = Employee.objects.filter(pk__in=validated_ids, company=company)
+            m.participants.set(valid)
             meeting_payload = _serialize_hr_meeting(m)
+
+            # Build a strong success reply so the frontend never has to guess.
+            names_display = ', '.join(e.full_name for e in all_matched_emps) or 'the participants'
+            time_display = sched.strftime('%A, %B %d, %Y at %I:%M %p')
+            override_reply = (
+                f"**Meeting Scheduled Successfully!**\n\n"
+                f"**Title:** {m.title}\n"
+                f"**With:** {names_display}\n"
+                f"**When:** {time_display}\n"
+                f"**Duration:** {m.duration_minutes} minutes\n"
+            )
+            return Response({'status': 'success', 'data': {
+                'reply': override_reply,
+                'meeting': meeting_payload,
+                'parsed': parsed,
+                'action': 'scheduled',
+                'resolved_participants': [
+                    {'id': e.id, 'full_name': e.full_name, 'work_email': e.work_email}
+                    for e in all_matched_emps
+                ],
+            }})
 
         return Response({'status': 'success', 'data': {
             'reply': parsed.get('reply') or 'Done.',
             'meeting': meeting_payload,
             'parsed': parsed,
+            'action': intent,
+            'resolved_participants': [
+                {'id': e.id, 'full_name': e.full_name, 'work_email': e.work_email}
+                for e in all_matched_emps
+            ],
         }})
     except KeyServiceError:
         raise
