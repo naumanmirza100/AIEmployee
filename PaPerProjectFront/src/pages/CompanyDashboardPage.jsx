@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,15 +46,20 @@ const toLocaleDateStr = (date) => {
 
 const CompanyDashboardPage = () => {
   const navigate = useNavigate();
+  const { tab: tabParam } = useParams();
   const { toast } = useToast();
-  
+
+  // Dashboard tabs are URL-driven so each has its own address.
+  const DASHBOARD_TABS = ['jobs', 'projects', 'applications', 'users', 'all-tasks', 'ticket-tasks', 'ai-agents'];
+  const activeTab = DASHBOARD_TABS.includes(tabParam) ? tabParam : 'jobs';
+  const setActiveTab = (tab) => navigate(`/company/dashboard/${tab}`);
+
   const [companyUser, setCompanyUser] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [projects, setProjects] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('dashboard'); // 'dashboard', 'project-manager'
-  const [activeTab, setActiveTab] = useState('jobs');
   // Generic confirmation state — replaces window.confirm() for user (de)activation
   // and any other destructive action on this page.
   const [confirm, setConfirm] = useState({
@@ -75,7 +80,7 @@ const CompanyDashboardPage = () => {
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [expandedProjects, setExpandedProjects] = useState(new Set());
   const [expandedTasks, setExpandedTasks] = useState(new Set());
-  const { purchasedModules, allPurchases, refetch: refetchModules } = usePurchasedModules();
+  const { purchasedModules, allPurchases, modulesLoaded, refetch: refetchModules } = usePurchasedModules();
   const [agentsRefreshing, setAgentsRefreshing] = useState(false);
 
   // Auto-reload AI Agents every 30 seconds
@@ -226,6 +231,9 @@ const CompanyDashboardPage = () => {
         navigate('/project-manager/dashboard', { replace: true });
         return;
       }
+      // Note: bare /company/dashboard is normalized to a specific tab by a
+      // separate effect that waits for purchased modules to load (so we can
+      // send agent-less companies to the AI Agents tab).
     } catch (error) {
       console.error('Error parsing company user:', error);
       localStorage.removeItem('company_user');
@@ -647,6 +655,15 @@ const CompanyDashboardPage = () => {
       loadTicketTasks();
     }
   }, [activeTab, companyUser, taskStatusFilter, taskUserFilter, taskProjectFilter, usersPagination.page, usersPagination.limit, tasksPagination.page, tasksPagination.limit]);
+
+  // Normalize a bare /company/dashboard (no tab in URL) to a specific tab.
+  // Wait for purchased modules to load so agent-less companies land on the
+  // AI Agents tab (to browse/buy), while companies with any agent go to Jobs.
+  useEffect(() => {
+    if (!companyUser || tabParam || !modulesLoaded) return;
+    const target = purchasedModules.length === 0 ? 'ai-agents' : 'jobs';
+    navigate(`/company/dashboard/${target}`, { replace: true });
+  }, [companyUser, tabParam, modulesLoaded, purchasedModules, navigate]);
   
   const fetchAllUsersTasks = async () => {
     try {

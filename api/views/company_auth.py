@@ -83,7 +83,8 @@ def verify_registration_token(request):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         company_name = registration_token.company.name if registration_token.company else None
-        
+        company_email = registration_token.company.email if registration_token.company else None
+
         return Response({
             'status': 'success',
             'message': 'Token is valid',
@@ -91,6 +92,7 @@ def verify_registration_token(request):
                 'valid': True,
                 'companyId': registration_token.company.id if registration_token.company else None,
                 'companyName': company_name,
+                'companyEmail': company_email,
                 'expiresAt': registration_token.expires_at.isoformat()
             }
         }, status=status.HTTP_200_OK)
@@ -114,13 +116,13 @@ def register_company_user(request):
         email = data.get('email')
         password = data.get('password')
         full_name = data.get('fullName') or data.get('full_name', '')
-        
-        if not token or not email or not password:
+
+        if not token or not password:
             return Response({
                 'status': 'error',
-                'message': 'Token, email, and password are required'
+                'message': 'Token and password are required'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Verify token
         try:
             registration_token = CompanyRegistrationToken.objects.get(token=token)
@@ -129,20 +131,27 @@ def register_company_user(request):
                 'status': 'error',
                 'message': 'Invalid token'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         if registration_token.is_used:
             return Response({
                 'status': 'error',
                 'message': 'Token has already been used'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         if registration_token.expires_at < timezone.now():
             return Response({
                 'status': 'error',
                 'message': 'Token has expired'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         company = registration_token.company
+
+        # Email/name come from the company signup — no need to re-enter them.
+        # Fall back to the company's own email/name when not provided.
+        if not email:
+            email = company.email
+        if not full_name:
+            full_name = company.name
         
         # Check if email already exists for this company
         if CompanyUser.objects.filter(company=company, email=email).exists():
@@ -370,6 +379,98 @@ def logout_company_user(request):
     except Exception:
         pass
     return Response({'status': 'success', 'message': 'Logged out successfully.'}, status=status.HTTP_200_OK)
+
+
+def _company_profile_payload(company, company_user):
+    """Serialize the full company profile + the signed-in user's basic info."""
+    return {
+        'company': {
+            'id': company.id,
+            'name': company.name,
+            'email': company.email,
+            'phone': company.phone or '',
+            'address': company.address or '',
+            'website': company.website or '',
+            'industry': company.industry or '',
+            'companySize': company.company_size or '',
+            'description': company.description or '',
+            'createdAt': company.created_at.isoformat() if company.created_at else None,
+        },
+        'user': {
+            'id': company_user.id,
+            'fullName': company_user.full_name,
+            'email': company_user.email,
+            'role': company_user.role,
+        },
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_company_profile(request):
+    """Return the full company profile for the signed-in company user."""
+    company_user = request.user
+    company = company_user.company
+    if not company:
+        return Response({'status': 'error', 'message': 'No company associated with this account.'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': _company_profile_payload(company, company_user)},
+                    status=status.HTTP_200_OK)
+
+
+@api_view(['PUT', 'PATCH'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def update_company_profile(request):
+    """Update the company profile. Email is intentionally NOT editable here."""
+    company_user = request.user
+    company = company_user.company
+    if not company:
+        return Response({'status': 'error', 'message': 'No company associated with this account.'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    data = request.data
+    # Only these fields are editable — email is excluded on purpose.
+    editable = {
+        'name': 'name',
+        'phone': 'phone',
+        'address': 'address',
+        'website': 'website',
+        'industry': 'industry',
+        'companySize': 'company_size',
+        'company_size': 'company_size',
+        'description': 'description',
+    }
+
+    updated_fields = []
+    for key, attr in editable.items():
+        if key in data:
+            value = data.get(key)
+            if isinstance(value, str):
+                value = value.strip()
+            setattr(company, attr, value)
+            if attr not in updated_fields:
+                updated_fields.append(attr)
+
+    # Validate name (mirror the serializer's minimal rule).
+    if 'name' in updated_fields and (not company.name or len(company.name.strip()) < 2):
+        return Response({'status': 'error', 'message': 'Company name must be at least 2 characters.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        if updated_fields:
+            company.save(update_fields=updated_fields)
+    except Exception as e:
+        logger.error(f"update_company_profile error: {e}", exc_info=True)
+        return Response({'status': 'error', 'message': 'Failed to update profile'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'status': 'success',
+        'message': 'Profile updated successfully.',
+        'data': _company_profile_payload(company, company_user),
+    }, status=status.HTTP_200_OK)
 
 
 # Generic response so an attacker can't tell whether an email exists (avoids

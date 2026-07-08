@@ -39,6 +39,7 @@ import SuperAdminApiKeysPage from '@/pages/SuperAdminApiKeysPage';
 import CompanyRegisterPage from '@/pages/CompanyRegisterPage';
 import CompanyLoginPage from '@/pages/CompanyLoginPage';
 import CompanySignupPage from '@/pages/CompanySignupPage';
+import CompanyProfilePage from '@/pages/CompanyProfilePage';
 import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
 import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
@@ -123,7 +124,9 @@ import { useTranslation } from 'react-i18next';
             <Route path="/company/login" element={<CompanyLoginPage />} />
             <Route path="/company/signup" element={<CompanySignupPage />} />
             <Route path="/company/dashboard" element={<CompanyDashboardPage />} />
+            <Route path="/company/dashboard/:tab" element={<CompanyDashboardPage />} />
             <Route path="/company/settings/api-keys" element={<AgentKeysSettingsPage />} />
+            <Route path="/company/profile" element={<CompanyProfilePage />} />
             
             {/* Project Manager routes without header/footer */}
             <Route 

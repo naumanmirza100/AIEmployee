@@ -2,7 +2,7 @@ import React from 'react';
 
 /**
  * Brand logo: the Pay Per Project icon image + wordmark.
- * The image lives in /public/logo.jpg so it is served from the site root.
+ * The image lives in /public/logo.png so it is served from the site root.
  *
  * Wordmark style: "PAY PER" on top (white), "PROJECT" below in a
  * blue→purple gradient, uppercase and bold.
@@ -22,7 +22,7 @@ const Logo = ({
   return (
     <span className={`flex items-center gap-2 ${className}`}>
       <img
-        src="/logo.jpg"
+        src="/logo.png"
         alt="Pay Per Project logo"
         className={`${imgClassName} rounded-md object-contain shrink-0`}
       />

@@ -7,10 +7,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle, Wand2, Settings, X, ArrowRight, ArrowDown, Copy, Check, Eye, MapPin, Building2, Clock, ExternalLink, Users, FileText, BrainCircuit, Download, ChevronDown, ChevronUp, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Plus, Edit, Trash2, Briefcase, CheckCircle, XCircle, Wand2, Settings, X, ArrowRight, ArrowDown, Copy, Check, Eye, MapPin, Building2, Clock, ExternalLink, Users, FileText, BrainCircuit, Download, ChevronDown, ChevronUp, Search, ChevronLeft, ChevronRight, Maximize2, Minimize2 } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
 import {
   getJobDescriptions,
@@ -38,6 +39,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  // Full-screen toggle for the manual create modal.
+  const [createFullScreen, setCreateFullScreen] = useState(false);
   // Auto-open the "Create Job with AI" modal the first time the page opens
   // this session. Using a lazy initializer avoids effect-timing issues.
   const [showCreateWithAiModal, setShowCreateWithAiModal] = useState(() => {
@@ -52,6 +55,10 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingJob, setDeletingJob] = useState(null);
   const [editingJob, setEditingJob] = useState(null);
+  // Bulk delete
+  const [selectedJobIds, setSelectedJobIds] = useState(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -284,6 +291,56 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
     }
   };
 
+  // ---- Bulk delete -------------------------------------------------------
+  const toggleJobSelected = (jobId, checked) => {
+    setSelectedJobIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(jobId);
+      else next.delete(jobId);
+      return next;
+    });
+  };
+
+  const allJobsSelected = jobs.length > 0 && jobs.every((j) => selectedJobIds.has(j.id));
+
+  const toggleSelectAllJobs = (checked) => {
+    if (checked) setSelectedJobIds(new Set(jobs.map((j) => j.id)));
+    else setSelectedJobIds(new Set());
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    const ids = Array.from(selectedJobIds);
+    if (ids.length === 0) return;
+    try {
+      setBulkDeleting(true);
+      const results = await Promise.allSettled(ids.map((id) => deleteJobDescription(id)));
+      const failed = results.filter(
+        (r) => r.status === 'rejected' || r.value?.status !== 'success'
+      ).length;
+      const succeeded = ids.length - failed;
+
+      if (succeeded > 0) {
+        toast({
+          title: 'Deleted',
+          description: `${succeeded} job${succeeded > 1 ? 's' : ''} deleted${failed ? `, ${failed} failed` : ''}.`,
+          variant: failed ? 'destructive' : undefined,
+        });
+      } else {
+        toast({ title: 'Error', description: 'Failed to delete selected jobs', variant: 'destructive' });
+      }
+
+      setSelectedJobIds(new Set());
+      setShowBulkDeleteModal(false);
+      refreshJobs();
+      if (onUpdate) onUpdate();
+    } catch (error) {
+      console.error('Bulk delete error:', error);
+      toast({ title: 'Error', description: error?.message || 'Failed to delete selected jobs', variant: 'destructive' });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       title: '',
@@ -441,6 +498,51 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         </div>
       </div>
 
+      {/* Bulk selection / delete bar */}
+      {jobs.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <div className="relative inline-flex items-center justify-center">
+              {selectedJobIds.size === 0 && (
+                <span className="absolute left-1/2 -translate-x-1/2 -top-6 text-violet-400 animate-bounce pointer-events-none">
+                  <ArrowDown className="h-4 w-4" />
+                </span>
+              )}
+              <Checkbox
+                checked={allJobsSelected ? true : selectedJobIds.size > 0 ? 'indeterminate' : false}
+                onCheckedChange={(c) => toggleSelectAllJobs(!!c)}
+                aria-label="Select all jobs"
+              />
+            </div>
+            <span className="text-sm text-white/70">
+              {selectedJobIds.size > 0
+                ? `${selectedJobIds.size} selected`
+                : 'Select all'}
+            </span>
+            {selectedJobIds.size === 0 && (
+              <span className="text-xs text-violet-300/90">
+                — tick jobs here to delete multiple at once
+              </span>
+            )}
+          </div>
+          {selectedJobIds.size > 0 && (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setShowBulkDeleteModal(true)}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete ({selectedJobIds.size})
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedJobIds(new Set())}>
+                Clear
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Search + Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[200px]">
@@ -532,15 +634,27 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-full">
           {jobs.map((job) => (
-            <Card key={job.id} className="border-white/10 bg-black/20 backdrop-blur-sm">
+            <Card
+              key={job.id}
+              className={`border-white/10 bg-black/20 backdrop-blur-sm ${selectedJobIds.has(job.id) ? 'ring-1 ring-primary/60' : ''}`}
+            >
               <CardHeader>
                 <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <CardTitle className="text-lg">{job.title}</CardTitle>
-                    <CardDescription className="mt-1">
-                      {job.location && `${job.location} • `}
-                      {job.type}
-                    </CardDescription>
+                  <div className="flex flex-1 items-start gap-2 min-w-0">
+                    <Checkbox
+                      checked={selectedJobIds.has(job.id)}
+                      onCheckedChange={(c) => toggleJobSelected(job.id, !!c)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select ${job.title}`}
+                      className="mt-1 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <CardTitle className="text-lg">{job.title}</CardTitle>
+                      <CardDescription className="mt-1">
+                        {job.location && `${job.location} • `}
+                        {job.type}
+                      </CardDescription>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap justify-end">
                     {onGoToSettings && (
@@ -974,10 +1088,22 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
       )}
 
       {/* Create Modal (manual) – reset form when closed by X or overlay too */}
-      <Dialog open={showCreateModal} onOpenChange={(open) => { setShowCreateModal(open); if (!open) resetForm(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={showCreateModal} onOpenChange={(open) => { setShowCreateModal(open); if (!open) { resetForm(); setCreateFullScreen(false); } }}>
+        <DialogContent className={createFullScreen
+          ? "w-screen h-[100dvh] max-w-none max-h-[100dvh] rounded-none overflow-y-auto"
+          : "max-w-2xl max-h-[90vh] overflow-y-auto"}>
+          {/* Full-screen toggle, sitting right beside the dialog's close (X) button */}
+          <button
+            type="button"
+            onClick={() => setCreateFullScreen((v) => !v)}
+            title={createFullScreen ? 'Exit full screen' : 'Full screen'}
+            aria-label={createFullScreen ? 'Exit full screen' : 'Full screen'}
+            className="absolute right-14 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/25 text-muted-foreground transition-colors hover:bg-white/10 hover:text-white"
+          >
+            {createFullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
           <DialogHeader>
-            <div className="flex items-start justify-between gap-3 pr-6">
+            <div className="flex items-start justify-between gap-3 pr-24">
               <div>
                 <DialogTitle>Create Job Description</DialogTitle>
                 <DialogDescription>
@@ -1020,7 +1146,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
               <button
                 type="button"
                 onClick={switchToManualModal}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
+                className="shrink-0 mr-10 inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
               >
                 <FileText className="h-4 w-4" />
                 Create manually
@@ -1130,13 +1256,53 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk delete confirmation */}
+      <Dialog open={showBulkDeleteModal} onOpenChange={setShowBulkDeleteModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {selectedJobIds.size} job{selectedJobIds.size > 1 ? 's' : ''}?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete the selected job description{selectedJobIds.size > 1 ? 's' : ''}. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBulkDeleteModal(false)} disabled={bulkDeleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDeleteConfirm} disabled={bulkDeleting}>
+              {bulkDeleting ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Deleting...</>
+              ) : (
+                <><Trash2 className="h-4 w-4 mr-2" />Delete {selectedJobIds.size}</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
 const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
+  const [durationDays, setDurationDays] = useState('');
+
+  // Quick-set: open = today, close = today + N days.
+  const applyDaysRange = (daysValue) => {
+    const days = parseInt(daysValue, 10);
+    if (!days || days < 1) return;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const closeDate = new Date(today.getTime() + days * 86400000);
+    setFormData((prev) => ({
+      ...prev,
+      application_open_date: toLocaleDateStr(today),
+      application_close_date: toLocaleDateStr(closeDate),
+    }));
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full max-w-3xl mx-auto">
       <div className="space-y-2">
         <Label htmlFor="title">Title *</Label>
         <Input
@@ -1148,7 +1314,7 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="location">Location</Label>
           <Input
@@ -1196,7 +1362,31 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      {/* Quick-set: enter number of days → open = today, close = today + N days.
+          Manual date pickers below still work independently. */}
+      <div className="rounded-lg border border-white/15 bg-white/[0.03] p-3">
+        <Label htmlFor="durationDays" className="text-sm">
+          Quick set — open today for how many days?
+        </Label>
+        <div className="mt-2 flex items-center gap-2">
+          <Input
+            id="durationDays"
+            type="number"
+            min="1"
+            value={durationDays}
+            onChange={(e) => setDurationDays(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyDaysRange(durationDays); } }}
+            placeholder="e.g. 30"
+            className="w-28"
+          />
+          <Button type="button" variant="secondary" onClick={() => applyDaysRange(durationDays)}>
+            Set dates
+          </Button>
+          <span className="text-xs text-muted-foreground">Sets open = today, close = today + days.</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Applications Open Date <span className="text-red-500">*</span></Label>
           <DatePicker
