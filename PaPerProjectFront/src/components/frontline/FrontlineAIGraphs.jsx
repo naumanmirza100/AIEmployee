@@ -335,7 +335,7 @@ export default function FrontlineAIGraphs() {
   return (
     <div className="space-y-4">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 max-w-md">
+        <TabsList data-tour-aigraphs="saved" className="grid w-full grid-cols-2 max-w-md">
           <TabsTrigger value="generate" className="text-sm">
             <Sparkles className="h-4 w-4 mr-2" />
             Generate
@@ -358,7 +358,7 @@ export default function FrontlineAIGraphs() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
+              <div data-tour-aigraphs="prompt" className="space-y-2">
                 <Label>Prompt</Label>
                 <Textarea
                   placeholder="e.g. Show tickets by status as a pie chart"
@@ -382,7 +382,7 @@ export default function FrontlineAIGraphs() {
                   {generating ? ' Generating...' : ' Generate graph'}
                 </Button>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div data-tour-aigraphs="examples" className="flex flex-wrap gap-2">
                 {examplePrompts.map((ex) => (
                   <Button key={ex} variant="outline" size="sm" onClick={() => setPrompt(ex)} className="text-xs">
                     {ex}
@@ -390,7 +390,7 @@ export default function FrontlineAIGraphs() {
                 ))}
               </div>
               {generatedChart && (
-                <div className="space-y-4 pt-4 border-t">
+                <div data-tour-aigraphs="chart" className="space-y-4 pt-4 border-t">
                   <div className="flex items-start justify-between gap-2">
                     <div className="p-3 rounded-lg bg-muted/50 border text-sm flex-1">{chartInsights}</div>
                     <Button variant="outline" size="sm" onClick={() => { setSaveTitle(generatedChart.title || ''); setSaveModalOpen(true); }}>

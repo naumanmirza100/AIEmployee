@@ -5,6 +5,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'frontline_agent/css/dashboard.css' %}">
+<link rel="stylesheet" href="{% static 'frontline_agent/css/tutorial.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -12,10 +13,14 @@
     <div class="dashboard-header">
         <h1>🎯 Frontline Agent Dashboard</h1>
         <p class="subtitle">Manage tickets, knowledge base, workflows, and more with AI-powered agents</p>
+        <button type="button" class="flt-replay-btn" data-tour="replay" title="Replay the onboarding tutorial">
+            <span aria-hidden="true">🎓</span>
+            <span>Take the Tour</span>
+        </button>
     </div>
 
     <!-- Statistics Cards -->
-    <div class="stats-grid">
+    <div class="stats-grid" data-tour="stats">
         <div class="stat-card">
             <div class="stat-icon">📋</div>
             <div class="stat-content">
@@ -51,7 +56,7 @@
         <!-- Left Column -->
         <div class="left-column">
             <!-- Knowledge Q&A Agent -->
-            <div class="agent-card">
+            <div class="agent-card" data-tour="knowledge-qa">
                 <div class="card-header">
                     <h2>💡 Knowledge Q&A Agent</h2>
                     <p class="card-subtitle">Ask questions and get answers from the knowledge base</p>
@@ -68,7 +73,7 @@
             </div>
 
             <!-- Ticket Management -->
-            <div class="agent-card">
+            <div class="agent-card" data-tour="tickets">
                 <div class="card-header">
                     <h2>🎫 Ticket Triage & Auto-resolution</h2>
                     <p class="card-subtitle">Create and manage support tickets</p>
@@ -102,7 +107,7 @@
             </div>
 
             <!-- Workflow / SOP Runner -->
-            <div class="agent-card">
+            <div class="agent-card" data-tour="workflow">
                 <div class="card-header">
                     <h2>⚙️ Workflow / SOP Runner</h2>
                     <p class="card-subtitle">Execute standard operating procedures</p>
@@ -116,7 +121,7 @@
             </div>
 
             <!-- Document Processing -->
-            <div class="agent-card">
+            <div class="agent-card" data-tour="documents">
                 <div class="card-header">
                     <h2>📄 Document Processing Agent</h2>
                     <p class="card-subtitle">Upload and process documents</p>
@@ -133,7 +138,7 @@
         <!-- Right Column -->
         <div class="right-column">
             <!-- Proactive Notifications -->
-            <div class="agent-card">
+            <div class="agent-card" data-tour="notifications">
                 <div class="card-header">
                     <h2>🔔 Proactive Notifications</h2>
                     <p class="card-subtitle">Recent notifications and follow-ups</p>
@@ -145,7 +150,7 @@
             </div>
 
             <!-- Meeting Scheduling -->
-            <div class="agent-card">
+            <div class="agent-card" data-tour="meetings">
                 <div class="card-header">
                     <h2>📅 Meeting Scheduling Agent</h2>
                     <p class="card-subtitle">Schedule meetings and appointments</p>
@@ -162,7 +167,7 @@
             </div>
 
             <!-- Analytics Dashboard -->
-            <div class="agent-card">
+            <div class="agent-card" data-tour="analytics">
                 <div class="card-header">
                     <h2>📊 Analytics & Dashboard</h2>
                     <p class="card-subtitle">View performance metrics and insights</p>
@@ -174,7 +179,7 @@
             </div>
 
             <!-- Recent Tickets -->
-            <div class="agent-card">
+            <div class="agent-card" data-tour="recent-tickets">
                 <div class="card-header">
                     <h2>📋 Recent Tickets</h2>
                 </div>
@@ -200,5 +205,14 @@
 </div>
 
 <script src="{% static 'frontline_agent/js/dashboard.js' %}"></script>
+<script>
+    window.FRONTLINE_TUTORIAL = {
+        autoStart: {% if auto_start_tutorial %}true{% else %}false{% endif %},
+        markSeenUrl: "{% url 'frontline_mark_tutorial_seen' %}",
+        resetUrl: "{% url 'frontline_reset_tutorial' %}",
+        csrfToken: "{{ csrf_token }}"
+    };
+</script>
+<script src="{% static 'frontline_agent/js/tutorial.js' %}"></script>
 {% endblock %}
 
