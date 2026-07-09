@@ -77,6 +77,9 @@ import {
   Paperclip,
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
+import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from './FrontlineTutorial';
+import { TAB_TOURS } from './frontlineTutorialSteps';
+import { GraduationCap } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { renderChart } from '../recruitment/ChartRenderer';
@@ -268,7 +271,7 @@ function FrontlineNotificationsTab() {
         {preferencesLoading ? (
           <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading preferences...</div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div data-tour-notif="prefs" className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-3">
               <p className="text-sm font-medium text-muted-foreground">Master toggles</p>
               <div className="flex items-center space-x-2">
@@ -339,10 +342,10 @@ function FrontlineNotificationsTab() {
           <CardTitle className="flex items-center gap-2"><Bell className="h-5 w-5" /> Notifications</CardTitle>
           <CardDescription>Templates and send/schedule notifications (email).</CardDescription>
         </div>
-        <Button onClick={openCreateTemplate}><Plus className="h-4 w-4 mr-2" /> Create template</Button>
+        <Button data-tour-notif="template-create" onClick={openCreateTemplate}><Plus className="h-4 w-4 mr-2" /> Create template</Button>
       </CardHeader>
       <CardContent className="space-y-6">
-        <form onSubmit={handleSendNow} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
+        <form data-tour-notif="send-form" onSubmit={handleSendNow} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
           <div className="space-y-1">
             <Label>Template</Label>
             <Select value={sendForm.template_id} onValueChange={(v) => setSendForm((f) => ({ ...f, template_id: v }))}>
@@ -371,7 +374,7 @@ function FrontlineNotificationsTab() {
           <Button type="submit" disabled={sending}>Send now</Button>
         </form>
         {loading ? <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /></div> : (
-          <>
+          <div data-tour-notif="lists">
             <div>
               <h4 className="font-medium mb-2">Templates ({templates.length})</h4>
               <div className="space-y-2 max-h-40 overflow-y-auto">
@@ -399,7 +402,7 @@ function FrontlineNotificationsTab() {
                 ))}
               </div>
             </div>
-          </>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -795,10 +798,10 @@ function FrontlineWorkflowsTab() {
           <CardTitle className="flex items-center gap-2"><GitBranch className="h-5 w-5" /> Workflows</CardTitle>
           <CardDescription>Run SOP/workflows with context (e.g. ticket_id, recipient_email).</CardDescription>
         </div>
-        <Button onClick={openCreateWorkflow}><Plus className="h-4 w-4 mr-2" /> Create workflow</Button>
+        <Button data-tour-workflows="create" onClick={openCreateWorkflow}><Plus className="h-4 w-4 mr-2" /> Create workflow</Button>
       </CardHeader>
       <CardContent className="space-y-6">
-        <form onSubmit={handleExecute} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
+        <form data-tour-workflows="execute-form" onSubmit={handleExecute} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
           <div className="space-y-1">
             <Label>Workflow</Label>
             <Select value={executeForm.workflow_id} onValueChange={(v) => setExecuteForm((f) => ({ ...f, workflow_id: v }))}>
@@ -828,7 +831,7 @@ function FrontlineWorkflowsTab() {
         </form>
         {loading ? <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /></div> : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full min-w-0">
-            <div className="min-w-0">
+            <div data-tour-workflows="list" className="min-w-0">
               <h4 className="font-medium mb-2">Workflows ({workflows.length})</h4>
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {workflows.length === 0 ? <p className="text-sm text-muted-foreground">No workflows yet. Click &quot;Create workflow&quot; to add one.</p> : workflows.map((w) => (
@@ -845,7 +848,7 @@ function FrontlineWorkflowsTab() {
                 ))}
               </div>
             </div>
-            <div className="min-w-0">
+            <div data-tour-workflows="executions" className="min-w-0">
               <h4 className="font-medium mb-2">Recent executions</h4>
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {executions.length === 0 ? <p className="text-sm text-muted-foreground">No executions yet.</p> : executions.slice(0, 15).map((ex) => (
@@ -1506,7 +1509,7 @@ function HandoffQueueTab() {
   return (
     <div className="space-y-4">
       {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div data-tour-handoffs="filters" className="flex flex-wrap items-center gap-2">
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Status" />
@@ -1532,7 +1535,7 @@ function HandoffQueueTab() {
       </div>
 
       {/* Queue table */}
-      <div className="overflow-x-auto -mx-2 sm:mx-0">
+      <div data-tour-handoffs="queue" className="overflow-x-auto -mx-2 sm:mx-0">
         <Table>
           <TableHeader>
             <TableRow>
@@ -2001,7 +2004,7 @@ function FrontlineAnalyticsTab() {
       </CardHeader>
       <CardContent className="space-y-4">
         {/* NL analytics - ask in plain language */}
-        <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+        <div data-tour-analytics="nlq" className="rounded-lg border bg-muted/30 p-4 space-y-2">
           <Label className="text-sm font-medium">Ask in plain language</Label>
           <p className="text-xs text-muted-foreground">e.g. &quot;How many tickets were resolved?&quot; or &quot;Breakdown by status&quot;</p>
           <form onSubmit={handleAskAnalytics} className="flex flex-wrap gap-2">
@@ -2082,7 +2085,7 @@ function FrontlineAnalyticsTab() {
           )}
         </div>
 
-        <div className="flex flex-wrap items-end gap-3">
+        <div data-tour-analytics="range" className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
             <Label>From</Label>
             <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[160px]" />
@@ -2102,7 +2105,7 @@ function FrontlineAnalyticsTab() {
                 <p className="whitespace-pre-wrap">{data.narrative}</p>
               </div>
             )}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div data-tour-analytics="kpis" className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="p-3 border rounded">
                 <p className="text-sm text-muted-foreground">Total tickets</p>
                 <p className="text-2xl font-semibold">{data.total_tickets}</p>
@@ -2118,7 +2121,7 @@ function FrontlineAnalyticsTab() {
             </div>
 
             {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div data-tour-analytics="charts" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Tickets over time */}
               {(data.tickets_by_date || []).length > 0 && (
                 <Card>
@@ -2507,6 +2510,52 @@ const FrontlineDashboard = () => {
   const [documents, setDocuments] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  // Which per-tab tour is currently open (null when none). Value = tab key.
+  const [activeTabTour, setActiveTabTour] = useState(null);
+
+  // Auto-launch onboarding tutorial the first time this user lands on the dashboard.
+  useEffect(() => {
+    if (!hasSeenTutorial()) {
+      const t = setTimeout(() => setTutorialOpen(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const handleReplayTutorial = () => {
+    resetTutorial();
+    setTutorialOpen(true);
+  };
+
+  // Auto-launch the per-tab tour the first time the user visits a given tab.
+  useEffect(() => {
+    if (tutorialOpen) return; // don't stack with the main tour
+    const tour = TAB_TOURS[activeTab];
+    if (!tour) return;
+    if (hasSeenTutorial(tour.key)) return;
+    const t = setTimeout(() => setActiveTabTour(activeTab), 500);
+    return () => clearTimeout(t);
+  }, [activeTab, tutorialOpen]);
+
+  const handleReplayTabTour = (tabKey) => {
+    const tour = TAB_TOURS[tabKey];
+    if (!tour) return;
+    resetTutorial(tour.key);
+    setActiveTabTour(tabKey);
+  };
+
+  // Small button rendered inside each TabsContent header
+  const TabTourButton = ({ tabKey }) => (
+    <button
+      type="button"
+      onClick={() => handleReplayTabTour(tabKey)}
+      title={`Take a guided tour of the ${TAB_TOURS[tabKey]?.label || 'this'} tab`}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-400/40 bg-amber-400/10 text-amber-300 text-xs font-semibold hover:bg-amber-400/20 hover:text-amber-200 transition"
+    >
+      <GraduationCap className="h-3.5 w-3.5" />
+      Tour this tab
+    </button>
+  );
   
   // Document upload
   const [showUploadDialog, setShowUploadDialog] = useState(false);
@@ -3337,8 +3386,22 @@ const FrontlineDashboard = () => {
       style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
     >
     <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
+      {/* Take the Tour button */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleReplayTutorial}
+          data-tour="replay"
+          title="Replay the onboarding tutorial"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-amber-400/40 bg-amber-400/10 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 hover:text-amber-200 transition"
+        >
+          <GraduationCap className="h-4 w-4" />
+          Take the Tour
+        </button>
+      </div>
+
       {/* Stats Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
+      <div data-tour="stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
         {[
           {
             label: 'Total Documents',
@@ -3444,7 +3507,7 @@ const FrontlineDashboard = () => {
         </div>
 
         {/* Desktop: Regular tabs (lg and above) with horizontal scroll */}
-        <div className="hidden lg:block overflow-x-auto pb-1">
+        <div data-tour="tabs" className="hidden lg:block overflow-x-auto pb-1">
           <TabsList
             className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
             style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
@@ -3455,6 +3518,7 @@ const FrontlineDashboard = () => {
                 <TabsTrigger
                   key={item.value}
                   value={item.value}
+                  data-tour-tab={item.value}
                   className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                   style={activeTab === item.value
                     ? {
@@ -3482,11 +3546,12 @@ const FrontlineDashboard = () => {
         {/* Overview Tab */}
         <TabsContent value="overview" className="mt-6">
           <ErrorBoundary>
+          <div className="flex justify-end mb-3"><TabTourButton tabKey="overview" /></div>
           {/* Admin insights — SLA / KB / DLQ / audit log tiles. Lazy-fetched. */}
-          <div className="mb-5">
+          <div data-tour-ov="insights" className="mb-5">
             <FrontlineInsightsPanel />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
+          <div data-tour-ov="quicknav" className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
             {[
               {
                 title: 'Documents',
@@ -3594,13 +3659,14 @@ const FrontlineDashboard = () => {
         {/* Documents Tab */}
         <TabsContent value="documents" className="space-y-4 mt-4">
           <ErrorBoundary>
+          <div className="flex justify-end"><TabTourButton tabKey="documents" /></div>
           <Card className="w-full min-w-0">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
                 <CardTitle>Documents</CardTitle>
                 <CardDescription>Upload and manage knowledge base documents</CardDescription>
               </div>
-              <Button onClick={() => setShowUploadDialog(true)} className="w-full sm:w-auto shrink-0">
+              <Button data-tour-docs="upload" onClick={() => setShowUploadDialog(true)} className="w-full sm:w-auto shrink-0">
                 <Upload className="mr-2 h-4 w-4" />
                 Upload Document
               </Button>
@@ -3617,7 +3683,7 @@ const FrontlineDashboard = () => {
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div data-tour-docs="grid" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {documents.map((doc) => {
                     const fmt = (doc.file_format || 'other').toLowerCase();
                     const fmtColor = {
@@ -3719,7 +3785,7 @@ const FrontlineDashboard = () => {
                         </div>
 
                         {/* Action bar */}
-                        <div className="border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
+                        <div data-tour-docs="card-actions" className="border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
                           <div className="flex items-center">
                             <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => handleSummarizeDocument(doc)} title="Full summary">
                               <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize
@@ -3758,6 +3824,7 @@ const FrontlineDashboard = () => {
         {/* Knowledge Q&A Tab - Chat UI with sidebar */}
         <TabsContent value="qa" className="space-y-4 mt-4">
           <ErrorBoundary>
+          <div className="flex justify-end mb-2"><TabTourButton tabKey="qa" /></div>
           <div
             className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
             style={{
@@ -3767,6 +3834,7 @@ const FrontlineDashboard = () => {
           >
             <div className="flex w-full max-w-full relative">
               <div
+                data-tour-qa="sidebar"
                 className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
                   showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
                 }`}
@@ -3876,6 +3944,7 @@ const FrontlineDashboard = () => {
                           </svg>
                         </button>
                         <button
+                          data-tour-qa="new-chat"
                           onClick={newChat}
                           title="New chat"
                           className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
@@ -4025,7 +4094,7 @@ const FrontlineDashboard = () => {
                 </CardHeader>
 
                 <CardContent className="p-0 flex flex-col flex-1 min-h-0">
-                  <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
+                  <div data-tour-qa="messages" className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
                   {!selectedChatId && chats.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                       <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
@@ -4209,6 +4278,7 @@ const FrontlineDashboard = () => {
                   </div>
 
                   <form
+                    data-tour-qa="input"
                     onSubmit={handleAskQuestion}
                     className="shrink-0"
                     style={{
@@ -4217,7 +4287,7 @@ const FrontlineDashboard = () => {
                     }}
                   >
                     <div className="mx-4 my-4 space-y-3 rounded-2xl px-4 py-4" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
-                      <div className="space-y-2">
+                      <div className="space-y-2" data-tour-qa="scope">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm text-muted-foreground">Answer from:</span>
                           <Select
@@ -4384,6 +4454,7 @@ const FrontlineDashboard = () => {
         {/* Chat widget tab */}
         <TabsContent value="widget" className="space-y-4 mt-4">
           <ErrorBoundary>
+          <div className="flex justify-end"><TabTourButton tabKey="widget" /></div>
           <Card className="w-full min-w-0">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -4402,7 +4473,7 @@ const FrontlineDashboard = () => {
                 </div>
               ) : widgetKey ? (
                 <>
-                  <div className="space-y-1">
+                  <div data-tour-widget="key" className="space-y-1">
                     <Label className="text-muted-foreground">Your widget key</Label>
                     <div className="flex items-center gap-2">
                       <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono break-all">{widgetKey}</code>
@@ -4418,7 +4489,7 @@ const FrontlineDashboard = () => {
                       </Button>
                     </div>
                   </div>
-                  <div className="space-y-1">
+                  <div data-tour-widget="origins" className="space-y-1">
                     <Label className="text-muted-foreground">Allowed origins</Label>
                     <p className="text-xs text-muted-foreground mb-1">
                       Comma-separated list of domains permitted to use this widget key (e.g.
@@ -4441,7 +4512,7 @@ const FrontlineDashboard = () => {
                   </div>
 
                   {/* Theming — pure customisation. Empty values use widget defaults. */}
-                  <div className="space-y-2 rounded-lg border border-white/[0.06] bg-black/20 p-3">
+                  <div data-tour-widget="theme" className="space-y-2 rounded-lg border border-white/[0.06] bg-black/20 p-3">
                     <div className="flex items-center justify-between">
                       <Label className="text-muted-foreground">Theme & appearance</Label>
                       <Button size="sm" onClick={handleSaveTheme} disabled={themeSaving}>
@@ -4509,7 +4580,7 @@ const FrontlineDashboard = () => {
                       />
                     </div>
                   </div>
-                  <div className="space-y-1">
+                  <div data-tour-widget="embed" className="space-y-1">
                     <Label className="text-muted-foreground">Embed on your site (floating chat button)</Label>
                     <p className="text-xs text-muted-foreground mb-1">Add this script before &lt;/body&gt;. Replace the origin with your app URL if different.</p>
                     <pre className="rounded bg-muted p-3 text-xs overflow-x-auto relative">
@@ -4553,13 +4624,14 @@ const FrontlineDashboard = () => {
         {/* Tickets Tab */}
         <TabsContent value="tickets" className="space-y-4 mt-4">
           <ErrorBoundary>
+          <div className="flex justify-end"><TabTourButton tabKey="tickets" /></div>
           <Card className="w-full min-w-0">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
                 <CardTitle>Support Tickets</CardTitle>
                 <CardDescription>Create and filter your support tickets</CardDescription>
               </div>
-              <Button onClick={() => setShowTicketDialog(true)} className="w-full sm:w-auto shrink-0">
+              <Button data-tour-tickets="create" onClick={() => setShowTicketDialog(true)} className="w-full sm:w-auto shrink-0">
                 <Ticket className="mr-2 h-4 w-4" />
                 Create Ticket
               </Button>
@@ -4577,7 +4649,7 @@ const FrontlineDashboard = () => {
                   <span className="text-xs text-muted-foreground">Tickets past due or due within 2 hours. Resolve or reassign to avoid missed SLAs.</span>
                 </div>
               )}
-              <div className="flex flex-wrap items-center gap-2">
+              <div data-tour-tickets="filters" className="flex flex-wrap items-center gap-2">
                 <Select value={ticketFilters.status || 'all'} onValueChange={(v) => { setTicketFilters((f) => ({ ...f, status: v === 'all' ? '' : v })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}>
                   <SelectTrigger className="w-[140px]">
                     <SelectValue placeholder="Status" />
@@ -4647,7 +4719,7 @@ const FrontlineDashboard = () => {
                 <>
                   {/* Bulk action bar — appears when at least one row is selected. */}
                   {selectedTicketIds.size > 0 && (
-                    <div className="flex items-center gap-2 flex-wrap rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 mb-2">
+                    <div data-tour-tickets="bulk-hint" className="flex items-center gap-2 flex-wrap rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 mb-2">
                       <span className="text-sm font-medium text-violet-200">
                         {selectedTicketIds.size} selected
                       </span>
@@ -4671,7 +4743,7 @@ const FrontlineDashboard = () => {
                       </Button>
                     </div>
                   )}
-                  <div className="overflow-x-auto -mx-2 sm:mx-0">
+                  <div data-tour-tickets="table" className="overflow-x-auto -mx-2 sm:mx-0">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -4817,26 +4889,31 @@ const FrontlineDashboard = () => {
 
         {/* Hand-offs Tab */}
         <TabsContent value="handoffs" className="space-y-4 mt-4">
+          <div className="flex justify-end"><TabTourButton tabKey="handoffs" /></div>
           <ErrorBoundary><HandoffQueueTab /></ErrorBoundary>
         </TabsContent>
 
         {/* Notifications Tab */}
         <TabsContent value="notifications" className="space-y-4 mt-4">
+          <div className="flex justify-end"><TabTourButton tabKey="notifications" /></div>
           <ErrorBoundary><FrontlineNotificationsTab /></ErrorBoundary>
         </TabsContent>
 
         {/* Workflows Tab */}
         <TabsContent value="workflows" className="space-y-4 mt-4">
+          <div className="flex justify-end"><TabTourButton tabKey="workflows" /></div>
           <ErrorBoundary><FrontlineWorkflowsTab /></ErrorBoundary>
         </TabsContent>
 
         {/* Analytics Tab */}
         <TabsContent value="analytics" className="space-y-4 mt-4">
+          <div className="flex justify-end"><TabTourButton tabKey="analytics" /></div>
           <ErrorBoundary><FrontlineAnalyticsTab /></ErrorBoundary>
         </TabsContent>
 
         {/* AI Graphs Tab */}
         <TabsContent value="ai-graphs" className="space-y-4 mt-4">
+          <div className="flex justify-end"><TabTourButton tabKey="ai-graphs" /></div>
           <ErrorBoundary><FrontlineAIGraphs /></ErrorBoundary>
         </TabsContent>
       </Tabs>
@@ -5231,6 +5308,23 @@ const FrontlineDashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* First-time onboarding tutorial (main tour) */}
+      <FrontlineTutorial
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
+        setActiveTab={setActiveTab}
+      />
+
+      {/* Per-tab guided tour */}
+      {activeTabTour && TAB_TOURS[activeTabTour] && (
+        <FrontlineTutorial
+          open={!!activeTabTour}
+          onClose={() => setActiveTabTour(null)}
+          steps={TAB_TOURS[activeTabTour].steps}
+          storageKey={TAB_TOURS[activeTabTour].key}
+        />
+      )}
     </div>
     </div>
   );

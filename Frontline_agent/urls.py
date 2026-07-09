@@ -27,5 +27,9 @@ urlpatterns = [
     
     # Analytics & Dashboard Agent
     path('api/analytics/', views.get_analytics, name='frontline_get_analytics'),
+
+    # Onboarding tutorial
+    path('api/tutorial/seen/', views.mark_tutorial_seen, name='frontline_mark_tutorial_seen'),
+    path('api/tutorial/reset/', views.reset_tutorial, name='frontline_reset_tutorial'),
 ]
 

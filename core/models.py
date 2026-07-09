@@ -374,6 +374,7 @@ class UserProfile(models.Model):
     linkedin = models.URLField(max_length=255, blank=True, null=True)
     github = models.URLField(max_length=255, blank=True, null=True)
     email_notifications_enabled = models.BooleanField(default=True, help_text="Enable email notifications")
+    has_seen_frontline_tutorial = models.BooleanField(default=False, help_text="Whether the user has completed or skipped the Frontline Agent onboarding tutorial")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

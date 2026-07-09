@@ -103,14 +103,19 @@ def frontline_dashboard(request):
         calculated_at__gte=timezone.now() - timedelta(days=7)
     ).order_by('-calculated_at')[:10]
     
+    profile = request.user.profile
+    has_seen_tutorial = getattr(profile, 'has_seen_frontline_tutorial', False)
+
     context = {
         'open_tickets': open_tickets,
         'resolved_tickets': resolved_tickets,
         'unread_notifications': unread_notifications,
         'recent_tickets': recent_tickets,
         'analytics': analytics,
+        'has_seen_tutorial': has_seen_tutorial,
+        'auto_start_tutorial': not has_seen_tutorial,
     }
-    
+
     return render(request, 'frontline_agent/dashboard.html', context)
 
 
@@ -569,6 +574,33 @@ def upload_document(request):
         
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+# Tutorial / Onboarding Views
+@login_required
+@require_http_methods(["POST"])
+def mark_tutorial_seen(request):
+    """Mark the frontline onboarding tutorial as seen for this user."""
+    if not is_frontline_agent(request.user):
+        return JsonResponse({"error": "Unauthorized. Frontline Agent role required."}, status=403)
+
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    profile.has_seen_frontline_tutorial = True
+    profile.save(update_fields=['has_seen_frontline_tutorial', 'updated_at'])
+    return JsonResponse({"success": True, "has_seen_frontline_tutorial": True})
+
+
+@login_required
+@require_http_methods(["POST"])
+def reset_tutorial(request):
+    """Reset the tutorial flag so the user can replay the onboarding tour."""
+    if not is_frontline_agent(request.user):
+        return JsonResponse({"error": "Unauthorized. Frontline Agent role required."}, status=403)
+
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    profile.has_seen_frontline_tutorial = False
+    profile.save(update_fields=['has_seen_frontline_tutorial', 'updated_at'])
+    return JsonResponse({"success": True, "has_seen_frontline_tutorial": False})
 
 
 # Analytics & Dashboard Agent Views
