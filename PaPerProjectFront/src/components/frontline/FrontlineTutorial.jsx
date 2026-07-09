@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ChevronLeft, ChevronRight, GraduationCap } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
 
 const DEFAULT_STORAGE_KEY = 'frontline_tutorial_seen_v1';
 
@@ -146,10 +147,12 @@ export function resetTutorial(key = DEFAULT_STORAGE_KEY) {
 const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) => {
   const stepsArr = steps && steps.length ? steps : MAIN_TOUR_STEPS;
   const storeKey = storageKey || DEFAULT_STORAGE_KEY;
+  const { toast } = useToast();
 
   const [index, setIndex] = useState(0);
   const [targetRect, setTargetRect] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0, placement: 'bottom' });
+  const [showSkipConfirm, setShowSkipConfirm] = useState(false);
   const tooltipRef = useRef(null);
 
   const step = stepsArr[index];
@@ -273,6 +276,13 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {
+      // When the skip-confirm modal is up, Escape dismisses it instead of
+      // re-opening it, and Enter confirms.
+      if (showSkipConfirm) {
+        if (e.key === 'Escape') { e.preventDefault(); setShowSkipConfirm(false); }
+        else if (e.key === 'Enter') { e.preventDefault(); confirmSkip(); }
+        return;
+      }
       if (e.key === 'Escape') handleSkip();
       else if (e.key === 'ArrowRight' || e.key === 'Enter') handleNext();
       else if (e.key === 'ArrowLeft') handlePrev();
@@ -280,7 +290,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, index]);
+  }, [open, index, showSkipConfirm]);
 
   const handleNext = () => {
     if (isLast) return handleFinish();
@@ -291,15 +301,26 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
     setIndex((i) => Math.max(i - 1, 0));
   };
 
-  const handleSkip = () => {
-    const ok = window.confirm("Skip this tour? You can replay it anytime from the 'Take the Tour' or 'Tour this tab' button.");
-    if (!ok) return;
+  // Open the styled confirmation modal instead of window.confirm.
+  const handleSkip = () => setShowSkipConfirm(true);
+
+  const confirmSkip = () => {
+    setShowSkipConfirm(false);
     markTutorialSeen(storeKey);
     onClose && onClose();
   };
 
+  const cancelSkip = () => setShowSkipConfirm(false);
+
   const handleFinish = () => {
     markTutorialSeen(storeKey);
+    // Little celebration + reminder that other tours can still be replayed.
+    try {
+      toast({
+        title: 'Tour complete 🎉',
+        description: 'You can replay it anytime from the "Take the Tour" button in the header, or "Tour this tab" inside any tab.',
+      });
+    } catch (_) { /* toaster not mounted — safe to ignore */ }
     onClose && onClose();
   };
 
@@ -430,6 +451,65 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
           </div>
         </div>
       </div>
+
+      {/* Skip-confirmation modal — replaces the browser's window.confirm
+          with a card in the same visual language as the tour. */}
+      {showSkipConfirm && (
+        <>
+          {/* Extra backdrop above the tour overlay so nothing behind is clickable */}
+          <div
+            className="fixed inset-0 z-[10001]"
+            style={{ background: 'rgba(2, 3, 8, 0.55)' }}
+            onClick={cancelSkip}
+          />
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="flt-skip-title"
+            className="fixed z-[10002] rounded-xl border border-[#3a295a] bg-[#161630] shadow-2xl"
+            style={{
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: 'min(400px, calc(100vw - 32px))',
+              padding: '1.25rem 1.5rem',
+            }}
+          >
+            <div className="flex items-start gap-3 mb-3">
+              <div className="shrink-0 h-9 w-9 rounded-full bg-amber-400/15 border border-amber-400/40 flex items-center justify-center">
+                <span className="text-amber-300 font-bold text-lg leading-none">!</span>
+              </div>
+              <div className="min-w-0">
+                <h3 id="flt-skip-title" className="text-base font-bold text-white mb-1">Skip this tour?</h3>
+                <p className="text-sm text-white/70 leading-relaxed">
+                  You can replay it anytime from the <span className="text-amber-300 font-semibold">"Take the Tour"</span> button in the header, or <span className="text-amber-300 font-semibold">"Tour this tab"</span> inside any tab.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={cancelSkip}
+                autoFocus
+                className="px-3.5 py-1.5 text-xs font-semibold rounded-md border border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white transition"
+              >
+                Continue tour
+              </button>
+              <button
+                type="button"
+                onClick={confirmSkip}
+                className="inline-flex items-center gap-1 px-3.5 py-1.5 text-xs font-semibold rounded-md text-white transition"
+                style={{
+                  background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
+                  boxShadow: '0 0 8px 0 #f59e0b55',
+                }}
+              >
+                Skip tutorial
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Pulse animation keyframes */}
       <style>{`
