@@ -41,6 +41,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   // Full-screen toggle for the manual create modal.
   const [createFullScreen, setCreateFullScreen] = useState(false);
+  // Full-screen toggle for the AI create modal (useful on its generated-form step).
+  const [aiFullScreen, setAiFullScreen] = useState(false);
   // Auto-open the "Create Job with AI" modal the first time the page opens
   // this session. Using a lazy initializer avoids effect-timing issues.
   const [showCreateWithAiModal, setShowCreateWithAiModal] = useState(() => {
@@ -1131,8 +1133,22 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
       </Dialog>
 
       {/* Create Job with AI Modal: step 1 = prompt, step 2 = editable form */}
-      <Dialog open={showCreateWithAiModal} onOpenChange={(open) => { if (!open) closeCreateWithAi(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={showCreateWithAiModal} onOpenChange={(open) => { if (!open) { closeCreateWithAi(); setAiFullScreen(false); } }}>
+        <DialogContent className={(aiFullScreen && createWithAiStep === 'form')
+          ? "w-screen h-[100dvh] max-w-none max-h-[100dvh] rounded-none overflow-y-auto"
+          : "max-w-2xl max-h-[90vh] overflow-y-auto"}>
+          {/* Full-screen toggle — only useful on the generated-form step */}
+          {createWithAiStep === 'form' && (
+            <button
+              type="button"
+              onClick={() => setAiFullScreen((v) => !v)}
+              title={aiFullScreen ? 'Exit full screen' : 'Full screen'}
+              aria-label={aiFullScreen ? 'Exit full screen' : 'Full screen'}
+              className="absolute right-14 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/25 text-muted-foreground transition-colors hover:bg-white/10 hover:text-white"
+            >
+              {aiFullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </button>
+          )}
           <DialogHeader>
             <div className="flex items-start justify-between gap-3 pr-6">
               <div>
@@ -1146,7 +1162,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
               <button
                 type="button"
                 onClick={switchToManualModal}
-                className="shrink-0 mr-10 inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
+                className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted ${createWithAiStep === 'form' ? 'mr-20' : 'mr-10'}`}
               >
                 <FileText className="h-4 w-4" />
                 Create manually

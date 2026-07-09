@@ -22,6 +22,8 @@ import {
   Sparkles,
   Layers,
   Target,
+  Info,
+  X,
 } from 'lucide-react';
 
 const STEP = { PARSE: 1, SUMMARIZE: 2, ENRICH: 3, QUALIFY: 4 };
@@ -47,6 +49,8 @@ const RecruitmentApiTester = () => {
   const [cvText, setCvText] = useState('');
   const [jobKeywords, setJobKeywords] = useState('');
   const [loadingStep, setLoadingStep] = useState(null);
+  // Step-by-step hints banner, toggled by the info button in the header.
+  const [showHints, setShowHints] = useState(false);
 
   const [parsed, setParsed] = useState(null);
   const [insights, setInsights] = useState(null);
@@ -185,11 +189,74 @@ const RecruitmentApiTester = () => {
             <CardTitle className="flex items-center gap-2 text-white">
               <FileText className="h-5 w-5" />
               Test pipeline APIs step by step
+
+              {/* Info button + hint text */}
+              <button
+                type="button"
+                onClick={() => setShowHints((v) => !v)}
+                aria-expanded={showHints}
+                className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-500/10 px-2.5 py-1 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
+              >
+                <Info className={`h-3.5 w-3.5 ${showHints ? '' : 'animate-pulse'}`} />
+                {showHints ? 'Hide hints' : 'Check the hints'}
+              </button>
             </CardTitle>
             <CardDescription className="text-white/60">
               Add a CV (file or text), then run Parse → Summarize → Enrich → Qualify. Each step shows the result; press
               Next to run the next step.
             </CardDescription>
+
+            {/* Steps banner */}
+            {showHints && (
+              <div
+                className="mt-4 rounded-xl px-4 py-3.5"
+                style={{
+                  background: 'linear-gradient(90deg, rgba(167,139,250,0.10) 0%, rgba(96,165,250,0.07) 100%)',
+                  border: '1px solid rgba(167,139,250,0.30)',
+                }}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0 mt-0.5 rounded-lg p-1.5" style={{ background: 'rgba(167,139,250,0.15)' }}>
+                    <Info className="h-4 w-4 text-violet-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white">How to run the pipeline</p>
+                    <ol className="mt-2 space-y-1.5 text-xs text-white/70">
+                      {[
+                        ['Add a CV', 'Upload a .pdf, .docx or .txt file — or paste the CV text.'],
+                        ['Add job keywords (optional)', 'Comma-separated skills. Summarize and Qualify score against these.'],
+                        ['Parse', 'Extracts structured fields (name, email, skills, experience) from the CV.'],
+                        ['Summarize', 'Turns the parsed data into insights. Run Parse first.'],
+                        ['Enrich', 'Adds extra context to the candidate. Run Parse and Summarize first.'],
+                        ['Qualify', 'Produces the final decision — Interview, Hold or Reject — with a confidence score.'],
+                      ].map(([title, desc], i) => (
+                        <li key={title} className="flex gap-2">
+                          <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/20 text-[10px] font-bold text-violet-300">
+                            {i + 1}
+                          </span>
+                          <span>
+                            <span className="font-semibold text-white">{title}</span>
+                            {' — '}
+                            {desc}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                    <p className="mt-3 text-xs text-white/50">
+                      Each step shows its raw JSON response, which you can copy.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowHints(false)}
+                    aria-label="Dismiss hints"
+                    className="shrink-0 text-white/30 hover:text-white/60 transition-colors mt-0.5"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Input: CV file or text */}
