@@ -193,6 +193,18 @@ export const signupCompany = async (companyData) =>
   postPublic('/company/signup', companyData);
 
 /**
+ * Get the signed-in company's full profile (authenticated).
+ */
+export const getCompanyProfile = async () =>
+  companyApi.get('/company/profile');
+
+/**
+ * Update the company profile (email is not editable server-side).
+ */
+export const updateCompanyProfile = async (data) =>
+  companyApi.put('/company/profile/update', data);
+
+/**
  * Step 1 — request a password reset OTP for the given email.
  * Backend always returns a generic success (no email enumeration).
  */
@@ -283,6 +295,8 @@ export default {
   getCompanyUser,
   companyApi,
   signupCompany,
+  getCompanyProfile,
+  updateCompanyProfile,
   requestPasswordReset,
   verifyResetOtp,
   resetPassword,

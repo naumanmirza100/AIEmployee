@@ -1,7 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LogOut, Bell, Key } from 'lucide-react';
+import { LogOut, Bell, Key, User } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { API_BASE_URL } from '@/config/apiConfig';
 
 const DashboardNavbar = ({
@@ -147,7 +155,7 @@ const DashboardNavbar = ({
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
               <Link to="/" className="shrink-0" title="Pay Per Project — Home">
                 <img
-                  src="/logo.jpg"
+                  src="/logo.png"
                   alt="Pay Per Project logo"
                   className="h-9 w-9 sm:h-11 sm:w-11 rounded-md object-contain"
                 />
@@ -219,42 +227,65 @@ const DashboardNavbar = ({
                 )}
               </div>
 
+              {/* Profile dropdown — avatar + name/email; opens a menu with profile, API keys, logout */}
               {user && (
-                <div className="flex items-center gap-2 sm:gap-3">
-                  {/* Avatar */}
-                  <div
-                    className="h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center shrink-0 text-white font-bold text-sm sm:text-base select-none"
-                    style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a259ff 100%)', boxShadow: '0 0 10px rgba(124,58,237,0.45)' }}
-                  >
-                    {(user.fullName || user.username || user.email || 'U').charAt(0).toUpperCase()}
-                  </div>
-                  {/* Name + Email */}
-                  <div className="hidden sm:block text-left">
-                    <p className="text-sm font-semibold text-white leading-tight truncate max-w-[160px]">
-                      {user.fullName || user.username || user.email?.split('@')[0] || 'User'}
-                    </p>
-                    <p className="text-xs text-white/40 leading-tight truncate max-w-[160px]">{user.email}</p>
-                  </div>
-                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger className="flex items-center gap-2 sm:gap-3 rounded-full focus:outline-none focus:ring-2 focus:ring-violet-400/50 pr-1">
+                    <div
+                      className="h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center shrink-0 text-white font-bold text-sm sm:text-base select-none"
+                      style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a259ff 100%)', boxShadow: '0 0 10px rgba(124,58,237,0.45)' }}
+                    >
+                      {(user.fullName || user.username || user.email || 'U').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="hidden sm:block text-left">
+                      <p className="text-sm font-semibold text-white leading-tight truncate max-w-[160px]">
+                        {user.fullName || user.username || user.email?.split('@')[0] || 'User'}
+                      </p>
+                      <p className="text-xs text-white/40 leading-tight truncate max-w-[160px]">{user.email}</p>
+                    </div>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel className="font-normal">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {user.fullName || user.username || user.email?.split('@')[0] || 'User'}
+                          </p>
+                          {user.email && (
+                            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                          )}
+                        </div>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => navigate('/company/profile')}
+                      className="cursor-pointer"
+                    >
+                      <User className="mr-2 h-4 w-4" />
+                      Profile
+                    </DropdownMenuItem>
+                    {isCompanyUser && (
+                      <DropdownMenuItem
+                        onClick={() => navigate('/company/settings/api-keys')}
+                        className="cursor-pointer"
+                      >
+                        <Key className="mr-2 h-4 w-4" />
+                        API Keys
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => setShowConfirm(true)}
+                      className="cursor-pointer text-red-500 focus:text-red-500"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
-              {/* API Keys (company users only) */}
-              {isCompanyUser && (
-                <button
-                  onClick={() => navigate('/company/settings/api-keys')}
-                  className="h-8 w-8 sm:h-9 sm:w-9 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
-                  title="API Keys & Token Quota"
-                >
-                  <Key className="h-4 w-4" />
-                </button>
-              )}
-              {/* Logout */}
-              <button
-                onClick={() => setShowConfirm(true)}
-                className="h-8 w-8 sm:h-9 sm:w-9 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
-                title="Logout"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
             </div>
           </div>
 
