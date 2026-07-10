@@ -32,7 +32,7 @@ import {
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Ticket, RotateCcw, KeyRound, RefreshCw, Copy
+  Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2
 } from 'lucide-react';
 import { createCheckoutSession } from '@/services/modulePurchaseService';
 
@@ -74,6 +74,8 @@ const CompanyDashboardPage = () => {
   const [usersSearch, setUsersSearch] = useState('');
   const [allTasksSearch, setAllTasksSearch] = useState('');
   const [showCreateJobModal, setShowCreateJobModal] = useState(false);
+  // Full-screen toggle for the "Post New Job" modal.
+  const [jobModalFullScreen, setJobModalFullScreen] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [selectedJobApplications, setSelectedJobApplications] = useState([]);
   const [processingApplicants, setProcessingApplicants] = useState(false);
@@ -154,6 +156,21 @@ const CompanyDashboardPage = () => {
     application_close_date: '',
   });
   const [jobSubmitting, setJobSubmitting] = useState(false);
+  // Quick-set for the application window: open = today, close = today + N days.
+  const [jobDurationDays, setJobDurationDays] = useState('');
+
+  const applyJobDaysRange = (daysValue) => {
+    const days = parseInt(daysValue, 10);
+    if (!days || days < 1) return;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const closeDate = new Date(today.getTime() + days * 86400000);
+    setJobForm((prev) => ({
+      ...prev,
+      application_open_date: toLocaleDateStr(today),
+      application_close_date: toLocaleDateStr(closeDate),
+    }));
+  };
 
   // Ticket Tasks (Frontline KB-gap tasks) - only relevant when frontline_agent is purchased
   const [ticketTasks, setTicketTasks] = useState([]);
@@ -295,8 +312,8 @@ const CompanyDashboardPage = () => {
       return err('Requirements must contain at least 10 alphanumeric characters if provided.');
     if (!jobForm.application_open_date)  return err('Please select an Applications Open Date.');
     if (!jobForm.application_close_date) return err('Please select an Applications Close Date.');
-    if (jobForm.application_open_date > jobForm.application_close_date)
-      return err('Open date must be before the close date.');
+    if (jobForm.application_close_date <= jobForm.application_open_date)
+      return err('Applications close date must be after the open date.');
 
     setJobSubmitting(true);
     try {
@@ -312,6 +329,7 @@ const CompanyDashboardPage = () => {
           description: '', requirements: '', is_active: true,
           application_open_date: '', application_close_date: '',
         });
+        setJobDurationDays('');
         fetchJobs();
       }
     } catch (error) {
@@ -2439,8 +2457,20 @@ const CompanyDashboardPage = () => {
         </div>
 
         {/* Create Job Modal */}
-        <Dialog open={showCreateJobModal} onOpenChange={setShowCreateJobModal}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <Dialog open={showCreateJobModal} onOpenChange={(open) => { setShowCreateJobModal(open); if (!open) setJobModalFullScreen(false); }}>
+          <DialogContent className={jobModalFullScreen
+            ? "w-screen h-[100dvh] max-w-none max-h-[100dvh] rounded-none overflow-y-auto"
+            : "max-w-2xl max-h-[90vh] overflow-y-auto"}>
+            {/* Full-screen toggle, beside the dialog's close (X) button */}
+            <button
+              type="button"
+              onClick={() => setJobModalFullScreen((v) => !v)}
+              title={jobModalFullScreen ? 'Exit full screen' : 'Full screen'}
+              aria-label={jobModalFullScreen ? 'Exit full screen' : 'Full screen'}
+              className="absolute right-14 top-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/25 text-muted-foreground transition-colors hover:bg-white/10 hover:text-white"
+            >
+              {jobModalFullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </button>
             <DialogHeader>
               <DialogTitle>Post New Job</DialogTitle>
             </DialogHeader>
@@ -2508,8 +2538,32 @@ const CompanyDashboardPage = () => {
                 />
               </div>
 
+              {/* Quick-set: enter number of days → open = today, close = today + N days.
+                  Manual date pickers below still work independently. */}
+              <div className="rounded-lg border border-white/15 bg-white/[0.03] p-3">
+                <Label htmlFor="jf-durationDays" className="text-sm">
+                  Quick set — open today for how many days?
+                </Label>
+                <div className="mt-2 flex items-center gap-2">
+                  <Input
+                    id="jf-durationDays"
+                    type="number"
+                    min="1"
+                    value={jobDurationDays}
+                    onChange={(e) => setJobDurationDays(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyJobDaysRange(jobDurationDays); } }}
+                    placeholder="e.g. 30"
+                    className="w-28"
+                  />
+                  <Button type="button" variant="secondary" onClick={() => applyJobDaysRange(jobDurationDays)}>
+                    Set dates
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Sets open = today, close = today + days.</span>
+                </div>
+              </div>
+
               {/* Application dates */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Applications Open Date <span className="text-red-500">*</span></Label>
                   <DatePicker
@@ -2524,6 +2578,10 @@ const CompanyDashboardPage = () => {
                     date={jobForm.application_close_date ? new Date(jobForm.application_close_date + 'T00:00:00') : null}
                     setDate={(date) => setJobForm({ ...jobForm, application_close_date: date ? toLocaleDateStr(date) : '' })}
                     placeholder="Select close date"
+                    // Disable any day on or before the open date — close must be after open.
+                    fromDate={jobForm.application_open_date
+                      ? new Date(new Date(jobForm.application_open_date + 'T00:00:00').getTime() + 86400000)
+                      : undefined}
                   />
                 </div>
               </div>

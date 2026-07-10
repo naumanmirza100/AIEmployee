@@ -11,7 +11,8 @@ from rest_framework.throttling import AnonRateThrottle
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
 from django.contrib.auth.hashers import make_password, check_password
 from rest_framework.authtoken.models import Token
 
@@ -32,6 +33,14 @@ def _generate_registration_token():
         token = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(64))
         if not CompanyRegistrationToken.objects.filter(token=token).exists():
             return token
+
+
+def _send_html_email(subject, template_name, context, to_email, text_body):
+    """Send a branded HTML email with a plain-text fallback."""
+    html_body = render_to_string(template_name, context)
+    msg = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [to_email])
+    msg.attach_alternative(html_body, 'text/html')
+    msg.send(fail_silently=False)
 
 
 def _find_login_company_user(email):
@@ -246,21 +255,26 @@ def company_signup(request):
         # Email the setup link to the company address.
         email_sent = False
         try:
-            subject = 'Complete your Pay Per Project account setup'
-            message = (
+            expiry_days = 7
+            text_body = (
                 f"Hi {company.name},\n\n"
-                f"Thanks for signing up! To finish setting up your account, "
+                f"Your company account has been created. To finish setting it up, "
                 f"open the link below and choose a password:\n\n"
                 f"{setup_link}\n\n"
-                f"This link expires in 7 days.\n\n"
+                f"This link expires in {expiry_days} days.\n\n"
                 f"— Pay Per Project"
             )
-            send_mail(
-                subject,
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [company.email],
-                fail_silently=False,
+            _send_html_email(
+                subject='Complete your Pay Per Project account setup',
+                template_name='company/emails/signup_setup_link.html',
+                context={
+                    'company_name': company.name,
+                    'company_email': company.email,
+                    'setup_link': setup_link,
+                    'expiry_days': expiry_days,
+                },
+                to_email=company.email,
+                text_body=text_body,
             )
             email_sent = True
         except Exception as mail_exc:
@@ -505,21 +519,27 @@ def forgot_password(request):
             company_user.reset_otp_expires = timezone.now() + timedelta(minutes=OTP_TTL_MINUTES)
             company_user.save(update_fields=['reset_otp', 'reset_otp_expires'])
 
-            subject = 'Your password reset code'
-            message = (
-                f"Hi {company_user.full_name or 'there'},\n\n"
+            recipient_name = company_user.full_name or 'there'
+            company_name = company_user.company.name if company_user.company else 'Pay Per Project'
+            text_body = (
+                f"Hi {recipient_name},\n\n"
                 f"Your password reset code is: {otp}\n\n"
                 f"This code expires in {OTP_TTL_MINUTES} minutes. "
                 f"If you didn't request this, you can safely ignore this email.\n\n"
-                f"— {company_user.company.name if company_user.company else 'Pay Per Project'}"
+                f"— {company_name}"
             )
             try:
-                send_mail(
-                    subject,
-                    message,
-                    settings.DEFAULT_FROM_EMAIL,
-                    [company_user.email],
-                    fail_silently=False,
+                _send_html_email(
+                    subject='Your password reset code',
+                    template_name='company/emails/password_reset_otp.html',
+                    context={
+                        'otp': otp,
+                        'ttl_minutes': OTP_TTL_MINUTES,
+                        'recipient_name': recipient_name,
+                        'company_name': company_name,
+                    },
+                    to_email=company_user.email,
+                    text_body=text_body,
                 )
             except Exception as mail_exc:
                 logger.error(f"Failed to send reset OTP to {email}: {mail_exc}", exc_info=True)
