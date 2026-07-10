@@ -343,6 +343,236 @@ export const AI_GRAPHS_TOUR = {
   ],
 };
 
+// Floating quick-chat launcher (bottom-right pulse). Its own storage key
+// so the tour auto-opens the first time the chat is opened, and can be
+// replayed independently of the tab tours.
+export const FLOATING_CHAT_TOUR = {
+  key: 'frontline_tour_floating_chat_v1',
+  label: 'Quick Chat',
+  steps: [
+    {
+      title: 'Meet Quick Chat ✨',
+      body: "This is the fastest way to get work done. Ask a question, request a summary, or look up a procedure — the AI answers using your indexed knowledge base and cites the source it used.",
+      placement: 'center',
+    },
+    {
+      selector: '[data-tour-fc="input"]',
+      title: 'Type any question here',
+      body: "Natural language works — 'What's our refund policy?', 'How do I reset a password?', 'Which SOP covers escalations?'. Press Enter to send. Shift+Enter for a new line.",
+      placement: 'top',
+    },
+    {
+      selector: '[data-tour-fc="send"]',
+      title: 'Send',
+      body: 'Click to submit your question. The AI searches every indexed document and returns an answer with the sources it used, so you can trust and verify.',
+      placement: 'top',
+    },
+    {
+      selector: '[data-tour-fc="messages"]',
+      title: 'Answers with citations',
+      body: 'Answers appear here. Each response shows the document(s) the AI cited, so you can click through to the source. Errors surface as a red bubble.',
+      placement: 'top',
+    },
+    {
+      selector: '[data-tour-fc="header"]',
+      title: 'Close and replay',
+      body: 'Close the chat with X, or click the graduation cap to replay this tour. When closed, the launcher goes back to the bottom-right — always one click away.',
+      placement: 'bottom',
+    },
+  ],
+};
+
+// Inline "!" hint content — clicking a hint next to an element opens a
+// tutorial-style card with these copy. Kept in sync with the tour steps
+// above so both surfaces use the same wording.
+export const HINTS = {
+  // Overview
+  ovInsights: {
+    title: 'Admin insights',
+    body: 'These tiles pull real data from the last 30 days: SLA status, knowledge base gaps, background failure queue (DLQ), and recent audit events. Refresh any tile from its icon.',
+  },
+  ovQuicknav: {
+    title: 'Quick jump to any tool',
+    body: 'Shortcut cards to the most-used tabs — Documents, Knowledge Q&A, Tickets, Chat widget, Workflows, or Analytics. Click any card to switch tabs instantly.',
+  },
+
+  // Documents
+  docsUpload: {
+    title: 'Upload Document',
+    body: 'Add PDFs, Word docs, or text files here. Once processed, the AI can reference the content when answering questions.',
+  },
+  docsGrid: {
+    title: 'Your document library',
+    body: 'Every uploaded file is a card. Status badges: Indexed (ready), Processing, Queued, or Failed. Failed uploads can be retried.',
+  },
+  docsCardActions: {
+    title: 'Per-document actions',
+    body: 'Summarize (AI writes a summary), Extract (pull key facts), Mark outdated (excludes from answers), or Delete. "Show summary" expands the AI\'s take inline.',
+  },
+
+  // Knowledge Q&A
+  qaSidebar: {
+    title: 'Chat history',
+    body: 'Every conversation is saved. Click any past chat to reopen it — the AI remembers the context so you can pick up where you left off.',
+  },
+  qaNewChat: {
+    title: 'New chat',
+    body: 'Start a fresh conversation. Use this when switching topics — a clean slate helps the AI focus.',
+  },
+  qaScope: {
+    title: 'Answer scope',
+    body: 'Choose what the AI searches: all documents, only a specific document type (e.g. policies), or a hand-picked set. Narrower scope = more precise answers.',
+  },
+  qaInput: {
+    title: 'Ask a question',
+    body: "Type a natural-language question — 'What's our refund policy?', 'Which SOP covers onboarding?', anything. Enter or click Send to submit.",
+  },
+  qaMessages: {
+    title: 'Answers with citations',
+    body: 'The AI reply lands here with the source document(s) it cited. Thumbs up/down teaches the system what a good answer looks like for your team.',
+  },
+
+  // Chat widget
+  widgetKey: {
+    title: 'Widget key',
+    body: 'Unique key tying the widget to your account. Copy it — you\'ll paste it into the embed snippet. Do not share publicly.',
+  },
+  widgetOrigins: {
+    title: 'Allowed origins',
+    body: 'Comma-separated whitelist of domains where this widget key is valid (e.g. https://yoursite.com). Requests from anywhere else are blocked with 403.',
+  },
+  widgetTheme: {
+    title: 'Theme & appearance',
+    body: 'Tweak colors, fonts, border radius, header background, and bubble style so the widget blends into your site. Advanced users can inject custom CSS.',
+  },
+  widgetEmbed: {
+    title: 'Embed snippet',
+    body: 'Copy this <script> tag and paste it into your website\'s HTML, just before </body>. That\'s the full installation.',
+  },
+
+  // Tickets
+  ticketsCreate: {
+    title: 'Create Ticket',
+    body: 'Log tickets that arrived by phone, email, or chat by hand — status, priority, and category set in one dialog.',
+  },
+  ticketsFilters: {
+    title: 'Filter the queue',
+    body: 'Slice by status, priority, category, or date. Great for daily triage: "show me all urgent open tickets from this week".',
+  },
+  ticketsTable: {
+    title: 'Ticket table',
+    body: 'Every column is meaningful: SLA countdown, auto-resolved flag, priority. Click any row to open the detail drawer with the full thread.',
+  },
+  ticketsBulk: {
+    title: 'Bulk actions',
+    body: 'Tick multiple rows and a bulk-action bar appears. Change status, priority, or category on many tickets at once — huge time saver.',
+  },
+
+  // Hand-offs
+  handoffsFilters: {
+    title: 'Filter your queue',
+    body: 'Switch between Pending / Accepted / All. Tick "Only mine" to see hand-offs assigned to you. Refresh pulls the latest.',
+  },
+  handoffsQueue: {
+    title: 'Hand-off queue',
+    body: 'Each row is one AI-to-human escalation: title, customer, reason, request time, priority. Click Open for full context and the reply drawer.',
+  },
+
+  // Notifications
+  notifPrefs: {
+    title: 'Notification preferences',
+    body: 'Master toggles for email and in-app, plus per-event switches (ticket created, updated, assigned, workflow emails). Turn off what you don\'t want.',
+  },
+  notifTemplateCreate: {
+    title: 'Create template',
+    body: 'Save reusable message formats. Enable AI personalization for tailored sends. Placeholders like {{ticket_id}}, {{customer_name}} are supported.',
+  },
+  notifSendForm: {
+    title: 'Send a notification',
+    body: 'Pick a template, add a recipient (optionally link a ticket), hit Send Now. Great for ad-hoc updates outside of workflow automation.',
+  },
+  notifLists: {
+    title: 'Templates & scheduled',
+    body: 'Saved templates above; queued/scheduled sends below. Edits to templates only affect future sends.',
+  },
+
+  // Workflows
+  workflowsCreate: {
+    title: 'Create workflow',
+    body: 'Build a multi-step automation. Add ordered steps (email, update ticket, webhook, Slack, assign) and set trigger conditions like category=billing + priority=urgent.',
+  },
+  workflowsExecute: {
+    title: 'Execute manually',
+    body: 'Fire a workflow on demand: pick the workflow, optionally attach a ticket or recipient, hit Execute. Bypass triggers entirely.',
+  },
+  workflowsList: {
+    title: 'Your workflows',
+    body: 'All saved workflows. Toggle Active/Inactive, click Dry Run to preview execution without side effects, or Edit to change steps and triggers.',
+  },
+  workflowsExecutions: {
+    title: 'Recent executions',
+    body: 'Running log of what fired, when, and outcome (success, fail, awaiting approval). Approve/reject pending ones inline.',
+  },
+
+  // Analytics
+  analyticsNlq: {
+    title: 'Ask in plain language',
+    body: "Type things like 'how many tickets did we close last week?' or 'which category has the worst SLA?'. AI queries your data and answers with a written summary plus charts.",
+  },
+  analyticsRange: {
+    title: 'Date range & Export',
+    body: 'Set from/to dates and click Load — the whole page recomputes. Export CSV gives raw ticket-level data for offline analysis.',
+  },
+  analyticsKpis: {
+    title: 'Headline KPIs',
+    body: 'At-a-glance metrics: total tickets, auto-resolved count, average resolution hours. Reflect the current date range.',
+  },
+  analyticsCharts: {
+    title: 'Charts & team performance',
+    body: 'Tickets over time, by status, by category — plus a per-agent table with resolved counts, SLA breach rate, and median resolution time. Click column headers to sort.',
+  },
+
+  // Floating Quick Chat
+  fcLauncher: {
+    title: 'Quick Chat launcher',
+    body: 'Your one-click AI assistant. Ask any question and get a grounded answer — no tab-switching needed. It searches every indexed document.',
+  },
+  fcInput: {
+    title: 'Ask any question',
+    body: "Type in plain English. Examples: 'How do I reset a password?', 'What's our refund policy?', 'Which SOP covers onboarding?'. Enter = send, Shift+Enter = new line.",
+  },
+  fcSend: {
+    title: 'Send',
+    body: 'Submit your question. The AI searches your knowledge base and answers with citations you can verify.',
+  },
+  fcMessages: {
+    title: 'Chat area',
+    body: 'Your conversation lives here. Each AI answer includes the sources it cited so you can drill in. Errors show as a red bubble.',
+  },
+  fcHeader: {
+    title: 'Header actions',
+    body: 'Graduation cap replays this tour. X closes the chat and returns the floating launcher to the bottom-right corner.',
+  },
+
+  // AI Graphs
+  aigraphsPrompt: {
+    title: 'Describe your chart',
+    body: "Type something like 'show tickets by status as a pie chart' or 'resolution time trend for the last quarter'. The AI picks a chart type and renders it.",
+  },
+  aigraphsExamples: {
+    title: 'Example prompts',
+    body: 'Click any example to instantly load it as your prompt. A quick way to learn what kinds of questions the AI can chart.',
+  },
+  aigraphsChart: {
+    title: 'Generated chart',
+    body: 'The AI renders the chart here plus a written insight paragraph explaining what stands out in the data. Click Save Prompt to keep it.',
+  },
+  aigraphsSaved: {
+    title: 'Generate vs. Saved Prompts',
+    body: 'Toggle between generating a new chart and viewing your saved prompt library — search, favorite, replay, or delete from there.',
+  },
+};
+
 // Convenience map for quick lookup by tab value.
 export const TAB_TOURS = {
   overview: OVERVIEW_TOUR,

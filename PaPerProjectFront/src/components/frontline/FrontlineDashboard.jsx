@@ -78,8 +78,11 @@ import {
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from './FrontlineTutorial';
-import { TAB_TOURS } from './frontlineTutorialSteps';
-import { GraduationCap } from 'lucide-react';
+import { TAB_TOURS, HINTS } from './frontlineTutorialSteps';
+import InfoHint, { HintsProvider, useHints } from './InfoHint';
+import FrontlineFloatingChat from './FrontlineFloatingChat';
+import { trackRecentlyViewed } from './frontlineLocalStore';
+import { GraduationCap, Eye, EyeOff } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import { renderChart } from '../recruitment/ChartRenderer';
@@ -264,7 +267,10 @@ function FrontlineNotificationsTab() {
   <>
     <Card className="mb-4">
       <CardHeader>
-        <CardTitle className="text-base">Notification preferences</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-base">Notification preferences</CardTitle>
+          <InfoHint {...HINTS.notifPrefs} />
+        </div>
         <CardDescription>Control how and when you receive notifications. Turning these off reduces spam and respects your choice.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -342,10 +348,15 @@ function FrontlineNotificationsTab() {
           <CardTitle className="flex items-center gap-2"><Bell className="h-5 w-5" /> Notifications</CardTitle>
           <CardDescription>Templates and send/schedule notifications (email).</CardDescription>
         </div>
-        <Button data-tour-notif="template-create" onClick={openCreateTemplate}><Plus className="h-4 w-4 mr-2" /> Create template</Button>
+        <div className="flex items-center gap-2">
+          <Button data-tour-notif="template-create" onClick={openCreateTemplate}><Plus className="h-4 w-4 mr-2" /> Create template</Button>
+          <InfoHint {...HINTS.notifTemplateCreate} />
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        <form data-tour-notif="send-form" onSubmit={handleSendNow} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
+        <div className="flex items-start gap-2">
+          <div className="pt-3"><InfoHint {...HINTS.notifSendForm} /></div>
+          <form data-tour-notif="send-form" onSubmit={handleSendNow} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg flex-1">
           <div className="space-y-1">
             <Label>Template</Label>
             <Select value={sendForm.template_id} onValueChange={(v) => setSendForm((f) => ({ ...f, template_id: v }))}>
@@ -373,8 +384,13 @@ function FrontlineNotificationsTab() {
           </div>
           <Button type="submit" disabled={sending}>Send now</Button>
         </form>
+        </div>
         {loading ? <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /></div> : (
           <div data-tour-notif="lists">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Templates & sends</span>
+              <InfoHint {...HINTS.notifLists} />
+            </div>
             <div>
               <h4 className="font-medium mb-2">Templates ({templates.length})</h4>
               <div className="space-y-2 max-h-40 overflow-y-auto">
@@ -798,10 +814,15 @@ function FrontlineWorkflowsTab() {
           <CardTitle className="flex items-center gap-2"><GitBranch className="h-5 w-5" /> Workflows</CardTitle>
           <CardDescription>Run SOP/workflows with context (e.g. ticket_id, recipient_email).</CardDescription>
         </div>
-        <Button data-tour-workflows="create" onClick={openCreateWorkflow}><Plus className="h-4 w-4 mr-2" /> Create workflow</Button>
+        <div className="flex items-center gap-2">
+          <Button data-tour-workflows="create" onClick={openCreateWorkflow}><Plus className="h-4 w-4 mr-2" /> Create workflow</Button>
+          <InfoHint {...HINTS.workflowsCreate} />
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        <form data-tour-workflows="execute-form" onSubmit={handleExecute} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg">
+        <div className="flex items-start gap-2">
+          <div className="pt-3"><InfoHint {...HINTS.workflowsExecute} /></div>
+          <form data-tour-workflows="execute-form" onSubmit={handleExecute} className="flex flex-wrap items-end gap-3 p-3 border rounded-lg flex-1">
           <div className="space-y-1">
             <Label>Workflow</Label>
             <Select value={executeForm.workflow_id} onValueChange={(v) => setExecuteForm((f) => ({ ...f, workflow_id: v }))}>
@@ -829,10 +850,14 @@ function FrontlineWorkflowsTab() {
           </div>
           <Button type="submit" disabled={executing}>Execute</Button>
         </form>
+        </div>
         {loading ? <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /></div> : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full min-w-0">
             <div data-tour-workflows="list" className="min-w-0">
-              <h4 className="font-medium mb-2">Workflows ({workflows.length})</h4>
+              <div className="flex items-center gap-1.5 mb-2">
+                <h4 className="font-medium">Workflows ({workflows.length})</h4>
+                <InfoHint {...HINTS.workflowsList} />
+              </div>
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {workflows.length === 0 ? <p className="text-sm text-muted-foreground">No workflows yet. Click &quot;Create workflow&quot; to add one.</p> : workflows.map((w) => (
                   <div key={w.id} className="flex justify-between items-center p-2 border rounded text-sm">
@@ -849,7 +874,10 @@ function FrontlineWorkflowsTab() {
               </div>
             </div>
             <div data-tour-workflows="executions" className="min-w-0">
-              <h4 className="font-medium mb-2">Recent executions</h4>
+              <div className="flex items-center gap-1.5 mb-2">
+                <h4 className="font-medium">Recent executions</h4>
+                <InfoHint {...HINTS.workflowsExecutions} />
+              </div>
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {executions.length === 0 ? <p className="text-sm text-muted-foreground">No executions yet.</p> : executions.slice(0, 15).map((ex) => (
                   <div key={ex.id} className="flex justify-between items-center p-2 border rounded text-sm gap-2">
@@ -1416,6 +1444,13 @@ function HandoffQueueTab() {
   useEffect(() => { load(); }, [statusFilter, mine]);
 
   const openTicket = async (ticket) => {
+    // Remember this hand-off for the "Recently viewed" strip in Quick Chat.
+    trackRecentlyViewed({
+      kind: 'ticket',
+      id: ticket.id,
+      title: ticket.title || `Ticket #${ticket.id}`,
+      meta: ticket.priority || '',
+    });
     setDrawer({
       open: true, ticket, messages: [], loading: true,
       reply: '', sending: false, suggesting: false, accepting: false,
@@ -1510,6 +1545,7 @@ function HandoffQueueTab() {
     <div className="space-y-4">
       {/* Filter bar */}
       <div data-tour-handoffs="filters" className="flex flex-wrap items-center gap-2">
+        <InfoHint {...HINTS.handoffsFilters} />
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Status" />
@@ -1535,6 +1571,10 @@ function HandoffQueueTab() {
       </div>
 
       {/* Queue table */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Queue</span>
+        <InfoHint {...HINTS.handoffsQueue} />
+      </div>
       <div data-tour-handoffs="queue" className="overflow-x-auto -mx-2 sm:mx-0">
         <Table>
           <TableHeader>
@@ -2005,7 +2045,10 @@ function FrontlineAnalyticsTab() {
       <CardContent className="space-y-4">
         {/* NL analytics - ask in plain language */}
         <div data-tour-analytics="nlq" className="rounded-lg border bg-muted/30 p-4 space-y-2">
-          <Label className="text-sm font-medium">Ask in plain language</Label>
+          <div className="flex items-center gap-1.5">
+            <Label className="text-sm font-medium">Ask in plain language</Label>
+            <InfoHint {...HINTS.analyticsNlq} />
+          </div>
           <p className="text-xs text-muted-foreground">e.g. &quot;How many tickets were resolved?&quot; or &quot;Breakdown by status&quot;</p>
           <form onSubmit={handleAskAnalytics} className="flex flex-wrap gap-2">
             <Input
@@ -2086,6 +2129,7 @@ function FrontlineAnalyticsTab() {
         </div>
 
         <div data-tour-analytics="range" className="flex flex-wrap items-end gap-3">
+          <div className="pb-2"><InfoHint {...HINTS.analyticsRange} /></div>
           <div className="space-y-1">
             <Label>From</Label>
             <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[160px]" />
@@ -2105,6 +2149,10 @@ function FrontlineAnalyticsTab() {
                 <p className="whitespace-pre-wrap">{data.narrative}</p>
               </div>
             )}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">KPIs</span>
+              <InfoHint {...HINTS.analyticsKpis} />
+            </div>
             <div data-tour-analytics="kpis" className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="p-3 border rounded">
                 <p className="text-sm text-muted-foreground">Total tickets</p>
@@ -2121,6 +2169,10 @@ function FrontlineAnalyticsTab() {
             </div>
 
             {/* Charts */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Charts & team</span>
+              <InfoHint {...HINTS.analyticsCharts} />
+            </div>
             <div data-tour-analytics="charts" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Tickets over time */}
               {(data.tickets_by_date || []).length > 0 && (
@@ -2556,6 +2608,29 @@ const FrontlineDashboard = () => {
       Tour this tab
     </button>
   );
+
+  // Toggle for showing/hiding all "!" InfoHint icons across the dashboard.
+  // Reads from the same context every InfoHint consumes, so flipping this
+  // state hides / re-shows every hint icon instantly and persistently.
+  const HintsToggleButton = () => {
+    const { enabled, toggle } = useHints();
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        aria-pressed={enabled}
+        title={enabled ? 'Hide the ! help icons on every element' : 'Show the ! help icons on every element'}
+        className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition border ${
+          enabled
+            ? 'border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20 hover:text-amber-200'
+            : 'border-white/10 bg-white/[0.03] text-white/50 hover:bg-white/[0.06] hover:text-white/70'
+        }`}
+      >
+        {enabled ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+        <span>Hints: {enabled ? 'On' : 'Off'}</span>
+      </button>
+    );
+  };
   
   // Document upload
   const [showUploadDialog, setShowUploadDialog] = useState(false);
@@ -2910,6 +2985,7 @@ const FrontlineDashboard = () => {
   };
 
   const handleSummarizeDocument = async (doc) => {
+    trackRecentlyViewed({ kind: 'document', id: doc.id, title: doc.title || `Document #${doc.id}` });
     setDocResultDialog({ open: true, type: 'summary', title: `Summary: ${doc.title}`, content: null, loading: true });
     try {
       const response = await frontlineAgentService.summarizeDocument(doc.id, {});
@@ -3381,13 +3457,15 @@ const FrontlineDashboard = () => {
   }
 
   return (
+    <HintsProvider>
     <div
       className="w-full rounded-2xl border border-white/[0.06] p-0"
       style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
     >
     <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
-      {/* Take the Tour button */}
-      <div className="flex justify-end">
+      {/* Take the Tour + Hints toggle */}
+      <div className="flex justify-end items-center gap-2">
+        <HintsToggleButton />
         <button
           type="button"
           onClick={handleReplayTutorial}
@@ -3548,8 +3626,13 @@ const FrontlineDashboard = () => {
           <ErrorBoundary>
           <div className="flex justify-end mb-3"><TabTourButton tabKey="overview" /></div>
           {/* Admin insights — SLA / KB / DLQ / audit log tiles. Lazy-fetched. */}
-          <div data-tour-ov="insights" className="mb-5">
+          <div data-tour-ov="insights" className="mb-5 relative">
+            <div className="absolute -top-1 right-1 z-10"><InfoHint {...HINTS.ovInsights} /></div>
             <FrontlineInsightsPanel />
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs uppercase tracking-wider text-white/40 font-semibold">Quick jump</span>
+            <InfoHint {...HINTS.ovQuicknav} />
           </div>
           <div data-tour-ov="quicknav" className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
             {[
@@ -3663,13 +3746,19 @@ const FrontlineDashboard = () => {
           <Card className="w-full min-w-0">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
-                <CardTitle>Documents</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle>Documents</CardTitle>
+                  <InfoHint {...HINTS.docsGrid} />
+                </div>
                 <CardDescription>Upload and manage knowledge base documents</CardDescription>
               </div>
-              <Button data-tour-docs="upload" onClick={() => setShowUploadDialog(true)} className="w-full sm:w-auto shrink-0">
-                <Upload className="mr-2 h-4 w-4" />
-                Upload Document
-              </Button>
+              <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                <Button data-tour-docs="upload" onClick={() => setShowUploadDialog(true)} className="w-full sm:w-auto">
+                  <Upload className="mr-2 h-4 w-4" />
+                  Upload Document
+                </Button>
+                <InfoHint {...HINTS.docsUpload} />
+              </div>
             </CardHeader>
             <CardContent>
               {documents.length === 0 ? (
@@ -3787,6 +3876,7 @@ const FrontlineDashboard = () => {
                         {/* Action bar */}
                         <div data-tour-docs="card-actions" className="border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
                           <div className="flex items-center">
+                            <InfoHint {...HINTS.docsCardActions} className="ml-1 mr-2" />
                             <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => handleSummarizeDocument(doc)} title="Full summary">
                               <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize
                             </Button>
@@ -3859,7 +3949,10 @@ const FrontlineDashboard = () => {
                     }}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-base font-semibold text-white/90 tracking-wide">Frontline</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-base font-semibold text-white/90 tracking-wide">Frontline</span>
+                        <InfoHint {...HINTS.qaSidebar} />
+                      </div>
                       <button
                         onClick={() => setShowChatHistory(false)}
                         title="Close sidebar"
@@ -3951,6 +4044,7 @@ const FrontlineDashboard = () => {
                         >
                           <Plus className="h-4 w-4 text-white/80" />
                         </button>
+                        <InfoHint {...HINTS.qaNewChat} />
                       </div>
                     )}
                   </div>
@@ -4065,6 +4159,7 @@ const FrontlineDashboard = () => {
                         Ask questions and get answers from your knowledge base and uploaded documents.
                       </CardDescription>
                     </div>
+                    <InfoHint {...HINTS.qaMessages} />
                   </div>
 
                   <Button
@@ -4290,6 +4385,7 @@ const FrontlineDashboard = () => {
                       <div className="space-y-2" data-tour-qa="scope">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm text-muted-foreground">Answer from:</span>
+                          <InfoHint {...HINTS.qaScope} />
                           <Select
                             value={qaScopeMode}
                             onValueChange={(v) => {
@@ -4407,7 +4503,8 @@ const FrontlineDashboard = () => {
                         )}
                       </div>
 
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 items-start">
+                        <div className="pt-2"><InfoHint {...HINTS.qaInput} /></div>
                         <Textarea
                           placeholder={selectedMode.placeholder}
                           value={question}
@@ -4474,7 +4571,10 @@ const FrontlineDashboard = () => {
               ) : widgetKey ? (
                 <>
                   <div data-tour-widget="key" className="space-y-1">
-                    <Label className="text-muted-foreground">Your widget key</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-muted-foreground">Your widget key</Label>
+                      <InfoHint {...HINTS.widgetKey} />
+                    </div>
                     <div className="flex items-center gap-2">
                       <code className="flex-1 rounded bg-muted px-3 py-2 text-sm font-mono break-all">{widgetKey}</code>
                       <Button
@@ -4490,7 +4590,10 @@ const FrontlineDashboard = () => {
                     </div>
                   </div>
                   <div data-tour-widget="origins" className="space-y-1">
-                    <Label className="text-muted-foreground">Allowed origins</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-muted-foreground">Allowed origins</Label>
+                      <InfoHint {...HINTS.widgetOrigins} />
+                    </div>
                     <p className="text-xs text-muted-foreground mb-1">
                       Comma-separated list of domains permitted to use this widget key (e.g.
                       <code className="mx-1 px-1 rounded bg-muted text-[10px]">https://example.com,https://app.example.com</code>).
@@ -4514,7 +4617,10 @@ const FrontlineDashboard = () => {
                   {/* Theming — pure customisation. Empty values use widget defaults. */}
                   <div data-tour-widget="theme" className="space-y-2 rounded-lg border border-white/[0.06] bg-black/20 p-3">
                     <div className="flex items-center justify-between">
-                      <Label className="text-muted-foreground">Theme & appearance</Label>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-muted-foreground">Theme & appearance</Label>
+                        <InfoHint {...HINTS.widgetTheme} />
+                      </div>
                       <Button size="sm" onClick={handleSaveTheme} disabled={themeSaving}>
                         {themeSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
                         Save theme
@@ -4581,7 +4687,10 @@ const FrontlineDashboard = () => {
                     </div>
                   </div>
                   <div data-tour-widget="embed" className="space-y-1">
-                    <Label className="text-muted-foreground">Embed on your site (floating chat button)</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-muted-foreground">Embed on your site (floating chat button)</Label>
+                      <InfoHint {...HINTS.widgetEmbed} />
+                    </div>
                     <p className="text-xs text-muted-foreground mb-1">Add this script before &lt;/body&gt;. Replace the origin with your app URL if different.</p>
                     <pre className="rounded bg-muted p-3 text-xs overflow-x-auto relative">
                       <code>{`<script src="${typeof window !== 'undefined' ? window.location.origin : ''}/frontline-widget.js" data-key="${widgetKey}" data-base="${typeof window !== 'undefined' ? window.location.origin : ''}`}{'"></script>'}</code>
@@ -4628,13 +4737,19 @@ const FrontlineDashboard = () => {
           <Card className="w-full min-w-0">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
-                <CardTitle>Support Tickets</CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle>Support Tickets</CardTitle>
+                  <InfoHint {...HINTS.ticketsTable} />
+                </div>
                 <CardDescription>Create and filter your support tickets</CardDescription>
               </div>
-              <Button data-tour-tickets="create" onClick={() => setShowTicketDialog(true)} className="w-full sm:w-auto shrink-0">
-                <Ticket className="mr-2 h-4 w-4" />
-                Create Ticket
-              </Button>
+              <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                <Button data-tour-tickets="create" onClick={() => setShowTicketDialog(true)} className="w-full sm:w-auto">
+                  <Ticket className="mr-2 h-4 w-4" />
+                  Create Ticket
+                </Button>
+                <InfoHint {...HINTS.ticketsCreate} />
+              </div>
             </CardHeader>
             <CardContent className="space-y-4 overflow-x-hidden">
               {ticketsAging && (ticketsAging.count_breached > 0 || ticketsAging.count_at_risk > 0) && (
@@ -4650,6 +4765,7 @@ const FrontlineDashboard = () => {
                 </div>
               )}
               <div data-tour-tickets="filters" className="flex flex-wrap items-center gap-2">
+                <InfoHint {...HINTS.ticketsFilters} />
                 <Select value={ticketFilters.status || 'all'} onValueChange={(v) => { setTicketFilters((f) => ({ ...f, status: v === 'all' ? '' : v })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}>
                   <SelectTrigger className="w-[140px]">
                     <SelectValue placeholder="Status" />
@@ -4720,6 +4836,7 @@ const FrontlineDashboard = () => {
                   {/* Bulk action bar — appears when at least one row is selected. */}
                   {selectedTicketIds.size > 0 && (
                     <div data-tour-tickets="bulk-hint" className="flex items-center gap-2 flex-wrap rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 mb-2">
+                      <InfoHint {...HINTS.ticketsBulk} />
                       <span className="text-sm font-medium text-violet-200">
                         {selectedTicketIds.size} selected
                       </span>
@@ -5327,6 +5444,10 @@ const FrontlineDashboard = () => {
       )}
     </div>
     </div>
+    {/* Floating quick-chat launcher — pinned bottom-right of the viewport,
+        rendered via portal so it stays put across every tab. */}
+    <FrontlineFloatingChat />
+    </HintsProvider>
   );
 };
 

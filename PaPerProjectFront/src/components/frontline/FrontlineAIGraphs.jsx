@@ -25,6 +25,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Loader2, Sparkles, BarChart3, Save, Star, StarOff, Play, MoreVertical, Trash2, Copy, Search, RefreshCw, Clock } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
+import InfoHint from './InfoHint';
+import { HINTS } from './frontlineTutorialSteps';
 
 // Chart components (same data shapes as recruitment AIGraphGenerator)
 const SimpleBarChart = ({ data, colors, height = 250, title }) => {
@@ -335,6 +337,10 @@ export default function FrontlineAIGraphs() {
   return (
     <div className="space-y-4">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="flex items-center gap-2 mb-1">
+          <InfoHint {...HINTS.aigraphsSaved} />
+          <span className="text-xs text-muted-foreground">Toggle between generating and viewing saved prompts</span>
+        </div>
         <TabsList data-tour-aigraphs="saved" className="grid w-full grid-cols-2 max-w-md">
           <TabsTrigger value="generate" className="text-sm">
             <Sparkles className="h-4 w-4 mr-2" />
@@ -359,7 +365,10 @@ export default function FrontlineAIGraphs() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div data-tour-aigraphs="prompt" className="space-y-2">
-                <Label>Prompt</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label>Prompt</Label>
+                  <InfoHint {...HINTS.aigraphsPrompt} />
+                </div>
                 <Textarea
                   placeholder="e.g. Show tickets by status as a pie chart"
                   value={prompt}
@@ -382,7 +391,8 @@ export default function FrontlineAIGraphs() {
                   {generating ? ' Generating...' : ' Generate graph'}
                 </Button>
               </div>
-              <div data-tour-aigraphs="examples" className="flex flex-wrap gap-2">
+              <div data-tour-aigraphs="examples" className="flex flex-wrap gap-2 items-center">
+                <InfoHint {...HINTS.aigraphsExamples} />
                 {examplePrompts.map((ex) => (
                   <Button key={ex} variant="outline" size="sm" onClick={() => setPrompt(ex)} className="text-xs">
                     {ex}
@@ -392,6 +402,7 @@ export default function FrontlineAIGraphs() {
               {generatedChart && (
                 <div data-tour-aigraphs="chart" className="space-y-4 pt-4 border-t">
                   <div className="flex items-start justify-between gap-2">
+                    <div className="pt-3"><InfoHint {...HINTS.aigraphsChart} /></div>
                     <div className="p-3 rounded-lg bg-muted/50 border text-sm flex-1">{chartInsights}</div>
                     <Button variant="outline" size="sm" onClick={() => { setSaveTitle(generatedChart.title || ''); setSaveModalOpen(true); }}>
                       <Save className="h-4 w-4 mr-2" />
