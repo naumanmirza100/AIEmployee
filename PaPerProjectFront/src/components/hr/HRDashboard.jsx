@@ -46,6 +46,15 @@ import HRLeaveTab from './HRLeaveTab';
 import HREmployeeDetailDrawer from './HREmployeeDetailDrawer';
 import HRManagerTeamTab from './HRManagerTeamTab';
 import HROrgChartTab from './HROrgChartTab';
+// Tutorial + hints + floating chat (reused from Frontline, HR-specific content)
+import InfoHint, { HintsProvider, useHints } from '../frontline/InfoHint';
+import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '../frontline/FrontlineTutorial';
+import HRFloatingChat from './HRFloatingChat';
+import {
+  HR_MAIN_TOUR_STEPS, HR_TAB_TOURS, HR_HINTS, HR_MAIN_TOUR_KEY,
+} from './hrTutorialSteps';
+import { trackHRRecentlyViewed } from './hrLocalStore';
+import { GraduationCap, Eye, EyeOff } from 'lucide-react';
 
 // ---------- Tab metadata ----------
 const HR_TAB_ITEMS = [
@@ -75,6 +84,71 @@ const STAT_PALETTE = {
 const HRDashboard = () => {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('overview');
+
+  // ---- Onboarding tutorial + per-tab tours ----
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [activeTabTour, setActiveTabTour] = useState(null);
+
+  useEffect(() => {
+    if (!hasSeenTutorial(HR_MAIN_TOUR_KEY)) {
+      const t = setTimeout(() => setTutorialOpen(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tutorialOpen) return;
+    const tour = HR_TAB_TOURS[activeTab];
+    if (!tour) return;
+    if (hasSeenTutorial(tour.key)) return;
+    const t = setTimeout(() => setActiveTabTour(activeTab), 500);
+    return () => clearTimeout(t);
+  }, [activeTab, tutorialOpen]);
+
+  const handleReplayTutorial = () => {
+    resetTutorial(HR_MAIN_TOUR_KEY);
+    setTutorialOpen(true);
+  };
+  const handleReplayTabTour = (tabKey) => {
+    const tour = HR_TAB_TOURS[tabKey];
+    if (!tour) return;
+    resetTutorial(tour.key);
+    setActiveTabTour(tabKey);
+  };
+
+  // Small button rendered inside each TabsContent header
+  const TabTourButton = ({ tabKey }) => (
+    <button
+      type="button"
+      onClick={() => handleReplayTabTour(tabKey)}
+      title={`Take a guided tour of the ${HR_TAB_TOURS[tabKey]?.label || 'this'} tab`}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-violet-400/40 bg-violet-500/10 text-violet-200 text-xs font-semibold hover:bg-violet-500/20 hover:text-violet-100 transition"
+    >
+      <GraduationCap className="h-3.5 w-3.5" />
+      Tour this tab
+    </button>
+  );
+
+  // Toggle for showing/hiding every "!" InfoHint icon in the HR dashboard.
+  const HintsToggleButton = () => {
+    const { enabled, toggle } = useHints();
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        aria-pressed={enabled}
+        title={enabled ? 'Hide the ! help icons on every element' : 'Show the ! help icons on every element'}
+        className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition border ${
+          enabled
+            ? 'border-violet-400/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 hover:text-violet-100'
+            : 'border-white/10 bg-white/[0.03] text-white/50 hover:bg-white/[0.06] hover:text-white/70'
+        }`}
+      >
+        {enabled ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+        <span>Hints: {enabled ? 'On' : 'Off'}</span>
+      </button>
+    );
+  };
 
   // Overview
   const [stats, setStats] = useState(null);
@@ -379,6 +453,7 @@ const HRDashboard = () => {
 
   // ---------- Document actions ----------
   const handleSummarizeDoc = async (d) => {
+    trackHRRecentlyViewed({ kind: 'document', id: d.id, title: d.title || `Document #${d.id}` });
     setDocResult({ open: true, type: 'summary', title: `Summary: ${d.title}`,
                    loading: true, content: null, error: null });
     try {
@@ -716,12 +791,28 @@ const HRDashboard = () => {
   const CurrentTabIcon = currentTab.icon;
 
   return (
+    <HintsProvider>
     <div className="space-y-4">
       <div
         className="w-full rounded-2xl border border-white/[0.06] p-0"
         style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
       >
         <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
+
+          {/* Top bar: Hints toggle + Take the Tour */}
+          <div className="flex justify-end items-center gap-2">
+            <HintsToggleButton />
+            <button
+              type="button"
+              onClick={handleReplayTutorial}
+              data-tour-hr="replay"
+              title="Replay the onboarding tutorial"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-violet-400/40 bg-violet-500/10 text-violet-200 text-sm font-semibold hover:bg-violet-500/20 hover:text-violet-100 transition"
+            >
+              <GraduationCap className="h-4 w-4" />
+              Take the Tour
+            </button>
+          </div>
 
           {/* Header */}
           <div className="flex items-center gap-3">
@@ -749,7 +840,7 @@ const HRDashboard = () => {
                 <a href="/hr/me"><User className="h-3.5 w-3.5 mr-1" /> My profile</a>
               </Button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 w-full">
+            <div data-tour-hr="stats" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 w-full">
               {statCards.map((card) => {
                 const Icon = card.icon;
                 return (
@@ -815,7 +906,7 @@ const HRDashboard = () => {
             </div>
 
             {/* Desktop: Pill tabs (lg and above) */}
-            <div className="hidden lg:block overflow-x-auto pb-1">
+            <div data-tour-hr="tabs" className="hidden lg:block overflow-x-auto pb-1">
               <TabsList
                 className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
                 style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
@@ -826,6 +917,7 @@ const HRDashboard = () => {
                     <TabsTrigger
                       key={item.value}
                       value={item.value}
+                      data-tour-hr-tab={item.value}
                       className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                       style={activeTab === item.value
                         ? {
@@ -853,7 +945,11 @@ const HRDashboard = () => {
             {/* OVERVIEW — agent quick-links */}
             <TabsContent value="overview" className="mt-6">
               <ErrorBoundary>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 w-full min-w-0">
+                <div className="flex items-center gap-2 justify-end mb-3">
+                  <InfoHint {...HR_HINTS.hrOvQuicknav} />
+                  <TabTourButton tabKey="overview" />
+                </div>
+                <div data-tour-hr-ov="quicknav" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 w-full min-w-0">
                   <AgentTile
                     icon={MessageSquare} accent={STAT_PALETTE.violet}
                     title="Knowledge Q&A"
@@ -890,41 +986,61 @@ const HRDashboard = () => {
 
             {/* KNOWLEDGE Q&A */}
             <TabsContent value="qa" className="mt-6">
-              <ErrorBoundary><HRKnowledgeQAAgent /></ErrorBoundary>
+              <div className="flex items-center gap-2 justify-end mb-3">
+                <InfoHint {...HR_HINTS.hrQaPanel} />
+                <TabTourButton tabKey="qa" />
+              </div>
+              <div data-tour-hr-qa="panel">
+                <ErrorBoundary><HRKnowledgeQAAgent /></ErrorBoundary>
+              </div>
             </TabsContent>
 
             {/* EMPLOYEES */}
             <TabsContent value="employees" className="mt-6">
               <ErrorBoundary>
+                <div className="flex justify-end mb-3"><TabTourButton tabKey="employees" /></div>
                 <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <CardTitle className="flex items-center gap-2">
                         <Users className="h-5 w-5 text-violet-400" /> Employees
+                        <InfoHint {...HR_HINTS.hrEmpTable} />
                       </CardTitle>
                       <CardDescription>Auto-synced from your company's auth.User accounts.</CardDescription>
                     </div>
                     <div className="flex flex-wrap gap-2 items-center">
-                      <select
-                        value={empDeptFilter}
-                        onChange={(e) => setEmpDeptFilter(e.target.value)}
-                        className="h-9 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-white/90"
-                      >
-                        <option value="">All departments</option>
-                        {departments.map((d) => (
-                          <option key={d.id} value={d.id}>{d.name}{d.employee_count != null ? ` (${d.employee_count})` : ''}</option>
-                        ))}
-                      </select>
-                      <Button variant="outline" size="sm" onClick={openDeptManager}>Manage depts</Button>
-                      <Button variant="outline" size="sm" onClick={openCycleManager}>Review cycles</Button>
-                      <Input
-                        placeholder="Search by name or email"
-                        value={empSearch}
-                        onChange={(e) => setEmpSearch(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') loadEmployees(); }}
-                        className="w-64 bg-white/[0.03] border-white/[0.08]"
-                      />
-                      <Button variant="outline" onClick={loadEmployees}>Search</Button>
+                      <div className="flex items-center gap-1.5" data-tour-hr-emp="filter">
+                        <select
+                          value={empDeptFilter}
+                          onChange={(e) => setEmpDeptFilter(e.target.value)}
+                          className="h-9 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-white/90"
+                        >
+                          <option value="">All departments</option>
+                          {departments.map((d) => (
+                            <option key={d.id} value={d.id}>{d.name}{d.employee_count != null ? ` (${d.employee_count})` : ''}</option>
+                          ))}
+                        </select>
+                        <InfoHint {...HR_HINTS.hrEmpFilter} />
+                      </div>
+                      <div className="flex items-center gap-1.5" data-tour-hr-emp="manage-depts">
+                        <Button variant="outline" size="sm" onClick={openDeptManager}>Manage depts</Button>
+                        <InfoHint {...HR_HINTS.hrEmpManageDepts} />
+                      </div>
+                      <div className="flex items-center gap-1.5" data-tour-hr-emp="review-cycles">
+                        <Button variant="outline" size="sm" onClick={openCycleManager}>Review cycles</Button>
+                        <InfoHint {...HR_HINTS.hrEmpReviewCycles} />
+                      </div>
+                      <div className="flex items-center gap-1.5" data-tour-hr-emp="search">
+                        <Input
+                          placeholder="Search by name or email"
+                          value={empSearch}
+                          onChange={(e) => setEmpSearch(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') loadEmployees(); }}
+                          className="w-64 bg-white/[0.03] border-white/[0.08]"
+                        />
+                        <Button variant="outline" onClick={loadEmployees}>Search</Button>
+                        <InfoHint {...HR_HINTS.hrEmpSearch} />
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -934,7 +1050,7 @@ const HRDashboard = () => {
                       <EmptyState icon={Users} title="No employees yet"
                         sub="When new auth.Users are added under your company, they'll appear here automatically." />
                     ) : (
-                      <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+                      <div data-tour-hr-emp="table" className="rounded-xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
                         <div className="overflow-x-auto">
                           <Table>
                             <TableHeader>
@@ -963,7 +1079,14 @@ const HRDashboard = () => {
                                   <TableRow
                                     key={e.id}
                                     className="border-white/[0.06] hover:bg-white/[0.04] transition-colors cursor-pointer"
-                                    onClick={() => setEmployeeDrawer({ open: true, id: e.id })}
+                                    onClick={() => {
+                                      trackHRRecentlyViewed({
+                                        kind: 'employee', id: e.id,
+                                        title: e.full_name || e.username || `Employee #${e.id}`,
+                                        meta: e.job_title || '',
+                                      });
+                                      setEmployeeDrawer({ open: true, id: e.id });
+                                    }}
                                   >
                                     <TableCell className="font-medium text-white/95">
                                       <div className="flex items-center gap-2.5 min-w-0">
@@ -1149,34 +1272,57 @@ const HRDashboard = () => {
 
             {/* MY TEAM — manager rollup */}
             <TabsContent value="my_team" className="mt-6">
-              <ErrorBoundary>
-                <HRManagerTeamTab
-                  onOpenEmployee={(id) => setEmployeeDrawer({ open: true, id })} />
-              </ErrorBoundary>
+              <div className="flex items-center gap-2 justify-end mb-3">
+                <InfoHint {...HR_HINTS.hrTeamList} />
+                <TabTourButton tabKey="my_team" />
+              </div>
+              <div data-tour-hr-team="list">
+                <ErrorBoundary>
+                  <HRManagerTeamTab
+                    onOpenEmployee={(id) => {
+                      trackHRRecentlyViewed({ kind: 'employee', id, title: `Employee #${id}` });
+                      setEmployeeDrawer({ open: true, id });
+                    }} />
+                </ErrorBoundary>
+              </div>
             </TabsContent>
 
             {/* ORG CHART */}
             <TabsContent value="org_chart" className="mt-6">
-              <ErrorBoundary>
-                <HROrgChartTab
-                  onOpenEmployee={(id) => setEmployeeDrawer({ open: true, id })} />
-              </ErrorBoundary>
+              <div className="flex items-center gap-2 justify-end mb-3">
+                <InfoHint {...HR_HINTS.hrOrgCanvas} />
+                <TabTourButton tabKey="org_chart" />
+              </div>
+              <div data-tour-hr-org="canvas">
+                <ErrorBoundary>
+                  <HROrgChartTab
+                    onOpenEmployee={(id) => {
+                      trackHRRecentlyViewed({ kind: 'employee', id, title: `Employee #${id}` });
+                      setEmployeeDrawer({ open: true, id });
+                    }} />
+                </ErrorBoundary>
+              </div>
             </TabsContent>
 
             {/* DOCUMENTS */}
             <TabsContent value="documents" className="mt-6">
               <ErrorBoundary>
+                <div className="flex justify-end mb-3"><TabTourButton tabKey="documents" /></div>
                 <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <CardTitle className="flex items-center gap-2">
                         <FileText className="h-5 w-5 text-violet-400" /> HR Documents
+                        <InfoHint {...HR_HINTS.hrDocsGrid} />
                       </CardTitle>
                       <CardDescription>Handbook, policies, contracts, payroll. Confidentiality-gated.</CardDescription>
                     </div>
-                    <Button onClick={() => setUploadOpen(true)}>
-                      <Upload className="h-4 w-4 mr-1" /> Upload
-                    </Button>
+                    <div className="flex items-center gap-2" data-tour-hr-docs="upload">
+                      <Button onClick={() => setUploadOpen(true)}>
+                        <Upload className="h-4 w-4 mr-1" /> Upload
+                      </Button>
+                      <InfoHint {...HR_HINTS.hrDocsUpload} />
+                    </div>
                   </CardHeader>
                   <CardContent>
                     {docsLoading ? (
@@ -1185,7 +1331,7 @@ const HRDashboard = () => {
                       <EmptyState icon={FileText} title="No documents uploaded yet"
                         sub="Click Upload to add your first HR document — handbook, policy, contract." />
                     ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                      <div data-tour-hr-docs="grid" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                         {documents.map((d) => {
                           const fmt = (d.file_format || 'other').toLowerCase();
                           const fmtColor = {
@@ -1271,8 +1417,9 @@ const HRDashboard = () => {
                               </div>
 
                               {/* Action bar */}
-                              <div className="mt-auto border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
+                              <div data-tour-hr-docs="card-actions" className="mt-auto border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
                                 <div className="flex items-center">
+                                  <InfoHint {...HR_HINTS.hrDocsCardActions} className="ml-1 mr-2" />
                                   <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
                                     onClick={() => handleSummarizeDoc(d)} title="Summarize">
                                     <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize
@@ -1556,21 +1703,29 @@ const HRDashboard = () => {
             {/* WORKFLOWS */}
             <TabsContent value="workflows" className="mt-6">
               <ErrorBoundary>
+                <div className="flex justify-end mb-3"><TabTourButton tabKey="workflows" /></div>
                 <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-row items-center justify-between">
                     <div>
                       <CardTitle className="flex items-center gap-2">
                         <GitBranch className="h-5 w-5 text-violet-400" /> HR Workflows / SOPs
+                        <InfoHint {...HR_HINTS.hrWfList} />
                       </CardTitle>
                       <CardDescription>Onboarding · offboarding · approvals · reminders. Triggers fire on lifecycle events.</CardDescription>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" onClick={openWfTemplateDialog}>
-                        <BookTemplate className="h-4 w-4 mr-1" /> From template
-                      </Button>
-                      <Button onClick={openCreateWorkflow}>
-                        <Plus className="h-4 w-4 mr-1" /> New workflow
-                      </Button>
+                      <div className="flex items-center gap-1.5" data-tour-hr-wf="template">
+                        <Button variant="outline" onClick={openWfTemplateDialog}>
+                          <BookTemplate className="h-4 w-4 mr-1" /> From template
+                        </Button>
+                        <InfoHint {...HR_HINTS.hrWfTemplate} />
+                      </div>
+                      <div className="flex items-center gap-1.5" data-tour-hr-wf="create">
+                        <Button onClick={openCreateWorkflow}>
+                          <Plus className="h-4 w-4 mr-1" /> New workflow
+                        </Button>
+                        <InfoHint {...HR_HINTS.hrWfCreate} />
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -1580,7 +1735,7 @@ const HRDashboard = () => {
                       <EmptyState icon={GitBranch} title="No workflows yet"
                         sub="Create your first workflow — onboarding, offboarding, leave approval, or any custom SOP." />
                     ) : (
-                      <div className="space-y-2">
+                      <div data-tour-hr-wf="list" className="space-y-2">
                         {workflows.map((w) => {
                           const trig = w.trigger_conditions || {};
                           const trigEvent = trig.on || null;
@@ -1934,17 +2089,38 @@ const HRDashboard = () => {
 
             {/* MEETINGS */}
             <TabsContent value="meetings" className="mt-6">
-              <ErrorBoundary><HRMeetingScheduler /></ErrorBoundary>
+              <div className="flex items-center gap-2 justify-end mb-3">
+                <InfoHint {...HR_HINTS.hrMeetChat} />
+                <InfoHint {...HR_HINTS.hrMeetList} />
+                <InfoHint {...HR_HINTS.hrMeetExport} />
+                <TabTourButton tabKey="meetings" />
+              </div>
+              <div data-tour-hr-meet="chat">
+                <ErrorBoundary><HRMeetingScheduler /></ErrorBoundary>
+              </div>
             </TabsContent>
 
             {/* LEAVE */}
             <TabsContent value="leave" className="mt-6">
-              <ErrorBoundary><HRLeaveTab /></ErrorBoundary>
+              <div className="flex items-center gap-2 justify-end mb-3">
+                <InfoHint {...HR_HINTS.hrLeaveList} />
+                <InfoHint {...HR_HINTS.hrLeaveNew} />
+                <TabTourButton tabKey="leave" />
+              </div>
+              <div data-tour-hr-leave="list">
+                <ErrorBoundary><HRLeaveTab /></ErrorBoundary>
+              </div>
             </TabsContent>
 
             {/* NOTIFICATIONS */}
             <TabsContent value="notifications" className="mt-6">
-              <ErrorBoundary><HRNotificationsTab /></ErrorBoundary>
+              <div className="flex items-center gap-2 justify-end mb-3">
+                <InfoHint {...HR_HINTS.hrNotifList} />
+                <TabTourButton tabKey="notifications" />
+              </div>
+              <div data-tour-hr-notif="list">
+                <ErrorBoundary><HRNotificationsTab /></ErrorBoundary>
+              </div>
             </TabsContent>
           </Tabs>
         </div>
@@ -1956,7 +2132,30 @@ const HRDashboard = () => {
         employeeId={employeeDrawer.id}
         onOpenChange={(open) => setEmployeeDrawer((s) => ({ ...s, open }))}
       />
+
+      {/* Main onboarding tour */}
+      <FrontlineTutorial
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
+        setActiveTab={setActiveTab}
+        steps={HR_MAIN_TOUR_STEPS}
+        storageKey={HR_MAIN_TOUR_KEY}
+      />
+
+      {/* Per-tab guided tour */}
+      {activeTabTour && HR_TAB_TOURS[activeTabTour] && (
+        <FrontlineTutorial
+          open={!!activeTabTour}
+          onClose={() => setActiveTabTour(null)}
+          steps={HR_TAB_TOURS[activeTabTour].steps}
+          storageKey={HR_TAB_TOURS[activeTabTour].key}
+        />
+      )}
     </div>
+
+    {/* Floating HR Quick Chat — pinned bottom-right, portaled internally */}
+    <HRFloatingChat />
+    </HintsProvider>
   );
 };
 
