@@ -188,7 +188,7 @@ import { useTranslation } from 'react-i18next';
             </Route>
 
             {/* Operations Agent routes without header/footer */}
-            <Route path="/operations" element={<Navigate to="/operations/dashboard" replace />} />
+            <Route path="/operations" element={<Navigate to="/operations/documents" replace />} />
             <Route path="/operations/dashboard" element={<OperationsAgentPage />} />
             <Route path="/operations/documents" element={<OperationsAgentPage />} />
             <Route path="/operations/documents/:id" element={<OperationsAgentPage />} />

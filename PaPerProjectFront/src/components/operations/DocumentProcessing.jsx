@@ -103,12 +103,22 @@ const DocumentProcessing = () => {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-  // Upload
-  const [showUpload, setShowUpload] = useState(false);
+  // Upload — auto-open the modal the first time the Documents section opens
+  // this session (cleared on logout). Lazy initializer avoids effect timing.
+  const [showUpload, setShowUpload] = useState(() => {
+    if (typeof window !== 'undefined' && !sessionStorage.getItem('operations_upload_modal_shown')) {
+      sessionStorage.setItem('operations_upload_modal_shown', '1');
+      return true;
+    }
+    return false;
+  });
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadTags, setUploadTags] = useState('');
   const [uploading, setUploading] = useState(false);
+  // Id of a just-uploaded document — we point an arrow + banner at its
+  // "view" action so the user opens its details.
+  const [highlightDocId, setHighlightDocId] = useState(null);
 
   // View mode
   const [viewMode, setViewMode] = useState('table');
@@ -160,6 +170,9 @@ const DocumentProcessing = () => {
       setUploadFile(null);
       setUploadTitle('');
       setUploadTags('');
+      // Point the user at the new document's details.
+      if (res.document?.id != null) setHighlightDocId(res.document.id);
+      setPage(1);
       fetchDocuments();
     } catch (e) {
       const isHardBlock = e?.status === 402 || e?.status === 403 || e?.data?.hard_block;
@@ -247,6 +260,34 @@ const DocumentProcessing = () => {
         </Button>
       </motion.div>
 
+      {/* ── "Document uploaded" nudge banner ── */}
+      {highlightDocId != null && (
+        <motion.div variants={itemVariants}>
+          <button
+            type="button"
+            onClick={() => navigate(`/operations/documents/${highlightDocId}`)}
+            className="group flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors"
+            style={{ background: 'linear-gradient(90deg, rgba(245,158,11,0.14) 0%, rgba(217,119,6,0.08) 100%)', border: '1px solid rgba(245,158,11,0.35)' }}
+          >
+            <div className="shrink-0 rounded-lg p-1.5" style={{ background: 'rgba(245,158,11,0.18)' }}>
+              <CheckCircle2 className="h-4 w-4 text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">Document uploaded &amp; analyzed</p>
+              <p className="text-xs text-white/60 mt-0.5">Click to open its details, or use the eye icon in the list.</p>
+            </div>
+            <ArrowRight className="h-5 w-5 text-amber-400 shrink-0 transition-transform group-hover:translate-x-1" />
+            <span
+              onClick={(e) => { e.stopPropagation(); setHighlightDocId(null); }}
+              className="shrink-0 text-white/30 hover:text-white/70 transition-colors"
+              title="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </span>
+          </button>
+        </motion.div>
+      )}
+
       {/* ── Documents List ── */}
       {docsLoading ? (
         <motion.div variants={itemVariants} className="flex flex-col items-center justify-center py-20">
@@ -332,9 +373,16 @@ const DocumentProcessing = () => {
                             </div>
                           )}
                         </div>
-                        <div className="flex items-center gap-1 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
-                          <Button variant="ghost" size="sm" className="h-8 px-3 rounded-lg text-white/60 hover:text-amber-400 hover:bg-amber-500/10 gap-1.5 text-xs"
-                            onClick={() => navigate(`/operations/documents/${doc.id}`)}>
+                        <div className={`flex items-center gap-1 shrink-0 transition-opacity ${doc.id === highlightDocId ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`}>
+                          {doc.id === highlightDocId && (
+                            <span className="flex items-center gap-1 mr-1 text-amber-400 animate-blink">
+                              <span className="text-xs font-semibold whitespace-nowrap">View here</span>
+                              <ArrowRight className="h-6 w-6 animate-nudge-x" />
+                            </span>
+                          )}
+                          <Button variant="ghost" size="sm"
+                            className={`h-8 px-3 rounded-lg gap-1.5 text-xs ${doc.id === highlightDocId ? 'text-amber-400 bg-amber-500/15 ring-1 ring-amber-500/40' : 'text-white/60 hover:text-amber-400 hover:bg-amber-500/10'}`}
+                            onClick={() => { setHighlightDocId(null); navigate(`/operations/documents/${doc.id}`); }}>
                             <Eye className="h-3.5 w-3.5" />View
                           </Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10"
@@ -404,9 +452,16 @@ const DocumentProcessing = () => {
                             {doc.uploaded_by && <div className="text-[10px] text-white/25">{doc.uploaded_by}</div>}
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex items-center justify-end gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
-                              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/60 hover:text-amber-400 hover:bg-amber-500/10"
-                                onClick={() => navigate(`/operations/documents/${doc.id}`)}>
+                            <div className={`flex items-center justify-end gap-1 transition-opacity ${doc.id === highlightDocId ? 'opacity-100' : 'opacity-50 group-hover:opacity-100'}`}>
+                              {doc.id === highlightDocId && (
+                                <span className="flex items-center gap-0.5 text-amber-400 animate-blink">
+                                  <span className="text-[10px] font-semibold whitespace-nowrap">View</span>
+                                  <ArrowRight className="h-5 w-5 animate-nudge-x" />
+                                </span>
+                              )}
+                              <Button variant="ghost" size="icon"
+                                className={`h-7 w-7 rounded-md ${doc.id === highlightDocId ? 'text-amber-400 bg-amber-500/15 ring-1 ring-amber-500/40' : 'text-white/60 hover:text-amber-400 hover:bg-amber-500/10'}`}
+                                onClick={() => { setHighlightDocId(null); navigate(`/operations/documents/${doc.id}`); }}>
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/40 hover:text-red-400 hover:bg-red-500/10"

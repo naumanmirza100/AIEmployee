@@ -2388,7 +2388,7 @@ const CompanyDashboardPage = () => {
                                       marketing_agent:       '/marketing/dashboard',
                                       project_manager_agent: '/project-manager/dashboard',
                                       frontline_agent:       '/frontline/dashboard',
-                                      operations_agent:      '/operations/dashboard',
+                                      operations_agent:      '/operations/documents',
                                       reply_draft_agent:     '/reply-draft/dashboard',
                                       ai_sdr_agent:          '/ai-sdr/dashboard',
                                     }[agent.module_name]) && (
@@ -2401,7 +2401,7 @@ const CompanyDashboardPage = () => {
                                           marketing_agent:       '/marketing/dashboard',
                                           project_manager_agent: '/project-manager/dashboard',
                                           frontline_agent:       '/frontline/dashboard',
-                                          operations_agent:      '/operations/dashboard',
+                                          operations_agent:      '/operations/documents',
                                           reply_draft_agent:     '/reply-draft/dashboard',
                                           ai_sdr_agent:          '/ai-sdr/dashboard',
                                         }[agent.module_name]))}
