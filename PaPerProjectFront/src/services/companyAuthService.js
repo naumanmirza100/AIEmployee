@@ -279,8 +279,11 @@ const logoutCompany = async () => {
     localStorage.removeItem('company_user');
     localStorage.removeItem('company_purchased_modules');
     // Reset per-session UI flags so the next login is treated as fresh
-    // (e.g. the recruitment "Create Job with AI" auto-open modal).
+    // (e.g. the recruitment "Create Job with AI" auto-open modal and the
+    // operations "Upload Document" auto-open modal).
     sessionStorage.removeItem('recruitment_ai_modal_shown');
+    sessionStorage.removeItem('operations_upload_modal_shown');
+    sessionStorage.removeItem('operations_authoring_onboarded');
   }
 };
 

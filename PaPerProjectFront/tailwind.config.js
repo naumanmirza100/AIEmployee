@@ -68,12 +68,22 @@ module.exports = {
         "pulse-slow": {
           "0%, 100%": { opacity: "1", boxShadow: "0 0 12px 0 rgba(162,89,255,0.25)" },
           "50%": { opacity: "0.75", boxShadow: "0 0 18px 2px rgba(162,89,255,0.45)" }
+        },
+        "blink": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.15" }
+        },
+        "nudge-x": {
+          "0%, 100%": { transform: "translateX(0)" },
+          "50%": { transform: "translateX(4px)" }
         }
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "pulse-slow": "pulse-slow 2.4s ease-in-out infinite"
+        "pulse-slow": "pulse-slow 2.4s ease-in-out infinite",
+        "blink": "blink 0.9s step-start infinite",
+        "nudge-x": "nudge-x 0.8s ease-in-out infinite"
       },
       fontFamily: {
         sans: ["Inter", "sans-serif"],

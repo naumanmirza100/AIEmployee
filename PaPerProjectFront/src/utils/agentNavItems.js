@@ -20,7 +20,7 @@ const ALL_AGENTS = [
   { key: 'recruitment_agent',     label: 'Recruitment Agent',     icon: UserCheck,    section: 'recruitment',      path: '/recruitment/job-descriptions' },
   { key: 'marketing_agent',       label: 'Marketing Agent',       icon: Megaphone,    section: 'marketing',        path: '/marketing/dashboard' },
   { key: 'frontline_agent',       label: 'Frontline Agent',       icon: Headphones,   section: 'frontline',        path: '/frontline/dashboard' },
-  { key: 'operations_agent',      label: 'Operations Agent',      icon: FileSearch,   section: 'operations',       path: '/operations/dashboard' },
+  { key: 'operations_agent',      label: 'Operations Agent',      icon: FileSearch,   section: 'operations',       path: '/operations/documents' },
   { key: 'reply_draft_agent',     label: 'Reply Draft Agent',     icon: Reply,        section: 'reply-draft',      path: '/reply-draft/dashboard' },
   { key: 'ai_sdr_agent',          label: 'AI SDR Agent',          icon: Target,       section: 'ai-sdr',           path: '/ai-sdr/dashboard' },
   { key: 'hr_agent',              label: 'HR Support Agent',      icon: Users,        section: 'hr',               path: '/hr/dashboard' },
