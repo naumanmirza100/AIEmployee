@@ -29,96 +29,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import execMeetingService from '@/services/execMeetingService';
-
-// ── Markdown → HTML renderer (violet theme, matches this dashboard) ─────────
-function markdownToHtml(md) {
-  if (!md || typeof md !== 'string') return '';
-  const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const inline = (s) => {
-    let out = escape(s);
-    out = out.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-white/10 text-violet-200 text-[0.85em] font-mono">$1</code>');
-    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-violet-200">$1</strong>');
-    out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em class="italic text-white/85">$2</em>');
-    return out;
-  };
-  const getIndent = (line) => {
-    const m = line.match(/^(\s*)(?:[-*•]|\d+\.)\s+/);
-    if (!m) return -1;
-    return Math.floor(m[1].length / 2);
-  };
-  const lines = md.replace(/\r\n/g, '\n').split('\n');
-  const out = [];
-  let listDepth = -1;
-  const closeLists = (target) => { while (listDepth > target) { out.push('</ul>'); listDepth--; } };
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const t = line.trim();
-    if (t.startsWith('|') && t.endsWith('|')) {
-      closeLists(-1);
-      const rows = [];
-      let j = i;
-      while (j < lines.length && lines[j].trim().startsWith('|')) {
-        const cells = lines[j].trim().split('|').map((c) => c.trim()).filter(Boolean);
-        if (cells.length && cells.every((c) => /^[-:\s]+$/.test(c))) { j++; continue; }
-        rows.push(cells);
-        j++;
-      }
-      i = j;
-      if (rows.length) {
-        out.push('<div class="my-4 overflow-x-auto rounded-lg border border-white/10">');
-        out.push('<table class="w-full text-sm"><thead><tr class="bg-violet-500/10">');
-        rows[0].forEach((c) => out.push(`<th class="px-3 py-2 text-left font-semibold text-violet-300">${inline(c)}</th>`));
-        out.push('</tr></thead><tbody>');
-        rows.slice(1).forEach((r, idx) => {
-          out.push(`<tr class="${idx % 2 === 0 ? 'bg-white/[0.02]' : ''} hover:bg-white/[0.04]">`);
-          r.forEach((c) => out.push(`<td class="px-3 py-2 border-t border-white/5 text-white/85">${inline(c)}</td>`));
-          out.push('</tr>');
-        });
-        out.push('</tbody></table></div>');
-      }
-      continue;
-    }
-    if (/^---+$/.test(t)) { closeLists(-1); out.push('<hr class="my-5 border-white/20" />'); i++; continue; }
-    if (/^#### /.test(t)) { closeLists(-1); out.push(`<h4 class="text-sm font-semibold mt-3 mb-1.5 text-violet-100/90">${inline(t.slice(5))}</h4>`); i++; continue; }
-    if (/^### /.test(t))  { closeLists(-1); out.push(`<h3 class="text-base font-bold mt-5 mb-2 text-violet-200">${inline(t.slice(4))}</h3>`); i++; continue; }
-    if (/^## /.test(t))   { closeLists(-1); out.push(`<h2 class="text-lg font-bold mt-6 mb-2.5 text-violet-300 border-b border-violet-500/30 pb-1.5">${inline(t.slice(3))}</h2>`); i++; continue; }
-    if (/^# /.test(t))    { closeLists(-1); out.push(`<h1 class="text-2xl font-bold mt-2 mb-4 text-white">${inline(t.slice(2))}</h1>`); i++; continue; }
-    const indent = getIndent(line);
-    if (indent >= 0) {
-      const content = t.replace(/^[\s]*(?:[-*•]|\d+\.)\s+/, '');
-      if (indent > listDepth) {
-        while (listDepth < indent) {
-          const isTop = listDepth === -1;
-          out.push(`<ul class="${isTop ? 'pl-4 my-2 space-y-1.5' : 'pl-5 mt-1 mb-1 space-y-1 border-l border-white/[0.06]'}">`);
-          listDepth++;
-        }
-      } else if (indent < listDepth) {
-        closeLists(indent);
-      }
-      const bullet = indent === 0 ? '•' : '›';
-      const color  = indent === 0 ? 'text-violet-400' : 'text-white/30';
-      const textColor = indent === 0 ? 'text-white/90' : 'text-white/70';
-      out.push(
-        `<li class="text-sm leading-relaxed ${textColor} flex gap-2 ${indent === 0 ? 'pt-1' : ''}">` +
-        `<span class="${color} shrink-0 mt-0.5">${bullet}</span><span>${inline(content)}</span></li>`,
-      );
-      i++; continue;
-    }
-    if (t === '' && listDepth >= 0) {
-      let k = i + 1;
-      while (k < lines.length && lines[k].trim() === '') k++;
-      if (k >= lines.length || getIndent(lines[k]) < 0) closeLists(-1);
-      i++; continue;
-    }
-    if (t === '') { i++; continue; }
-    closeLists(-1);
-    out.push(`<p class="text-sm leading-relaxed text-white/85 my-2.5">${inline(t)}</p>`);
-    i++;
-  }
-  closeLists(-1);
-  return out.join('\n');
-}
+import {
+  markdownToHtml, CARD_STYLE, ROW_STYLE, STAT_PALETTE,
+  DateTimePicker, DateOnlyPicker, StatCard, priorityBadge, statusBadge,
+  AssigneeAvatars, EmptyState, validateMeetingLink,
+} from './shared';
+import {
+  ScheduleMeetingDialog, MeetingEditDialog, AssigneePicker,
+  AddTaskDialog, TaskEditDialog,
+} from './dialogs';
 
 const TAB_ITEMS = [
   { value: 'overview',      label: 'Overview',      icon: LayoutDashboard },
@@ -128,821 +47,6 @@ const TAB_ITEMS = [
   { value: 'documents',     label: 'Documents',      icon: FileText },
   { value: 'notifications', label: 'Notifications',  icon: Bell },
 ];
-
-// ── Hour / minute options ───────────────────────────────────────────────────
-const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-const MINUTES = ['00', '15', '30', '45'];
-
-// ── DateTimePicker component ────────────────────────────────────────────────
-const DateTimePicker = ({ value, onChange, allowPast = false }) => {
-  const [calOpen, setCalOpen] = useState(false);
-
-  // Parse ISO string → { date, hour, minute }
-  const parsed = value ? new Date(value) : null;
-  const selectedDate = parsed && !isNaN(parsed) ? parsed : null;
-  const selectedHour  = selectedDate ? String(selectedDate.getHours()).padStart(2, '0') : '09';
-  const selectedMin   = selectedDate
-    ? (['00','15','30','45'].includes(String(selectedDate.getMinutes()).padStart(2,'0'))
-        ? String(selectedDate.getMinutes()).padStart(2,'0')
-        : '00')
-    : '00';
-
-  const buildISO = (date, hour, minute) => {
-    if (!date) return '';
-    const d = new Date(date);
-    d.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
-    // return local ISO-like string backend can parse
-    const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
-  };
-
-  const handleDateSelect = (date) => {
-    setCalOpen(false);
-    onChange(buildISO(date, selectedHour, selectedMin));
-  };
-
-  const handleHourChange = (h) => onChange(buildISO(selectedDate, h, selectedMin));
-  const handleMinChange  = (m) => onChange(buildISO(selectedDate, selectedHour, m));
-
-  return (
-    <div className="flex gap-2">
-      {/* Calendar popover */}
-      <Popover open={calOpen} onOpenChange={setCalOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            className="flex-1 justify-start text-left font-normal bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white"
-          >
-            <CalendarIcon className="mr-2 h-4 w-4 text-violet-400 flex-shrink-0" />
-            {selectedDate ? format(selectedDate, 'dd MMM yyyy') : <span className="text-white/40">Pick a date</span>}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          className="w-auto p-0 bg-[#0d0b1f] border-white/10"
-          align="start"
-          style={{ zIndex: 9999 }}
-        >
-          <Calendar
-            mode="single"
-            selected={selectedDate}
-            onSelect={handleDateSelect}
-            fromDate={allowPast ? undefined : new Date()}
-            initialFocus
-            classNames={{
-              months: 'flex flex-col',
-              month: 'space-y-2',
-              caption: 'flex justify-center pt-1 relative items-center text-white',
-              caption_label: 'text-sm font-medium text-white',
-              nav: 'space-x-1 flex items-center',
-              nav_button: 'h-7 w-7 bg-white/10 border border-white/10 rounded p-0 hover:bg-white/20 text-white',
-              nav_button_previous: 'absolute left-1',
-              nav_button_next: 'absolute right-1',
-              table: 'w-full border-collapse',
-              head_row: 'flex',
-              head_cell: 'text-white/40 rounded-md w-9 font-normal text-[0.8rem]',
-              row: 'flex w-full mt-1',
-              cell: 'h-9 w-9 text-center text-sm p-0 relative focus-within:relative focus-within:z-20',
-              day: 'h-9 w-9 p-0 font-normal text-white/70 rounded hover:bg-violet-600/40 hover:text-white transition-colors',
-              day_selected: 'bg-violet-600 text-white hover:bg-violet-600 hover:text-white',
-              day_today: 'bg-white/10 text-white',
-              day_outside: 'text-white/20',
-              day_disabled: 'text-white/20 cursor-not-allowed',
-            }}
-          />
-        </PopoverContent>
-      </Popover>
-
-      {/* Hour select */}
-      <Select value={selectedHour} onValueChange={handleHourChange}>
-        <SelectTrigger className="w-20 bg-white/5 border-white/10 text-white">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="max-h-48 overflow-y-auto">
-          {HOURS.map(h => <SelectItem key={h} value={h}>{h}:00</SelectItem>)}
-        </SelectContent>
-      </Select>
-
-      {/* Minute select */}
-      <Select value={selectedMin} onValueChange={handleMinChange}>
-        <SelectTrigger className="w-20 bg-white/5 border-white/10 text-white">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {MINUTES.map(m => <SelectItem key={m} value={m}>:{m}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-};
-
-const STAT_PALETTE = {
-  violet: { color: '#a78bfa', bg: 'rgba(167,139,250,0.2)', border: 'rgba(167,139,250,0.2)', from: 'rgba(167,139,250,0.2)', to: 'rgba(147,51,234,0.1)' },
-  emerald:{ color: '#34d399', bg: 'rgba(52,211,153,0.2)',  border: 'rgba(52,211,153,0.2)',  from: 'rgba(52,211,153,0.2)',  to: 'rgba(22,163,74,0.1)' },
-  amber:  { color: '#fbbf24', bg: 'rgba(251,191,36,0.2)',  border: 'rgba(251,191,36,0.2)',  from: 'rgba(251,191,36,0.15)', to: 'rgba(245,158,11,0.08)' },
-  sky:    { color: '#60a5fa', bg: 'rgba(96,165,250,0.2)',  border: 'rgba(96,165,250,0.2)',  from: 'rgba(96,165,250,0.2)',  to: 'rgba(34,211,238,0.1)' },
-  rose:   { color: '#fb7185', bg: 'rgba(251,113,133,0.2)', border: 'rgba(251,113,133,0.2)', from: 'rgba(251,113,133,0.18)', to: 'rgba(225,29,72,0.08)' },
-};
-
-const StatCard = ({ label, value, icon: Icon, palette }) => {
-  const p = STAT_PALETTE[palette] || STAT_PALETTE.violet;
-  return (
-    <div
-      className="rounded-2xl p-4 flex items-center gap-4 transition-transform duration-200 hover:scale-[1.03] cursor-default"
-      style={{
-        background: `linear-gradient(135deg, ${p.from}, ${p.to})`,
-        border: `1px solid ${p.border}`,
-        backdropFilter: 'blur(8px)',
-      }}
-    >
-      <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: p.bg, boxShadow: `0 0 12px 0 ${p.color}33` }}>
-        <Icon className="h-5 w-5" style={{ color: p.color }} />
-      </div>
-      <div>
-        <p className="text-2xl font-bold text-white">{value ?? '—'}</p>
-        <p className="text-xs text-white/50">{label}</p>
-      </div>
-    </div>
-  );
-};
-
-const priorityBadge = (priority) => {
-  const map = {
-    critical: 'bg-red-500/20 text-red-400 border-red-500/30',
-    high:     'bg-orange-500/20 text-orange-400 border-orange-500/30',
-    medium:   'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    low:      'bg-green-500/20 text-green-400 border-green-500/30',
-  };
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border ${map[priority] || map.medium}`}>
-      {priority}
-    </span>
-  );
-};
-
-const statusBadge = (status) => {
-  const map = {
-    scheduled:   'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    in_progress: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    completed:   'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-    cancelled:   'bg-red-500/20 text-red-400 border-red-500/30',
-    todo:        'bg-slate-500/20 text-slate-400 border-slate-500/30',
-    review:      'bg-purple-500/20 text-purple-400 border-purple-500/30',
-    done:        'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  };
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border ${map[status] || map.todo}`}>
-      {status?.replace('_', ' ')}
-    </span>
-  );
-};
-
-const CARD_STYLE = {
-  background: 'rgba(0,0,0,0.25)',
-  border: '1px solid rgba(255,255,255,0.08)',
-  backdropFilter: 'blur(8px)',
-};
-
-const ROW_STYLE = {
-  borderBottom: '1px solid rgba(255,255,255,0.05)',
-};
-
-const EmptyState = ({ icon: Icon, label }) => (
-  <div className="flex flex-col items-center justify-center py-16 gap-3 text-white/30">
-    <div className="rounded-2xl p-4" style={{ background: 'rgba(162,89,255,0.08)', border: '1px solid rgba(162,89,255,0.15)' }}>
-      <Icon className="h-8 w-8 text-violet-400/40" />
-    </div>
-    <p className="text-sm">{label}</p>
-  </div>
-);
-
-// ── Date-only picker (for tasks) ────────────────────────────────────────────
-const DateOnlyPicker = ({ value, onChange }) => {
-  const [open, setOpen] = useState(false);
-  const selected = value ? new Date(value + 'T00:00:00') : null;
-
-  const handleSelect = (date) => {
-    setOpen(false);
-    if (!date) { onChange(''); return; }
-    const pad = n => String(n).padStart(2, '0');
-    onChange(`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`);
-  };
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          className="w-full justify-start text-left font-normal bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white"
-        >
-          <CalendarIcon className="mr-2 h-4 w-4 text-violet-400 flex-shrink-0" />
-          {selected && !isNaN(selected)
-            ? format(selected, 'dd MMM yyyy')
-            : <span className="text-white/40">Pick a date</span>}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-auto p-0 bg-[#0d0b1f] border-white/10"
-        align="start"
-        style={{ zIndex: 9999 }}
-      >
-        <Calendar
-          mode="single"
-          selected={selected && !isNaN(selected) ? selected : undefined}
-          onSelect={handleSelect}
-          initialFocus
-          classNames={{
-            months: 'flex flex-col',
-            month: 'space-y-2',
-            caption: 'flex justify-center pt-1 relative items-center text-white',
-            caption_label: 'text-sm font-medium text-white',
-            nav: 'space-x-1 flex items-center',
-            nav_button: 'h-7 w-7 bg-white/10 border border-white/10 rounded p-0 hover:bg-white/20 text-white',
-            nav_button_previous: 'absolute left-1',
-            nav_button_next: 'absolute right-1',
-            table: 'w-full border-collapse',
-            head_row: 'flex',
-            head_cell: 'text-white/40 rounded-md w-9 font-normal text-[0.8rem]',
-            row: 'flex w-full mt-1',
-            cell: 'h-9 w-9 text-center text-sm p-0 relative focus-within:relative focus-within:z-20',
-            day: 'h-9 w-9 p-0 font-normal text-white/70 rounded hover:bg-violet-600/40 hover:text-white transition-colors',
-            day_selected: 'bg-violet-600 text-white hover:bg-violet-600 hover:text-white',
-            day_today: 'bg-white/10 text-white',
-            day_outside: 'text-white/20',
-            day_disabled: 'text-white/20 cursor-not-allowed',
-          }}
-        />
-      </PopoverContent>
-    </Popover>
-  );
-};
-
-// ── Schedule meeting dialog ─────────────────────────────────────────────────
-const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
-  const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    title: '', description: '', scheduled_at: '', duration_minutes: '60', meeting_link: '',
-  });
-  const [linkError, setLinkError] = useState('');
-  const set = (k, v) => {
-    setForm(f => ({ ...f, [k]: v }));
-    if (k === 'meeting_link') {
-      setLinkError(v && !validateMeetingLink(v) ? 'Please enter a valid meeting link (Google Meet, Zoom, Teams, Jitsi, Webex, etc.)' : '');
-    }
-  };
-
-  // Participant search state (local to dialog)
-  const [searchQ, setSearchQ] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [participants, setParticipants] = useState([]);
-
-  const searchUsers = async (q) => {
-    setSearchQ(q);
-    if (q.length < 2) { setSearchResults([]); return; }
-    setSearchLoading(true);
-    try {
-      const data = await execMeetingService.searchUsers(q);
-      const addedKeys = participants.map(p => `${p.user_type || 'company_user'}-${p.id}`);
-      setSearchResults((data.users || []).filter(u => !addedKeys.includes(`${u.user_type || 'company_user'}-${u.id}`)));
-    } catch { setSearchResults([]); }
-    finally { setSearchLoading(false); }
-  };
-
-  const addUser = (u) => {
-    setParticipants(prev => [...prev, u]);
-    setSearchQ(''); setSearchResults([]);
-  };
-
-  const removeUser = (id) => setParticipants(prev => prev.filter(p => p.id !== id));
-
-  const handleSubmit = async () => {
-    if (!form.title || !form.scheduled_at) {
-      toast({ title: 'Title and date are required', variant: 'destructive' });
-      return;
-    }
-    if (form.meeting_link && !validateMeetingLink(form.meeting_link)) {
-      toast({ title: 'Invalid meeting link', description: 'Use Google Meet, Zoom, Teams, Jitsi, or Webex links.', variant: 'destructive' });
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await execMeetingService.createMeeting({
-        title: form.title,
-        description: form.description,
-        scheduled_at: form.scheduled_at,
-        duration_minutes: parseInt(form.duration_minutes) || 60,
-        meeting_link: form.meeting_link.trim() || '',
-      });
-      // Add participants if any
-      const meetingId = res.meeting?.id;
-      if (meetingId && participants.length > 0) {
-        await Promise.all(participants.map(p => execMeetingService.addParticipant(meetingId, p.id, p.user_type)));
-      }
-      toast({ title: 'Meeting scheduled!' });
-      onCreated();
-      onClose();
-      setForm({ title: '', description: '', scheduled_at: '', duration_minutes: '60', meeting_link: '' });
-      setParticipants([]); setSearchQ(''); setSearchResults([]);
-    } catch (err) {
-      toast({ title: 'Failed to schedule meeting', description: err.message, variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl bg-[#0d0b1f] border-white/10 text-white">
-        <DialogHeader>
-          <DialogTitle>Schedule Meeting</DialogTitle>
-          <DialogDescription className="text-white/50">Fill in the meeting details below.</DialogDescription>
-        </DialogHeader>
-        {/* Two-column layout */}
-        <div className="grid grid-cols-2 gap-6 py-2">
-          {/* LEFT column — core meeting fields */}
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <Label>Title *</Label>
-              <Input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Q3 Strategy Review" className="bg-white/5 border-white/10 text-white" />
-            </div>
-            <div className="space-y-1">
-              <Label>Description</Label>
-              <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Meeting agenda..." rows={3}
-                className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
-            </div>
-            <div className="space-y-1">
-              <Label>Date & Time *</Label>
-              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} />
-            </div>
-            <div className="space-y-1">
-              <Label>Duration</Label>
-              <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {['15','30','45','60','90','120','180'].map(d => (
-                    <SelectItem key={d} value={d}>{d} min</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-          </div>
-
-          {/* RIGHT column — participants */}
-          <div className="space-y-3 flex flex-col">
-            <Label>Add Participants</Label>
-
-            {/* Added chips */}
-            {participants.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {participants.map(p => (
-                  <span key={p.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
-                    {p.full_name}
-                    <button onClick={() => removeUser(p.id)} className="text-violet-300/60 hover:text-white leading-none">✕</button>
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {/* Search input */}
-            <div className="relative">
-              <Input
-                value={searchQ}
-                onChange={e => searchUsers(e.target.value)}
-                placeholder="Type name or email to add…"
-                autoComplete="off"
-                className="bg-white/5 border-white/10 text-white text-sm"
-              />
-              {searchLoading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
-              {searchResults.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
-                  {searchResults.map(u => (
-                    <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => addUser(u)}
-                      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
-                      <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
-                        {u.full_name?.[0]?.toUpperCase() || '?'}
-                      </div>
-                      <div>
-                        <p className="text-white text-xs font-medium">{u.full_name}</p>
-                        <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {searchQ.length >= 2 && !searchLoading && searchResults.length === 0 && (
-                <p className="text-white/30 text-xs mt-1">No users found</p>
-              )}
-            </div>
-
-            {/* Placeholder when no participants yet */}
-            {participants.length === 0 && (
-              <p className="text-white/20 text-xs mt-2">Search above to add team members.</p>
-            )}
-           <div className="space-y-1">
-              <Label>Video Call Link <span className="text-white/30 text-xs">(leave blank to auto-generate)</span></Label>
-              <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
-                placeholder="https://meet.google.com/xxx-yyyy-zzz"
-                className={`bg-white/5 border-white/10 text-white ${linkError ? 'border-red-500/60' : ''}`} />
-              {linkError && <p className="text-red-400 text-[11px] mt-0.5">{linkError}</p>}
-              <p className="text-white/25 text-[10px]">Supported: Google Meet, Zoom, Teams, Jitsi, Webex</p>
-            </div>
-          </div>
-
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Schedule
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-const VALID_MEETING_LINK_PATTERN = /^https?:\/\/(meet\.google\.com|zoom\.us|[\w-]+\.zoom\.us|us\d+web\.zoom\.us|teams\.microsoft\.com|[\w-]+\.jitsi\.meet|meet\.jit\.si|webex\.com|[\w-]+\.webex\.com|whereby\.com|[\w-]+\.whereby\.com|bluejeans\.com|gotomeet\.me|goto\.meeting)[\w\-/?=&#%+.]*$/i;
-
-const validateMeetingLink = (url) => {
-  if (!url || !url.trim()) return true; // blank is OK (auto-generated)
-  return VALID_MEETING_LINK_PATTERN.test(url.trim());
-};
-
-// ── Edit meeting dialog ─────────────────────────────────────────────────────
-const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
-  const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    title: '', description: '', scheduled_at: '', duration_minutes: '60',
-    meeting_link: '', status: 'scheduled',
-  });
-  const [linkError, setLinkError] = useState('');
-  const set = (k, v) => {
-    setForm(f => ({ ...f, [k]: v }));
-    if (k === 'meeting_link') {
-      setLinkError(v && !validateMeetingLink(v) ? 'Please enter a valid meeting link (Google Meet, Zoom, Teams, Jitsi, Webex, etc.)' : '');
-    }
-  };
-
-  // Populate form when meeting changes
-  useEffect(() => {
-    if (meeting) {
-      setForm({
-        title: meeting.title || '',
-        description: meeting.description || '',
-        scheduled_at: meeting.scheduled_at ? meeting.scheduled_at.slice(0, 16) : '',
-        duration_minutes: String(meeting.duration_minutes || 60),
-        meeting_link: meeting.meeting_link || '',
-        status: meeting.status || 'scheduled',
-      });
-    }
-  }, [meeting]);
-
-  const handleSave = async () => {
-    if (!form.title || !form.scheduled_at) {
-      toast({ title: 'Title and date are required', variant: 'destructive' });
-      return;
-    }
-    if (form.meeting_link && !validateMeetingLink(form.meeting_link)) {
-      toast({ title: 'Invalid meeting link', description: 'Use Google Meet, Zoom, Teams, Jitsi, or Webex links.', variant: 'destructive' });
-      return;
-    }
-    setLoading(true);
-    try {
-      await execMeetingService.updateMeeting(meeting.id, {
-        title: form.title,
-        description: form.description,
-        scheduled_at: form.scheduled_at,
-        duration_minutes: parseInt(form.duration_minutes) || 60,
-        meeting_link: form.meeting_link.trim(),
-        status: form.status,
-      });
-      toast({ title: 'Meeting updated', description: 'Participants have been notified by email.' });
-      onUpdated();
-      onClose();
-    } catch (err) {
-      toast({ title: 'Update failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl bg-[#0d0b1f] border-white/10 text-white">
-        <DialogHeader>
-          <DialogTitle>Edit Meeting</DialogTitle>
-          <DialogDescription className="text-white/50">Update meeting details. All participants will receive an email notification.</DialogDescription>
-        </DialogHeader>
-
-        <div className="grid grid-cols-2 gap-8 py-2">
-          {/* LEFT */}
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <Label>Title *</Label>
-              <Input value={form.title} onChange={e => set('title', e.target.value)}
-                className="bg-white/5 border-white/10 text-white" />
-            </div>
-            <div className="space-y-1">
-              <Label>Description</Label>
-              <Textarea value={form.description} onChange={e => set('description', e.target.value)}
-                rows={3} className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
-            </div>
-            <div className="space-y-1">
-              <Label>Date & Time *</Label>
-              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} allowPast />
-            </div>
-          </div>
-
-          {/* RIGHT */}
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <Label>Duration</Label>
-              <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {['15','30','45','60','90','120','180'].map(d => (
-                    <SelectItem key={d} value={d}>{d} min</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Status</Label>
-              <Select value={form.status} onValueChange={v => set('status', v)}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {['scheduled','in_progress','completed','cancelled'].map(s => (
-                    <SelectItem key={s} value={s}>{s.replace('_', ' ')}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Video Call Link</Label>
-              <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
-                placeholder="https://meet.google.com/xxx"
-                className={`bg-white/5 border-white/10 text-white ${linkError ? 'border-red-500/60' : ''}`} />
-              {linkError && <p className="text-red-400 text-[11px] mt-0.5">{linkError}</p>}
-              <p className="text-white/25 text-[10px]">Supported: Google Meet, Zoom, Teams, Jitsi, Webex</p>
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
-          <Button onClick={handleSave} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Save Changes
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-// ── Shared: multi-assignee picker (used by Add + Detail dialogs) ────────────
-const AssigneePicker = ({ assignees, onChange }) => {
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-
-  const search = async (val) => {
-    setQ(val);
-    if (val.length < 2) { setResults([]); return; }
-    setSearching(true);
-    try {
-      const data = await execMeetingService.searchUsers(val);
-      const addedKeys = assignees.map(a => `${a.user_type || 'cu'}-${a.id}`);
-      setResults((data.users || []).filter(u => !addedKeys.includes(`${u.user_type || 'cu'}-${u.id}`)));
-    } catch { setResults([]); }
-    finally { setSearching(false); }
-  };
-
-  const add = (u) => { onChange([...assignees, u]); setQ(''); setResults([]); };
-  const remove = (key) => onChange(assignees.filter(a => `${a.user_type || 'cu'}-${a.id}` !== key));
-
-  return (
-    <div className="space-y-2">
-      {assignees.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {assignees.map(a => {
-            const key = `${a.user_type || 'cu'}-${a.id}`;
-            return (
-              <span key={key} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
-                {a.full_name}
-                <button onClick={() => remove(key)} className="text-violet-300/60 hover:text-white leading-none">✕</button>
-              </span>
-            );
-          })}
-        </div>
-      )}
-      <div className="relative">
-        <Input
-          value={q}
-          onChange={e => search(e.target.value)}
-          placeholder="Type name or email to add…"
-          autoComplete="off"
-          className="bg-white/5 border-white/10 text-white text-sm"
-        />
-        {searching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
-        {results.length > 0 && (
-          <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
-            {results.map(u => (
-              <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => add(u)}
-                className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
-                <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
-                  {u.full_name?.[0]?.toUpperCase() || '?'}
-                </div>
-                <div>
-                  <p className="text-white text-xs font-medium">{u.full_name}</p>
-                  <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-        {q.length >= 2 && !searching && results.length === 0 && (
-          <p className="text-white/30 text-xs mt-1">No users found</p>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ── Add task dialog ─────────────────────────────────────────────────────────
-const AddTaskDialog = ({ open, onClose, onCreated }) => {
-  const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', priority: 'medium', due_date: '' });
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const [assignees, setAssignees] = useState([]);
-
-  const reset = () => {
-    setForm({ title: '', description: '', priority: 'medium', due_date: '' });
-    setAssignees([]);
-  };
-
-  const handleSubmit = async () => {
-    if (!form.title) { toast({ title: 'Title is required', variant: 'destructive' }); return; }
-    setLoading(true);
-    try {
-      await execMeetingService.createTask({
-        ...form,
-        assignees: assignees.map(a => ({ id: a.id, user_type: a.user_type || 'company_user' })),
-      });
-      toast({ title: 'Task created!' });
-      onCreated(); onClose(); reset();
-    } catch (err) {
-      toast({ title: 'Failed to create task', description: err.message, variant: 'destructive' });
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v) reset(); onClose(); }}>
-      <DialogContent className="max-w-lg bg-[#0d0b1f] border-white/10 text-white">
-        <DialogHeader>
-          <DialogTitle>Add Task</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
-          <div className="space-y-1">
-            <Label>Title *</Label>
-            <Input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Review Q3 report" className="bg-white/5 border-white/10 text-white" />
-          </div>
-          <div className="space-y-1">
-            <Label>Description</Label>
-            <Textarea value={form.description} onChange={e => set('description', e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>Priority</Label>
-              <Select value={form.priority} onValueChange={v => set('priority', v)}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {['low','medium','high','critical'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Due Date</Label>
-              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label>Assign To</Label>
-            <AssigneePicker assignees={assignees} onChange={setAssignees} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Add Task
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-// ── Task edit dialog (opens when Edit button clicked) ───────────────────────
-const TaskEditDialog = ({ task, onClose, onUpdated }) => {
-  const { toast } = useToast();
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState(null);
-  const [assignees, setAssignees] = useState([]);
-
-  useEffect(() => {
-    if (task) {
-      setForm({
-        title: task.title || '',
-        description: task.description || '',
-        status: task.status || 'todo',
-        priority: task.priority || 'medium',
-        due_date: task.due_date || '',
-      });
-      setAssignees((task.assignees || []).map(a => ({ ...a, user_type: 'company_user' })));
-    }
-  }, [task]);
-
-  if (!task || !form) return null;
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await execMeetingService.updateTask(task.id, {
-        ...form,
-        assignees: assignees.map(a => ({ id: a.id, user_type: a.user_type || 'company_user' })),
-      });
-      toast({ title: 'Task updated!' });
-      onUpdated();
-      onClose();
-    } catch (err) {
-      toast({ title: 'Failed to save', description: err.message, variant: 'destructive' });
-    } finally { setSaving(false); }
-  };
-
-  return (
-    <Dialog open={!!task} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg bg-[#0d0b1f] border-white/10 text-white">
-        <DialogHeader>
-          <DialogTitle>Edit Task</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
-          <div className="space-y-1">
-            <Label>Title *</Label>
-            <Input value={form.title} onChange={e => set('title', e.target.value)} className="bg-white/5 border-white/10 text-white" />
-          </div>
-          <div className="space-y-1">
-            <Label>Description</Label>
-            <Textarea value={form.description} onChange={e => set('description', e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label>Status</Label>
-              <Select value={form.status} onValueChange={v => set('status', v)}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {['todo','in_progress','review','done','blocked'].map(s => (
-                    <SelectItem key={s} value={s}>{s.replace('_',' ')}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Priority</Label>
-              <Select value={form.priority} onValueChange={v => set('priority', v)}>
-                <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {['low','medium','high','critical'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Due Date</Label>
-              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label>Assigned To</Label>
-            <AssigneePicker assignees={assignees} onChange={setAssignees} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 // Display ISO datetime string as UTC — avoids browser timezone shifting the date
 const fmtUtc = (isoStr) => {
@@ -983,6 +87,7 @@ const ExecMeetingDashboard = () => {
   const [editingTask, setEditingTask] = useState(null);
   const [editingMeeting, setEditingMeeting] = useState(null);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState(null);
+  const [subtaskParentTask, setSubtaskParentTask] = useState(null); // task being added a subtask to
 
   // AI Documents
   const [aiDocLoading, setAiDocLoading] = useState(false);
@@ -1266,7 +371,13 @@ const ExecMeetingDashboard = () => {
     setDeletingTaskId(id);
     try {
       await execMeetingService.deleteTask(id);
-      setTasks(prev => prev.filter(t => t.id !== id));
+      // id may belong to a top-level task or to a subtask nested under one —
+      // strip it from both places so the row disappears immediately.
+      setTasks(prev => prev
+        .filter(t => t.id !== id)
+        .map(t => (t.subtasks?.some(st => st.id === id)
+          ? { ...t, subtasks: t.subtasks.filter(st => st.id !== id), subtask_count: (t.subtask_count || 1) - 1 }
+          : t)));
       setExpandedTaskId(null);
       loadStats();
       toast({ title: 'Task deleted', description: 'Assignees have been notified by email.' });
@@ -1923,6 +1034,9 @@ const ExecMeetingDashboard = () => {
         <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
           {tasks.map(t => {
             const isOpen = expandedTaskId === t.id;
+            const subtasks = t.subtasks || [];
+            const subtaskDone = t.subtask_done_count || 0;
+            const subtaskTotal = t.subtask_count ?? subtasks.length;
             return (
               <div key={t.id} style={ROW_STYLE}>
                 {/* ── Row ── */}
@@ -1932,14 +1046,17 @@ const ExecMeetingDashboard = () => {
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{t.title}</p>
-                    <p className="text-white/40 text-xs">
-                      {t.due_date ? `Due: ${t.due_date}` : 'No due date'}
-                      {(t.assignees || []).length > 0 && (
-                        <span className="text-violet-300/70 ml-1.5">
-                          · {t.assignees.map(a => a.full_name).join(', ')}
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <p className="text-white/40 text-xs">
+                        {t.due_date ? `Due: ${t.due_date}` : 'No due date'}
+                      </p>
+                      {subtaskTotal > 0 && (
+                        <span className="text-white/30 text-xs flex items-center gap-1">
+                          · <ListChecks className="h-3 w-3" />{subtaskDone}/{subtaskTotal}
                         </span>
                       )}
-                    </p>
+                      <AssigneeAvatars assignees={t.assignees} />
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {priorityBadge(t.priority)}
@@ -1950,14 +1067,17 @@ const ExecMeetingDashboard = () => {
 
                 {/* ── Inline detail panel ── */}
                 {isOpen && (
-                  <div className="px-4 pb-4 pt-2 border-t border-white/5 space-y-2">
+                  <div className="px-4 pb-4 pt-2 border-t border-white/5 space-y-3">
                     {t.description && (
                       <p className="text-white/60 text-xs whitespace-pre-wrap">{t.description}</p>
                     )}
                     {(t.assignees || []).length > 0 && (
                       <div className="flex flex-wrap gap-1.5">
                         {t.assignees.map(a => (
-                          <span key={a.id} className="px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
+                          <span key={a.id} className="inline-flex items-center gap-1.5 pl-1 pr-2.5 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
+                            <span className="h-4 w-4 rounded-full bg-violet-500/40 flex items-center justify-center text-[9px] font-semibold">
+                              {a.full_name?.[0]?.toUpperCase() || '?'}
+                            </span>
                             {a.full_name}
                           </span>
                         ))}
@@ -1966,11 +1086,16 @@ const ExecMeetingDashboard = () => {
                     {t.ai_reasoning && (
                       <p className="text-white/40 text-xs italic">{t.ai_reasoning}</p>
                     )}
-                    <div className="flex gap-2 pt-1">
+                    <div className="flex gap-2">
                       <Button size="sm" variant="outline"
                         className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs h-7 px-3"
                         onClick={e => { e.stopPropagation(); setEditingTask(t); }}>
                         <Pencil className="h-3 w-3 mr-1" /> Edit
+                      </Button>
+                      <Button size="sm" variant="outline"
+                        className="border-sky-500/40 text-sky-300 hover:bg-sky-500/10 text-xs h-7 px-3"
+                        onClick={e => { e.stopPropagation(); setSubtaskParentTask(t); }}>
+                        <Plus className="h-3 w-3 mr-1" /> Add Subtask
                       </Button>
                       <Button size="sm" variant="ghost"
                         className="text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs h-7 px-3"
@@ -1978,6 +1103,31 @@ const ExecMeetingDashboard = () => {
                         <Trash2 className="h-3 w-3 mr-1" /> Delete
                       </Button>
                     </div>
+
+                    {/* Subtasks */}
+                    {subtasks.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <p className="text-white/30 text-[10px] uppercase tracking-wide">Subtasks ({subtaskDone}/{subtaskTotal})</p>
+                        {subtasks.map(st => (
+                          <div key={st.id}
+                            className="flex items-center gap-3 rounded-lg px-3 py-2 bg-white/[0.03] border border-white/5 cursor-pointer hover:bg-white/[0.06]"
+                            onClick={e => { e.stopPropagation(); setEditingTask(st); }}>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-xs font-medium truncate ${st.status === 'done' ? 'text-white/40 line-through' : 'text-white/80'}`}>{st.title}</p>
+                              {st.due_date && <p className="text-white/30 text-[10px]">Due: {st.due_date}</p>}
+                            </div>
+                            <AssigneeAvatars assignees={st.assignees} size="sm" />
+                            {priorityBadge(st.priority)}
+                            {statusBadge(st.status)}
+                            <button
+                              className="text-white/20 hover:text-red-400 text-xs px-1"
+                              onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(st.id); }}>
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2783,6 +1933,13 @@ const ExecMeetingDashboard = () => {
       <AddTaskDialog
         open={showTaskDialog}
         onClose={() => setShowTaskDialog(false)}
+        onCreated={() => { loadTasks(); loadStats(); }}
+      />
+
+      <AddTaskDialog
+        open={!!subtaskParentTask}
+        parentTask={subtaskParentTask}
+        onClose={() => setSubtaskParentTask(null)}
         onCreated={() => { loadTasks(); loadStats(); }}
       />
 
