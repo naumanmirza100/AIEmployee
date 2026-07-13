@@ -48,6 +48,7 @@ const execMeetingService = {
 
   getMeetingNotes: (meetingId)          => companyApi.get(`${BASE}/meetings/${meetingId}/notes`),
   generateNotes:   (meetingId, payload) => companyApi.post(`${BASE}/meetings/${meetingId}/notes`, payload),
+  generateMeetingDescription: (title, points) => companyApi.post(`${BASE}/ai/generate-description`, { title, points }),
 
   // Tasks — returns raw response; callers do res.tasks || []
   getTasks: (params = {}) => {
@@ -61,6 +62,7 @@ const execMeetingService = {
   updateTask:     (id, payload) => companyApi.patch(`${BASE}/tasks/${id}`, payload),
   deleteTask:     (id)          => companyApi.delete(`${BASE}/tasks/${id}`),
   prioritizeTasks: ()           => companyApi.post(`${BASE}/tasks/ai/prioritize`, {}),
+  generateTaskDescription: (title, points) => companyApi.post(`${BASE}/tasks/ai/generate-description`, { title, points }),
 
   // Calendar
   planWeek:       (opts = {}) => companyApi.post(`${BASE}/calendar/plan-week`, opts),

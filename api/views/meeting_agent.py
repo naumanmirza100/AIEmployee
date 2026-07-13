@@ -636,6 +636,30 @@ def schedule_meeting_ai(request):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecLLMThrottle])
+def generate_meeting_description(request):
+    """AI-expand a meeting title + a few rough points into a description + agenda."""
+    company_user = request.user
+    title = (request.data.get('title') or '').strip()
+    points = (request.data.get('points') or '').strip()
+
+    if not points:
+        return Response({'status': 'error', 'message': 'points is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        agent = _get_agent('meeting_scheduling', company_user)
+        data = agent.generate_description(title, points)
+        return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error("generate_meeting_description error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1154,6 +1178,30 @@ def task_detail(request, task_id):
     for cu in assignees_to_notify:
         _send_task_deleted_email(cu, task_title, task_priority, company_user.full_name)
     return Response({'status': 'success', 'message': 'Task deleted.'})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecLLMThrottle])
+def generate_task_description(request):
+    """AI-expand a task title + a few rough points into a full description."""
+    company_user = request.user
+    title = (request.data.get('title') or '').strip()
+    points = (request.data.get('points') or '').strip()
+
+    if not points:
+        return Response({'status': 'error', 'message': 'points is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        agent = _get_agent('task_prioritization', company_user)
+        data = agent.generate_description(title, points)
+        return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error("generate_task_description error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])

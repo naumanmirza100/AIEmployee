@@ -139,6 +139,30 @@ Return ONLY the JSON object."""
         raw = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=500)
         return self._extract_json(raw)
 
+    def generate_description(self, title: str, points: str) -> dict:
+        """
+        Expand a task title + a few free-form points into a proper task
+        description — the user reviews/edits before saving.
+        """
+        self.log_action("generate_description", {"title": title})
+        prompt = f"""Write a task description for the following. Output ONLY valid JSON:
+
+{{
+  "description": "a clear, actionable 2-4 sentence task description"
+}}
+
+Task title: {title or 'Untitled task'}
+Points to cover (from the assigner, may be rough notes): {points or 'Not provided'}
+
+Rules:
+- The description should read as a clear, actionable summary of what needs to be done — not a copy of the raw points.
+- If points are too sparse, infer a reasonable description from the title.
+- Return ONLY the JSON object, no explanation, no markdown fences."""
+
+        raw = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=300)
+        parsed = self._extract_json(raw)
+        return {'description': parsed.get('description', '') or ''}
+
     def process(self, action: str = 'prioritize', **kwargs) -> dict:
         try:
             if action == 'prioritize':
@@ -160,6 +184,11 @@ Return ONLY the JSON object."""
                 return {
                     'success': True,
                     'analysis': self.analyze_workload(kwargs['tasks'], kwargs.get('company_user_name', '')),
+                }
+            if action == 'generate_description':
+                return {
+                    'success': True,
+                    'data': self.generate_description(kwargs.get('title', ''), kwargs.get('points', '')),
                 }
             return {'success': False, 'error': f"Unknown action: {action}"}
         except Exception as e:
