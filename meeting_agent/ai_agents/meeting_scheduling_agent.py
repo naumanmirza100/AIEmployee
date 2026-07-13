@@ -162,6 +162,34 @@ If any field is unclear, use sensible defaults. Return ONLY JSON, no explanation
             dates.append(current)
         return dates
 
+    def generate_description(self, title: str, points: str) -> dict:
+        """
+        Expand a meeting title + a few free-form points into a proper meeting
+        description and agenda — the user reviews/edits before scheduling.
+        """
+        self.log_action("generate_description", {"title": title})
+        prompt = f"""Write a meeting description and agenda for the following. Output ONLY valid JSON:
+
+{{
+  "description": "a concise 2-4 sentence meeting description/purpose",
+  "agenda": ["agenda item 1", "agenda item 2", "..."]
+}}
+
+Meeting title: {title or 'Untitled meeting'}
+Points to cover (from the organizer, may be rough notes): {points or 'Not provided'}
+
+Rules:
+- The description should read as a short, professional summary of the meeting's purpose — not a copy of the raw points.
+- Turn the points into 3-6 clear agenda items. If points are too sparse, infer reasonable agenda items from the title.
+- Return ONLY the JSON object, no explanation, no markdown fences."""
+
+        raw = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=500)
+        parsed = self._extract_json(raw)
+        return {
+            'description': parsed.get('description', '') or '',
+            'agenda': parsed.get('agenda', []) or [],
+        }
+
     def draft_invite_message(self, meeting_data: dict) -> str:
         """Generate a professional meeting invitation message."""
         self.log_action("draft_invite_message")
@@ -208,6 +236,11 @@ Write a concise, professional email body (no subject line). Keep it under 150 wo
                 return {
                     'success': True,
                     'message': self.draft_invite_message(kwargs['meeting_data']),
+                }
+            if action == 'generate_description':
+                return {
+                    'success': True,
+                    'data': self.generate_description(kwargs.get('title', ''), kwargs.get('points', '')),
                 }
             return {'success': False, 'error': f"Unknown action: {action}"}
         except Exception as e:

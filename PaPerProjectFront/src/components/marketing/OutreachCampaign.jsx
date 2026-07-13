@@ -441,8 +441,21 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     if (companySize && companySize !== '__any__') data.company_size = companySize;
     if (interests) data.interests = interests.trim();
     if (language) data.language = language.trim();
-    if (startDate) data.start_date = startDate;
-    if (endDate) data.end_date = endDate;
+    if (showDates) {
+      // Dates are directly editable here — send whatever the user set.
+      if (startDate) data.start_date = startDate;
+      if (endDate) data.end_date = endDate;
+    } else if (action === 'launch') {
+      // No date fields shown for Launch — the campaign record may still carry
+      // a stale start_date from whenever the draft was first created (possibly
+      // in the past), which the backend re-validates against today() on every
+      // launch. Always send a fresh pair computed from Duration so launching
+      // an old draft doesn't fail a "start date in the past" check the user
+      // never got a chance to see or fix.
+      const { start, end } = computeDatesFromDuration();
+      data.start_date = start;
+      data.end_date = end;
+    }
     if (emailAccountId) data.email_account_id = Number(emailAccountId);
     data.goals = {};
     if (data.target_leads) data.goals.leads = data.target_leads;
@@ -490,9 +503,13 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     // loaded via the effect above — just reveal them for editing, no AI call needed.
     if (showCampaignSelect && campaignId) {
       if (showDates) {
+        // Always recompute from Duration (not just when empty) — the campaign-load
+        // effect fills startDate/endDate from the saved draft, which can be weeks
+        // old. The user is looking at Duration right now, so it should win over a
+        // stale saved date instead of being silently ignored.
         const { start, end } = computeDatesFromDuration();
-        if (!startDate) setStartDate(start);
-        if (!endDate) setEndDate(end);
+        setStartDate(start);
+        setEndDate(end);
       }
       setFieldsRevealed(true);
       return;
@@ -673,7 +690,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       <CardContent className="space-y-6">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <div className={`grid grid-cols-1 gap-4 items-end ${showCampaignSelect ? 'md:grid-cols-3' : !fieldsRevealed ? 'md:grid-cols-2' : ''}`}>
+            <div className={`grid grid-cols-1 gap-4 items-end ${showCampaignSelect ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
               <div className="space-y-2">
                 <Label className="text-white/90">Action</Label>
                 <Select value={action} onValueChange={(v) => { setAction(v); setResult(null); setError(null); setDesignReady(false); setFieldsRevealed(false); }}>
@@ -693,7 +710,30 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                   <Label className="text-white/90">Existing campaign {campaignSelectRequired ? '(required)' : '(optional)'}</Label>
                   <Select
                     value={campaignId || (campaignSelectRequired ? '' : '__new__')}
-                    onValueChange={(v) => { setCampaignId(v === '__new__' ? '' : v); setFieldsRevealed(false); }}
+                    onValueChange={(v) => {
+                      if (v === '__new__') {
+                        // Switching to "Create a new campaign" — clear out whatever
+                        // the previously-selected existing campaign loaded into these
+                        // fields, otherwise its name/description/account/etc. linger
+                        // and look like they belong to the new campaign.
+                        setCampaignId('');
+                        setName('');
+                        setDescription('');
+                        setTargetLeads('');
+                        setTargetConversions('');
+                        setAgeRange('');
+                        setLocation('');
+                        setIndustry('');
+                        setCompanySize('__any__');
+                        setInterests('');
+                        setLanguage('');
+                        setStartDate('');
+                        setEndDate('');
+                      } else {
+                        setCampaignId(v);
+                      }
+                      setFieldsRevealed(false);
+                    }}
                     disabled={loadingCampaigns}
                   >
                     <SelectTrigger>
@@ -712,31 +752,53 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 </div>
               )}
 
-              {!fieldsRevealed && (
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <Input
-                      id="duration-amount"
-                      type="number"
-                      min={1}
-                      placeholder="Duration"
-                      className="w-30 h-10 shrink-0"
-                      value={durationAmount}
-                      onChange={(e) => setDurationAmount(e.target.value)}
-                    />
-                    <Select value={durationUnit} onValueChange={setDurationUnit}>
-                      <SelectTrigger className="flex-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DURATION_UNITS.map((u) => (
-                          <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+              <div className="space-y-2">
+                <Label className="text-white/90">Duration</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="duration-amount"
+                    type="number"
+                    min={1}
+                    placeholder="Duration"
+                    className="w-30 h-10 shrink-0"
+                    value={durationAmount}
+                    onChange={(e) => {
+                      setDurationAmount(e.target.value);
+                      if (showDates) {
+                        const { start, end } = computeDatesFromDuration();
+                        setStartDate(start);
+                        setEndDate(end);
+                      }
+                    }}
+                  />
+                  <Select
+                    value={durationUnit}
+                    onValueChange={(v) => {
+                      setDurationUnit(v);
+                      if (showDates) {
+                        const amount = parseInt(durationAmount, 10);
+                        const today = new Date();
+                        const end = new Date(today);
+                        if (Number.isFinite(amount) && amount > 0) {
+                          if (v === 'month') end.setMonth(end.getMonth() + amount);
+                          else end.setDate(end.getDate() + amount * 7);
+                        }
+                        setStartDate(formatDateLocal(today));
+                        setEndDate(formatDateLocal(end));
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DURATION_UNITS.map((u) => (
+                        <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              )}
+              </div>
             </div>
 
             {!fieldsRevealed && (

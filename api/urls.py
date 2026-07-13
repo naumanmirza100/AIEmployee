@@ -874,6 +874,7 @@ urlpatterns = [
 
     # Meetings
     re_path(r'^exec-meeting/ai/schedule/?$', exec_meeting_api.schedule_meeting_ai, name='exec_schedule_meeting_ai'),  # POST
+    re_path(r'^exec-meeting/ai/generate-description/?$', exec_meeting_api.generate_meeting_description, name='exec_generate_meeting_description'),  # POST
     re_path(r'^exec-meeting/meetings/?$', exec_meeting_api.meeting_list, name='exec_meeting_list'),  # GET, POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/?$', exec_meeting_api.meeting_detail, name='exec_meeting_detail'),  # GET, PATCH, DELETE
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST
@@ -888,6 +889,7 @@ urlpatterns = [
 
     # Tasks
     re_path(r'^exec-meeting/tasks/?$', exec_meeting_api.task_list, name='exec_task_list'),  # GET, POST
+    re_path(r'^exec-meeting/tasks/ai/generate-description/?$', exec_meeting_api.generate_task_description, name='exec_generate_task_description'),  # POST
     re_path(r'^exec-meeting/tasks/ai/prioritize/?$', exec_meeting_api.task_prioritize_ai, name='exec_task_prioritize_ai'),  # POST
     re_path(r'^exec-meeting/tasks/ai/workload/?$', exec_meeting_api.task_workload_analysis, name='exec_task_workload'),  # POST
     re_path(r'^exec-meeting/tasks/(?P<task_id>\d+)/?$', exec_meeting_api.task_detail, name='exec_task_detail'),  # GET, PATCH, DELETE

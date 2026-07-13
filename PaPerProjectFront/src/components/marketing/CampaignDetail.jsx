@@ -1261,6 +1261,10 @@ const CampaignDetail = () => {
                 onChange={(e) => setAccountDraftId(e.target.value)}
                 className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
+                {/* Without this, a campaign with no account set (accountDraftId === '')
+                    has no matching <option>, so the browser silently falls back to
+                    displaying the first account in the list — looking selected in the
+                    UI while React state (and what gets saved) is still empty. */}
                 <option value="">No default (sequences must set one)</option>
                 {emailAccounts.map((a) => (
                   <option key={a.id} value={String(a.id)}>

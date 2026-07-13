@@ -540,12 +540,12 @@ def _resolve_assignees(assignee_list, company):
     return result
 
 
-def _serialize_task(task):
+def _serialize_task(task, include_subtasks=True):
     assignees = [
         {'id': cu.id, 'full_name': cu.full_name, 'email': cu.email}
         for cu in task.assignees.all()
     ]
-    return {
+    data = {
         'id': task.id,
         'title': task.title,
         'description': task.description,
@@ -556,9 +556,16 @@ def _serialize_task(task):
         'ai_reasoning': task.ai_reasoning,
         'assignees': assignees,
         'linked_meeting_id': task.linked_meeting_id,
+        'parent_task_id': task.parent_task_id,
         'created_at': task.created_at.isoformat(),
         'updated_at': task.updated_at.isoformat(),
     }
+    if include_subtasks:
+        subtasks = list(task.subtasks.all())
+        data['subtasks'] = [_serialize_task(st, include_subtasks=False) for st in subtasks]
+        data['subtask_count'] = len(subtasks)
+        data['subtask_done_count'] = sum(1 for st in subtasks if st.status == 'done')
+    return data
 
 
 def _serialize_notification(notif):
@@ -633,6 +640,30 @@ def schedule_meeting_ai(request):
         raise
     except Exception as e:
         logger.error("schedule_meeting_ai error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecLLMThrottle])
+def generate_meeting_description(request):
+    """AI-expand a meeting title + a few rough points into a description + agenda."""
+    company_user = request.user
+    title = (request.data.get('title') or '').strip()
+    points = (request.data.get('points') or '').strip()
+
+    if not points:
+        return Response({'status': 'error', 'message': 'points is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        agent = _get_agent('meeting_scheduling', company_user)
+        data = agent.generate_description(title, points)
+        return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error("generate_meeting_description error: %s", e)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -1080,7 +1111,9 @@ def task_list(request):
     if request.method == 'GET':
         status_filter = request.query_params.get('status')
         priority_filter = request.query_params.get('priority')
-        qs = ExecutiveTask.objects.filter(company_user=company_user)
+        # Top-level list only — subtasks ride along nested under their parent
+        # (via _serialize_task's 'subtasks' key) instead of appearing twice.
+        qs = ExecutiveTask.objects.filter(company_user=company_user, parent_task__isnull=True)
         if status_filter:
             qs = qs.filter(status=status_filter)
         if priority_filter:
@@ -1091,6 +1124,14 @@ def task_list(request):
     if not title:
         return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    parent_task_id = request.data.get('parent_task_id') or None
+    if parent_task_id:
+        # Subtasks nest one level only — a subtask can't itself have a parent
+        # that is already a subtask.
+        parent = get_object_or_404(ExecutiveTask, id=parent_task_id, company_user=company_user)
+        if parent.parent_task_id:
+            return Response({'status': 'error', 'message': 'Subtasks cannot be nested more than one level deep.'}, status=status.HTTP_400_BAD_REQUEST)
+
     task = ExecutiveTask.objects.create(
         company_user=company_user,
         title=title,
@@ -1099,6 +1140,7 @@ def task_list(request):
         priority=request.data.get('priority', 'medium'),
         due_date=request.data.get('due_date') or None,
         linked_meeting_id=request.data.get('linked_meeting_id') or None,
+        parent_task_id=parent_task_id,
     )
     # assignees — list of {id, user_type} dicts
     assignee_list = request.data.get('assignees', [])
@@ -1154,6 +1196,30 @@ def task_detail(request, task_id):
     for cu in assignees_to_notify:
         _send_task_deleted_email(cu, task_title, task_priority, company_user.full_name)
     return Response({'status': 'success', 'message': 'Task deleted.'})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecLLMThrottle])
+def generate_task_description(request):
+    """AI-expand a task title + a few rough points into a full description."""
+    company_user = request.user
+    title = (request.data.get('title') or '').strip()
+    points = (request.data.get('points') or '').strip()
+
+    if not points:
+        return Response({'status': 'error', 'message': 'points is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        agent = _get_agent('task_prioritization', company_user)
+        data = agent.generate_description(title, points)
+        return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error("generate_task_description error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
