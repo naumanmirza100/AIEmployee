@@ -103,6 +103,20 @@ export function markdownToHtml(md) {
   return out.join('\n');
 }
 
+// Display ISO datetime string as UTC — avoids browser timezone shifting the date
+export const fmtUtc = (isoStr) => {
+  if (!isoStr) return '—';
+  const [datePart, timePart] = isoStr.replace('Z', '').replace('+00:00', '').split('T');
+  if (!datePart) return '—';
+  const [y, mo, d] = datePart.split('-');
+  if (!timePart) return `${mo}/${d}/${y}`;
+  const [h, m] = timePart.split(':');
+  const hour = parseInt(h, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const h12 = hour % 12 || 12;
+  return `${mo}/${d}/${y}, ${h12}:${m} ${ampm}`;
+};
+
 // ── Style constants ─────────────────────────────────────────────────────────
 export const CARD_STYLE = {
   background: 'rgba(0,0,0,0.25)',
