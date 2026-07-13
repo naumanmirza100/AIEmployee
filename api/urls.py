@@ -16,6 +16,7 @@ from api.views import analytics
 from api.views import notification
 from api.views import company
 from api.views import company_auth
+from api.views import company_integrations
 from api.views import company_users
 from api.views import user_tasks
 from api.views import company_user_tasks
@@ -186,6 +187,11 @@ urlpatterns = [
     re_path(r'^company/logout/?$', company_auth.logout_company_user, name='logout_company_user'),
     re_path(r'^company/profile/?$', company_auth.get_company_profile, name='get_company_profile'),
     re_path(r'^company/profile/update/?$', company_auth.update_company_profile, name='update_company_profile'),
+    # Company-wide integrations (Google Calendar OAuth connect)
+    re_path(r'^company/integrations/google-calendar/?$', company_integrations.google_calendar_status, name='company_gcal_status'),  # GET
+    re_path(r'^company/integrations/google-calendar/connect/?$', company_integrations.google_calendar_connect, name='company_gcal_connect'),  # POST
+    re_path(r'^company/integrations/google-calendar/callback/?$', company_integrations.google_calendar_callback, name='company_gcal_callback'),  # GET (public)
+    re_path(r'^company/integrations/google-calendar/disconnect/?$', company_integrations.google_calendar_disconnect, name='company_gcal_disconnect'),  # DELETE
     re_path(r'^company/forgot-password/?$', company_auth.forgot_password, name='company_forgot_password'),
     re_path(r'^company/verify-otp/?$', company_auth.verify_reset_otp, name='company_verify_reset_otp'),
     re_path(r'^company/reset-password/?$', company_auth.reset_password, name='company_reset_password'),
