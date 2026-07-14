@@ -1,7 +1,7 @@
 // Meetings panel (list + inline participants + notetaker) — extracted from
 // ExecMeetingDashboard.jsx. Stateless: all state + handlers via props.
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,7 +17,20 @@ export const MeetingsPanel = ({
   loadMeetings, setShowMeetingDialog, setEditingMeeting, openParticipants, openNotes,
   removeParticipant, setConfirmRemoveMap, addParticipant, setPendingAddMap,
   setUserSearchQ, setUserSearchResults, searchUsers, submitTranscript, setTranscriptInput,
-}) => (
+  convertActionItem, focusMeetingId, setFocusMeetingId,
+}) => {
+  // When a notification navigates here, scroll the target meeting into view and
+  // briefly highlight it, then clear the focus so it doesn't stick.
+  const rowRefs = useRef({});
+  useEffect(() => {
+    if (focusMeetingId && rowRefs.current[focusMeetingId]) {
+      rowRefs.current[focusMeetingId].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const t = setTimeout(() => setFocusMeetingId && setFocusMeetingId(null), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [focusMeetingId, meetings]);
+
+  return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-white font-semibold flex items-center gap-2">
@@ -44,8 +57,14 @@ export const MeetingsPanel = ({
             const isPartsOpen = participantsOpenId === m.id;
             const notes = meetingNotes[m.id];
             const parts = participantsMap[m.id] || [];
+            const isFocused = String(focusMeetingId) === String(m.id);
             return (
-              <div key={m.id} style={ROW_STYLE}>
+              <div
+                key={m.id}
+                ref={el => { rowRefs.current[m.id] = el; }}
+                style={ROW_STYLE}
+                className={isFocused ? 'ring-2 ring-inset ring-violet-500/70 bg-violet-500/[0.06] transition-all' : 'transition-all'}
+              >
                 {/* Meeting row */}
                 <div className="flex items-center gap-4 px-4 py-3">
                   <div className="rounded-lg p-2 bg-violet-500/20 flex-shrink-0">
@@ -222,7 +241,6 @@ export const MeetingsPanel = ({
                   </div>
                   );
                 })()}
-
                 {/* Notetaker panel — expands inline */}
                 {isNotesOpen && (
                   <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
@@ -245,14 +263,33 @@ export const MeetingsPanel = ({
                         )}
                         {Array.isArray(notes.action_items) && notes.action_items.length > 0 && (
                           <div className="rounded-xl p-3 bg-white/5 border border-white/10">
-                            <p className="text-white/60 text-xs font-semibold mb-1">Action Items ({notes.action_items.length})</p>
-                            {notes.action_items.map((a, i) => (
-                              <p key={i} className="text-white/70 text-xs">
-                                • {a.title}
-                                {a.assignee_hint ? <span className="text-violet-300/70"> → {a.assignee_hint}</span> : ''}
-                                {a.due_date ? <span className="text-white/40"> · {a.due_date}</span> : ''}
-                              </p>
-                            ))}
+                            <p className="text-white/60 text-xs font-semibold mb-2">Action Items ({notes.action_items.length})</p>
+                            <div className="space-y-1.5">
+                              {notes.action_items.map((a, i) => {
+                                const done = a.status === 'done';
+                                return (
+                                  <div key={a.id ?? i} className="flex items-center gap-2">
+                                    <div className="flex-1 min-w-0">
+                                      <p className={`text-xs ${done ? 'text-white/40 line-through' : 'text-white/75'}`}>
+                                        • {a.title}
+                                        {a.due_date ? <span className="text-white/40"> · {a.due_date}</span> : ''}
+                                      </p>
+                                    </div>
+                                    {done ? (
+                                      <span className="text-[10px] text-emerald-400/80 flex-shrink-0">✓ Task created</span>
+                                    ) : a.id ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => convertActionItem(m.id, a.id)}
+                                        className="flex items-center gap-1 text-[10px] text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:bg-violet-500/10 rounded px-1.5 py-0.5 flex-shrink-0 transition-colors"
+                                      >
+                                        <Plus className="h-3 w-3" /> Convert to task
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -283,4 +320,5 @@ export const MeetingsPanel = ({
         </div>
       )}
     </div>
-);
+  );
+};

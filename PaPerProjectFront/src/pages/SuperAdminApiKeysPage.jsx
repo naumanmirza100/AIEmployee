@@ -1866,7 +1866,6 @@ const SuperAdminApiKeysPage = () => {
               </div>
             )}
           </div>
-
           <DialogFooter className="pt-2 border-t border-white/8">
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setAssignModal({ open: false, replacingKey: null, prefillRequest: null })}>Cancel</Button>
             <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitAssign} disabled={submitting}>

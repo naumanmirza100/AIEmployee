@@ -1045,6 +1045,29 @@ def meeting_suggest_slots(request):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def meeting_check_conflicts(request):
+    """Return meetings that clash with a proposed time window (no LLM, DB only).
+    Body: { scheduled_at, duration_minutes, exclude_meeting_id? }.
+    Used before creating/updating a meeting to warn the user of a double-booking."""
+    company_user = request.user
+    scheduled_at = _parse_datetime(request.data.get('scheduled_at'))
+    if not scheduled_at:
+        return Response({'status': 'error', 'message': 'Valid scheduled_at is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    duration = int(request.data.get('duration_minutes') or 60)
+    exclude_id = request.data.get('exclude_meeting_id') or None
+    try:
+        agent = _get_agent('meeting_scheduling', company_user)
+        conflicts = agent.check_conflicts(company_user.id, scheduled_at, duration, exclude_id)
+        return Response({'status': 'success', 'conflicts': conflicts})
+    except Exception as e:
+        logger.error("meeting_check_conflicts error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ===========================================================================
 # MEETING NOTES
 # ===========================================================================
@@ -1109,6 +1132,24 @@ def meeting_notes(request, meeting_id):
             )
             created_items.append({'id': item.id, 'title': item.title})
 
+        # Notify the organizer that action items were extracted, so they don't
+        # sit unseen inside the Notes panel (these have no due date, so the
+        # separate "overdue action item" scan never surfaces them).
+        if created_items:
+            ExecNotification.objects.create(
+                company_user_id=company_user.id,
+                notification_type='action_items_added',
+                severity='info',
+                title=f"{len(created_items)} action item(s) from “{meeting.title}”",
+                message=(
+                    f"AI pulled {len(created_items)} action item(s) out of the notes for "
+                    f"“{meeting.title}”: " + ', '.join(ci['title'] for ci in created_items[:5])
+                    + ('…' if len(created_items) > 5 else '')
+                ),
+                meeting=meeting,
+                data={'meeting_id': meeting.id, 'action_item_ids': [ci['id'] for ci in created_items]},
+            )
+
         return Response({'status': 'success', 'notes': {
             'ai_summary': note.ai_summary,
             'key_decisions': note.key_decisions,
@@ -1152,6 +1193,41 @@ def action_item_detail(request, item_id):
         item.assignee_id = request.data['assignee_id'] or None
     item.save()
     return Response({'status': 'success', 'message': 'Action item updated.'})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def action_item_convert_to_task(request, item_id):
+    """Turn a meeting action item into a trackable ExecutiveTask.
+
+    The new task carries the action item's title/description/priority/due date
+    and is linked back to its meeting. The action item is marked 'done' so it
+    doesn't get converted twice. Body (optional): { parent_task_id } to create
+    it as a subtask of an existing task instead of a standalone one."""
+    company_user = request.user
+    item = get_object_or_404(MeetingActionItem, id=item_id, meeting__organizer=company_user)
+
+    parent_task_id = request.data.get('parent_task_id') or None
+    if parent_task_id:
+        parent = get_object_or_404(ExecutiveTask, id=parent_task_id, company_user=company_user)
+        if parent.parent_task_id:
+            return Response({'status': 'error', 'message': 'Subtasks cannot be nested more than one level deep.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    task = ExecutiveTask.objects.create(
+        company_user=company_user,
+        title=item.title,
+        description=item.description or '',
+        priority=item.priority or 'medium',
+        due_date=item.due_date or None,
+        linked_meeting=item.meeting,
+        parent_task_id=parent_task_id,
+    )
+    # Mark the source action item done so it isn't converted again.
+    item.status = 'done'
+    item.save(update_fields=['status'])
+    return Response({'status': 'success', 'task': _serialize_task(task), 'message': 'Action item converted to task.'}, status=status.HTTP_201_CREATED)
 
 
 # ===========================================================================
@@ -1427,7 +1503,30 @@ def calendar_plan_week(request):
             models.Q(due_date__isnull=True) |
             models.Q(due_date__gte=_week_start_date, due_date__lte=_week_end_date)
         )
-    tasks = [_serialize_task(t) for t in tasks_qs[:30]]
+    # Flatten for the planner: each task AND each of its subtasks becomes its own
+    # schedulable line item, so subtasks show up in the weekly plan too (not just
+    # buried inside their parent). Subtasks are prefixed with the parent title.
+    tasks = []
+    for t in tasks_qs[:30]:
+        s = _serialize_task(t)
+        subtasks = s.pop('subtasks', []) or []
+        tasks.append(s)
+        for st in subtasks:
+            # Include any subtask that is still open — anything that isn't
+            # finished/cancelled (so 'review' and 'blocked' count too, not just
+            # 'todo'/'in_progress'). Then apply the same week window as parents.
+            if st.get('status') in ('done', 'completed', 'cancelled'):
+                continue
+            st_due = (st.get('due_date') or '')[:10]
+            if st_due:
+                if include_past_tasks:
+                    if st_due > _week_end_date.isoformat():
+                        continue
+                else:
+                    if not (_week_start_date.isoformat() <= st_due <= _week_end_date.isoformat()):
+                        continue
+            st = {**st, 'title': f"{t.title} → {st.get('title')}", 'is_subtask': True}
+            tasks.append(st)
 
     logger.info("calendar_plan_week: user=%s week_start=%s meetings=%d tasks=%d include_past=%s",
                 company_user.id, week_start, len(meetings), len(tasks), include_past_tasks)
@@ -1503,7 +1602,7 @@ def document_draft(request):
     meeting_id = request.data.get('meeting_id')
     save = request.data.get('save', False)
 
-    valid_doc_types = ['agenda', 'minutes', 'briefing', 'report']
+    valid_doc_types = ['agenda', 'minutes', 'briefing']
     if doc_type not in valid_doc_types:
         return Response({'status': 'error', 'message': f'doc_type must be one of {valid_doc_types}'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1578,19 +1677,6 @@ def document_draft(request):
                 request.data.get('context', ''),
                 request.data.get('key_points'),
                 request.data.get('audience', 'Executive Team') or 'Executive Team',
-            )
-
-        else:  # report
-            report_type_label = (
-                request.data.get('report_type') or
-                request.data.get('title') or
-                'Status'
-            )
-            content = agent.draft_report(
-                report_type_label,
-                request.data.get('data', {}),
-                request.data.get('period', ''),
-                request.data.get('context', ''),
             )
 
         result = {'status': 'success', 'doc_type': doc_type, 'content': content}
@@ -1733,6 +1819,32 @@ def notification_mark_all_read(request):
     company_user = request.user
     ExecNotification.objects.filter(company_user=company_user, is_read=False).update(is_read=True)
     return Response({'status': 'success', 'message': 'All notifications marked as read.'})
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def notification_delete(request, notification_id):
+    """Delete a single notification."""
+    company_user = request.user
+    notif = get_object_or_404(ExecNotification, id=notification_id, company_user=company_user)
+    notif.delete()
+    return Response({'status': 'success', 'message': 'Notification deleted.'})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def notification_bulk_delete(request):
+    """Delete multiple notifications by id. Body: { ids: [1, 2, ...] }."""
+    company_user = request.user
+    ids = request.data.get('ids') or []
+    if not isinstance(ids, list) or not ids:
+        return Response({'status': 'error', 'message': 'ids (non-empty list) is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    deleted, _ = ExecNotification.objects.filter(company_user=company_user, id__in=ids).delete()
+    return Response({'status': 'success', 'message': f'{deleted} notification(s) deleted.', 'deleted': deleted})
 
 
 @api_view(['POST'])

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import {
   CARD_STYLE, ROW_STYLE, priorityBadge, statusBadge, AssigneeAvatars, EmptyState,
+  BulkSelectBar, SelectCheckbox,
 } from '../shared';
 
 export const TasksPanel = ({
@@ -17,6 +18,7 @@ export const TasksPanel = ({
   loadTasks, runAiPrioritize, setShowTaskDialog, setPrioritizeResult,
   setExpandedTaskId, setExpandedSubtasksId, setEditingTask,
   setSubtaskParentTask, setConfirmDeleteTaskId, toast,
+  selectedTaskIds, toggleSelected, setSelectedTaskIds, bulkDeleteTasks, bulkDeleting,
 }) => (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -135,6 +137,15 @@ export const TasksPanel = ({
       ) : !Array.isArray(tasks) || tasks.length === 0 ? (
         <EmptyState icon={ListChecks} label="No tasks yet" />
       ) : (
+        <>
+        <BulkSelectBar
+          allIds={tasks.map(t => t.id)}
+          selected={selectedTaskIds}
+          onToggleAll={() => setSelectedTaskIds(selectedTaskIds.size === tasks.length ? new Set() : new Set(tasks.map(t => t.id)))}
+          onDelete={bulkDeleteTasks}
+          deleting={bulkDeleting}
+          label="task"
+        />
         <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
           {tasks.map(t => {
             const isOpen = expandedTaskId === t.id;
@@ -155,6 +166,10 @@ export const TasksPanel = ({
                   className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-white/[0.04] transition-colors"
                   onClick={() => setExpandedTaskId(isOpen ? null : t.id)}
                 >
+                  <SelectCheckbox
+                    checked={selectedTaskIds.has(t.id)}
+                    onChange={() => toggleSelected(setSelectedTaskIds, t.id)}
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{t.title}</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -269,6 +284,7 @@ export const TasksPanel = ({
             );
           })}
         </div>
+        </>
       )}
     </div>
 );

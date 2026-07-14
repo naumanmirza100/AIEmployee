@@ -29,7 +29,7 @@ import execMeetingService from '@/services/execMeetingService';
 import {
   markdownToHtml, CARD_STYLE, ROW_STYLE, fmtUtc,
   StatCard, priorityBadge, statusBadge,
-  AssigneeAvatars, EmptyState,
+  AssigneeAvatars, EmptyState, BulkSelectBar, SelectCheckbox,
 } from './shared';
 import {
   ScheduleMeetingDialog, MeetingEditDialog,
@@ -72,10 +72,17 @@ const ExecMeetingDashboard = () => {
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const [expandedTaskId, setExpandedTaskId] = useState(null); // inline-expanded task
   const [expandedSubtasksId, setExpandedSubtasksId] = useState(null); // task whose subtasks accordion is open
+  const [focusMeetingId, setFocusMeetingId] = useState(null); // meeting to highlight/scroll to (from a notification)
   const [editingTask, setEditingTask] = useState(null);
   const [editingMeeting, setEditingMeeting] = useState(null);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState(null);
   const [subtaskParentTask, setSubtaskParentTask] = useState(null); // task being added a subtask to
+
+  // Bulk-select state (each is a Set of ids) for Tasks / Documents / Notifications
+  const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
+  const [selectedDocIds, setSelectedDocIds] = useState(() => new Set());
+  const [selectedNotifIds, setSelectedNotifIds] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // AI Documents
   const [aiDocLoading, setAiDocLoading] = useState(false);
@@ -342,14 +349,32 @@ const ExecMeetingDashboard = () => {
     }
     setNotesLoading(true);
     try {
-      const data = await execMeetingService.generateNotes(meetingId, { transcript: transcriptInput });
-      setMeetingNotes(prev => ({ ...prev, [meetingId]: data.notes }));
+      await execMeetingService.generateNotes(meetingId, { transcript: transcriptInput });
+      // Re-fetch the full notes so the extracted action items (with their ids)
+      // show up — the POST response only returns a created-count, not the list.
+      const fresh = await execMeetingService.getMeetingNotes(meetingId);
+      if (fresh.notes) setMeetingNotes(prev => ({ ...prev, [meetingId]: fresh.notes }));
       setTranscriptInput('');
+      loadStats(); // an "action items added" notification may have been created
       toast({ title: 'Notes generated!', description: 'Summary, decisions and action items extracted.' });
     } catch (err) {
       toast({ title: 'Notetaker failed', description: err.message, variant: 'destructive' });
     } finally {
       setNotesLoading(false);
+    }
+  };
+
+  // Turn a meeting action item into a trackable task, then refresh that
+  // meeting's notes so the item shows as done and the tasks list picks it up.
+  const convertActionItem = async (meetingId, itemId) => {
+    try {
+      await execMeetingService.convertActionItemToTask(itemId);
+      const fresh = await execMeetingService.getMeetingNotes(meetingId);
+      if (fresh.notes) setMeetingNotes(prev => ({ ...prev, [meetingId]: fresh.notes }));
+      loadTasks(); loadStats();
+      toast({ title: 'Converted to task', description: 'Find it in the Tasks tab.' });
+    } catch (err) {
+      toast({ title: 'Failed to convert', description: err.message, variant: 'destructive' });
     }
   };
 
@@ -400,6 +425,61 @@ const ExecMeetingDashboard = () => {
     } catch {
       toast({ title: 'Failed to delete document', variant: 'destructive' });
     }
+  };
+
+  // Toggle one id in a Set-based selection state.
+  const toggleSelected = (setFn, id) => {
+    setFn(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const bulkDeleteTasks = async () => {
+    const ids = Array.from(selectedTaskIds);
+    if (ids.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all(ids.map(id => execMeetingService.deleteTask(id)));
+      setSelectedTaskIds(new Set());
+      loadTasks(); loadStats();
+      toast({ title: `${ids.length} task(s) deleted`, description: 'Assignees have been notified by email.' });
+    } catch {
+      toast({ title: 'Failed to delete some tasks', variant: 'destructive' });
+      loadTasks();
+    } finally { setBulkDeleting(false); }
+  };
+
+  const bulkDeleteDocs = async () => {
+    const ids = Array.from(selectedDocIds);
+    if (ids.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all(ids.map(id => execMeetingService.deleteDocument(id)));
+      setSavedDocs(prev => prev.filter(d => !selectedDocIds.has(d.id)));
+      setSelectedDocIds(new Set());
+      toast({ title: `${ids.length} document(s) deleted` });
+    } catch {
+      toast({ title: 'Failed to delete some documents', variant: 'destructive' });
+      loadDocuments();
+    } finally { setBulkDeleting(false); }
+  };
+
+  const bulkDeleteNotifs = async () => {
+    const ids = Array.from(selectedNotifIds);
+    if (ids.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      await execMeetingService.bulkDeleteNotifications(ids);
+      setNotifications(prev => prev.filter(n => !selectedNotifIds.has(n.id)));
+      setSelectedNotifIds(new Set());
+      loadStats();
+      toast({ title: `${ids.length} notification(s) deleted` });
+    } catch {
+      toast({ title: 'Failed to delete notifications', variant: 'destructive' });
+      loadNotifications();
+    } finally { setBulkDeleting(false); }
   };
 
   const downloadDocPdf = async (doc) => {
@@ -509,8 +589,26 @@ const ExecMeetingDashboard = () => {
     try {
       await execMeetingService.markNotificationRead(id);
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      loadStats(); // keep the unread badge/count in sync
     } catch {
       toast({ title: 'Failed to mark as read', variant: 'destructive' });
+    }
+  };
+
+  // Clicking a notification marks it read and jumps to whatever it's about —
+  // the linked task (expanded) or the linked meeting's tab.
+  const handleNotificationClick = (n) => {
+    if (!n.is_read) markNotifRead(n.id);
+    const taskId = n.data?.task_id;
+    const meetingId = n.meeting_id || n.data?.meeting_id;
+    if (taskId) {
+      loadTasks();
+      setActiveTab('tasks');
+      setExpandedTaskId(taskId);
+    } else if (meetingId) {
+      loadMeetings();
+      setActiveTab('meetings');
+      setFocusMeetingId(meetingId);
     }
   };
 
@@ -664,14 +762,27 @@ const ExecMeetingDashboard = () => {
       ) : !Array.isArray(notifications) || notifications.length === 0 ? (
         <EmptyState icon={Bell} label="No notifications" />
       ) : (
+        <>
+        <BulkSelectBar
+          allIds={notifications.map(n => n.id)}
+          selected={selectedNotifIds}
+          onToggleAll={() => setSelectedNotifIds(selectedNotifIds.size === notifications.length ? new Set() : new Set(notifications.map(n => n.id)))}
+          onDelete={bulkDeleteNotifs}
+          deleting={bulkDeleting}
+          label="notification"
+        />
         <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
           {notifications.map(n => (
             <div
               key={n.id}
-              className={`flex items-start gap-4 px-4 py-3 cursor-pointer transition-colors ${!n.is_read ? 'bg-white/[0.03]' : ''}`}
+              className={`flex items-start gap-4 px-4 py-3 cursor-pointer transition-colors hover:bg-white/[0.05] ${!n.is_read ? 'bg-white/[0.03]' : ''}`}
               style={ROW_STYLE}
-              onClick={() => !n.is_read && markNotifRead(n.id)}
+              onClick={() => handleNotificationClick(n)}
             >
+              <SelectCheckbox
+                checked={selectedNotifIds.has(n.id)}
+                onChange={() => toggleSelected(setSelectedNotifIds, n.id)}
+              />
               <div className={`rounded-lg p-2 flex-shrink-0 ${
                 n.severity === 'critical' ? 'bg-red-500/20' :
                 n.severity === 'warning'  ? 'bg-amber-500/20' : 'bg-sky-500/20'
@@ -686,12 +797,18 @@ const ExecMeetingDashboard = () => {
                 <p className={`text-sm font-medium truncate ${n.is_read ? 'text-white/50' : 'text-white'}`}>{n.title}</p>
                 <p className="text-white/40 text-xs">{n.message}</p>
               </div>
-              {!n.is_read && (
-                <div className="flex-shrink-0 mt-1.5 h-2 w-2 rounded-full bg-violet-400" />
-              )}
+              <div className="flex items-center gap-2 flex-shrink-0 mt-1">
+                {!n.is_read && (
+                  <div className="h-2 w-2 rounded-full bg-red-500" />
+                )}
+                {(n.data?.task_id || n.meeting_id || n.data?.meeting_id) && (
+                  <ChevronRight className="h-4 w-4 text-white/30" />
+                )}
+              </div>
             </div>
           ))}
         </div>
+        </>
       )}
     </div>
   );
@@ -714,6 +831,8 @@ const ExecMeetingDashboard = () => {
         setPendingAddMap={setPendingAddMap} setUserSearchQ={setUserSearchQ}
         setUserSearchResults={setUserSearchResults} searchUsers={searchUsers}
         submitTranscript={submitTranscript} setTranscriptInput={setTranscriptInput}
+        convertActionItem={convertActionItem}
+        focusMeetingId={focusMeetingId} setFocusMeetingId={setFocusMeetingId}
       />
     ),
     tasks: () => (
@@ -726,6 +845,9 @@ const ExecMeetingDashboard = () => {
         setExpandedTaskId={setExpandedTaskId} setExpandedSubtasksId={setExpandedSubtasksId}
         setEditingTask={setEditingTask} setSubtaskParentTask={setSubtaskParentTask}
         setConfirmDeleteTaskId={setConfirmDeleteTaskId} toast={toast}
+        selectedTaskIds={selectedTaskIds} toggleSelected={toggleSelected}
+        setSelectedTaskIds={setSelectedTaskIds} bulkDeleteTasks={bulkDeleteTasks}
+        bulkDeleting={bulkDeleting}
       />
     ),
     calendar: () => (
@@ -747,6 +869,9 @@ const ExecMeetingDashboard = () => {
         setAiDocMeetingId={setAiDocMeetingId} setAiDocInput={setAiDocInput}
         generateAiDoc={generateAiDoc} loadDocuments={loadDocuments}
         setViewDoc={setViewDoc} downloadDocPdf={downloadDocPdf} deleteDoc={deleteDoc}
+        selectedDocIds={selectedDocIds} toggleSelected={toggleSelected}
+        setSelectedDocIds={setSelectedDocIds} bulkDeleteDocs={bulkDeleteDocs}
+        bulkDeleting={bulkDeleting}
       />
     ),
     notifications: notificationsPanel,
@@ -789,6 +914,11 @@ const ExecMeetingDashboard = () => {
                     onClick={() => { setActiveTab(t.value); setMobileMenuOpen(false); }}
                   >
                     <t.icon className="h-4 w-4 mr-2" />{t.label}
+                    {t.value === 'notifications' && stats?.unread_notifications > 0 && (
+                      <span className="ml-auto inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                        {stats.unread_notifications > 99 ? '99+' : stats.unread_notifications}
+                      </span>
+                    )}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -812,6 +942,11 @@ const ExecMeetingDashboard = () => {
                 }}
               >
                 <t.icon className="h-3.5 w-3.5" />{t.label}
+                {t.value === 'notifications' && stats?.unread_notifications > 0 && (
+                  <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                    {stats.unread_notifications > 99 ? '99+' : stats.unread_notifications}
+                  </span>
+                )}
               </TabsTrigger>
             ))}
           </TabsList>

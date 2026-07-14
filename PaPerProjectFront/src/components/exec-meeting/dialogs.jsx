@@ -29,6 +29,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
   const [agenda, setAgenda] = useState([]);
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [linkError, setLinkError] = useState('');
+  const [conflicts, setConflicts] = useState(null); // clashing meetings awaiting confirmation
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
     if (k === 'meeting_link') {
@@ -80,15 +81,10 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
     }
   };
 
-  const handleSubmit = async () => {
-    if (!form.title || !form.scheduled_at) {
-      toast({ title: 'Title and date are required', variant: 'destructive' });
-      return;
-    }
-    if (form.meeting_link && !validateMeetingLink(form.meeting_link)) {
-      toast({ title: 'Invalid meeting link', description: 'Use Google Meet, Zoom, Teams, Jitsi, or Webex links.', variant: 'destructive' });
-      return;
-    }
+  // Actually creates the meeting (called directly, or after the user confirms
+  // past a scheduling conflict).
+  const doCreate = async () => {
+    setConflicts(null);
     setLoading(true);
     try {
       const res = await execMeetingService.createMeeting({
@@ -115,6 +111,35 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async () => {
+    if (!form.title || !form.scheduled_at) {
+      toast({ title: 'Title and date are required', variant: 'destructive' });
+      return;
+    }
+    if (form.meeting_link && !validateMeetingLink(form.meeting_link)) {
+      toast({ title: 'Invalid meeting link', description: 'Use Google Meet, Zoom, Teams, Jitsi, or Webex links.', variant: 'destructive' });
+      return;
+    }
+    // Warn about any meeting already scheduled/in-progress at this time before
+    // creating — let the user confirm they want a second meeting in that slot.
+    setLoading(true);
+    try {
+      const res = await execMeetingService.checkMeetingConflicts({
+        scheduled_at: form.scheduled_at,
+        duration_minutes: parseInt(form.duration_minutes) || 60,
+      });
+      const found = res.conflicts || [];
+      if (found.length > 0) {
+        setConflicts(found);
+        setLoading(false);
+        return;
+      }
+    } catch {
+      // If the conflict check itself fails, don't block creation — just proceed.
+    }
+    await doCreate();
   };
 
   return (
@@ -251,9 +276,51 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <MeetingConflictDialog
+        conflicts={conflicts}
+        onCancel={() => setConflicts(null)}
+        onConfirm={doCreate}
+        loading={loading}
+      />
     </Dialog>
   );
 };
+
+// Shown when a meeting already occupies the chosen time slot — lets the user
+// double-book on purpose or go back and pick another time.
+const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading }) => (
+  <Dialog open={!!conflicts && conflicts.length > 0} onOpenChange={v => { if (!v) onCancel(); }}>
+    <DialogContent className="max-w-md bg-[#0d0b1f] border-white/10 text-white">
+      <DialogHeader>
+        <DialogTitle className="text-amber-300">Time slot already booked</DialogTitle>
+        <DialogDescription className="text-white/50">
+          You already have {conflicts?.length === 1 ? 'a meeting' : `${conflicts?.length} meetings`} at this time.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="space-y-2 py-2">
+        {(conflicts || []).map(c => (
+          <div key={c.id} className="rounded-lg border-b border-amber-500/20 px-3 py-2">
+            <p className="text-sm font-medium text-white">{c.title}</p>
+            <p className="text-xs text-white/50">
+              {c.status === 'in_progress' ? 'In progress' : 'Scheduled'}
+              {c.scheduled_at ? ` · ${new Date(c.scheduled_at).toLocaleString()}` : ''}
+              {c.duration_minutes ? ` · ${c.duration_minutes} min` : ''}
+            </p>
+          </div>
+        ))}
+        <p className="text-xs text-white/40 pt-1">Do you still want to add another meeting in this slot?</p>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel} className="border-white/10 text-white/70">Pick another time</Button>
+        <Button onClick={onConfirm} disabled={loading} className="bg-amber-600 hover:bg-amber-700 text-white border-0">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+          Add anyway
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+);
 
 // ── Edit meeting dialog ─────────────────────────────────────────────────────
 export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
@@ -266,6 +333,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
   const [agenda, setAgenda] = useState([]);
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [linkError, setLinkError] = useState('');
+  const [conflicts, setConflicts] = useState(null);
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
     if (k === 'meeting_link') {
@@ -307,15 +375,8 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
     }
   };
 
-  const handleSave = async () => {
-    if (!form.title || !form.scheduled_at) {
-      toast({ title: 'Title and date are required', variant: 'destructive' });
-      return;
-    }
-    if (form.meeting_link && !validateMeetingLink(form.meeting_link)) {
-      toast({ title: 'Invalid meeting link', description: 'Use Google Meet, Zoom, Teams, Jitsi, or Webex links.', variant: 'destructive' });
-      return;
-    }
+  const doSave = async () => {
+    setConflicts(null);
     setLoading(true);
     try {
       await execMeetingService.updateMeeting(meeting.id, {
@@ -335,6 +396,43 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSave = async () => {
+    if (!form.title || !form.scheduled_at) {
+      toast({ title: 'Title and date are required', variant: 'destructive' });
+      return;
+    }
+    if (form.meeting_link && !validateMeetingLink(form.meeting_link)) {
+      toast({ title: 'Invalid meeting link', description: 'Use Google Meet, Zoom, Teams, Jitsi, or Webex links.', variant: 'destructive' });
+      return;
+    }
+    // Only warn about clashes when the meeting is (or stays) active. Marking a
+    // meeting completed or cancelled frees its slot, so there's nothing to
+    // conflict with — save straight through.
+    if (form.status === 'completed' || form.status === 'cancelled') {
+      await doSave();
+      return;
+    }
+    setLoading(true);
+    try {
+      // Exclude this meeting itself from the clash check (it legitimately
+      // occupies its own slot).
+      const res = await execMeetingService.checkMeetingConflicts({
+        scheduled_at: form.scheduled_at,
+        duration_minutes: parseInt(form.duration_minutes) || 60,
+        exclude_meeting_id: meeting.id,
+      });
+      const found = res.conflicts || [];
+      if (found.length > 0) {
+        setConflicts(found);
+        setLoading(false);
+        return;
+      }
+    } catch {
+      // conflict check failed — don't block the update
+    }
+    await doSave();
   };
 
   return (
@@ -383,7 +481,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
             </div>
             <div className="space-y-1">
               <Label>Date & Time *</Label>
-              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} allowPast />
+              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} />
             </div>
           </div>
 
@@ -430,6 +528,13 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <MeetingConflictDialog
+        conflicts={conflicts}
+        onCancel={() => setConflicts(null)}
+        onConfirm={doSave}
+        loading={loading}
+      />
     </Dialog>
   );
 };

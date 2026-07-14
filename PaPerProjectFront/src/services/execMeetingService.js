@@ -48,7 +48,9 @@ const execMeetingService = {
 
   getMeetingNotes: (meetingId)          => companyApi.get(`${BASE}/meetings/${meetingId}/notes`),
   generateNotes:   (meetingId, payload) => companyApi.post(`${BASE}/meetings/${meetingId}/notes`, payload),
+  convertActionItemToTask: (itemId, payload = {}) => companyApi.post(`${BASE}/action-items/${itemId}/convert-to-task`, payload),
   generateMeetingDescription: (title, points) => companyApi.post(`${BASE}/ai/generate-description`, { title, points }),
+  checkMeetingConflicts: (payload) => companyApi.post(`${BASE}/meetings/check-conflicts`, payload),
 
   // Tasks — returns raw response; callers do res.tasks || []
   getTasks: (params = {}) => {
@@ -97,6 +99,8 @@ const execMeetingService = {
   },
   markNotificationRead: (id) => companyApi.patch(`${BASE}/notifications/${id}/read`, {}),
   markAllRead:          ()   => companyApi.patch(`${BASE}/notifications/mark-all-read`, {}),
+  deleteNotification:   (id) => companyApi.delete(`${BASE}/notifications/${id}`),
+  bulkDeleteNotifications: (ids) => companyApi.post(`${BASE}/notifications/bulk-delete`, { ids }),
 };
 
 export default execMeetingService;
