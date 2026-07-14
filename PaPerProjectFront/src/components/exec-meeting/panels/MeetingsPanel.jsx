@@ -51,7 +51,7 @@ export const MeetingsPanel = ({
       ) : !Array.isArray(meetings) || meetings.length === 0 ? (
         <EmptyState icon={CalendarClock} label="No meetings scheduled yet" />
       ) : (
-        <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
+        <div className="rounded-2xl" style={CARD_STYLE}>
           {meetings.map(m => {
             const isNotesOpen = notesOpenId === m.id;
             const isPartsOpen = participantsOpenId === m.id;
@@ -132,7 +132,7 @@ export const MeetingsPanel = ({
 
                     {/* Current participants */}
                     {parts.length > 0 && (
-                      <div className="space-y-1">
+                      <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
                         {parts.map(p => (
                           <div key={p.user_id}>
                             <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-white/5">
@@ -217,7 +217,7 @@ export const MeetingsPanel = ({
                           <Loader2 className="absolute right-2 top-2 h-4 w-4 animate-spin text-white/40" />
                         )}
                         {userSearchResults.length > 0 && (
-                          <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+                          <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl max-h-56 overflow-y-auto">
                             {userSearchResults.map(u => (
                               <button key={u.id}
                                 onClick={() => { setPendingAddMap(prev => ({ ...prev, [m.id]: u })); setUserSearchResults([]); }}

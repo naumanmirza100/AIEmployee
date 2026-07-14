@@ -187,6 +187,27 @@ export const TasksPanel = ({
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {priorityBadge(t.priority)}
                     {statusBadge(t.status)}
+                    {/* Quick actions inline with the badges */}
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button" title="Edit"
+                        onClick={e => { e.stopPropagation(); setEditingTask(t); }}
+                        className="p-1 rounded text-white/30 hover:text-violet-300 hover:bg-violet-500/10 transition-colors">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button" title="Add subtask"
+                        onClick={e => { e.stopPropagation(); setSubtaskParentTask(t); }}
+                        className="p-1 rounded text-white/30 hover:text-sky-300 hover:bg-sky-500/10 transition-colors">
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button" title="Delete"
+                        onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(t.id); }}
+                        className="p-1 rounded text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                     <ChevronRight className={`h-4 w-4 text-white/30 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                   </div>
                 </div>
@@ -212,23 +233,6 @@ export const TasksPanel = ({
                     {t.ai_reasoning && (
                       <p className="text-white/40 text-xs italic">{t.ai_reasoning}</p>
                     )}
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="outline"
-                        className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs h-7 px-3"
-                        onClick={e => { e.stopPropagation(); setEditingTask(t); }}>
-                        <Pencil className="h-3 w-3 mr-1" /> Edit
-                      </Button>
-                      <Button size="sm" variant="outline"
-                        className="border-sky-500/40 text-sky-300 hover:bg-sky-500/10 text-xs h-7 px-3"
-                        onClick={e => { e.stopPropagation(); setSubtaskParentTask(t); }}>
-                        <Plus className="h-3 w-3 mr-1" /> Add Subtask
-                      </Button>
-                      <Button size="sm" variant="ghost"
-                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs h-7 px-3"
-                        onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(t.id); }}>
-                        <Trash2 className="h-3 w-3 mr-1" /> Delete
-                      </Button>
-                    </div>
 
                     {/* Subtasks accordion */}
                     {subtasks.length > 0 && (() => {
