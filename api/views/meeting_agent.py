@@ -296,6 +296,64 @@ def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
     _send_email_safe(f"Task Assigned: {task.title}", html, assignee_cu.email)
 
 
+def _send_subtask_added_email(recipient_cu, parent_task, subtask, added_by_name):
+    """Notify a parent task's assignee that a subtask was added under their task.
+    Lists the subtask's own assignees (if any) so the recipient knows who's on it."""
+    first_name = (recipient_cu.full_name or '').split()[0] if recipient_cu.full_name else 'there'
+    sub_assignees = list(subtask.assignees.all())
+    assignees_str = ', '.join(cu.full_name for cu in sub_assignees) if sub_assignees else 'No one assigned yet'
+    desc_block = (
+        f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{subtask.description}</p>'
+        if subtask.description else ''
+    )
+    content = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:20px;">
+            <div style="width:56px;height:56px;background:#eff6ff;border-radius:50%;
+                        font-size:26px;line-height:56px;text-align:center;">🧩</div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        New Subtask Added
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Hi {first_name}, {added_by_name} added a subtask under your task "{parent_task.title}".
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;margin-bottom:4px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#2563eb;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Subtask Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Parent task', parent_task.title)}
+              {_email_divider()}
+              {_email_detail_row('Subtask', subtask.title)}
+              {_email_divider()}
+              {_email_detail_row('Priority', subtask.priority.capitalize())}
+              {_email_divider()}
+              {_email_detail_row('Due Date', str(subtask.due_date) if subtask.due_date else 'Not set')}
+              {_email_divider()}
+              {_email_detail_row('Assigned to', assignees_str)}
+              {_email_divider()}
+              {_email_detail_row('Added by', added_by_name)}
+            </table>
+            {desc_block}
+          </td>
+        </tr>
+      </table>
+      <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0 20px;"/>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
+        Please log in to the platform to view this subtask.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"New subtask added: {subtask.title}")
+    _send_email_safe(f"Subtask added to \"{parent_task.title}\": {subtask.title}", html, recipient_cu.email)
+
+
 def _send_meeting_removal_email(cu, meeting, removed_by_name):
     scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
     first_name = (cu.full_name or '').split()[0] if cu.full_name else 'there'
@@ -1124,13 +1182,27 @@ def task_list(request):
     if not title:
         return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    due_date = request.data.get('due_date') or None
     parent_task_id = request.data.get('parent_task_id') or None
+    parent = None
     if parent_task_id:
         # Subtasks nest one level only — a subtask can't itself have a parent
         # that is already a subtask.
         parent = get_object_or_404(ExecutiveTask, id=parent_task_id, company_user=company_user)
         if parent.parent_task_id:
             return Response({'status': 'error', 'message': 'Subtasks cannot be nested more than one level deep.'}, status=status.HTTP_400_BAD_REQUEST)
+        # A subtask must finish on or before its parent — a due date after the
+        # parent's makes no sense for a piece of that parent's work.
+        if due_date and parent.due_date:
+            try:
+                sub_dt = datetime.strptime(str(due_date), '%Y-%m-%d').date()
+                if sub_dt > parent.due_date:
+                    return Response({
+                        'status': 'error',
+                        'message': f"Subtask due date can't be after the parent task's due date ({parent.due_date}).",
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            except (ValueError, TypeError):
+                pass
 
     task = ExecutiveTask.objects.create(
         company_user=company_user,
@@ -1138,7 +1210,7 @@ def task_list(request):
         description=request.data.get('description', ''),
         status=request.data.get('status', 'todo'),
         priority=request.data.get('priority', 'medium'),
-        due_date=request.data.get('due_date') or None,
+        due_date=due_date,
         linked_meeting_id=request.data.get('linked_meeting_id') or None,
         parent_task_id=parent_task_id,
     )
@@ -1150,6 +1222,17 @@ def task_list(request):
         for cu in resolved:
             if cu.email:
                 _send_task_assignment_email(cu, task, company_user.full_name)
+
+    # For a subtask, also notify the PARENT task's assignees that a subtask was
+    # added under their task (so they see it appear on their work item). Skip
+    # anyone who's already on the subtask itself — they just got the assignment
+    # email above — and skip the creator.
+    if parent is not None:
+        sub_assignee_ids = {cu.id for cu in resolved}
+        for pcu in parent.assignees.all():
+            if pcu.email and pcu.id not in sub_assignee_ids and pcu.id != company_user.id:
+                _send_subtask_added_email(pcu, parent, task, company_user.full_name)
+
     return Response({'status': 'success', 'task': _serialize_task(task)}, status=status.HTTP_201_CREATED)
 
 

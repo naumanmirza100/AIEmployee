@@ -63,6 +63,21 @@ export const MeetingsPanel = ({
                         <span>🔗</span> Join Meeting
                       </a>
                     )}
+                    {m.description && (
+                      <p className="text-white/50 text-xs mt-1 whitespace-pre-wrap">{m.description}</p>
+                    )}
+                    {Array.isArray(m.agenda) && m.agenda.length > 0 && (
+                      <div className="mt-1.5">
+                        <p className="text-[10px] text-white/30 uppercase tracking-wide mb-0.5">Agenda</p>
+                        <ul className="space-y-0.5">
+                          {m.agenda.map((item, i) => (
+                            <li key={i} className="text-xs text-white/60 flex gap-1.5">
+                              <span className="text-violet-400/70">•</span>{item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {statusBadge(m.status)}

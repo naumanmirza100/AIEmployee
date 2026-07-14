@@ -263,6 +263,8 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
     title: '', description: '', scheduled_at: '', duration_minutes: '60',
     meeting_link: '', status: 'scheduled',
   });
+  const [agenda, setAgenda] = useState([]);
+  const [generatingDesc, setGeneratingDesc] = useState(false);
   const [linkError, setLinkError] = useState('');
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
@@ -282,8 +284,28 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
         meeting_link: meeting.meeting_link || '',
         status: meeting.status || 'scheduled',
       });
+      setAgenda(Array.isArray(meeting.agenda) ? meeting.agenda : []);
     }
   }, [meeting]);
+
+  const handleGenerateDescription = async () => {
+    if (!form.description.trim()) {
+      toast({ title: 'Add a few points first', description: 'Type what the meeting should cover, then generate.', variant: 'destructive' });
+      return;
+    }
+    setGeneratingDesc(true);
+    try {
+      const res = await execMeetingService.generateMeetingDescription(form.title, form.description);
+      const data = res.data || {};
+      if (data.description) set('description', data.description);
+      if (Array.isArray(data.agenda) && data.agenda.length > 0) setAgenda(data.agenda);
+      toast({ title: 'Description generated', description: 'Review and edit before saving.' });
+    } catch (err) {
+      toast({ title: 'Failed to generate description', description: err.message, variant: 'destructive' });
+    } finally {
+      setGeneratingDesc(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!form.title || !form.scheduled_at) {
@@ -299,6 +321,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
       await execMeetingService.updateMeeting(meeting.id, {
         title: form.title,
         description: form.description,
+        agenda,
         scheduled_at: form.scheduled_at,
         duration_minutes: parseInt(form.duration_minutes) || 60,
         meeting_link: form.meeting_link.trim(),
@@ -331,9 +354,32 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
                 className="bg-white/5 border-white/10 text-white" />
             </div>
             <div className="space-y-1">
-              <Label>Description</Label>
+              <div className="flex items-center justify-between">
+                <Label>Description</Label>
+                <button
+                  type="button"
+                  onClick={handleGenerateDescription}
+                  disabled={generatingDesc}
+                  className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
+                >
+                  {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                  Generate with AI
+                </button>
+              </div>
               <Textarea value={form.description} onChange={e => set('description', e.target.value)}
                 rows={3} className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
+              {agenda.length > 0 && (
+                <div className="mt-1.5 rounded-md border border-white/10 bg-white/[0.03] p-2">
+                  <p className="text-[10px] text-white/40 mb-1">Agenda</p>
+                  <ul className="space-y-0.5">
+                    {agenda.map((item, i) => (
+                      <li key={i} className="text-xs text-white/70 flex gap-1.5">
+                        <span className="text-violet-400">•</span>{item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
             <div className="space-y-1">
               <Label>Date & Time *</Label>
@@ -491,6 +537,11 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
 
   const handleSubmit = async () => {
     if (!form.title) { toast({ title: 'Title is required', variant: 'destructive' }); return; }
+    // A subtask can't be due after its parent task.
+    if (parentTask?.due_date && form.due_date && form.due_date > parentTask.due_date) {
+      toast({ title: 'Due date too late', description: `Subtask can't be due after the parent task (${parentTask.due_date}).`, variant: 'destructive' });
+      return;
+    }
     setLoading(true);
     try {
       await execMeetingService.createTask({
@@ -544,6 +595,9 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
             <div className="space-y-1">
               <Label>Due Date</Label>
               <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
+              {parentTask?.due_date && (
+                <p className="text-white/30 text-[10px]">Must be on or before parent's due date: {parentTask.due_date}</p>
+              )}
             </div>
           </div>
           <div className="space-y-1">
@@ -554,7 +608,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
           <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Add Task
+            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}{parentTask ? 'Add Subtask' : 'Add Task'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -566,6 +620,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
 export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  const [generatingDesc, setGeneratingDesc] = useState(false);
   const [form, setForm] = useState(null);
   const [assignees, setAssignees] = useState([]);
 
@@ -584,6 +639,24 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
 
   if (!task || !form) return null;
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleGenerateDescription = async () => {
+    if (!form.description.trim()) {
+      toast({ title: 'Add a few points first', description: 'Type what the task should cover, then generate.', variant: 'destructive' });
+      return;
+    }
+    setGeneratingDesc(true);
+    try {
+      const res = await execMeetingService.generateTaskDescription(form.title, form.description);
+      const data = res.data || {};
+      if (data.description) set('description', data.description);
+      toast({ title: 'Description generated', description: 'Review and edit before saving.' });
+    } catch (err) {
+      toast({ title: 'Failed to generate description', description: err.message, variant: 'destructive' });
+    } finally {
+      setGeneratingDesc(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -612,7 +685,18 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
             <Input value={form.title} onChange={e => set('title', e.target.value)} className="bg-white/5 border-white/10 text-white" />
           </div>
           <div className="space-y-1">
-            <Label>Description</Label>
+            <div className="flex items-center justify-between">
+              <Label>Description</Label>
+              <button
+                type="button"
+                onClick={handleGenerateDescription}
+                disabled={generatingDesc}
+                className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
+              >
+                {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                Generate with AI
+              </button>
+            </div>
             <Textarea value={form.description} onChange={e => set('description', e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
           </div>
           <div className="grid grid-cols-3 gap-3">
