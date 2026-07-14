@@ -330,27 +330,36 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
 
   const tour = (
     <>
-      {/* Backdrop with cutout for target */}
-      <div
-        className="fixed inset-0 z-[9998] pointer-events-auto"
-        style={{
-          background: 'rgba(2, 3, 8, 0.72)',
-        }}
-      />
-
-      {/* Highlight ring around target */}
-      {targetRect && !isCentered && (
+      {/* Full-screen backdrop — ONLY for centered steps (no highlighted element).
+          When a target IS highlighted, the ring's own giant box-shadow acts as
+          the backdrop-with-a-cutout, so a second full-screen dim here would
+          also darken the highlighted area and make its content look dull. */}
+      {isCentered && (
         <div
-          className="fixed z-[9999] pointer-events-none rounded-xl"
-          style={{
-            top: targetRect.top - 6,
-            left: targetRect.left - 6,
-            width: targetRect.width + 12,
-            height: targetRect.height + 12,
-            boxShadow: '0 0 0 3px #f59e0b, 0 0 0 9999px rgba(2,3,8,0.72)',
-            animation: 'fltPulse 1.8s ease-in-out infinite',
-          }}
+          className="fixed inset-0 z-[9998] pointer-events-auto"
+          style={{ background: 'rgba(2, 3, 8, 0.72)' }}
         />
+      )}
+
+      {/* Highlight ring around target — its box-shadow dims everything OUTSIDE
+          the ring while leaving the target itself at full brightness. */}
+      {targetRect && !isCentered && (
+        <>
+          {/* Transparent click-catcher over the dimmed area so clicks outside
+              the highlight don't fall through to the app underneath. */}
+          <div className="fixed inset-0 z-[9997] pointer-events-auto" />
+          <div
+            className="fixed z-[9999] pointer-events-none rounded-xl"
+            style={{
+              top: targetRect.top - 6,
+              left: targetRect.left - 6,
+              width: targetRect.width + 12,
+              height: targetRect.height + 12,
+              boxShadow: '0 0 0 3px #f59e0b, 0 0 0 9999px rgba(2,3,8,0.72)',
+              animation: 'fltPulse 1.8s ease-in-out infinite',
+            }}
+          />
+        </>
       )}
 
       {/* Tooltip */}

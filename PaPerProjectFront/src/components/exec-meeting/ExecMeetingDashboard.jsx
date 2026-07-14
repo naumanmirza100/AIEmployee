@@ -19,7 +19,7 @@ import {
   Loader2, LayoutDashboard, CalendarClock, ListChecks, CalendarDays,
   FileText, Bell, Plus, Menu, Clock, AlertTriangle, CheckCircle2,
   RefreshCw, Trash2, MoreHorizontal, ChevronRight,
-  Download, Sparkles, Pencil,
+  Download, Sparkles, Pencil, GraduationCap,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -39,6 +39,8 @@ import { TasksPanel } from './panels/TasksPanel';
 import { CalendarPanel } from './panels/CalendarPanel';
 import { DocumentsPanel } from './panels/DocumentsPanel';
 import { MeetingsPanel } from './panels/MeetingsPanel';
+import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '@/components/frontline/FrontlineTutorial';
+import { EXEC_MEETING_TOUR_STEPS, EXEC_MEETING_TOUR_KEY } from './execMeetingTourSteps';
 
 const TAB_ITEMS = [
   { value: 'overview',      label: 'Overview',      icon: LayoutDashboard },
@@ -123,7 +125,23 @@ const ExecMeetingDashboard = () => {
   const [prioritizeLoading, setPrioritizeLoading] = useState(false);
   const [prioritizeResult, setPrioritizeResult] = useState(null);
 
+  // Guided tour
+  const [tourOpen, setTourOpen] = useState(false);
+
   useEffect(() => { loadStats(); }, []);
+
+  // Auto-launch the tour the first time this user lands on the dashboard.
+  useEffect(() => {
+    if (!hasSeenTutorial(EXEC_MEETING_TOUR_KEY)) {
+      const t = setTimeout(() => setTourOpen(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const handleReplayTour = () => {
+    resetTutorial(EXEC_MEETING_TOUR_KEY);
+    setTourOpen(true);
+  };
 
   useEffect(() => {
     if (activeTab === 'meetings' && meetings.length === 0) loadMeetings();
@@ -618,7 +636,7 @@ const ExecMeetingDashboard = () => {
   const overviewPanel = () => (
     <div className="space-y-6">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div data-tour-em="stats" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {statsLoading ? (
           <div className="col-span-full flex justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
@@ -898,6 +916,18 @@ const ExecMeetingDashboard = () => {
               <p className="text-white/40 text-sm">Manage meetings, tasks & get AI-powered insights</p>
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            {/* Take the Tour */}
+            <button
+              type="button"
+              onClick={handleReplayTour}
+              data-tour-em="replay"
+              title="Replay the guided tour"
+              className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-300 text-sm font-semibold hover:bg-violet-400/20 hover:text-violet-200 transition"
+            >
+              <GraduationCap className="h-4 w-4" />
+              Take the Tour
+            </button>
           {/* Mobile tab menu */}
           <div className="md:hidden">
             <DropdownMenu open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
@@ -924,11 +954,12 @@ const ExecMeetingDashboard = () => {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+          </div>
         </div>
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="hidden md:flex flex-wrap gap-1.5 h-auto p-1.5 mb-6 bg-[#1a1333] border border-[#3a295a] rounded-xl">
+          <TabsList data-tour-em="tabs" className="hidden md:flex flex-wrap gap-1.5 h-auto p-1.5 mb-6 bg-[#1a1333] border border-[#3a295a] rounded-xl">
             {TAB_ITEMS.map(t => (
               <TabsTrigger
                 key={t.value}
@@ -952,7 +983,7 @@ const ExecMeetingDashboard = () => {
           </TabsList>
 
           {TAB_ITEMS.map(t => (
-            <TabsContent key={t.value} value={t.value} className="mt-0">
+            <TabsContent key={t.value} value={t.value} className="mt-0" data-tour-em={`tab-${t.value}`}>
               <ErrorBoundary key={t.value}>
                 {PANEL_MAP[t.value]?.()}
               </ErrorBoundary>
@@ -960,6 +991,15 @@ const ExecMeetingDashboard = () => {
           ))}
         </Tabs>
       </div>
+
+      {/* Guided tour overlay (reuses the generic tutorial component) */}
+      <FrontlineTutorial
+        open={tourOpen}
+        onClose={() => setTourOpen(false)}
+        setActiveTab={setActiveTab}
+        steps={EXEC_MEETING_TOUR_STEPS}
+        storageKey={EXEC_MEETING_TOUR_KEY}
+      />
 
       {/* Dialogs */}
       <ScheduleMeetingDialog

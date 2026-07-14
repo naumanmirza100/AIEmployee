@@ -172,18 +172,6 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
               </div>
               <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Jot a few points — title + these will be expanded into a description and agenda" rows={3}
                 className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
-              {agenda.length > 0 && (
-                <div className="mt-1.5 rounded-md border border-white/10 bg-white/[0.03] p-2">
-                  <p className="text-[10px] text-white/40 mb-1">Agenda (generated)</p>
-                  <ul className="space-y-0.5">
-                    {agenda.map((item, i) => (
-                      <li key={i} className="text-xs text-white/70 flex gap-1.5">
-                        <span className="text-violet-400">•</span>{item}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
             <div className="space-y-1">
               <Label>Date & Time *</Label>
@@ -267,6 +255,21 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
           </div>
 
         </div>
+
+        {/* Agenda — full width below both columns so generating it doesn't
+            stretch the left column and misalign the fields. */}
+        {agenda.length > 0 && (
+          <div className="rounded-md border border-white/10 bg-white/[0.03] p-3 max-h-40 overflow-y-auto">
+            <p className="text-[10px] text-white/40 mb-1.5 uppercase tracking-wide">Agenda (generated)</p>
+            <ul className="space-y-1">
+              {agenda.map((item, i) => (
+                <li key={i} className="text-xs text-white/70 flex gap-1.5">
+                  <span className="text-violet-400">•</span>{item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
@@ -466,18 +469,6 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
               </div>
               <Textarea value={form.description} onChange={e => set('description', e.target.value)}
                 rows={3} className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
-              {agenda.length > 0 && (
-                <div className="mt-1.5 rounded-md border border-white/10 bg-white/[0.03] p-2">
-                  <p className="text-[10px] text-white/40 mb-1">Agenda</p>
-                  <ul className="space-y-0.5">
-                    {agenda.map((item, i) => (
-                      <li key={i} className="text-xs text-white/70 flex gap-1.5">
-                        <span className="text-violet-400">•</span>{item}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
             <div className="space-y-1">
               <Label>Date & Time *</Label>
@@ -519,6 +510,21 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
             </div>
           </div>
         </div>
+
+        {/* Agenda — full width below the two columns so it doesn't stretch the
+            left column and knock the right column's fields out of alignment. */}
+        {agenda.length > 0 && (
+          <div className="rounded-md border border-white/10 bg-white/[0.03] p-3 max-h-40 overflow-y-auto">
+            <p className="text-[10px] text-white/40 mb-1.5 uppercase tracking-wide">Agenda</p>
+            <ul className="space-y-1">
+              {agenda.map((item, i) => (
+                <li key={i} className="text-xs text-white/70 flex gap-1.5">
+                  <span className="text-violet-400">•</span>{item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>

@@ -103,6 +103,27 @@ def _email_divider() -> str:
     return '<tr><td colspan="2"><hr style="border:none;border-top:1px solid #f3f4f6;margin:6px 0;"/></td></tr>'
 
 
+def _email_agenda_block(agenda) -> str:
+    """Render a meeting's agenda (a list of strings) as an HTML bullet list for
+    emails. Returns '' when there's no agenda so it can be dropped straight into
+    an f-string."""
+    items = [str(a).strip() for a in (agenda or []) if str(a).strip()]
+    if not items:
+        return ''
+    import html as _html
+    lis = ''.join(
+        f'<li style="margin:0 0 6px;color:#374151;font-size:13px;line-height:1.5;">{_html.escape(it)}</li>'
+        for it in items
+    )
+    return (
+        '<div style="margin:16px 0 0;">'
+        '<p style="margin:0 0 6px;color:#7c3aed;font-size:12px;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.06em;">Agenda</p>'
+        f'<ul style="margin:0;padding-left:18px;">{lis}</ul>'
+        '</div>'
+    )
+
+
 def _send_email_safe(subject, html_body, recipient_email, plain_body=''):
     if not recipient_email or '@' not in recipient_email:
         logger.warning("Email skipped — invalid recipient: %r", recipient_email)
@@ -132,6 +153,7 @@ def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_
         f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{meeting.description}</p>'
         if meeting.description else ''
     )
+    agenda_block = _email_agenda_block(meeting.agenda)
     content = f"""
       <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;">Meeting Updated</p>
       <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">
@@ -196,6 +218,7 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
         f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{meeting.description}</p>'
         if meeting.description else ''
     )
+    agenda_block = _email_agenda_block(meeting.agenda)
     content = f"""
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
@@ -229,6 +252,7 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
               {_email_detail_row('Organizer', organizer_name)}
             </table>
             {desc_block}
+            {agenda_block}
           </td>
         </tr>
       </table>

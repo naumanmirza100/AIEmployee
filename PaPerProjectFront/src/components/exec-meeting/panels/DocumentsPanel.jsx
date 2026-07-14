@@ -33,13 +33,18 @@ export const DocumentsPanel = ({
   generateAiDoc, loadDocuments, setViewDoc, downloadDocPdf, deleteDoc,
   selectedDocIds, toggleSelected, setSelectedDocIds, bulkDeleteDocs, bulkDeleting,
 }) => (
-    <div className="space-y-5">
-      {/* Generator card */}
-      <div className="rounded-2xl p-5 space-y-4" style={CARD_STYLE}>
-        <h3 className="text-white font-semibold flex items-center gap-2">
-          <FileText className="h-4 w-4 text-violet-400" />
-          Generate Document with AI
-        </h3>
+    <div className="space-y-6">
+      {/* ── PART 1: Generator (inputs) ─────────────────────────────────── */}
+      <div data-tour-em="docs-create">
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <span className="h-5 w-5 rounded-full bg-violet-500/20 border border-violet-500/40 flex items-center justify-center text-violet-300 text-[11px] font-bold">1</span>
+          <p className="text-white/70 text-xs font-semibold uppercase tracking-wide">Create a document</p>
+        </div>
+        <div className="rounded-2xl p-5 space-y-4 border border-violet-500/20" style={{ ...CARD_STYLE, background: 'rgba(162,89,255,0.05)' }}>
+          <h3 className="text-white font-semibold flex items-center gap-2">
+            <FileText className="h-4 w-4 text-violet-400" />
+            Generate Document with AI
+          </h3>
 
         {/* Row 1: Doc type + meeting picker */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -186,25 +191,31 @@ export const DocumentsPanel = ({
           </>
         )}
 
-        <div className="flex justify-end">
-          <Button onClick={generateAiDoc} disabled={aiDocLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
-            {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
-            {aiDocLoading ? 'Generating…' : 'Generate & Save'}
-          </Button>
+          <div className="flex justify-end">
+            <Button onClick={generateAiDoc} disabled={aiDocLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
+              {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
+              {aiDocLoading ? 'Generating…' : 'Generate & Save'}
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Saved documents list */}
-      <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-          <h3 className="text-white font-semibold text-sm flex items-center gap-2">
-            <FileText className="h-3.5 w-3.5 text-violet-400" />
-            Saved Documents
-          </h3>
-          <Button size="sm" variant="ghost" onClick={loadDocuments} disabled={docsLoading} className="text-white/40 hover:text-white">
-            <RefreshCw className={`h-3.5 w-3.5 ${docsLoading ? 'animate-spin' : ''}`} />
-          </Button>
+      {/* ── PART 2: Saved documents ────────────────────────────────────── */}
+      <div data-tour-em="docs-saved">
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <span className="h-5 w-5 rounded-full bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-300 text-[11px] font-bold">2</span>
+          <p className="text-white/70 text-xs font-semibold uppercase tracking-wide">Saved documents</p>
         </div>
+        <div className="rounded-2xl overflow-hidden" style={CARD_STYLE}>
+          <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+            <h3 className="text-white font-semibold text-sm flex items-center gap-2">
+              <FileText className="h-3.5 w-3.5 text-violet-400" />
+              Saved Documents
+            </h3>
+            <Button size="sm" variant="ghost" onClick={loadDocuments} disabled={docsLoading} className="text-white/40 hover:text-white">
+              <RefreshCw className={`h-3.5 w-3.5 ${docsLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
 
         {docsLoading ? (
           <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-violet-400" /></div>
@@ -263,6 +274,7 @@ export const DocumentsPanel = ({
           ))}
           </>
         )}
+        </div>
       </div>
     </div>
 );
