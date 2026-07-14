@@ -721,7 +721,11 @@ STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'whsec_placeholder')
 # Google Calendar / Meet integration (for auto-generating Meet links on booking)
 GOOGLE_CLIENT_ID     = os.getenv('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
-GOOGLE_REFRESH_TOKEN = os.getenv('GOOGLE_REFRESH_TOKEN', '')
+GOOGLE_REFRESH_TOKEN = os.getenv('GOOGLE_REFRESH_TOKEN', '')  # legacy/global; per-company OAuth is preferred
+# Redirect URI registered in the Google Cloud OAuth app for the per-company
+# "Connect Google Calendar" flow. Must exactly match a redirect URI whitelisted
+# in the console, e.g. http://localhost:8000/api/company/integrations/google-calendar/callback
+GOOGLE_OAUTH_REDIRECT_URI = os.getenv('GOOGLE_OAUTH_REDIRECT_URI', '')
 
 # Frontend base URL (React app) – for CORS, Stripe success/cancel redirects. Set FRONTEND_URL in .env.
 FRONTEND_URL = (os.getenv('FRONTEND_URL') or '').rstrip('/')

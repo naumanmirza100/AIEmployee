@@ -10,10 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Loader2, Mail, Calendar, Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Lock, Target, ChevronsUpDown, Check, Search } from 'lucide-react';
-import { 
-  getEmailSettings, 
-  updateEmailSettings, 
-  getInterviewSettings, 
+import {
+  getEmailSettings,
+  updateEmailSettings,
+  getInterviewSettings,
   updateInterviewSettings,
   getQualificationSettings,
   updateQualificationSettings,

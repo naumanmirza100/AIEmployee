@@ -608,6 +608,16 @@ class Company(models.Model):
     hubspot_config = models.JSONField(default=dict, blank=True,
                                       help_text='HubSpot private-app config: {enabled, access_token, portal_id, last_error}.')
 
+    # Per-company Google Calendar connection for interview scheduling.
+    # Populated after the company completes the OAuth "Connect" flow. When
+    # `connected` is False (or refresh_token missing), no calendar event/Meet
+    # link is created for that company's interviews — there is no global env
+    # fallback, so every company uses its own connected calendar.
+    # Shape: {"connected": bool, "refresh_token": "...", "google_email": "...",
+    #         "calendar_id": "primary", "last_error": ""}
+    google_calendar_config = models.JSONField(default=dict, blank=True,
+                                              help_text='Per-company Google Calendar OAuth config: {connected, refresh_token, google_email, calendar_id, last_error}.')
+
     class Meta:
         verbose_name_plural = 'Companies'
         ordering = ['name']
