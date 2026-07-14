@@ -8,6 +8,8 @@ import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Calendar, BarChart3, Clock, AlertCircle, Settings, Layers, ChevronDown, ChevronUp, BrainCircuit, TrendingUp } from 'lucide-react';
+import InfoHint from '../frontline/InfoHint';
+import { PM_HINTS } from './pmTutorialSteps';
 import {
   PieChart,
   Pie,
@@ -126,9 +128,10 @@ const TimelineGanttAgent = ({ projects = [] }) => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <label className="text-sm font-medium mb-2 block">
+          <div data-tour-pm-tl="project-select">
+            <label className="text-sm font-medium mb-2 flex items-center gap-1.5">
               Select Project *
+              <InfoHint {...PM_HINTS.pmTlProjectSelect} />
             </label>
             <Select value={selectedProjectId || "none"} onValueChange={setSelectedProjectId} disabled={safeProjects.length === 0}>
               <SelectTrigger>
@@ -149,9 +152,10 @@ const TimelineGanttAgent = ({ projects = [] }) => {
           </div>
 
           {action === 'check_deadlines' && (
-            <div>
-              <label className="text-sm font-medium mb-2 block">
+            <div data-tour-pm-tl="days-ahead">
+              <label className="text-sm font-medium mb-2 flex items-center gap-1.5">
                 Days Ahead
+                <InfoHint {...PM_HINTS.pmTlDaysAhead} />
               </label>
               <Input
                 type="number"
@@ -166,21 +170,32 @@ const TimelineGanttAgent = ({ projects = [] }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {actions.map((actionItem) => {
               const Icon = actionItem.icon;
+              const anchorMap = {
+                create_timeline:     ['action-create',   'pmTlActionCreate'],
+                generate_gantt:      ['action-gantt',    'pmTlActionGantt'],
+                check_deadlines:     ['action-check',    'pmTlActionCheck'],
+                suggest_adjustments: ['action-suggest',  'pmTlActionSuggest'],
+                calculate_duration:  ['action-duration', 'pmTlActionDuration'],
+                manage_phases:       ['action-phases',   'pmTlActionPhases'],
+              };
+              const [anchor, hintKey] = anchorMap[actionItem.value] || ['', ''];
               return (
-                <Button
-                  key={actionItem.value}
-                  variant={action === actionItem.value ? 'default' : 'outline'}
-                  onClick={() => handleAction(actionItem.value)}
-                  disabled={loading || !selectedProjectId}
-                  className="justify-start"
-                >
-                  {loading && action === actionItem.value ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Icon className="h-4 w-4 mr-2" />
-                  )}
-                  {actionItem.label}
-                </Button>
+                <div key={actionItem.value} data-tour-pm-tl={anchor} className="flex items-center gap-1.5">
+                  <Button
+                    variant={action === actionItem.value ? 'default' : 'outline'}
+                    onClick={() => handleAction(actionItem.value)}
+                    disabled={loading || !selectedProjectId}
+                    className="justify-start flex-1"
+                  >
+                    {loading && action === actionItem.value ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Icon className="h-4 w-4 mr-2" />
+                    )}
+                    {actionItem.label}
+                  </Button>
+                  {hintKey && <InfoHint {...PM_HINTS[hintKey]} />}
+                </div>
               );
             })}
           </div>
@@ -188,7 +203,11 @@ const TimelineGanttAgent = ({ projects = [] }) => {
       </Card>
 
       {result && (
-        <div className="space-y-6">
+        <div data-tour-pm-tl="results" className="space-y-6">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs uppercase tracking-wider text-white/40 font-semibold">Results</span>
+            <InfoHint {...PM_HINTS.pmTlResults} />
+          </div>
           {/* Charts Section - Hide for create_timeline action */}
           {charts && action !== 'create_timeline' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -379,6 +398,8 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                       All tasks displayed on a unified timeline showing start dates, status changes, deadlines, and completions
                     </CardDescription>
                   </div>
+                  <div data-tour-pm-tl="scale" className="flex items-center gap-1.5">
+                  <InfoHint {...PM_HINTS.pmTlScale} />
                   <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
                     {[
                       { value: 'auto', label: 'Auto' },
@@ -398,6 +419,7 @@ const TimelineGanttAgent = ({ projects = [] }) => {
                         {opt.label}
                       </button>
                     ))}
+                  </div>
                   </div>
                 </div>
               </CardHeader>

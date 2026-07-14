@@ -9,6 +9,9 @@ import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2, ChevronsLeft, ChevronsRight, Bot, Search, BarChart2, Maximize2 } from 'lucide-react';
 import { renderChart } from '../recruitment/ChartRenderer';
+import InfoHint from '../frontline/InfoHint';
+import { PM_HINTS } from './pmTutorialSteps';
+import { trackPMRecentlyViewed } from './pmLocalStore';
 
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -351,6 +354,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
     >
       <div className="flex w-full max-w-full relative max-h-[calc(100vh-40px)]">
         <div
+          data-tour-pm-kqa="sidebar"
           className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
@@ -375,7 +379,10 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
               }}
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
+                  <InfoHint {...PM_HINTS.pmKqaSidebar} />
+                </div>
                 <button
                   onClick={() => setShowChatHistory(false)}
                   title="Close sidebar"
@@ -459,12 +466,14 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                     </svg>
                   </button>
                   <button
+                    data-tour-pm-kqa="new-chat"
                     onClick={newChat}
                     title="New chat"
                     className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
                   >
                     <Plus className="h-4 w-4 text-white/80" />
                   </button>
+                  <InfoHint {...PM_HINTS.pmKqaNewChat} />
                 </div>
               )}
             </div>
@@ -605,7 +614,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
             </Button>
           </CardHeader>
           <CardContent className="p-0 flex flex-col flex-1 min-h-0">
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
+            <div data-tour-pm-kqa="results" className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
             {!selectedChatId && chats.length === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                 <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
@@ -698,7 +707,15 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
               <div className="mx-4 my-3 rounded-xl px-3 py-3" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
                 {/* Top row: project select + mode side by side */}
                 <div className="flex items-center gap-2 mb-2">
-                  <Select value={selectedProjectId || 'all'} onValueChange={(v) => setSelectedProjectId(v === 'all' ? '' : v)}>
+                  <div data-tour-pm-kqa="project-select" className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <InfoHint {...PM_HINTS.pmKqaProjectSelect} />
+                    <Select value={selectedProjectId || 'all'} onValueChange={(v) => {
+                      setSelectedProjectId(v === 'all' ? '' : v);
+                      if (v && v !== 'all') {
+                        const p = safeProjects.find((x) => String(x.id) === String(v));
+                        if (p) trackPMRecentlyViewed({ kind: 'project', id: p.id, title: p.title || p.name });
+                      }
+                    }}>
                     <SelectTrigger
                       className="h-8 text-xs flex-1 min-w-0"
                       style={{
@@ -728,7 +745,9 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                       )}
                     </SelectContent>
                   </Select>
+                  </div>
 
+                  <div data-tour-pm-kqa="input-mode" className="flex items-center gap-1.5 shrink-0">
                   <Select value={inputMode} onValueChange={setInputMode}>
                     <SelectTrigger
                       className="h-8 text-xs w-[130px] shrink-0"
@@ -763,11 +782,15 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                       })}
                     </SelectContent>
                   </Select>
+                  <InfoHint {...PM_HINTS.pmKqaInputMode} />
+                  </div>
                 </div>
 
                 {/* Textarea + send */}
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-start">
+                  <div className="pt-2"><InfoHint {...PM_HINTS.pmKqaInput} /></div>
                   <Textarea
+                    data-tour-pm-kqa="input"
                     placeholder={selectedMode.placeholder}
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
@@ -786,9 +809,10 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                       color: '#e2e2f0',
                     }}
                   />
-                  <Button type="submit" disabled={loading} size="icon" className="h-[40px] w-10 shrink-0">
+                  <Button data-tour-pm-kqa="send" type="submit" disabled={loading} size="icon" className="h-[40px] w-10 shrink-0">
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </Button>
+                  <div className="pt-2"><InfoHint {...PM_HINTS.pmKqaSend} /></div>
                 </div>
               </div>
             </form>

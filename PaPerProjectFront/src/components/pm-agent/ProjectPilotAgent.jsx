@@ -8,6 +8,9 @@ import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle, ChevronsLeft, ChevronsRight, Bot } from 'lucide-react';
+import InfoHint from '../frontline/InfoHint';
+import { PM_HINTS } from './pmTutorialSteps';
+import { trackPMRecentlyViewed } from './pmLocalStore';
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
   const { toast } = useToast();
@@ -274,6 +277,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
     >
       <div className="flex w-full max-w-full relative max-h-[calc(100vh-40px)]">
         <div
+          data-tour-pm-pp="sidebar"
           className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
@@ -298,8 +302,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
               }}
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
+                  <InfoHint {...PM_HINTS.pmPpSidebar} />
+                </div>
                 <button
+                  data-tour-pm-pp="history-toggle"
                   onClick={() => setShowChatHistory(false)}
                   title="Close sidebar"
                   className="h-8 w-8 flex items-center justify-center rounded-full border border-white/20 hover:border-violet-400/60 bg-black/30 hover:bg-violet-700/20 transition-all duration-150"
@@ -382,12 +390,14 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                     </svg>
                   </button>
                   <button
+                    data-tour-pm-pp="new-chat"
                     onClick={newChat}
                     title="New chat"
                     className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
                   >
                     <Plus className="h-4 w-4 text-white/80" />
                   </button>
+                  <InfoHint {...PM_HINTS.pmPpNewChat} />
                 </div>
               )}
             </div>
@@ -675,10 +685,18 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
             <div className="mx-4 my-3 rounded-xl px-3 py-3" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
             {/* Top row: project select + file upload side by side */}
             <div className="flex items-center gap-2 mb-2">
-              <Select value={selectedProjectId || 'all'} onValueChange={(v) => setSelectedProjectId(v === 'all' ? '' : v)}>
-                <SelectTrigger className="h-8 text-xs flex-1 min-w-0">
-                  <SelectValue placeholder="All projects" />
-                </SelectTrigger>
+              <div data-tour-pm-pp="project-select" className="flex items-center gap-1.5 flex-1 min-w-0">
+                <InfoHint {...PM_HINTS.pmPpProjectSelect} />
+                <Select value={selectedProjectId || 'all'} onValueChange={(v) => {
+                  setSelectedProjectId(v === 'all' ? '' : v);
+                  if (v && v !== 'all') {
+                    const p = safeProjects.find((x) => String(x.id) === String(v));
+                    if (p) trackPMRecentlyViewed({ kind: 'project', id: p.id, title: p.title || p.name });
+                  }
+                }}>
+                  <SelectTrigger className="h-8 text-xs flex-1 min-w-0">
+                    <SelectValue placeholder="All projects" />
+                  </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All projects</SelectItem>
                   {safeProjects.length > 0 ? (
@@ -692,6 +710,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                   )}
                 </SelectContent>
               </Select>
+              </div>
 
               <input
                 ref={fileInputRef}
@@ -702,16 +721,19 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                 id="pilot-file-upload"
               />
               {!selectedFile ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs shrink-0"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload className="h-3.5 w-3.5 mr-1" />
-                  Upload
-                </Button>
+                <div data-tour-pm-pp="file-upload" className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="h-3.5 w-3.5 mr-1" />
+                    Upload
+                  </Button>
+                  <InfoHint {...PM_HINTS.pmPpFileUpload} />
+                </div>
               ) : (
                 <div className="flex items-center gap-1 shrink-0">
                   <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -739,8 +761,10 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
             </div>
 
             {/* Textarea + send */}
-            <form onSubmit={handleSubmit} className="flex gap-2">
+            <form onSubmit={handleSubmit} className="flex gap-2 items-start">
+              <div className="pt-2"><InfoHint {...PM_HINTS.pmPpInput} /></div>
               <Textarea
+                data-tour-pm-pp="input"
                 placeholder="e.g., Create a new project 'Website Redesign' with high priority..."
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -754,9 +778,10 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                 disabled={loading || fileLoading}
                 className="min-h-[40px] resize-none flex-1 text-sm"
               />
-              <Button type="submit" disabled={loading || fileLoading} size="icon" className="h-[40px] w-10 shrink-0">
+              <Button data-tour-pm-pp="send" type="submit" disabled={loading || fileLoading} size="icon" className="h-[40px] w-10 shrink-0">
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
+              <div className="pt-2"><InfoHint {...PM_HINTS.pmPpSend} /></div>
             </form>
             </div>
             </div>

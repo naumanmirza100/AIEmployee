@@ -50,6 +50,14 @@ import PMToolsHub from '@/components/pm-agent/PMToolsHub';
 import MeetingScheduler from '@/components/pm-agent/MeetingScheduler';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
+// Tutorial + hints + floating chat (generic components reused, PM-specific content)
+import InfoHint, { HintsProvider, useHints } from '@/components/frontline/InfoHint';
+import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '@/components/frontline/FrontlineTutorial';
+import PMFloatingChat from '@/components/pm-agent/PMFloatingChat';
+import {
+  PM_MAIN_TOUR_STEPS, PM_TAB_TOURS, PM_HINTS, PM_MAIN_TOUR_KEY,
+} from '@/components/pm-agent/pmTutorialSteps';
+import { GraduationCap, Eye, EyeOff } from 'lucide-react';
 
 const PM_TAB_ITEMS = [
   { value: 'overview', label: 'Overview', icon: BrainCircuit },
@@ -67,6 +75,69 @@ const ProjectManagerDashboardPage = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+
+  // ---- Onboarding tutorial + per-tab tours ----
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [activeTabTour, setActiveTabTour] = useState(null);
+
+  useEffect(() => {
+    if (!hasSeenTutorial(PM_MAIN_TOUR_KEY)) {
+      const t = setTimeout(() => setTutorialOpen(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tutorialOpen) return;
+    const tour = PM_TAB_TOURS[activeTab];
+    if (!tour) return;
+    if (hasSeenTutorial(tour.key)) return;
+    const t = setTimeout(() => setActiveTabTour(activeTab), 500);
+    return () => clearTimeout(t);
+  }, [activeTab, tutorialOpen]);
+
+  const handleReplayTutorial = () => {
+    resetTutorial(PM_MAIN_TOUR_KEY);
+    setTutorialOpen(true);
+  };
+  const handleReplayTabTour = (tabKey) => {
+    const tour = PM_TAB_TOURS[tabKey];
+    if (!tour) return;
+    resetTutorial(tour.key);
+    setActiveTabTour(tabKey);
+  };
+
+  const TabTourButton = ({ tabKey }) => (
+    <button
+      type="button"
+      onClick={() => handleReplayTabTour(tabKey)}
+      title={`Take a guided tour of the ${PM_TAB_TOURS[tabKey]?.label || 'this'} tab`}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-xs font-semibold hover:bg-cyan-500/20 hover:text-cyan-100 transition"
+    >
+      <GraduationCap className="h-3.5 w-3.5" />
+      Tour this tab
+    </button>
+  );
+
+  const HintsToggleButton = () => {
+    const { enabled, toggle } = useHints();
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        aria-pressed={enabled}
+        title={enabled ? 'Hide the ! help icons on every element' : 'Show the ! help icons on every element'}
+        className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition border ${
+          enabled
+            ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 hover:text-cyan-100'
+            : 'border-white/10 bg-white/[0.03] text-white/50 hover:bg-white/[0.06] hover:text-white/70'
+        }`}
+      >
+        {enabled ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+        <span>Hints: {enabled ? 'On' : 'Off'}</span>
+      </button>
+    );
+  };
   const [activeSection, setActiveSection] = useState('project-manager'); // 'dashboard', 'project-manager', 'recruitment'
   const { logout, user } = useAuth();
   const { toast } = useToast();
@@ -243,6 +314,7 @@ const ProjectManagerDashboardPage = () => {
   }
 
   return (
+    <HintsProvider>
     <>
       <Helmet>
         <title>Project Manager Dashboard - PayPerProject</title>
@@ -290,6 +362,21 @@ const ProjectManagerDashboardPage = () => {
             style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
           >
           <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
+          {/* Top bar: Hints toggle + Take the Tour */}
+          <div className="flex justify-end items-center gap-2">
+            <HintsToggleButton />
+            <button
+              type="button"
+              onClick={handleReplayTutorial}
+              data-tour-pm="replay"
+              title="Replay the onboarding tutorial"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-sm font-semibold hover:bg-cyan-500/20 hover:text-cyan-100 transition"
+            >
+              <GraduationCap className="h-4 w-4" />
+              Take the Tour
+            </button>
+          </div>
+
           {/* Loading indicator */}
           {loading && (
             <div className="mb-4 flex items-center justify-center">
@@ -299,7 +386,7 @@ const ProjectManagerDashboardPage = () => {
           )}
 
           {/* Stats Overview */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
+          <div data-tour-pm="stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
             {[
               {
                 label: 'Total Projects',
@@ -406,7 +493,7 @@ const ProjectManagerDashboardPage = () => {
                 </div>
 
                 {/* Desktop: Regular tabs (lg and above) with horizontal scroll */}
-                <div className="hidden lg:block overflow-x-auto pb-1">
+                <div data-tour-pm="tabs" className="hidden lg:block overflow-x-auto pb-1">
                   <TabsList
                     className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
                     style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
@@ -417,6 +504,7 @@ const ProjectManagerDashboardPage = () => {
                         <TabsTrigger
                           key={item.value}
                           value={item.value}
+                          data-tour-pm-tab={item.value}
                           className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                           style={activeTab === item.value
                             ? {
@@ -442,7 +530,11 @@ const ProjectManagerDashboardPage = () => {
                 </div>
 
                 <TabsContent value="overview" className="mt-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
+                  <div className="flex items-center gap-2 justify-end mb-3">
+                    <InfoHint {...PM_HINTS.pmOvQuicknav} />
+                    <TabTourButton tabKey="overview" />
+                  </div>
+                  <div data-tour-pm-ov="quicknav" className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
                     {[
                       {
                         title: 'Project Pilot',
@@ -510,34 +602,42 @@ const ProjectManagerDashboardPage = () => {
                 </TabsContent>
 
                 <TabsContent value="create-project" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="create-project" /></div>
                   <ManualProjectCreation onProjectCreated={fetchProjects} />
                 </TabsContent>
 
                 <TabsContent value="create-task" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="create-task" /></div>
                   <ManualTaskCreation onTaskCreated={fetchProjects} />
                 </TabsContent>
 
                 <TabsContent value="project-pilot" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="project-pilot" /></div>
                   <ErrorBoundary><ProjectPilotAgent projects={projects || []} onProjectUpdate={fetchProjects} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="task-prioritization" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="task-prioritization" /></div>
                   <ErrorBoundary><TaskPrioritizationAgent projects={projects || []} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="knowledge-qa" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="knowledge-qa" /></div>
                   <ErrorBoundary><KnowledgeQAAgent projects={projects || []} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="timeline-gantt" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="timeline-gantt" /></div>
                   <ErrorBoundary><TimelineGanttAgent projects={projects || []} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="meeting-scheduler" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="meeting-scheduler" /></div>
                   <ErrorBoundary><MeetingScheduler /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="ai-tools" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="ai-tools" /></div>
                   <ErrorBoundary><PMToolsHub /></ErrorBoundary>
                 </TabsContent>
               </Tabs>
@@ -547,7 +647,30 @@ const ProjectManagerDashboardPage = () => {
 
         </main>
       </div>
+
+      {/* Main onboarding tour */}
+      <FrontlineTutorial
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
+        setActiveTab={setActiveTab}
+        steps={PM_MAIN_TOUR_STEPS}
+        storageKey={PM_MAIN_TOUR_KEY}
+      />
+
+      {/* Per-tab guided tour */}
+      {activeTabTour && PM_TAB_TOURS[activeTabTour] && (
+        <FrontlineTutorial
+          open={!!activeTabTour}
+          onClose={() => setActiveTabTour(null)}
+          steps={PM_TAB_TOURS[activeTabTour].steps}
+          storageKey={PM_TAB_TOURS[activeTabTour].key}
+        />
+      )}
+
+      {/* Floating dual-mode PM Quick Chat — pinned bottom-right */}
+      <PMFloatingChat />
     </>
+    </HintsProvider>
   );
 };
 

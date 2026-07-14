@@ -22,6 +22,8 @@ import {
   ChevronsLeft, ChevronsRight, Bot, Search,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
+import InfoHint from '../frontline/InfoHint';
+import { HR_HINTS } from './hrTutorialSteps';
 
 // ---------- markdown → HTML (lifted from PM agent's helper) ----------
 function markdownToHtml(markdown) {
@@ -255,6 +257,7 @@ const HRKnowledgeQAAgent = () => {
 
         {/* SIDEBAR */}
         <div
+          data-tour-hrqa="sidebar"
           className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
@@ -271,8 +274,12 @@ const HRKnowledgeQAAgent = () => {
               style={{ background: 'linear-gradient(180deg, rgba(60,30,90,0.22) 0%, rgba(36,18,54,0.85) 100%)' }}
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-base font-semibold text-white/90 tracking-wide">HR Assistant</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base font-semibold text-white/90 tracking-wide">HR Assistant</span>
+                  <InfoHint {...HR_HINTS.hrQaSidebar} />
+                </div>
                 <button
+                  data-tour-hrqa="sidebar-toggle-close"
                   onClick={() => setShowChatHistory(false)}
                   title="Close sidebar"
                   className="h-8 w-8 flex items-center justify-center rounded-full border border-white/20 hover:border-violet-400/60 bg-black/30 hover:bg-violet-700/20 transition-all duration-150"
@@ -308,19 +315,23 @@ const HRKnowledgeQAAgent = () => {
                   <span>Conversations</span>
                   <div className="flex items-center gap-1">
                     <button
+                      data-tour-hrqa="search"
                       title="Search"
                       onClick={() => setShowSidebarSearch(true)}
                       className="h-7 w-7 flex items-center justify-center rounded-full hover:bg-white/5"
                     >
                       <Search className="h-3.5 w-3.5 text-white/60" />
                     </button>
+                    <InfoHint {...HR_HINTS.hrQaSearch} />
                     <button
+                      data-tour-hrqa="new-chat"
                       title="New chat"
                       onClick={startNewChat}
                       className="h-7 w-7 flex items-center justify-center rounded-full hover:bg-white/5"
                     >
                       <Plus className="h-4 w-4 text-violet-400" />
                     </button>
+                    <InfoHint {...HR_HINTS.hrQaNewChat} />
                   </div>
                 </div>
               )}
@@ -399,20 +410,26 @@ const HRKnowledgeQAAgent = () => {
                 </CardDescription>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={startNewChat}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> New chat
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button data-tour-hrqa="header-new-chat" variant="outline" size="sm" onClick={startNewChat}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> New chat
+              </Button>
+              <InfoHint {...HR_HINTS.hrQaHeaderNewChat} />
+            </div>
           </CardHeader>
 
           <CardContent className="flex-1 flex flex-col min-h-0 p-0">
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-[280px]">
+            <div data-tour-hrqa="messages" className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-[280px]">
               {currentMessages.length === 0 && !loading ? (
                 <div className="h-full min-h-[260px] flex flex-col items-center justify-center text-center text-white/60 px-6">
                   <div className="h-12 w-12 rounded-2xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3">
                     <Bot className="h-6 w-6 text-violet-400" />
                   </div>
-                  <div className="text-sm font-medium text-white/90 mb-1">Ask the HR Assistant</div>
+                  <div className="text-sm font-medium text-white/90 mb-1 flex items-center gap-1.5">
+                    Ask the HR Assistant
+                    <InfoHint {...HR_HINTS.hrQaMessages} />
+                  </div>
                   <div className="text-xs max-w-md">
                     Examples: <em>“How many vacation days do I have?”</em> · <em>“What's the parental leave policy?”</em> · <em>“Can I claim this commute as expense?”</em>
                   </div>
@@ -476,7 +493,9 @@ const HRKnowledgeQAAgent = () => {
               onSubmit={handleSubmit}
               className="border-t border-white/[0.06] px-3 py-3 flex flex-col sm:flex-row items-end gap-2"
             >
+              <InfoHint {...HR_HINTS.hrQaInput} className="mb-2 sm:mb-0" />
               <Textarea
+                data-tour-hrqa="input"
                 rows={2}
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -489,12 +508,13 @@ const HRKnowledgeQAAgent = () => {
                 placeholder='Ask about HR policy, leave, benefits...  (Shift+Enter for newline)'
                 className="flex-1 resize-none bg-white/[0.03] border-white/[0.08] focus-visible:ring-violet-500/50"
               />
-              <Button type="submit" disabled={loading || !question.trim()}>
+              <Button data-tour-hrqa="send" type="submit" disabled={loading || !question.trim()}>
                 {loading
                   ? <Loader2 className="h-4 w-4 animate-spin" />
                   : <Send className="h-4 w-4" />}
                 <span className="ml-1 hidden sm:inline">Send</span>
               </Button>
+              <InfoHint {...HR_HINTS.hrQaSend} className="mb-2 sm:mb-0" />
             </form>
           </CardContent>
         </Card>

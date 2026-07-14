@@ -170,6 +170,15 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
     if (step.tab && typeof setActiveTab === 'function') {
       setActiveTab(step.tab);
     }
+    // Optional per-step side-effect for reaching UI that isn't visible by
+    // default (e.g. clicking an internal sub-tab). Fires slightly after
+    // any outer tab switch so the target is present.
+    if (typeof step.onEnter === 'function') {
+      const t = setTimeout(() => {
+        try { step.onEnter(); } catch (_) { /* non-fatal */ }
+      }, step.tab ? 240 : 40);
+      return () => clearTimeout(t);
+    }
   }, [open, index, step, setActiveTab]);
 
   // Continuously track target element position + size while the step is active.

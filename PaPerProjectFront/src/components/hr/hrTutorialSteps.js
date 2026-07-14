@@ -57,7 +57,14 @@ export const HR_QA_TOUR = {
   label: 'Knowledge Q&A',
   steps: [
     { title: 'Knowledge Q&A 💬', body: 'Ask any HR question — leave policy, benefits, contracts, escalation paths. The AI answers grounded in your indexed HR documents and shows the sources it used.', placement: 'center' },
-    { selector: '[data-tour-hr-qa="panel"]', title: 'Chat panel', body: 'History sidebar on the left, conversation in the middle, input at the bottom. Everything you say is saved so you can pick up where you left off.', placement: 'left' },
+    { selector: '[data-tour-hrqa="sidebar"]',             title: 'Chat history sidebar',   body: 'Every conversation you have is saved on the left. Click any past chat to reopen it — the AI remembers the context so you can pick up where you left off.', placement: 'right' },
+    { selector: '[data-tour-hrqa="search"]',              title: 'Search past chats',      body: "Click the magnifier to filter conversations by title. Fast way to jump back to that 'onboarding checklist' chat from last week.", placement: 'right' },
+    { selector: '[data-tour-hrqa="new-chat"]',            title: 'Start a new chat',       body: 'The + button opens a fresh conversation. Use it when switching topics — a clean slate helps the AI focus on the new question.', placement: 'right' },
+    { selector: '[data-tour-hrqa="sidebar-toggle-close"]', title: 'Collapse the sidebar',  body: 'Hide the sidebar to give the conversation more room. Bring it back with the chevron in the panel header.', placement: 'right' },
+    { selector: '[data-tour-hrqa="messages"]',            title: 'Answers with citations', body: 'AI replies land here. Each response includes the source document(s) it cited, plus a warning banner when the answer is not grounded in verified data.', placement: 'left' },
+    { selector: '[data-tour-hrqa="header-new-chat"]',     title: 'New chat, again',        body: 'Same as the sidebar + button — starts a fresh conversation. Handy shortcut when the sidebar is collapsed.', placement: 'bottom' },
+    { selector: '[data-tour-hrqa="input"]',               title: 'Ask your question',      body: "Type a natural-language question — 'How many vacation days do I have?', 'What is our parental leave policy?', anything. Enter to send, Shift+Enter for a new line.", placement: 'top' },
+    { selector: '[data-tour-hrqa="send"]',                title: 'Send',                   body: 'Submit your question. The AI searches your HR knowledge base and answers with citations you can verify.', placement: 'top' },
   ],
 };
 
@@ -118,10 +125,29 @@ export const HR_MEETINGS_TOUR = {
   key: 'hr_tour_meetings_v1',
   label: 'Meetings',
   steps: [
-    { title: 'Meetings 📅', body: "Schedule HR meetings in plain English. Say 'schedule a review with Ana next Thursday at 3pm' and the AI books it, invites participants, and generates an .ics file.", placement: 'center' },
-    { selector: '[data-tour-hr-meet="chat"]',   title: 'Chat scheduler',        body: 'Describe the meeting in plain English. Include names, dates, times, agenda — the more detail, the better the invite.', placement: 'right' },
-    { selector: '[data-tour-hr-meet="list"]',   title: 'Scheduled meetings',    body: 'Every meeting you and your team have scheduled through the agent. Click any row to see the full details and participants.', placement: 'left' },
-    { selector: '[data-tour-hr-meet="export"]', title: 'Export as .ics',        body: 'One click to download the calendar invite. Drop it into any calendar app — Google, Outlook, Apple — and the event lands correctly.', placement: 'top' },
+    { title: 'Meetings 📅', body: "Schedule HR meetings in plain English. Say 'schedule a review with Ana next Thursday at 3pm' and the AI books it, invites participants, and gives you an .ics you can drop into any calendar.", placement: 'center' },
+    { selector: '[data-tour-hrmeet="sidebar"]',        title: 'Scheduling conversations', body: 'Every scheduling conversation is saved on the left. Click any past chat to reopen it — great for reviewing exactly what was booked and when.', placement: 'right' },
+    { selector: '[data-tour-hrmeet="new-chat"]',       title: 'Start a new chat',         body: 'Open a fresh scheduling conversation. Use this when the meeting has nothing to do with the previous topic.', placement: 'right' },
+    { selector: '[data-tour-hrmeet="tabs"]',           title: 'Chat vs. Meetings tabs',    body: "'Chat' is where you tell the AI what to schedule. 'Meetings' is the actual list of everything that\'s been booked. Switch between them here.", placement: 'bottom' },
+    { selector: '[data-tour-hrmeet="chat-samples"]',   title: 'Try one of these',         body: "Sample prompts show what the scheduler understands. Click one to load it as your prompt — great for learning the phrasing that works best.", placement: 'bottom' },
+    { selector: '[data-tour-hrmeet="chat-input"]',     title: 'Describe the meeting',     body: "Type in plain English. Include names, date/time, duration, and agenda — the more detail, the better the invite. Enter to send, Shift+Enter for a new line.", placement: 'top' },
+    { selector: '[data-tour-hrmeet="chat-send"]',      title: 'Send',                     body: 'Submit your request. The AI parses it, finds the attendees, and either books the meeting or asks for missing info (like exact time).', placement: 'top' },
+    { selector: '[data-tour-hrmeet="stats"]',          title: 'Meetings snapshot',        body: 'Four counts at a glance: total, upcoming, completed, cancelled. Reflects everything the agent has scheduled for you and your team.', placement: 'bottom',
+      onEnter: () => {
+        // Switch the internal Chat/Meetings sub-tab to "Meetings" so the target is visible.
+        const btn = document.querySelectorAll('[data-tour-hrmeet="tabs"] button')[1];
+        if (btn) btn.click();
+      } },
+    { selector: '[data-tour-hrmeet="refresh"]',        title: 'Refresh',                  body: 'Reload the meetings list from the backend. Handy if a colleague just scheduled something and you want to see it appear.', placement: 'left',
+      onEnter: () => {
+        const btn = document.querySelectorAll('[data-tour-hrmeet="tabs"] button')[1];
+        if (btn) btn.click();
+      } },
+    { selector: '[data-tour-hrmeet="meeting-actions"]', title: 'Per-meeting actions',     body: 'Every meeting has four quick actions: Export .ics (download the invite), Edit (change title/time/attendees), Extract action items (AI pulls tasks from the transcript), and Cancel.', placement: 'top',
+      onEnter: () => {
+        const btn = document.querySelectorAll('[data-tour-hrmeet="tabs"] button')[1];
+        if (btn) btn.click();
+      } },
   ],
 };
 
@@ -165,7 +191,15 @@ export const HR_HINTS = {
   hrOvQuicknav: { title: 'Quick jump to any tool', body: 'Six shortcut tiles that jump straight to the tabs you use most. Click any tile to switch tabs instantly.' },
 
   // Q&A
-  hrQaPanel: { title: 'Knowledge Q&A panel', body: 'Chat history on the left, conversation in the middle, input at the bottom. Everything is saved so you can pick up where you left off.' },
+  hrQaPanel:              { title: 'Knowledge Q&A panel', body: 'Chat history on the left, conversation in the middle, input at the bottom. Everything is saved so you can pick up where you left off.' },
+  hrQaSidebar:            { title: 'Chat history',        body: 'Every past conversation, saved. Click any entry to reopen it — the AI keeps the full context.' },
+  hrQaSearch:             { title: 'Search chats',        body: 'Filter your conversations by title. Fast way to jump back to a specific topic.' },
+  hrQaNewChat:            { title: 'Start a new chat',    body: 'Open a fresh conversation. Use this when switching topics — a clean slate helps the AI focus.' },
+  hrQaSidebarToggleClose: { title: 'Collapse sidebar',    body: 'Hide the sidebar to give the conversation more room. Bring it back with the chevron in the panel header.' },
+  hrQaMessages:           { title: 'Answers with citations', body: 'Each AI reply shows the sources it cited. A warning banner appears when the answer is not grounded in verified data.' },
+  hrQaHeaderNewChat:      { title: 'New chat',            body: 'Same as the sidebar + button. Handy shortcut when the sidebar is collapsed.' },
+  hrQaInput:              { title: 'Ask a question',      body: "Type your HR question in natural language. Enter to send, Shift+Enter for a new line." },
+  hrQaSend:               { title: 'Send',                body: 'Submit your question. The AI searches your HR knowledge base and answers with citations.' },
 
   // Employees
   hrEmpFilter:       { title: 'Department filter',   body: 'Narrow the list to a specific department. Combines with search — great for scoping actions like sending a policy update to just Engineering.' },
@@ -189,9 +223,18 @@ export const HR_HINTS = {
   hrWfList:     { title: 'Workflows list', body: 'Every saved workflow with status badge and trigger event. Row actions: Run, Edit, View history, or Delete.' },
 
   // Meetings
-  hrMeetChat:   { title: 'Chat scheduler',     body: "Describe the meeting in plain English. Include names, dates, times, agenda — the more detail, the better the invite." },
-  hrMeetList:   { title: 'Scheduled meetings', body: 'Every meeting scheduled through the agent. Click any row to see full details and participants.' },
-  hrMeetExport: { title: 'Export as .ics',     body: 'One-click .ics download. Drop it into Google, Outlook, or Apple Calendar and the event lands correctly.' },
+  hrMeetChat:           { title: 'Chat scheduler',              body: "Describe the meeting in plain English. Include names, dates, times, agenda — the more detail, the better the invite." },
+  hrMeetList:           { title: 'Scheduled meetings',          body: 'Every meeting scheduled through the agent. Click any row to see full details and participants.' },
+  hrMeetExport:         { title: 'Export as .ics',              body: 'One-click .ics download. Drop it into Google, Outlook, or Apple Calendar and the event lands correctly.' },
+  hrMeetSidebar:        { title: 'Scheduling conversations',    body: 'Your saved scheduling chats. Reopen any one to see exactly what was booked and when.' },
+  hrMeetNewChat:        { title: 'Start a new chat',            body: "Open a fresh scheduling conversation — use when the meeting has nothing to do with the previous topic." },
+  hrMeetTabs:           { title: 'Chat vs. Meetings',           body: "'Chat' is where you tell the AI what to schedule. 'Meetings' is the actual list of everything booked." },
+  hrMeetChatSamples:    { title: 'Sample prompts',              body: "Example phrasings the scheduler understands. Click one to load it as your prompt." },
+  hrMeetChatInput:      { title: 'Describe the meeting',        body: "Type in plain English. Include names, date/time, duration, and agenda. Enter to send, Shift+Enter for a new line." },
+  hrMeetChatSend:       { title: 'Send',                        body: 'Submit your request. The AI books the meeting or asks for missing info (like exact time).' },
+  hrMeetStats:          { title: 'Meetings snapshot',           body: 'Total, upcoming, completed, cancelled — at a glance.' },
+  hrMeetRefresh:        { title: 'Refresh',                     body: 'Reload the meetings list from the backend. Handy if a colleague just scheduled something.' },
+  hrMeetRowActions:     { title: 'Per-meeting actions',         body: 'Export .ics, Edit, Extract action items (AI pulls tasks from the transcript), or Cancel — right on each row.' },
 
   // Leave
   hrLeaveList: { title: 'Leave requests', body: 'Pending, approved, and rejected requests all in one list. Approve or reject inline; the requester is notified automatically.' },
