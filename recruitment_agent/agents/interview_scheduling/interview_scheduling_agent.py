@@ -24,22 +24,53 @@ from recruitment_agent.models import Interview
 logger = logging.getLogger(__name__)
 
 
+def _company_for_interview(interview: 'Interview'):
+    """Resolve the Company that owns this interview, so we use its connected
+    Google Calendar. Prefer the interview's company_user; fall back to the
+    job the CV was matched against."""
+    try:
+        cu = getattr(interview, 'company_user', None)
+        if cu and getattr(cu, 'company', None):
+            return cu.company
+    except Exception:
+        pass
+    try:
+        cv = getattr(interview, 'cv_record', None)
+        jd = getattr(cv, 'job_description', None) if cv else None
+        if jd and getattr(jd, 'company', None):
+            return jd.company
+    except Exception:
+        pass
+    return None
+
+
 def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60) -> Optional[str]:
     """
-    Create a Google Calendar event with a Meet link for the interview.
-    Returns the Google Meet URL or None if unavailable.
+    Create a Google Calendar event with a Meet link on the *company's* connected
+    calendar. Returns the Google Meet URL, or None if the company hasn't
+    connected Google Calendar (there is no global env fallback).
     """
     try:
         from google.oauth2.credentials import Credentials
         from google.auth.transport.requests import Request
         from googleapiclient.discovery import build
 
+        # Platform OAuth app credentials (same app all companies connect through).
         client_id     = getattr(settings, 'GOOGLE_CLIENT_ID', '')
         client_secret = getattr(settings, 'GOOGLE_CLIENT_SECRET', '')
-        refresh_token = getattr(settings, 'GOOGLE_REFRESH_TOKEN', '')
 
-        if not all([client_id, client_secret, refresh_token]):
-            logger.warning("Google Meet not configured — skipping Meet link creation.")
+        company = _company_for_interview(interview)
+        cfg = (getattr(company, 'google_calendar_config', None) or {}) if company else {}
+        refresh_token = cfg.get('refresh_token', '')
+        calendar_id   = cfg.get('calendar_id') or 'primary'
+
+        if not cfg.get('connected') or not refresh_token:
+            logger.info(
+                f"Company for interview {interview.id} has not connected Google Calendar — skipping Meet link."
+            )
+            return None
+        if not all([client_id, client_secret]):
+            logger.warning("Google OAuth app not configured on server — skipping Meet link creation.")
             return None
 
         creds = Credentials(
@@ -80,7 +111,7 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
         }
 
         created  = service.events().insert(
-            calendarId='primary',
+            calendarId=calendar_id,
             body=event,
             conferenceDataVersion=1,
             sendUpdates='none',
@@ -96,7 +127,7 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
     except Exception as exc:
         logger.error(f"Failed to create Google Meet link for interview {interview.id}: {exc}")
         print(f"❌ Google Meet link creation failed: {exc}")
-        print("   → Run 'python scripts/refresh_google_token.py' to regenerate the refresh token in .env")
+        print("   → The company may need to reconnect Google Calendar in Recruitment → Settings → Integrations.")
         return None
 
 

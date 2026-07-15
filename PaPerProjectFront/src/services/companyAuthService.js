@@ -204,6 +204,18 @@ export const getCompanyProfile = async () =>
 export const updateCompanyProfile = async (data) =>
   companyApi.put('/company/profile/update', data);
 
+/** Get the company's Google Calendar connection status (no secrets). */
+export const getGoogleCalendarStatus = async () =>
+  companyApi.get('/company/integrations/google-calendar');
+
+/** Start the OAuth connect flow — returns { authUrl } to redirect the browser to. */
+export const connectGoogleCalendar = async () =>
+  companyApi.post('/company/integrations/google-calendar/connect', {});
+
+/** Disconnect the company's Google Calendar. */
+export const disconnectGoogleCalendar = async () =>
+  companyApi.delete('/company/integrations/google-calendar/disconnect');
+
 /**
  * Step 1 — request a password reset OTP for the given email.
  * Backend always returns a generic success (no email enumeration).
@@ -279,8 +291,11 @@ const logoutCompany = async () => {
     localStorage.removeItem('company_user');
     localStorage.removeItem('company_purchased_modules');
     // Reset per-session UI flags so the next login is treated as fresh
-    // (e.g. the recruitment "Create Job with AI" auto-open modal).
+    // (e.g. the recruitment "Create Job with AI" auto-open modal and the
+    // operations "Upload Document" auto-open modal).
     sessionStorage.removeItem('recruitment_ai_modal_shown');
+    sessionStorage.removeItem('operations_upload_modal_shown');
+    sessionStorage.removeItem('operations_authoring_onboarded');
   }
 };
 
@@ -297,6 +312,9 @@ export default {
   signupCompany,
   getCompanyProfile,
   updateCompanyProfile,
+  getGoogleCalendarStatus,
+  connectGoogleCalendar,
+  disconnectGoogleCalendar,
   requestPasswordReset,
   verifyResetOtp,
   resetPassword,

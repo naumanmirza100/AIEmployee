@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent, ChevronsUpDown, Check, Search, Settings, ArrowRight } from 'lucide-react';
+import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent, ChevronsUpDown, Check, Search, Settings, ArrowRight, Info } from 'lucide-react';
 import { processCVs, getJobDescriptions, getInterviewSettings } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
@@ -227,6 +227,26 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
       }}
     >
       <div className="p-4 md:p-6 lg:p-8 space-y-6 w-full max-w-full">
+        {/* Manual-processing notice */}
+        <div
+          className="flex items-start gap-3 rounded-xl px-4 py-3.5"
+          style={{
+            background: 'linear-gradient(90deg, rgba(167,139,250,0.10) 0%, rgba(96,165,250,0.07) 100%)',
+            border: '1px solid rgba(167,139,250,0.30)',
+          }}
+        >
+          <div className="shrink-0 mt-0.5 rounded-lg p-1.5" style={{ background: 'rgba(167,139,250,0.15)' }}>
+            <Info className="h-4 w-4 text-violet-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-white">This page is for manual CV processing</p>
+            <p className="text-xs text-white/60 mt-0.5">
+              Upload CVs here to screen candidates yourself. Applications submitted through a job's public
+              apply link are screened automatically — you don't need to upload those.
+            </p>
+          </div>
+        </div>
+
         {/* Upload Form Card */}
         <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader className="p-4 sm:p-6">

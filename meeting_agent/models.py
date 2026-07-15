@@ -205,6 +205,16 @@ class ExecutiveTask(models.Model):
         on_delete=models.SET_NULL,
         related_name='linked_tasks',
     )
+    # Flat one-level parent/child link — a subtask is a full ExecutiveTask
+    # with its own status/priority/assignees, just nested under a parent for
+    # display and progress rollup. Subtasks of subtasks are not supported
+    # (mirrors the core.Subtask pattern used elsewhere in this codebase).
+    parent_task = models.ForeignKey(
+        'self',
+        null=True, blank=True,
+        on_delete=models.CASCADE,
+        related_name='subtasks',
+    )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

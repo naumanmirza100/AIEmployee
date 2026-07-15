@@ -16,6 +16,7 @@ from api.views import analytics
 from api.views import notification
 from api.views import company
 from api.views import company_auth
+from api.views import company_integrations
 from api.views import company_users
 from api.views import user_tasks
 from api.views import company_user_tasks
@@ -186,6 +187,11 @@ urlpatterns = [
     re_path(r'^company/logout/?$', company_auth.logout_company_user, name='logout_company_user'),
     re_path(r'^company/profile/?$', company_auth.get_company_profile, name='get_company_profile'),
     re_path(r'^company/profile/update/?$', company_auth.update_company_profile, name='update_company_profile'),
+    # Company-wide integrations (Google Calendar OAuth connect)
+    re_path(r'^company/integrations/google-calendar/?$', company_integrations.google_calendar_status, name='company_gcal_status'),  # GET
+    re_path(r'^company/integrations/google-calendar/connect/?$', company_integrations.google_calendar_connect, name='company_gcal_connect'),  # POST
+    re_path(r'^company/integrations/google-calendar/callback/?$', company_integrations.google_calendar_callback, name='company_gcal_callback'),  # GET (public)
+    re_path(r'^company/integrations/google-calendar/disconnect/?$', company_integrations.google_calendar_disconnect, name='company_gcal_disconnect'),  # DELETE
     re_path(r'^company/forgot-password/?$', company_auth.forgot_password, name='company_forgot_password'),
     re_path(r'^company/verify-otp/?$', company_auth.verify_reset_otp, name='company_verify_reset_otp'),
     re_path(r'^company/reset-password/?$', company_auth.reset_password, name='company_reset_password'),
@@ -874,6 +880,7 @@ urlpatterns = [
 
     # Meetings
     re_path(r'^exec-meeting/ai/schedule/?$', exec_meeting_api.schedule_meeting_ai, name='exec_schedule_meeting_ai'),  # POST
+    re_path(r'^exec-meeting/ai/generate-description/?$', exec_meeting_api.generate_meeting_description, name='exec_generate_meeting_description'),  # POST
     re_path(r'^exec-meeting/meetings/?$', exec_meeting_api.meeting_list, name='exec_meeting_list'),  # GET, POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/?$', exec_meeting_api.meeting_detail, name='exec_meeting_detail'),  # GET, PATCH, DELETE
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST
@@ -881,13 +888,16 @@ urlpatterns = [
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/documents/?$', exec_meeting_api.meeting_documents, name='exec_meeting_documents'),  # GET
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/participants/?$', exec_meeting_api.meeting_participants, name='exec_meeting_participants'),  # GET, POST, DELETE
     re_path(r'^exec-meeting/meetings/suggest-slots/?$', exec_meeting_api.meeting_suggest_slots, name='exec_meeting_suggest_slots'),  # GET
+    re_path(r'^exec-meeting/meetings/check-conflicts/?$', exec_meeting_api.meeting_check_conflicts, name='exec_meeting_check_conflicts'),  # POST
     re_path(r'^exec-meeting/users/search/?$', exec_meeting_api.search_company_users, name='exec_users_search'),  # GET ?q=
 
     # Action Items
     re_path(r'^exec-meeting/action-items/(?P<item_id>\d+)/?$', exec_meeting_api.action_item_detail, name='exec_action_item_detail'),  # GET, PATCH
+    re_path(r'^exec-meeting/action-items/(?P<item_id>\d+)/convert-to-task/?$', exec_meeting_api.action_item_convert_to_task, name='exec_action_item_convert_to_task'),  # POST
 
     # Tasks
     re_path(r'^exec-meeting/tasks/?$', exec_meeting_api.task_list, name='exec_task_list'),  # GET, POST
+    re_path(r'^exec-meeting/tasks/ai/generate-description/?$', exec_meeting_api.generate_task_description, name='exec_generate_task_description'),  # POST
     re_path(r'^exec-meeting/tasks/ai/prioritize/?$', exec_meeting_api.task_prioritize_ai, name='exec_task_prioritize_ai'),  # POST
     re_path(r'^exec-meeting/tasks/ai/workload/?$', exec_meeting_api.task_workload_analysis, name='exec_task_workload'),  # POST
     re_path(r'^exec-meeting/tasks/(?P<task_id>\d+)/?$', exec_meeting_api.task_detail, name='exec_task_detail'),  # GET, PATCH, DELETE
@@ -904,7 +914,9 @@ urlpatterns = [
     # Notifications
     re_path(r'^exec-meeting/notifications/?$', exec_meeting_api.notification_list, name='exec_notification_list'),  # GET
     re_path(r'^exec-meeting/notifications/mark-all-read/?$', exec_meeting_api.notification_mark_all_read, name='exec_notification_mark_all_read'),  # PATCH
+    re_path(r'^exec-meeting/notifications/bulk-delete/?$', exec_meeting_api.notification_bulk_delete, name='exec_notification_bulk_delete'),  # POST
     re_path(r'^exec-meeting/notifications/(?P<notification_id>\d+)/read/?$', exec_meeting_api.notification_mark_read, name='exec_notification_mark_read'),  # PATCH
+    re_path(r'^exec-meeting/notifications/(?P<notification_id>\d+)/?$', exec_meeting_api.notification_delete, name='exec_notification_delete'),  # DELETE
     re_path(r'^exec-meeting/notifications/daily-digest/?$', exec_meeting_api.notification_daily_digest, name='exec_notification_daily_digest'),  # POST
 
     # Chat — per sub-agent

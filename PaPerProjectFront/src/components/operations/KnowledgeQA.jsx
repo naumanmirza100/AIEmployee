@@ -3,8 +3,12 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog';
+import {
   Loader2, Send, MessageSquare, Plus, Trash2, Bot, Search,
   ChevronsLeft, ChevronsRight, FileText, Pencil, Check, X,
+  HelpCircle, Upload, Sparkles, MessageSquareText, Quote, Lightbulb,
 } from 'lucide-react';
 import operationsService from '@/services/operationsAgentService';
 
@@ -178,6 +182,7 @@ const KnowledgeQA = () => {
   const [showSearch, setShowSearch] = useState(false);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const scrollRef = useRef(null);
 
@@ -599,6 +604,16 @@ const KnowledgeQA = () => {
                 </div>
               </div>
             </div>
+            {/* Onboarding / how-it-works */}
+            <button
+              onClick={() => setShowOnboarding(true)}
+              title="How this page works"
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+              style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}`, color: ACCENT }}
+            >
+              <HelpCircle className="h-4 w-4" />
+              <span className="hidden sm:inline">How it works</span>
+            </button>
           </div>
 
           {/* Messages */}
@@ -683,6 +698,73 @@ const KnowledgeQA = () => {
           </div>
         </div>
       </div>
+
+      {/* ── Onboarding / How-it-works modal ── */}
+      <Dialog open={showOnboarding} onOpenChange={setShowOnboarding}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto border-white/10 text-white" style={{ background: '#100a20' }}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <span className="flex items-center justify-center w-8 h-8 rounded-lg" style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}>
+                <Sparkles className="h-4 w-4" style={{ color: ACCENT }} />
+              </span>
+              Knowledge Q&amp;A — how it works
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              Chat with an AI that answers using the documents your team has uploaded.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-1">
+            {[
+              {
+                icon: Upload,
+                title: '1. Upload your documents first',
+                desc: 'Go to the Documents tab and upload files (PDF, Word, etc.). The assistant can only answer from what you have uploaded.',
+              },
+              {
+                icon: MessageSquareText,
+                title: '2. Ask a question',
+                desc: 'Type a question in the box below — e.g. “What is our refund policy?” The AI reads your documents and replies.',
+              },
+              {
+                icon: Quote,
+                title: '3. Answers cite their sources',
+                desc: 'Each answer shows which documents it came from, so you can verify and open the original.',
+              },
+              {
+                icon: MessageSquare,
+                title: '4. Organize your chats',
+                desc: 'Use the sidebar to start a New Chat, search past conversations, rename them, or delete ones you no longer need.',
+              },
+            ].map((step, i) => (
+              <div key={i} className="flex items-start gap-3 rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <span className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg mt-0.5" style={{ backgroundColor: ACCENT_SOFT }}>
+                  <step.icon className="h-4 w-4" style={{ color: ACCENT }} />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white">{step.title}</p>
+                  <p className="text-xs text-white/60 mt-0.5 leading-relaxed">{step.desc}</p>
+                </div>
+              </div>
+            ))}
+
+            <div className="flex items-start gap-2 rounded-xl p-3" style={{ background: 'rgba(245,158,11,0.10)', border: `1px solid ${ACCENT_BORDER}` }}>
+              <Lightbulb className="h-4 w-4 shrink-0 mt-0.5" style={{ color: ACCENT }} />
+              <p className="text-xs text-white/75 leading-relaxed">
+                <span className="font-semibold text-white">Tip:</span> Ask specific questions and mention the topic — the more precise your question, the better the cited answer.
+              </p>
+            </div>
+
+            <Button
+              onClick={() => setShowOnboarding(false)}
+              className="w-full border-0"
+              style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: '#fff' }}
+            >
+              Got it
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

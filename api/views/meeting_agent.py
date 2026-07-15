@@ -103,6 +103,27 @@ def _email_divider() -> str:
     return '<tr><td colspan="2"><hr style="border:none;border-top:1px solid #f3f4f6;margin:6px 0;"/></td></tr>'
 
 
+def _email_agenda_block(agenda) -> str:
+    """Render a meeting's agenda (a list of strings) as an HTML bullet list for
+    emails. Returns '' when there's no agenda so it can be dropped straight into
+    an f-string."""
+    items = [str(a).strip() for a in (agenda or []) if str(a).strip()]
+    if not items:
+        return ''
+    import html as _html
+    lis = ''.join(
+        f'<li style="margin:0 0 6px;color:#374151;font-size:13px;line-height:1.5;">{_html.escape(it)}</li>'
+        for it in items
+    )
+    return (
+        '<div style="margin:16px 0 0;">'
+        '<p style="margin:0 0 6px;color:#7c3aed;font-size:12px;font-weight:700;'
+        'text-transform:uppercase;letter-spacing:0.06em;">Agenda</p>'
+        f'<ul style="margin:0;padding-left:18px;">{lis}</ul>'
+        '</div>'
+    )
+
+
 def _send_email_safe(subject, html_body, recipient_email, plain_body=''):
     if not recipient_email or '@' not in recipient_email:
         logger.warning("Email skipped — invalid recipient: %r", recipient_email)
@@ -132,6 +153,7 @@ def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_
         f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{meeting.description}</p>'
         if meeting.description else ''
     )
+    agenda_block = _email_agenda_block(meeting.agenda)
     content = f"""
       <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;">Meeting Updated</p>
       <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">
@@ -196,6 +218,7 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
         f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{meeting.description}</p>'
         if meeting.description else ''
     )
+    agenda_block = _email_agenda_block(meeting.agenda)
     content = f"""
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
@@ -229,6 +252,7 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
               {_email_detail_row('Organizer', organizer_name)}
             </table>
             {desc_block}
+            {agenda_block}
           </td>
         </tr>
       </table>
@@ -294,6 +318,64 @@ def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
     """
     html = _email_base_html(content, preview_text=f"New task assigned: {task.title}")
     _send_email_safe(f"Task Assigned: {task.title}", html, assignee_cu.email)
+
+
+def _send_subtask_added_email(recipient_cu, parent_task, subtask, added_by_name):
+    """Notify a parent task's assignee that a subtask was added under their task.
+    Lists the subtask's own assignees (if any) so the recipient knows who's on it."""
+    first_name = (recipient_cu.full_name or '').split()[0] if recipient_cu.full_name else 'there'
+    sub_assignees = list(subtask.assignees.all())
+    assignees_str = ', '.join(cu.full_name for cu in sub_assignees) if sub_assignees else 'No one assigned yet'
+    desc_block = (
+        f'<p style="margin:16px 0 0;color:#374151;font-size:14px;line-height:1.65;">{subtask.description}</p>'
+        if subtask.description else ''
+    )
+    content = f"""
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td align="center" style="padding-bottom:20px;">
+            <div style="width:56px;height:56px;background:#eff6ff;border-radius:50%;
+                        font-size:26px;line-height:56px;text-align:center;">🧩</div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 6px;color:#111827;font-size:22px;font-weight:700;text-align:center;">
+        New Subtask Added
+      </p>
+      <p style="margin:0 0 24px;color:#6b7280;font-size:14px;text-align:center;">
+        Hi {first_name}, {added_by_name} added a subtask under your task "{parent_task.title}".
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;margin-bottom:4px;">
+        <tr>
+          <td style="padding:20px 24px;">
+            <p style="margin:0 0 14px;color:#2563eb;font-size:12px;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;">Subtask Details</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              {_email_detail_row('Parent task', parent_task.title)}
+              {_email_divider()}
+              {_email_detail_row('Subtask', subtask.title)}
+              {_email_divider()}
+              {_email_detail_row('Priority', subtask.priority.capitalize())}
+              {_email_divider()}
+              {_email_detail_row('Due Date', str(subtask.due_date) if subtask.due_date else 'Not set')}
+              {_email_divider()}
+              {_email_detail_row('Assigned to', assignees_str)}
+              {_email_divider()}
+              {_email_detail_row('Added by', added_by_name)}
+            </table>
+            {desc_block}
+          </td>
+        </tr>
+      </table>
+      <hr style="border:none;border-top:1px solid #f3f4f6;margin:24px 0 20px;"/>
+      <p style="margin:0;color:#374151;font-size:14px;line-height:1.8;">
+        Please log in to the platform to view this subtask.<br/><br/>
+        <strong style="color:#111827;">AI Executive Assistant</strong>
+      </p>
+    """
+    html = _email_base_html(content, preview_text=f"New subtask added: {subtask.title}")
+    _send_email_safe(f"Subtask added to \"{parent_task.title}\": {subtask.title}", html, recipient_cu.email)
 
 
 def _send_meeting_removal_email(cu, meeting, removed_by_name):
@@ -540,12 +622,12 @@ def _resolve_assignees(assignee_list, company):
     return result
 
 
-def _serialize_task(task):
+def _serialize_task(task, include_subtasks=True):
     assignees = [
         {'id': cu.id, 'full_name': cu.full_name, 'email': cu.email}
         for cu in task.assignees.all()
     ]
-    return {
+    data = {
         'id': task.id,
         'title': task.title,
         'description': task.description,
@@ -556,9 +638,16 @@ def _serialize_task(task):
         'ai_reasoning': task.ai_reasoning,
         'assignees': assignees,
         'linked_meeting_id': task.linked_meeting_id,
+        'parent_task_id': task.parent_task_id,
         'created_at': task.created_at.isoformat(),
         'updated_at': task.updated_at.isoformat(),
     }
+    if include_subtasks:
+        subtasks = list(task.subtasks.all())
+        data['subtasks'] = [_serialize_task(st, include_subtasks=False) for st in subtasks]
+        data['subtask_count'] = len(subtasks)
+        data['subtask_done_count'] = sum(1 for st in subtasks if st.status == 'done')
+    return data
 
 
 def _serialize_notification(notif):
@@ -633,6 +722,30 @@ def schedule_meeting_ai(request):
         raise
     except Exception as e:
         logger.error("schedule_meeting_ai error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecLLMThrottle])
+def generate_meeting_description(request):
+    """AI-expand a meeting title + a few rough points into a description + agenda."""
+    company_user = request.user
+    title = (request.data.get('title') or '').strip()
+    points = (request.data.get('points') or '').strip()
+
+    if not points:
+        return Response({'status': 'error', 'message': 'points is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        agent = _get_agent('meeting_scheduling', company_user)
+        data = agent.generate_description(title, points)
+        return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error("generate_meeting_description error: %s", e)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -956,6 +1069,29 @@ def meeting_suggest_slots(request):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def meeting_check_conflicts(request):
+    """Return meetings that clash with a proposed time window (no LLM, DB only).
+    Body: { scheduled_at, duration_minutes, exclude_meeting_id? }.
+    Used before creating/updating a meeting to warn the user of a double-booking."""
+    company_user = request.user
+    scheduled_at = _parse_datetime(request.data.get('scheduled_at'))
+    if not scheduled_at:
+        return Response({'status': 'error', 'message': 'Valid scheduled_at is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    duration = int(request.data.get('duration_minutes') or 60)
+    exclude_id = request.data.get('exclude_meeting_id') or None
+    try:
+        agent = _get_agent('meeting_scheduling', company_user)
+        conflicts = agent.check_conflicts(company_user.id, scheduled_at, duration, exclude_id)
+        return Response({'status': 'success', 'conflicts': conflicts})
+    except Exception as e:
+        logger.error("meeting_check_conflicts error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ===========================================================================
 # MEETING NOTES
 # ===========================================================================
@@ -1020,6 +1156,24 @@ def meeting_notes(request, meeting_id):
             )
             created_items.append({'id': item.id, 'title': item.title})
 
+        # Notify the organizer that action items were extracted, so they don't
+        # sit unseen inside the Notes panel (these have no due date, so the
+        # separate "overdue action item" scan never surfaces them).
+        if created_items:
+            ExecNotification.objects.create(
+                company_user_id=company_user.id,
+                notification_type='action_items_added',
+                severity='info',
+                title=f"{len(created_items)} action item(s) from “{meeting.title}”",
+                message=(
+                    f"AI pulled {len(created_items)} action item(s) out of the notes for "
+                    f"“{meeting.title}”: " + ', '.join(ci['title'] for ci in created_items[:5])
+                    + ('…' if len(created_items) > 5 else '')
+                ),
+                meeting=meeting,
+                data={'meeting_id': meeting.id, 'action_item_ids': [ci['id'] for ci in created_items]},
+            )
+
         return Response({'status': 'success', 'notes': {
             'ai_summary': note.ai_summary,
             'key_decisions': note.key_decisions,
@@ -1065,6 +1219,41 @@ def action_item_detail(request, item_id):
     return Response({'status': 'success', 'message': 'Action item updated.'})
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def action_item_convert_to_task(request, item_id):
+    """Turn a meeting action item into a trackable ExecutiveTask.
+
+    The new task carries the action item's title/description/priority/due date
+    and is linked back to its meeting. The action item is marked 'done' so it
+    doesn't get converted twice. Body (optional): { parent_task_id } to create
+    it as a subtask of an existing task instead of a standalone one."""
+    company_user = request.user
+    item = get_object_or_404(MeetingActionItem, id=item_id, meeting__organizer=company_user)
+
+    parent_task_id = request.data.get('parent_task_id') or None
+    if parent_task_id:
+        parent = get_object_or_404(ExecutiveTask, id=parent_task_id, company_user=company_user)
+        if parent.parent_task_id:
+            return Response({'status': 'error', 'message': 'Subtasks cannot be nested more than one level deep.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    task = ExecutiveTask.objects.create(
+        company_user=company_user,
+        title=item.title,
+        description=item.description or '',
+        priority=item.priority or 'medium',
+        due_date=item.due_date or None,
+        linked_meeting=item.meeting,
+        parent_task_id=parent_task_id,
+    )
+    # Mark the source action item done so it isn't converted again.
+    item.status = 'done'
+    item.save(update_fields=['status'])
+    return Response({'status': 'success', 'task': _serialize_task(task), 'message': 'Action item converted to task.'}, status=status.HTTP_201_CREATED)
+
+
 # ===========================================================================
 # TASKS
 # ===========================================================================
@@ -1080,7 +1269,9 @@ def task_list(request):
     if request.method == 'GET':
         status_filter = request.query_params.get('status')
         priority_filter = request.query_params.get('priority')
-        qs = ExecutiveTask.objects.filter(company_user=company_user)
+        # Top-level list only — subtasks ride along nested under their parent
+        # (via _serialize_task's 'subtasks' key) instead of appearing twice.
+        qs = ExecutiveTask.objects.filter(company_user=company_user, parent_task__isnull=True)
         if status_filter:
             qs = qs.filter(status=status_filter)
         if priority_filter:
@@ -1091,14 +1282,37 @@ def task_list(request):
     if not title:
         return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    due_date = request.data.get('due_date') or None
+    parent_task_id = request.data.get('parent_task_id') or None
+    parent = None
+    if parent_task_id:
+        # Subtasks nest one level only — a subtask can't itself have a parent
+        # that is already a subtask.
+        parent = get_object_or_404(ExecutiveTask, id=parent_task_id, company_user=company_user)
+        if parent.parent_task_id:
+            return Response({'status': 'error', 'message': 'Subtasks cannot be nested more than one level deep.'}, status=status.HTTP_400_BAD_REQUEST)
+        # A subtask must finish on or before its parent — a due date after the
+        # parent's makes no sense for a piece of that parent's work.
+        if due_date and parent.due_date:
+            try:
+                sub_dt = datetime.strptime(str(due_date), '%Y-%m-%d').date()
+                if sub_dt > parent.due_date:
+                    return Response({
+                        'status': 'error',
+                        'message': f"Subtask due date can't be after the parent task's due date ({parent.due_date}).",
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            except (ValueError, TypeError):
+                pass
+
     task = ExecutiveTask.objects.create(
         company_user=company_user,
         title=title,
         description=request.data.get('description', ''),
         status=request.data.get('status', 'todo'),
         priority=request.data.get('priority', 'medium'),
-        due_date=request.data.get('due_date') or None,
+        due_date=due_date,
         linked_meeting_id=request.data.get('linked_meeting_id') or None,
+        parent_task_id=parent_task_id,
     )
     # assignees — list of {id, user_type} dicts
     assignee_list = request.data.get('assignees', [])
@@ -1108,6 +1322,17 @@ def task_list(request):
         for cu in resolved:
             if cu.email:
                 _send_task_assignment_email(cu, task, company_user.full_name)
+
+    # For a subtask, also notify the PARENT task's assignees that a subtask was
+    # added under their task (so they see it appear on their work item). Skip
+    # anyone who's already on the subtask itself — they just got the assignment
+    # email above — and skip the creator.
+    if parent is not None:
+        sub_assignee_ids = {cu.id for cu in resolved}
+        for pcu in parent.assignees.all():
+            if pcu.email and pcu.id not in sub_assignee_ids and pcu.id != company_user.id:
+                _send_subtask_added_email(pcu, parent, task, company_user.full_name)
+
     return Response({'status': 'success', 'task': _serialize_task(task)}, status=status.HTTP_201_CREATED)
 
 
@@ -1154,6 +1379,30 @@ def task_detail(request, task_id):
     for cu in assignees_to_notify:
         _send_task_deleted_email(cu, task_title, task_priority, company_user.full_name)
     return Response({'status': 'success', 'message': 'Task deleted.'})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecLLMThrottle])
+def generate_task_description(request):
+    """AI-expand a task title + a few rough points into a full description."""
+    company_user = request.user
+    title = (request.data.get('title') or '').strip()
+    points = (request.data.get('points') or '').strip()
+
+    if not points:
+        return Response({'status': 'error', 'message': 'points is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        agent = _get_agent('task_prioritization', company_user)
+        data = agent.generate_description(title, points)
+        return Response({'status': 'success', 'data': data}, status=status.HTTP_200_OK)
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error("generate_task_description error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
@@ -1278,7 +1527,30 @@ def calendar_plan_week(request):
             models.Q(due_date__isnull=True) |
             models.Q(due_date__gte=_week_start_date, due_date__lte=_week_end_date)
         )
-    tasks = [_serialize_task(t) for t in tasks_qs[:30]]
+    # Flatten for the planner: each task AND each of its subtasks becomes its own
+    # schedulable line item, so subtasks show up in the weekly plan too (not just
+    # buried inside their parent). Subtasks are prefixed with the parent title.
+    tasks = []
+    for t in tasks_qs[:30]:
+        s = _serialize_task(t)
+        subtasks = s.pop('subtasks', []) or []
+        tasks.append(s)
+        for st in subtasks:
+            # Include any subtask that is still open — anything that isn't
+            # finished/cancelled (so 'review' and 'blocked' count too, not just
+            # 'todo'/'in_progress'). Then apply the same week window as parents.
+            if st.get('status') in ('done', 'completed', 'cancelled'):
+                continue
+            st_due = (st.get('due_date') or '')[:10]
+            if st_due:
+                if include_past_tasks:
+                    if st_due > _week_end_date.isoformat():
+                        continue
+                else:
+                    if not (_week_start_date.isoformat() <= st_due <= _week_end_date.isoformat()):
+                        continue
+            st = {**st, 'title': f"{t.title} → {st.get('title')}", 'is_subtask': True}
+            tasks.append(st)
 
     logger.info("calendar_plan_week: user=%s week_start=%s meetings=%d tasks=%d include_past=%s",
                 company_user.id, week_start, len(meetings), len(tasks), include_past_tasks)
@@ -1354,7 +1626,7 @@ def document_draft(request):
     meeting_id = request.data.get('meeting_id')
     save = request.data.get('save', False)
 
-    valid_doc_types = ['agenda', 'minutes', 'briefing', 'report']
+    valid_doc_types = ['agenda', 'minutes', 'briefing']
     if doc_type not in valid_doc_types:
         return Response({'status': 'error', 'message': f'doc_type must be one of {valid_doc_types}'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1429,19 +1701,6 @@ def document_draft(request):
                 request.data.get('context', ''),
                 request.data.get('key_points'),
                 request.data.get('audience', 'Executive Team') or 'Executive Team',
-            )
-
-        else:  # report
-            report_type_label = (
-                request.data.get('report_type') or
-                request.data.get('title') or
-                'Status'
-            )
-            content = agent.draft_report(
-                report_type_label,
-                request.data.get('data', {}),
-                request.data.get('period', ''),
-                request.data.get('context', ''),
             )
 
         result = {'status': 'success', 'doc_type': doc_type, 'content': content}
@@ -1584,6 +1843,32 @@ def notification_mark_all_read(request):
     company_user = request.user
     ExecNotification.objects.filter(company_user=company_user, is_read=False).update(is_read=True)
     return Response({'status': 'success', 'message': 'All notifications marked as read.'})
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def notification_delete(request, notification_id):
+    """Delete a single notification."""
+    company_user = request.user
+    notif = get_object_or_404(ExecNotification, id=notification_id, company_user=company_user)
+    notif.delete()
+    return Response({'status': 'success', 'message': 'Notification deleted.'})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def notification_bulk_delete(request):
+    """Delete multiple notifications by id. Body: { ids: [1, 2, ...] }."""
+    company_user = request.user
+    ids = request.data.get('ids') or []
+    if not isinstance(ids, list) or not ids:
+        return Response({'status': 'error', 'message': 'ids (non-empty list) is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    deleted, _ = ExecNotification.objects.filter(company_user=company_user, id__in=ids).delete()
+    return Response({'status': 'success', 'message': f'{deleted} notification(s) deleted.', 'deleted': deleted})
 
 
 @api_view(['POST'])

@@ -9,6 +9,7 @@ import {
   PenTool, Sparkles, FileText, Loader2, Plus, Trash2, Save, Search,
   RefreshCw, Copy, X, ChevronsLeft, ChevronsRight,
   Eye, Code, Pencil, History, Layers, ChevronDown, Zap,
+  HelpCircle, ArrowRight, ArrowLeft, ArrowDown, ArrowUp, Check,
 } from 'lucide-react';
 import * as operationsService from '@/services/operationsAgentService';
 import ExportMenu from './ExportMenu';
@@ -142,6 +143,19 @@ const DocumentAuthoring = () => {
   const [generatedDocs, setGeneratedDocs] = useState([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [sidebarSearch, setSidebarSearch] = useState('');
+
+  // Onboarding wizard — auto-opens the first time this page is visited in the
+  // session (flag cleared on logout, like the other Operations auto-modals).
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    if (typeof window !== 'undefined' && !sessionStorage.getItem('operations_authoring_onboarded')) {
+      sessionStorage.setItem('operations_authoring_onboarded', '1');
+      return true;
+    }
+    return false;
+  });
+  const [onboardStep, setOnboardStep] = useState(0);
+  // Little hint above the Guide button; hidden once the user opens the tour.
+  const [showGuideHint, setShowGuideHint] = useState(true);
 
   // Create form state
   const [template, setTemplate] = useState('weekly_report');
@@ -560,16 +574,40 @@ const DocumentAuthoring = () => {
                   </div>
                   <span className="text-sm font-semibold text-white/90">My documents</span>
                 </div>
-                <button
-                  onClick={() => setShowSidebar(false)}
-                  title="Hide sidebar"
-                  className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/20 hover:bg-white/5 transition-colors"
-                >
-                  <ChevronsLeft className="h-3.5 w-3.5 text-white/70" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <div className="relative">
+                    {showGuideHint && !showOnboarding && (
+                      <div className="group absolute right-full top-1/2 -translate-y-1/2 mr-1.5 flex items-center gap-1 z-30">
+                        <span
+                          className="whitespace-nowrap rounded-md px-2 py-1 text-[10px] font-semibold shadow-lg opacity-0 -translate-x-1 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0"
+                          style={{ backgroundColor: ACCENT, color: '#1a0e00' }}
+                        >
+                          Want the tour? Click
+                        </span>
+                        <ArrowRight className="h-4 w-4 animate-nudge-x cursor-pointer" style={{ color: ACCENT }} />
+                      </div>
+                    )}
+                  <button
+                    onClick={() => { setShowGuideHint(false); setOnboardStep(0); setShowOnboarding(true); }}
+                    title="How Authoring works"
+                    className="h-7 w-7 flex items-center justify-center rounded-md border transition-colors"
+                    style={{ backgroundColor: ACCENT_SOFT, borderColor: ACCENT_BORDER, color: ACCENT }}
+                  >
+                    <HelpCircle className="h-3.5 w-3.5" />
+                  </button>
+                  </div>
+                  <button
+                    onClick={() => setShowSidebar(false)}
+                    title="Hide sidebar"
+                    className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/20 hover:bg-white/5 transition-colors"
+                  >
+                    <ChevronsLeft className="h-3.5 w-3.5 text-white/70" />
+                  </button>
+                </div>
               </div>
 
               <Button
+                data-tour="new-doc"
                 onClick={handleNewDocument}
                 size="sm"
                 className="text-xs h-8 w-full font-semibold"
@@ -726,7 +764,205 @@ const DocumentAuthoring = () => {
         loading={!!confirmState?.loading}
         onConfirm={confirmState?.onConfirm}
       />
+
+      <AuthoringOnboarding
+        open={showOnboarding}
+        step={onboardStep}
+        setStep={setOnboardStep}
+        onClose={() => setShowOnboarding(false)}
+      />
     </div>
+  );
+};
+
+// ──────────────────────────────────────────────
+// Onboarding wizard — a first-run, step-by-step tour of the Authoring page.
+// ──────────────────────────────────────────────
+const ONBOARDING_STEPS = [
+  {
+    target: null, // welcome — centered, no pointer
+    icon: PenTool,
+    title: 'Welcome to Authoring',
+    body: 'Generate polished operational documents with AI, then edit and export them. Let me point out where everything is.',
+  },
+  {
+    target: 'new-doc',
+    icon: Plus,
+    title: 'Start a new document',
+    body: 'Click here to begin a fresh document. Your generated documents also appear in this sidebar.',
+  },
+  {
+    target: 'template',
+    icon: Layers,
+    title: 'Pick a template',
+    body: 'Choose the kind of document — Weekly Report, Memo, SOP, and more. This shapes its structure.',
+  },
+  {
+    target: 'references',
+    icon: FileText,
+    title: 'Add reference documents',
+    body: 'Attach documents you uploaded in the Documents tab. The AI grounds the draft in their content.',
+  },
+  {
+    target: 'tone',
+    icon: Sparkles,
+    title: 'Set the tone',
+    body: 'Pick how it should read — formal, friendly, or concise.',
+  },
+  {
+    target: 'prompt',
+    icon: Pencil,
+    title: 'Describe what you need',
+    body: 'Write your prompt here — be specific about the audience, sections, and any data to emphasize.',
+  },
+  {
+    target: 'generate',
+    icon: Zap,
+    title: 'Generate & take it from there',
+    body: 'Click Generate to stream the draft in live. Then edit it, Save to keep versions, and Export to download.',
+  },
+];
+
+// Spotlight/coach-mark tour that points an arrow at real UI elements.
+const AuthoringOnboarding = ({ open, step, setStep, onClose }) => {
+  const total = ONBOARDING_STEPS.length;
+  const idx = Math.min(step, total - 1);
+  const current = ONBOARDING_STEPS[idx];
+  const isLast = step >= total - 1;
+  const Icon = current.icon;
+
+  const [rect, setRect] = useState(null); // target bounding box (viewport coords)
+
+  // Measure the current step's target element (if any).
+  useEffect(() => {
+    if (!open) return;
+    if (!current.target) { setRect(null); return; }
+
+    let raf;
+    const measure = () => {
+      const el = document.querySelector(`[data-tour="${current.target}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        raf = requestAnimationFrame(() => {
+          const r = el.getBoundingClientRect();
+          setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+        });
+      } else {
+        setRect(null);
+      }
+    };
+    // Small delay lets scrollIntoView settle before we read the rect.
+    const t = setTimeout(measure, 60);
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      clearTimeout(t);
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
+  }, [open, idx, current.target]);
+
+  if (!open) return null;
+
+  const controls = (
+    <>
+      <div className="flex items-center gap-1.5 mb-3">
+        {ONBOARDING_STEPS.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => setStep(i)}
+            aria-label={`Step ${i + 1}`}
+            className="h-1.5 rounded-full transition-all"
+            style={{ width: i === idx ? 18 : 6, backgroundColor: i === idx ? ACCENT : 'rgba(255,255,255,0.25)' }}
+          />
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <button onClick={onClose} className="text-xs text-white/50 hover:text-white/80 transition-colors">Skip</button>
+        <div className="flex items-center gap-2">
+          {step > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setStep(step - 1)} className="h-8 border-white/20 text-white">
+              <ArrowLeft className="h-4 w-4 mr-1" /> Back
+            </Button>
+          )}
+          {isLast ? (
+            <Button size="sm" onClick={onClose} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff' }}>
+              <Check className="h-4 w-4 mr-1" /> Get started
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => setStep(step + 1)} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff' }}>
+              Next <ArrowRight className="h-4 w-4 ml-1" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </>
+  );
+
+  const card = (
+    <div className="w-[320px] max-w-[92vw] rounded-2xl border p-5 shadow-2xl"
+         style={{ background: '#140d26', borderColor: ACCENT_BORDER }}>
+      <div className="flex items-center gap-2.5 mb-2">
+        <span className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0" style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}>
+          <Icon className="h-4 w-4" style={{ color: ACCENT }} />
+        </span>
+        <h2 className="text-sm font-bold text-white">{current.title}</h2>
+        <span className="ml-auto text-[11px] text-white/40">{idx + 1}/{total}</span>
+      </div>
+      <p className="text-xs text-white/70 leading-relaxed mb-4">{current.body}</p>
+      {controls}
+    </div>
+  );
+
+  // Position the card near the target; fall back to center for the welcome step.
+  let cardStyle = { position: 'fixed', zIndex: 100 };
+  let arrow = null;
+  const pad = 14;
+  if (rect) {
+    const spaceRight = window.innerWidth - (rect.left + rect.width);
+    const spaceBelow = window.innerHeight - (rect.top + rect.height);
+    if (spaceRight > 360) {
+      // place to the right, arrow pointing left at the target
+      cardStyle.left = rect.left + rect.width + pad + 12;
+      cardStyle.top = Math.max(12, Math.min(rect.top, window.innerHeight - 260));
+      arrow = <ArrowLeft className="absolute -left-7 top-6 h-6 w-6 animate-nudge-x" style={{ color: ACCENT }} />;
+    } else if (spaceBelow > 260) {
+      // place below, arrow pointing up
+      cardStyle.top = rect.top + rect.height + pad + 10;
+      cardStyle.left = Math.max(12, Math.min(rect.left, window.innerWidth - 340));
+      arrow = <ArrowRight className="absolute left-6 -top-7 h-6 w-6 rotate-[-90deg] animate-bounce" style={{ color: ACCENT }} />;
+    } else {
+      // place above
+      cardStyle.top = Math.max(12, rect.top - 250);
+      cardStyle.left = Math.max(12, Math.min(rect.left, window.innerWidth - 340));
+      arrow = <ArrowRight className="absolute left-6 -bottom-7 h-6 w-6 rotate-90 animate-bounce" style={{ color: ACCENT }} />;
+    }
+  } else {
+    cardStyle.left = '50%';
+    cardStyle.top = '50%';
+    cardStyle.transform = 'translate(-50%, -50%)';
+  }
+
+  return (
+    <>
+      {/* Dim backdrop with a spotlight cutout around the target */}
+      <div className="fixed inset-0 z-[90]" onClick={onClose} style={{ background: 'rgba(0,0,0,0.55)' }} />
+      {rect && (
+        <div
+          className="fixed z-[95] rounded-xl pointer-events-none transition-all duration-200"
+          style={{
+            top: rect.top - 6, left: rect.left - 6,
+            width: rect.width + 12, height: rect.height + 12,
+            boxShadow: `0 0 0 3px ${ACCENT}, 0 0 0 9999px rgba(0,0,0,0.55)`,
+          }}
+        />
+      )}
+      <div style={cardStyle}>
+        {arrow}
+        {card}
+      </div>
+    </>
   );
 };
 
@@ -776,6 +1012,7 @@ const CreateView = ({
           {/* Compact config row: Template + References */}
           <div className="grid sm:grid-cols-2 gap-3">
             {/* Template selector */}
+            <div data-tour="template">
             <SelectorCard
               label="Template"
               onClick={onOpenTemplatePicker}
@@ -783,8 +1020,10 @@ const CreateView = ({
               secondaryText={tpl.description}
               icon={<TplIcon className="h-4 w-4" style={{ color: ACCENT }} />}
             />
+            </div>
 
             {/* References selector */}
+            <div data-tour="references">
             <SelectorCard
               label="References"
               onClick={onOpenRefsPicker}
@@ -805,10 +1044,11 @@ const CreateView = ({
                 </button>
               ) : null}
             />
+            </div>
           </div>
 
           {/* Tone pills */}
-          <div>
+          <div data-tour="tone">
             <Label className="text-[11px] uppercase tracking-wider text-white/55 mb-2 block">
               Tone
             </Label>
@@ -848,7 +1088,7 @@ const CreateView = ({
           </div>
 
           {/* Prompt — hero field */}
-          <div>
+          <div data-tour="prompt">
             <Label className="text-[11px] uppercase tracking-wider text-white/55 mb-2 block">
               What should the document cover?
             </Label>
@@ -873,6 +1113,7 @@ const CreateView = ({
             Powered by AI · Always review before sharing
           </div>
           <Button
+            data-tour="generate"
             onClick={onGenerate}
             disabled={!prompt.trim() || generating}
             className="h-10 px-5 text-sm font-semibold disabled:opacity-50"

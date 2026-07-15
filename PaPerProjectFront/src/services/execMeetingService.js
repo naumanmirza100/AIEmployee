@@ -48,6 +48,9 @@ const execMeetingService = {
 
   getMeetingNotes: (meetingId)          => companyApi.get(`${BASE}/meetings/${meetingId}/notes`),
   generateNotes:   (meetingId, payload) => companyApi.post(`${BASE}/meetings/${meetingId}/notes`, payload),
+  convertActionItemToTask: (itemId, payload = {}) => companyApi.post(`${BASE}/action-items/${itemId}/convert-to-task`, payload),
+  generateMeetingDescription: (title, points) => companyApi.post(`${BASE}/ai/generate-description`, { title, points }),
+  checkMeetingConflicts: (payload) => companyApi.post(`${BASE}/meetings/check-conflicts`, payload),
 
   // Tasks — returns raw response; callers do res.tasks || []
   getTasks: (params = {}) => {
@@ -61,6 +64,7 @@ const execMeetingService = {
   updateTask:     (id, payload) => companyApi.patch(`${BASE}/tasks/${id}`, payload),
   deleteTask:     (id)          => companyApi.delete(`${BASE}/tasks/${id}`),
   prioritizeTasks: ()           => companyApi.post(`${BASE}/tasks/ai/prioritize`, {}),
+  generateTaskDescription: (title, points) => companyApi.post(`${BASE}/tasks/ai/generate-description`, { title, points }),
 
   // Calendar
   planWeek:       (opts = {}) => companyApi.post(`${BASE}/calendar/plan-week`, opts),
@@ -95,6 +99,8 @@ const execMeetingService = {
   },
   markNotificationRead: (id) => companyApi.patch(`${BASE}/notifications/${id}/read`, {}),
   markAllRead:          ()   => companyApi.patch(`${BASE}/notifications/mark-all-read`, {}),
+  deleteNotification:   (id) => companyApi.delete(`${BASE}/notifications/${id}`),
+  bulkDeleteNotifications: (ids) => companyApi.post(`${BASE}/notifications/bulk-delete`, { ids }),
 };
 
 export default execMeetingService;
