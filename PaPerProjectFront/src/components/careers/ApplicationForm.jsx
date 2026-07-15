@@ -44,15 +44,21 @@ const ApplicationForm = ({ position }) => {
     if (!data.phone.trim()) e.phone = 'Required';
     if (!data.education.trim()) e.education = 'Required';
     if (!data.salary_expectation.trim()) e.salary_expectation = 'Required';
+    else if (!/^\d+$/.test(data.salary_expectation.trim())) e.salary_expectation = 'Numbers only';
     if (!data.previous_company.trim()) e.previous_company = 'Required';
     if (!data.previous_salary.trim()) e.previous_salary = 'Required';
+    else if (!/^\d+$/.test(data.previous_salary.trim())) e.previous_salary = 'Numbers only';
     if (!cvFile) e.cv_file = 'Please upload your CV';
     return e;
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((p) => ({ ...p, [name]: value }));
+    // Salary fields accept digits only
+    const nextValue = (name === 'salary_expectation' || name === 'previous_salary')
+      ? value.replace(/\D/g, '')
+      : value;
+    setForm((p) => ({ ...p, [name]: nextValue }));
     if (errors[name]) setErrors((p) => { const n = { ...p }; delete n[name]; return n; });
   };
 
@@ -82,6 +88,9 @@ const ApplicationForm = ({ position }) => {
       const el = domForm.elements[field];
       if (el) syncedForm[field] = el.value;
     });
+    // Salary fields: strip non-digits (covers autofill)
+    syncedForm.salary_expectation = (syncedForm.salary_expectation || '').replace(/\D/g, '');
+    syncedForm.previous_salary = (syncedForm.previous_salary || '').replace(/\D/g, '');
     setForm(syncedForm);
 
     const errs = validate(syncedForm);
@@ -234,7 +243,7 @@ const ApplicationForm = ({ position }) => {
               <Label htmlFor="salary_expectation">Salary Expectation <span className="text-destructive">*</span></Label>
               <Input
                 id="salary_expectation" name="salary_expectation" value={form.salary_expectation}
-                onChange={handleChange} placeholder="e.g. $2,000/month"
+                onChange={handleChange} inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 2000"
                 className={errors.salary_expectation ? 'border-destructive' : ''}
               />
               {errors.salary_expectation && <p className="text-xs text-destructive">{errors.salary_expectation}</p>}
@@ -268,7 +277,7 @@ const ApplicationForm = ({ position }) => {
               <Label htmlFor="previous_salary">Previous Salary <span className="text-destructive">*</span></Label>
               <Input
                 id="previous_salary" name="previous_salary" value={form.previous_salary}
-                onChange={handleChange} placeholder="e.g. $3,000/month"
+                onChange={handleChange} inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3000"
                 className={errors.previous_salary ? 'border-destructive' : ''}
               />
               {errors.previous_salary && <p className="text-xs text-destructive">{errors.previous_salary}</p>}
