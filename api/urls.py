@@ -885,11 +885,13 @@ urlpatterns = [
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/?$', exec_meeting_api.meeting_detail, name='exec_meeting_detail'),  # GET, PATCH, DELETE
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/notes/?$', exec_meeting_api.meeting_notes, name='exec_meeting_notes'),  # GET, POST
+    re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/notes/clear/?$', exec_meeting_api.meeting_notes_delete, name='exec_meeting_notes_delete'),  # DELETE
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/documents/?$', exec_meeting_api.meeting_documents, name='exec_meeting_documents'),  # GET
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/participants/?$', exec_meeting_api.meeting_participants, name='exec_meeting_participants'),  # GET, POST, DELETE
     re_path(r'^exec-meeting/meetings/suggest-slots/?$', exec_meeting_api.meeting_suggest_slots, name='exec_meeting_suggest_slots'),  # GET
     re_path(r'^exec-meeting/meetings/check-conflicts/?$', exec_meeting_api.meeting_check_conflicts, name='exec_meeting_check_conflicts'),  # POST
     re_path(r'^exec-meeting/users/search/?$', exec_meeting_api.search_company_users, name='exec_users_search'),  # GET ?q=
+    re_path(r'^exec-meeting/meetings-filter-users/?$', exec_meeting_api.meeting_filter_users, name='exec_meeting_filter_users'),  # GET
 
     # Action Items
     re_path(r'^exec-meeting/action-items/(?P<item_id>\d+)/?$', exec_meeting_api.action_item_detail, name='exec_action_item_detail'),  # GET, PATCH

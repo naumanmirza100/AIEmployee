@@ -38,9 +38,13 @@ const execMeetingService = {
   getMeetings: (params = {}) => {
     const q = new URLSearchParams();
     if (params.status) q.set('status', params.status);
+    if (params.search) q.set('search', params.search);
+    if (params.date) q.set('date', params.date);
+    if (params.participant) q.set('participant', params.participant);
     const qs = q.toString();
     return companyApi.get(`${BASE}/meetings${qs ? `?${qs}` : ''}`);
   },
+  getMeetingFilterUsers: () => companyApi.get(`${BASE}/meetings-filter-users`),
   getMeeting:    (id)          => companyApi.get(`${BASE}/meetings/${id}`),
   createMeeting: (payload)     => companyApi.post(`${BASE}/meetings`, payload),
   updateMeeting: (id, payload) => companyApi.patch(`${BASE}/meetings/${id}`, payload),
@@ -48,7 +52,9 @@ const execMeetingService = {
 
   getMeetingNotes: (meetingId)          => companyApi.get(`${BASE}/meetings/${meetingId}/notes`),
   generateNotes:   (meetingId, payload) => companyApi.post(`${BASE}/meetings/${meetingId}/notes`, payload),
+  clearMeetingNotes: (meetingId)        => companyApi.delete(`${BASE}/meetings/${meetingId}/notes/clear`),
   convertActionItemToTask: (itemId, payload = {}) => companyApi.post(`${BASE}/action-items/${itemId}/convert-to-task`, payload),
+  updateActionItem: (itemId, payload)   => companyApi.patch(`${BASE}/action-items/${itemId}`, payload),
   generateMeetingDescription: (title, points) => companyApi.post(`${BASE}/ai/generate-description`, { title, points }),
   checkMeetingConflicts: (payload) => companyApi.post(`${BASE}/meetings/check-conflicts`, payload),
 
@@ -57,6 +63,8 @@ const execMeetingService = {
     const q = new URLSearchParams();
     if (params.status)   q.set('status', params.status);
     if (params.priority) q.set('priority', params.priority);
+    if (params.search)   q.set('search', params.search);
+    if (params.date)     q.set('date', params.date);
     const qs = q.toString();
     return companyApi.get(`${BASE}/tasks${qs ? `?${qs}` : ''}`);
   },
@@ -78,6 +86,8 @@ const execMeetingService = {
   listDocuments:   (params = {}) => {
     const q = new URLSearchParams();
     if (params.doc_type) q.set('doc_type', params.doc_type);
+    if (params.search)   q.set('search', params.search);
+    if (params.date)     q.set('date', params.date);
     const qs = q.toString();
     return companyApi.get(`${BASE}/documents${qs ? `?${qs}` : ''}`);
   },
@@ -94,6 +104,8 @@ const execMeetingService = {
   getNotifications: (params = {}) => {
     const q = new URLSearchParams();
     if (params.unread_only) q.set('unread', 'true');
+    if (params.category)    q.set('category', params.category);
+    if (params.search)      q.set('search', params.search);
     const qs = q.toString();
     return companyApi.get(`${BASE}/notifications${qs ? `?${qs}` : ''}`);
   },

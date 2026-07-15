@@ -6,9 +6,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight,
+  Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight, Trash2, Check, X,
 } from 'lucide-react';
-import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc } from '../shared';
+import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar } from '../shared';
+
+const MEETING_STATUS_OPTIONS = [
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'pending_confirmation', label: 'Pending Confirmation' },
+];
 
 export const MeetingsPanel = ({
   meetings, meetingsLoading, notesOpenId, participantsOpenId, meetingNotes,
@@ -17,8 +25,11 @@ export const MeetingsPanel = ({
   loadMeetings, setShowMeetingDialog, setEditingMeeting, openParticipants, openNotes,
   removeParticipant, setConfirmRemoveMap, addParticipant, setPendingAddMap,
   setUserSearchQ, setUserSearchResults, searchUsers, submitTranscript, setTranscriptInput,
-  convertActionItem, focusMeetingId, setFocusMeetingId,
+  convertActionItem, convertedActionItemIds, clearMeetingNotes, removeMeetingAgenda,
+  focusMeetingId, setFocusMeetingId,
+  filters = {}, setFilters = () => {}, filterUsers = [],
 }) => {
+  const filtersActive = !!(filters.search || filters.status || filters.date || filters.participant);
   // When a notification navigates here, scroll the target meeting into view and
   // briefly highlight it, then clear the focus so it doesn't stick.
   const rowRefs = useRef({});
@@ -46,10 +57,35 @@ export const MeetingsPanel = ({
           </Button>
         </div>
       </div>
+
+      <FilterBar
+        search={filters.search || ''}
+        onSearchChange={v => setFilters(f => ({ ...f, search: v }))}
+        searchPlaceholder="Search meetings…"
+        selects={[
+          {
+            value: filters.status,
+            onChange: v => setFilters(f => ({ ...f, status: v })),
+            placeholder: 'All statuses', allLabel: 'All statuses',
+            options: MEETING_STATUS_OPTIONS,
+          },
+          ...(filterUsers.length > 0 ? [{
+            value: filters.participant,
+            onChange: v => setFilters(f => ({ ...f, participant: v })),
+            placeholder: 'All people', allLabel: 'All people',
+            options: filterUsers.map(u => ({ value: String(u.id), label: u.full_name || u.email })),
+          }] : []),
+        ]}
+        date={filters.date}
+        onDateChange={v => setFilters(f => ({ ...f, date: v }))}
+        active={filtersActive}
+        onClear={() => setFilters({ search: '', status: '', date: '', participant: '' })}
+      />
+
       {meetingsLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
       ) : !Array.isArray(meetings) || meetings.length === 0 ? (
-        <EmptyState icon={CalendarClock} label="No meetings scheduled yet" />
+        <EmptyState icon={CalendarClock} label={filtersActive ? 'No meetings match these filters' : 'No meetings scheduled yet'} />
       ) : (
         <div className="rounded-2xl" style={CARD_STYLE}>
           {meetings.map(m => {
@@ -87,7 +123,17 @@ export const MeetingsPanel = ({
                     )}
                     {Array.isArray(m.agenda) && m.agenda.length > 0 && (
                       <div className="mt-1.5">
-                        <p className="text-[10px] text-white/30 uppercase tracking-wide mb-0.5">Agenda</p>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="text-[10px] text-white/30 uppercase tracking-wide">Agenda</p>
+                          <button
+                            type="button"
+                            onClick={() => removeMeetingAgenda(m.id)}
+                            title="Remove agenda"
+                            className="text-[10px] text-white/25 hover:text-red-400 inline-flex items-center gap-0.5 transition-colors"
+                          >
+                            <X className="h-2.5 w-2.5" /> remove
+                          </button>
+                        </div>
                         <ul className="space-y-0.5">
                           {m.agenda.map((item, i) => (
                             <li key={i} className="text-xs text-white/60 flex gap-1.5">
@@ -247,14 +293,25 @@ export const MeetingsPanel = ({
                     {/* Existing notes */}
                     {notes && (
                       <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-white/50 text-[11px] font-semibold uppercase tracking-wide">AI Notes</p>
+                          <button
+                            type="button"
+                            onClick={() => clearMeetingNotes(m.id)}
+                            title="Clear all notes (summary, decisions, action items)"
+                            className="text-[10px] text-white/30 hover:text-red-400 inline-flex items-center gap-1 transition-colors"
+                          >
+                            <Trash2 className="h-3 w-3" /> Clear notes
+                          </button>
+                        </div>
                         {notes.ai_summary && (
-                          <div className="rounded-xl p-3 bg-violet-500/10 border border-violet-500/20">
+                          <div className="rounded-xl p-3 bg-violet-500/10 border-b border-violet-500/20">
                             <p className="text-violet-300 text-xs font-semibold mb-1">AI Summary</p>
                             <p className="text-white/80 text-xs whitespace-pre-wrap">{notes.ai_summary}</p>
                           </div>
                         )}
                         {Array.isArray(notes.key_decisions) && notes.key_decisions.length > 0 && (
-                          <div className="rounded-xl p-3 bg-white/5 border border-white/10">
+                          <div className="rounded-xl p-3 border-b border-white/10">
                             <p className="text-white/60 text-xs font-semibold mb-1">Key Decisions</p>
                             {notes.key_decisions.map((d, i) => (
                               <p key={i} className="text-white/70 text-xs">• {d}</p>
@@ -262,22 +319,27 @@ export const MeetingsPanel = ({
                           </div>
                         )}
                         {Array.isArray(notes.action_items) && notes.action_items.length > 0 && (
-                          <div className="rounded-xl p-3 bg-white/5 border border-white/10">
+                          <div className="rounded-xl p-3 border-b border-white/10">
                             <p className="text-white/60 text-xs font-semibold mb-2">Action Items ({notes.action_items.length})</p>
                             <div className="space-y-1.5">
                               {notes.action_items.map((a, i) => {
-                                const done = a.status === 'done';
+                                // Converted if we did it this session OR a task
+                                // with this title already exists for the meeting
+                                // (survives page reloads).
+                                const titleMatch = Array.isArray(notes.converted_titles)
+                                  && notes.converted_titles.includes((a.title || '').trim().toLowerCase());
+                                const converted = (a.id && convertedActionItemIds?.has(a.id)) || titleMatch;
                                 return (
                                   <div key={a.id ?? i} className="flex items-center gap-2">
                                     <div className="flex-1 min-w-0">
-                                      <p className={`text-xs ${done ? 'text-white/40 line-through' : 'text-white/75'}`}>
+                                      <p className="text-xs text-white/75">
                                         • {a.title}
                                         {a.due_date ? <span className="text-white/40"> · {a.due_date}</span> : ''}
                                       </p>
                                     </div>
-                                    {done ? (
-                                      <span className="text-[10px] text-emerald-400/80 flex-shrink-0">✓ Task created</span>
-                                    ) : a.id ? (
+                                    {a.id && (converted ? (
+                                      <span className="text-[10px] text-violet-300/80 flex-shrink-0 flex items-center gap-1"><Check className="h-3 w-3" /> Task created</span>
+                                    ) : (
                                       <button
                                         type="button"
                                         onClick={() => convertActionItem(m.id, a.id)}
@@ -285,7 +347,7 @@ export const MeetingsPanel = ({
                                       >
                                         <Plus className="h-3 w-3" /> Convert to task
                                       </button>
-                                    ) : null}
+                                    ))}
                                   </div>
                                 );
                               })}

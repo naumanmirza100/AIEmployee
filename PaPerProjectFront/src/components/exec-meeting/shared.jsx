@@ -6,12 +6,13 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar as CalendarIcon, Trash2, Loader2, Check } from 'lucide-react';
+import { Calendar as CalendarIcon, Trash2, Loader2, Check, Search, X, SlidersHorizontal } from 'lucide-react';
 
 // ── Markdown → HTML renderer (violet theme, matches this dashboard) ─────────
 export function markdownToHtml(md) {
@@ -266,7 +267,7 @@ export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
 };
 
 // ── Date-only picker (for tasks) ────────────────────────────────────────────
-export const DateOnlyPicker = ({ value, onChange }) => {
+export const DateOnlyPicker = ({ value, onChange, disableWeekends = false }) => {
   const [open, setOpen] = useState(false);
   const selected = value ? new Date(value + 'T00:00:00') : null;
 
@@ -299,6 +300,7 @@ export const DateOnlyPicker = ({ value, onChange }) => {
           mode="single"
           selected={selected && !isNaN(selected) ? selected : undefined}
           onSelect={handleSelect}
+          disabled={disableWeekends ? { dayOfWeek: [0, 6] } : undefined}
           initialFocus
           classNames={{
             months: 'flex flex-col',
@@ -318,7 +320,7 @@ export const DateOnlyPicker = ({ value, onChange }) => {
             day_selected: 'bg-violet-600 text-white hover:bg-violet-600 hover:text-white',
             day_today: 'bg-white/10 text-white',
             day_outside: 'text-white/20',
-            day_disabled: 'text-white/20 cursor-not-allowed',
+            day_disabled: 'text-white/20 cursor-not-allowed line-through',
           }}
         />
       </PopoverContent>
@@ -373,6 +375,7 @@ export const statusBadge = (status) => {
     todo:        'bg-slate-500/20 text-slate-400 border-slate-500/30',
     review:      'bg-purple-500/20 text-purple-400 border-purple-500/30',
     done:        'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    blocked:     'bg-red-500/20 text-red-400 border-red-500/30',
   };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border ${map[status] || map.todo}`}>
@@ -430,6 +433,16 @@ export const validateMeetingLink = (url) => {
   return VALID_MEETING_LINK_PATTERN.test(url.trim());
 };
 
+// True if a YYYY-MM-DD string falls on a Saturday/Sunday. Used to keep task
+// deadlines on weekdays.
+export const isWeekend = (ymd) => {
+  if (!ymd) return false;
+  const d = new Date(ymd + 'T00:00:00');
+  if (isNaN(d)) return false;
+  const day = d.getDay();
+  return day === 0 || day === 6;
+};
+
 // ── Bulk-select toolbar ─────────────────────────────────────────────────────
 // A small header row with a "select all" checkbox and, once anything is
 // selected, a count + "Delete selected" button. Used by the Tasks, Documents
@@ -478,4 +491,134 @@ export const SelectCheckbox = ({ checked, indeterminate = false, onChange }) => 
     {checked && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
     {indeterminate && !checked && <span className="h-0.5 w-2 rounded-full bg-white" />}
   </span>
+);
+
+// ── Filter date picker ───────────────────────────────────────────────────────
+// A compact, clearable calendar button used inside the filter bar. Unlike
+// DateOnlyPicker it shows a small "×" to clear the chosen day and never blocks
+// weekends (you may well want to filter to a Saturday meeting).
+export const FilterDatePicker = ({ value, onChange, placeholder = 'Any date' }) => {
+  const [open, setOpen] = useState(false);
+  const selected = value ? new Date(value + 'T00:00:00') : null;
+  const handleSelect = (date) => {
+    setOpen(false);
+    if (!date) { onChange(''); return; }
+    const pad = n => String(n).padStart(2, '0');
+    onChange(`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`);
+  };
+  return (
+    <div className="relative">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className={`h-9 justify-start text-left font-normal bg-white/5 border-white/10 hover:bg-white/10 hover:text-white ${value ? 'text-white pr-7' : 'text-white/50'}`}
+          >
+            <CalendarIcon className="mr-2 h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
+            {selected && !isNaN(selected) ? format(selected, 'dd MMM yyyy') : placeholder}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0 bg-[#0d0b1f] border-white/10" align="start" style={{ zIndex: 9999 }}>
+          <Calendar
+            mode="single"
+            selected={selected && !isNaN(selected) ? selected : undefined}
+            onSelect={handleSelect}
+            initialFocus
+            classNames={{
+              months: 'flex flex-col', month: 'space-y-2',
+              caption: 'flex justify-center pt-1 relative items-center text-white',
+              caption_label: 'text-sm font-medium text-white',
+              nav: 'space-x-1 flex items-center',
+              nav_button: 'h-7 w-7 bg-white/10 border border-white/10 rounded p-0 hover:bg-white/20 text-white',
+              nav_button_previous: 'absolute left-1', nav_button_next: 'absolute right-1',
+              table: 'w-full border-collapse', head_row: 'flex',
+              head_cell: 'text-white/40 rounded-md w-9 font-normal text-[0.8rem]',
+              row: 'flex w-full mt-1',
+              cell: 'h-9 w-9 text-center text-sm p-0 relative focus-within:relative focus-within:z-20',
+              day: 'h-9 w-9 p-0 font-normal text-white/70 rounded hover:bg-violet-600/40 hover:text-white transition-colors',
+              day_selected: 'bg-violet-600 text-white hover:bg-violet-600 hover:text-white',
+              day_today: 'bg-white/10 text-white', day_outside: 'text-white/20',
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          title="Clear date"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ── FilterBar ────────────────────────────────────────────────────────────────
+// A reusable search + dropdown-filters + date row shared by the Meetings,
+// Tasks, Documents and Notifications panels. Purely presentational: every
+// value + setter is passed in. Renders nothing but styled controls; the parent
+// owns the state and re-fetches on change.
+//
+// props:
+//   search, onSearchChange, searchPlaceholder
+//   selects: [{ value, onChange, placeholder, allLabel, options: [{value,label}] }]
+//   date, onDateChange   (omit both to hide the date picker)
+//   onClear              shown as a "Clear" button when any filter is active
+//   active               boolean — whether any filter is currently set
+export const FilterBar = ({
+  search, onSearchChange, searchPlaceholder = 'Search…',
+  selects = [], date, onDateChange, onClear, active = false,
+}) => (
+  <div className="flex flex-wrap items-center gap-2 mb-3">
+    <div className="relative flex-1 min-w-[180px]">
+      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/30" />
+      <Input
+        value={search}
+        onChange={e => onSearchChange(e.target.value)}
+        placeholder={searchPlaceholder}
+        className="h-9 pl-8 bg-white/5 border-white/10 text-white text-sm placeholder:text-white/30"
+      />
+      {search && (
+        <button
+          type="button"
+          onClick={() => onSearchChange('')}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+
+    {selects.map((sel, i) => (
+      <Select key={i} value={sel.value || 'all'} onValueChange={v => sel.onChange(v === 'all' ? '' : v)}>
+        <SelectTrigger className="h-9 w-auto min-w-[130px] gap-1.5 bg-white/5 border-white/10 text-white text-sm data-[placeholder]:text-white/40">
+          <SlidersHorizontal className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
+          <SelectValue placeholder={sel.placeholder} />
+        </SelectTrigger>
+        <SelectContent className="bg-[#1a1333] border-white/10 text-white">
+          <SelectItem value="all">{sel.allLabel || sel.placeholder || 'All'}</SelectItem>
+          {sel.options.map(o => (
+            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    ))}
+
+    {onDateChange && (
+      <FilterDatePicker value={date} onChange={onDateChange} />
+    )}
+
+    {active && onClear && (
+      <Button
+        size="sm" variant="ghost" onClick={onClear}
+        className="h-9 px-2.5 text-xs text-white/50 hover:text-white hover:bg-white/5 gap-1"
+      >
+        <X className="h-3.5 w-3.5" /> Clear
+      </Button>
+    )}
+  </div>
 );

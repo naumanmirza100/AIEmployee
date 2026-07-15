@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select';
 import {
   Loader2, LayoutDashboard, CalendarClock, ListChecks, CalendarDays,
-  FileText, Bell, Plus, Menu, Clock, AlertTriangle, CheckCircle2,
+  FileText, Bell, Plus, Menu, Clock, AlertTriangle,
   RefreshCw, Trash2, MoreHorizontal, ChevronRight,
   Download, Sparkles, Pencil, GraduationCap,
 } from 'lucide-react';
@@ -29,7 +29,7 @@ import execMeetingService from '@/services/execMeetingService';
 import {
   markdownToHtml, CARD_STYLE, ROW_STYLE, fmtUtc,
   StatCard, priorityBadge, statusBadge,
-  AssigneeAvatars, EmptyState, BulkSelectBar, SelectCheckbox,
+  AssigneeAvatars, EmptyState, BulkSelectBar, SelectCheckbox, FilterBar,
 } from './shared';
 import {
   ScheduleMeetingDialog, MeetingEditDialog,
@@ -69,6 +69,14 @@ const ExecMeetingDashboard = () => {
   const [digest, setDigest] = useState(null);
   const [digestLoading, setDigestLoading] = useState(false);
 
+  // ── Per-tab filters (search / dropdowns / date). Server-side: each change
+  // re-fetches the list with query params. `search` is debounced (see effect).
+  const [meetingFilters, setMeetingFilters] = useState({ search: '', status: '', date: '', participant: '' });
+  const [taskFilters, setTaskFilters] = useState({ search: '', status: '', priority: '', date: '' });
+  const [docFilters, setDocFilters] = useState({ search: '', doc_type: '', date: '' });
+  const [notifFilters, setNotifFilters] = useState({ search: '', category: '', unread_only: false });
+  const [meetingFilterUsers, setMeetingFilterUsers] = useState([]); // for the "by user" dropdown
+
   // Dialogs
   const [showMeetingDialog, setShowMeetingDialog] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
@@ -105,6 +113,8 @@ const ExecMeetingDashboard = () => {
   const [weekPlanLoading, setWeekPlanLoading] = useState(false);
   const [includePastTasks, setIncludePastTasks] = useState(false);
   const [showPastTasksConfirm, setShowPastTasksConfirm] = useState(false);
+  const [workStartHour, setWorkStartHour] = useState(9);  // task-scheduling window
+  const [workEndHour, setWorkEndHour] = useState(17);
 
   // Participants
   const [participantsOpenId, setParticipantsOpenId] = useState(null);
@@ -120,10 +130,10 @@ const ExecMeetingDashboard = () => {
   const [transcriptInput, setTranscriptInput] = useState('');
   const [notesLoading, setNotesLoading] = useState(false);
   const [meetingNotes, setMeetingNotes] = useState({});  // { [meetingId]: notesObj }
-
-  // Task Prioritization
-  const [prioritizeLoading, setPrioritizeLoading] = useState(false);
-  const [prioritizeResult, setPrioritizeResult] = useState(null);
+  // Action-item ids the user has already converted to a task this session — used
+  // only to hide the "Convert to task" button afterwards (the action item data
+  // itself is intentionally left untouched).
+  const [convertedActionItemIds, setConvertedActionItemIds] = useState(() => new Set());
 
   // Guided tour
   const [tourOpen, setTourOpen] = useState(false);
@@ -144,12 +154,39 @@ const ExecMeetingDashboard = () => {
   };
 
   useEffect(() => {
-    if (activeTab === 'meetings' && meetings.length === 0) loadMeetings();
+    if (activeTab === 'meetings') { if (meetings.length === 0) loadMeetings(); if (meetingFilterUsers.length === 0) loadMeetingFilterUsers(); }
     if (activeTab === 'tasks' && tasks.length === 0) loadTasks();
     if (activeTab === 'notifications') loadNotifications();
     if (activeTab === 'overview' && !digest) loadDigest();
     if (activeTab === 'documents') { loadDocuments(); loadMeetings(); }
   }, [activeTab]);
+
+  // ── Filter-driven refetch. The search box is debounced (300ms) so typing
+  // doesn't fire a request per keystroke; dropdown / date changes apply at once.
+  // Each effect only runs while its tab is active to avoid background fetches.
+  useEffect(() => {
+    if (activeTab !== 'meetings') return;
+    const t = setTimeout(() => loadMeetings(meetingFilters), 300);
+    return () => clearTimeout(t);
+  }, [meetingFilters.search, meetingFilters.status, meetingFilters.date, meetingFilters.participant]);
+
+  useEffect(() => {
+    if (activeTab !== 'tasks') return;
+    const t = setTimeout(() => loadTasks(taskFilters), 300);
+    return () => clearTimeout(t);
+  }, [taskFilters.search, taskFilters.status, taskFilters.priority, taskFilters.date]);
+
+  useEffect(() => {
+    if (activeTab !== 'documents') return;
+    const t = setTimeout(() => loadDocuments(docFilters), 300);
+    return () => clearTimeout(t);
+  }, [docFilters.search, docFilters.doc_type, docFilters.date]);
+
+  useEffect(() => {
+    if (activeTab !== 'notifications') return;
+    const t = setTimeout(() => loadNotifications(notifFilters), 300);
+    return () => clearTimeout(t);
+  }, [notifFilters.search, notifFilters.category, notifFilters.unread_only]);
 
   const loadStats = async () => {
     setStatsLoading(true);
@@ -163,10 +200,10 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadMeetings = async () => {
+  const loadMeetings = async (filters = meetingFilters) => {
     setMeetingsLoading(true);
     try {
-      const data = await execMeetingService.getMeetings();
+      const data = await execMeetingService.getMeetings(filters);
       setMeetings(data.meetings || []);
     } catch {
       setMeetings([]);
@@ -175,10 +212,40 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadTasks = async () => {
+  // One-time load of the user list that powers the Meetings "by user" dropdown.
+  const loadMeetingFilterUsers = async () => {
+    try {
+      const data = await execMeetingService.getMeetingFilterUsers();
+      setMeetingFilterUsers(data.users || []);
+    } catch {
+      setMeetingFilterUsers([]);
+    }
+  };
+
+  // The reload button — re-fetches the meeting list AND re-fetches any Notes /
+  // Participants panel that's currently open (those are cached separately, so a
+  // plain loadMeetings left them showing stale data until a full browser
+  // reload).
+  const refreshMeetings = async () => {
+    await loadMeetings();
+    if (notesOpenId) {
+      try {
+        const res = await execMeetingService.getMeetingNotes(notesOpenId);
+        setMeetingNotes(prev => ({ ...prev, [notesOpenId]: res.notes || null }));
+      } catch { /* leave cached notes */ }
+    }
+    if (participantsOpenId) {
+      try {
+        const res = await execMeetingService.getParticipants(participantsOpenId);
+        setParticipantsMap(prev => ({ ...prev, [participantsOpenId]: res.participants || [] }));
+      } catch { /* leave cached participants */ }
+    }
+  };
+
+  const loadTasks = async (filters = taskFilters) => {
     setTasksLoading(true);
     try {
-      const data = await execMeetingService.getTasks();
+      const data = await execMeetingService.getTasks(filters);
       setTasks(data.tasks || []);
     } catch {
       setTasks([]);
@@ -187,10 +254,10 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadNotifications = async () => {
+  const loadNotifications = async (filters = notifFilters) => {
     setNotifsLoading(true);
     try {
-      const data = await execMeetingService.getNotifications();
+      const data = await execMeetingService.getNotifications(filters);
       setNotifications(data.notifications || []);
     } catch {
       setNotifications([]);
@@ -213,16 +280,44 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (filters = docFilters) => {
     setDocsLoading(true);
     try {
-      const data = await execMeetingService.listDocuments();
+      const data = await execMeetingService.listDocuments(filters);
       setSavedDocs(data.documents || []);
     } catch {
       setSavedDocs([]);
     } finally {
       setDocsLoading(false);
     }
+  };
+
+  // When a meeting is linked in the document generator, pull whatever the AI
+  // Notetaker already extracted for it (summary, key decisions, action items)
+  // and pre-fill the "Meeting Summary / Key Discussion Points" box for a
+  // Minutes document. Meeting rows from listMeetings don't carry notes, so we
+  // fetch them here. Falls back to the meeting's description if there are no
+  // notes yet.
+  const applyMeetingNotesToDoc = async (meetingId, docType) => {
+    if (docType !== 'minutes') return;
+    // Always clear first so switching to a meeting with no notes doesn't leave
+    // the previous meeting's summary sitting in the box.
+    setAiDocSummary('');
+    try {
+      const res = await execMeetingService.getMeetingNotes(meetingId);
+      const n = res.notes;
+      if (!n) return;
+      const parts = [];
+      if (n.ai_summary) parts.push(`Summary:\n${n.ai_summary}`);
+      if (Array.isArray(n.key_decisions) && n.key_decisions.length) {
+        parts.push('Key Decisions:\n' + n.key_decisions.map(d => `- ${d}`).join('\n'));
+      }
+      if (Array.isArray(n.action_items) && n.action_items.length) {
+        parts.push('Action Items:\n' + n.action_items.map(a => `- ${a.title}`).join('\n'));
+      }
+      const text = parts.join('\n\n').trim();
+      if (text) setAiDocSummary(text.slice(0, 800));
+    } catch { /* no notes yet — box already cleared above */ }
   };
 
   const generateAiDoc = async () => {
@@ -382,17 +477,40 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  // Turn a meeting action item into a trackable task, then refresh that
-  // meeting's notes so the item shows as done and the tasks list picks it up.
+  // Create a standalone task from a meeting action item. The action item is
+  // left untouched (no 'done' flag, no link), so we only refresh the tasks list.
   const convertActionItem = async (meetingId, itemId) => {
     try {
       await execMeetingService.convertActionItemToTask(itemId);
-      const fresh = await execMeetingService.getMeetingNotes(meetingId);
-      if (fresh.notes) setMeetingNotes(prev => ({ ...prev, [meetingId]: fresh.notes }));
+      setConvertedActionItemIds(prev => new Set(prev).add(itemId));
       loadTasks(); loadStats();
-      toast({ title: 'Converted to task', description: 'Find it in the Tasks tab.' });
+      toast({ title: 'Task created', description: 'Find it in the Tasks tab.' });
     } catch (err) {
-      toast({ title: 'Failed to convert', description: err.message, variant: 'destructive' });
+      toast({ title: 'Failed to create task', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  // Clear a meeting's whole AI notes block (summary + decisions + non-converted
+  // action items).
+  const clearMeetingNotes = async (meetingId) => {
+    try {
+      await execMeetingService.clearMeetingNotes(meetingId);
+      setMeetingNotes(prev => { const next = { ...prev }; delete next[meetingId]; return next; });
+      loadStats();
+      toast({ title: 'Notes cleared' });
+    } catch (err) {
+      toast({ title: 'Failed to clear notes', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  // Remove a meeting's agenda (keep the meeting itself).
+  const removeMeetingAgenda = async (meetingId) => {
+    try {
+      await execMeetingService.updateMeeting(meetingId, { agenda: [] });
+      setMeetings(prev => prev.map(m => (m.id === meetingId ? { ...m, agenda: [] } : m)));
+      toast({ title: 'Agenda removed' });
+    } catch (err) {
+      toast({ title: 'Failed to remove agenda', description: err.message, variant: 'destructive' });
     }
   };
 
@@ -416,23 +534,6 @@ const ExecMeetingDashboard = () => {
     finally { setDeletingTaskId(null); }
   };
 
-  const runAiPrioritize = async () => {
-    setPrioritizeLoading(true);
-    try {
-      const data = await execMeetingService.prioritizeTasks();
-      setPrioritizeResult(data.tasks || data.prioritized || []);
-      if ((data.tasks || data.prioritized || []).length) {
-        toast({ title: 'Tasks reprioritized by AI!' });
-        loadTasks();
-      } else {
-        toast({ title: 'No prioritization result returned', variant: 'destructive' });
-      }
-    } catch (err) {
-      toast({ title: 'Prioritization failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setPrioritizeLoading(false);
-    }
-  };
 
   const deleteDoc = async (id) => {
     try {
@@ -636,7 +737,7 @@ const ExecMeetingDashboard = () => {
   const overviewPanel = () => (
     <div className="space-y-6">
       {/* Stat cards */}
-      <div data-tour-em="stats" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div data-tour-em="stats" className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {statsLoading ? (
           <div className="col-span-full flex justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
@@ -646,7 +747,6 @@ const ExecMeetingDashboard = () => {
             <StatCard label="Upcoming Meetings"   value={stats?.upcoming_meetings}    icon={CalendarClock} palette="violet" />
             <StatCard label="Total Tasks"         value={stats?.total_tasks}          icon={ListChecks}    palette="sky" />
             <StatCard label="Overdue Tasks"       value={stats?.overdue_tasks}        icon={AlertTriangle} palette="rose" />
-            <StatCard label="Action Items"        value={stats?.pending_action_items} icon={CheckCircle2}  palette="emerald" />
             <StatCard label="Unread Notifications" value={stats?.unread_notifications} icon={Bell}         palette="amber" />
           </>
         )}
@@ -669,27 +769,6 @@ const ExecMeetingDashboard = () => {
           <div className="space-y-3 text-sm">
             {digest.greeting && <p className="text-violet-300 font-medium">{digest.greeting}</p>}
             {digest.summary && <p className="text-white/70">{digest.summary}</p>}
-
-            {/* Pending Action Items */}
-            {Array.isArray(digest.pending_action_items) && digest.pending_action_items.length > 0 && (
-              <div className="rounded-xl p-3 bg-amber-500/10 border border-amber-500/20">
-                <p className="text-amber-300 text-xs font-semibold uppercase tracking-wide mb-2 flex items-center gap-1.5">
-                  <AlertTriangle className="h-3 w-3" /> Pending Action Items ({digest.pending_action_items.length})
-                </p>
-                <ul className="space-y-1.5">
-                  {digest.pending_action_items.map((a, i) => (
-                    <li key={i} className="flex items-start gap-2 text-white/80 text-xs">
-                      <ChevronRight className="h-3 w-3 mt-0.5 flex-shrink-0 text-amber-400" />
-                      <span>
-                        <span className="font-medium">{a.title}</span>
-                        {a.meeting && <span className="text-white/40 ml-1">· {a.meeting}</span>}
-                        {a.due_date && <span className="text-amber-400/70 ml-1">· due {a.due_date}</span>}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
 
             {/* Due / Overdue Tasks */}
             {Array.isArray(digest.due_tasks) && digest.due_tasks.length > 0 && (
@@ -771,14 +850,40 @@ const ExecMeetingDashboard = () => {
           <Bell className="h-4 w-4 text-amber-400" />
           Notifications
         </h3>
-        <Button size="sm" variant="ghost" onClick={loadNotifications} disabled={notifsLoading} className="text-white/50 hover:text-white">
+        <Button size="sm" variant="ghost" onClick={() => loadNotifications()} disabled={notifsLoading} className="text-white/50 hover:text-white">
           <RefreshCw className={`h-4 w-4 ${notifsLoading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
+
+      <FilterBar
+        search={notifFilters.search}
+        onSearchChange={v => setNotifFilters(f => ({ ...f, search: v }))}
+        searchPlaceholder="Search notifications…"
+        selects={[
+          {
+            value: notifFilters.category,
+            onChange: v => setNotifFilters(f => ({ ...f, category: v })),
+            placeholder: 'All types', allLabel: 'All types',
+            options: [
+              { value: 'meeting', label: 'Meeting notifications' },
+              { value: 'task', label: 'Task notifications' },
+            ],
+          },
+          {
+            value: notifFilters.unread_only ? 'unread' : '',
+            onChange: v => setNotifFilters(f => ({ ...f, unread_only: v === 'unread' })),
+            placeholder: 'Read & unread', allLabel: 'Read & unread',
+            options: [{ value: 'unread', label: 'Unread only' }],
+          },
+        ]}
+        active={!!(notifFilters.search || notifFilters.category || notifFilters.unread_only)}
+        onClear={() => setNotifFilters({ search: '', category: '', unread_only: false })}
+      />
+
       {notifsLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
       ) : !Array.isArray(notifications) || notifications.length === 0 ? (
-        <EmptyState icon={Bell} label="No notifications" />
+        <EmptyState icon={Bell} label={(notifFilters.search || notifFilters.category || notifFilters.unread_only) ? 'No notifications match these filters' : 'No notifications'} />
       ) : (
         <>
         <BulkSelectBar
@@ -842,7 +947,7 @@ const ExecMeetingDashboard = () => {
         userSearchQ={userSearchQ} userSearchLoading={userSearchLoading}
         userSearchResults={userSearchResults} transcriptInput={transcriptInput}
         notesLoading={notesLoading}
-        loadMeetings={loadMeetings} setShowMeetingDialog={setShowMeetingDialog}
+        loadMeetings={refreshMeetings} setShowMeetingDialog={setShowMeetingDialog}
         setEditingMeeting={setEditingMeeting} openParticipants={openParticipants}
         openNotes={openNotes} removeParticipant={removeParticipant}
         setConfirmRemoveMap={setConfirmRemoveMap} addParticipant={addParticipant}
@@ -850,22 +955,27 @@ const ExecMeetingDashboard = () => {
         setUserSearchResults={setUserSearchResults} searchUsers={searchUsers}
         submitTranscript={submitTranscript} setTranscriptInput={setTranscriptInput}
         convertActionItem={convertActionItem}
+        convertedActionItemIds={convertedActionItemIds}
+        clearMeetingNotes={clearMeetingNotes}
+        removeMeetingAgenda={removeMeetingAgenda}
         focusMeetingId={focusMeetingId} setFocusMeetingId={setFocusMeetingId}
+        filters={meetingFilters} setFilters={setMeetingFilters}
+        filterUsers={meetingFilterUsers}
       />
     ),
     tasks: () => (
       <TasksPanel
         tasks={tasks} tasksLoading={tasksLoading}
-        prioritizeLoading={prioritizeLoading} prioritizeResult={prioritizeResult}
         expandedTaskId={expandedTaskId} expandedSubtasksId={expandedSubtasksId}
-        loadTasks={loadTasks} runAiPrioritize={runAiPrioritize}
-        setShowTaskDialog={setShowTaskDialog} setPrioritizeResult={setPrioritizeResult}
+        loadTasks={loadTasks}
+        setShowTaskDialog={setShowTaskDialog}
         setExpandedTaskId={setExpandedTaskId} setExpandedSubtasksId={setExpandedSubtasksId}
         setEditingTask={setEditingTask} setSubtaskParentTask={setSubtaskParentTask}
-        setConfirmDeleteTaskId={setConfirmDeleteTaskId} toast={toast}
+        setConfirmDeleteTaskId={setConfirmDeleteTaskId}
         selectedTaskIds={selectedTaskIds} toggleSelected={toggleSelected}
         setSelectedTaskIds={setSelectedTaskIds} bulkDeleteTasks={bulkDeleteTasks}
         bulkDeleting={bulkDeleting}
+        filters={taskFilters} setFilters={setTaskFilters}
       />
     ),
     calendar: () => (
@@ -873,6 +983,8 @@ const ExecMeetingDashboard = () => {
         weekPlan={weekPlan} weekPlanLoading={weekPlanLoading} includePastTasks={includePastTasks}
         setWeekPlanLoading={setWeekPlanLoading} setWeekPlan={setWeekPlan}
         setIncludePastTasks={setIncludePastTasks} setShowPastTasksConfirm={setShowPastTasksConfirm}
+        workStartHour={workStartHour} setWorkStartHour={setWorkStartHour}
+        workEndHour={workEndHour} setWorkEndHour={setWorkEndHour}
         toast={toast}
       />
     ),
@@ -886,10 +998,12 @@ const ExecMeetingDashboard = () => {
         setAiDocContext={setAiDocContext} setAiDocAudience={setAiDocAudience} setAiDocPeriod={setAiDocPeriod}
         setAiDocMeetingId={setAiDocMeetingId} setAiDocInput={setAiDocInput}
         generateAiDoc={generateAiDoc} loadDocuments={loadDocuments}
+        applyMeetingNotesToDoc={applyMeetingNotesToDoc}
         setViewDoc={setViewDoc} downloadDocPdf={downloadDocPdf} deleteDoc={deleteDoc}
         selectedDocIds={selectedDocIds} toggleSelected={toggleSelected}
         setSelectedDocIds={setSelectedDocIds} bulkDeleteDocs={bulkDeleteDocs}
         bulkDeleting={bulkDeleting}
+        filters={docFilters} setFilters={setDocFilters}
       />
     ),
     notifications: notificationsPanel,
