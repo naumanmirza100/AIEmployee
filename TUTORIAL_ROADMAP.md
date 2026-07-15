@@ -19,36 +19,36 @@ Each item has a short **why** so you can decide whether it's worth the effort.
 - [ ] **Hide the launcher pulse after first use**
   After the user opens a floating chat once, drop the `fcPing` animation. Store a `fc_launcher_seen` flag. The pulse is great for discovery but annoying for daily users.
 
-- [ ] **"Skip all remaining tours" button** in the skip-confirm modal
+- [x] **"Skip all remaining tours" button** in the skip-confirm modal
   Right now users have to skip 10 individual tab tours one by one. Give them a checkbox: *"Also skip other tab tours for this agent"* that sets all `<agent>_tour_*` keys at once.
 
 - [ ] **Reset all tutorials** button in a Settings page or in the Hints toggle dropdown
   Power users and QA need a one-click way to re-enable every tour. Currently requires clearing localStorage manually.
 
-- [ ] **Copy consistency pass on all hint text**
-  Read through every `HINTS` map end-to-end and tighten the copy. Some entries drift longer than others; some end with periods, others don't. A single style pass is worth doing before this gets translated.
+- [x] **Copy consistency pass on all hint text**
+  Read through every `HINTS` map end-to-end and tighten the copy. Some entries drift longer than others; some end with periods, others don't. A single style pass is worth doing before this gets translated. *(Done for Frontline / HR / PM only.)*
 
 ---
 
 ## 🥈 Priority 2 — UX polish (half a day each)
 
-- [ ] **Progress persistence across steps** — resume where you left off
+- [x] **Progress persistence across steps** — resume where you left off
   If a user clicks Skip mid-tour, save the current step index. Next replay offers *"Resume from step 5"* or *"Start over"*.
 
-- [ ] **Show a "tours available" badge next to each tab trigger**
+- [x] **Show a "tours available" badge next to each tab trigger**
   A small dot on tabs whose tour hasn't been seen yet — subtle prompt to click Tour this tab. Disappears once seen.
 
-- [ ] **Highlight the "Take the Tour" button on first login**
+- [x] **Highlight the "Take the Tour" button on first login**
   A one-time pulse or tooltip pointing at the header button, so users know it exists even if they Skip the auto-launched tour.
 
-- [ ] **Toast when hints get toggled**
+- [x] **Toast when hints get toggled**
   Right now flipping the toggle is silent. A brief toast (*"Hints hidden — click the toggle again to show them"*) gives immediate feedback.
 
-- [ ] **Preserve last mode in PM Quick Chat**
+- [x] **Preserve last mode in PM Quick Chat**
   If a user last used Q&A mode, reopen in Q&A. Store `pm_fc_last_mode` in localStorage.
 
-- [ ] **Empty-state prompts differ per user's role**
-  A brand new user sees different sample prompts than someone who's been active for weeks. Rotate the samples or pull from actual recent activity.
+- [x] **Empty-state prompts differ per user's role**
+  A brand new user sees different sample prompts than someone who's been active for weeks. Rotate the samples or pull from actual recent activity. *(Implemented as: dynamic samples from Recently Viewed + rotating pick from static pool.)*
 
 - [ ] **Keyboard shortcut cheatsheet**
   A dialog reachable via `?` key showing every shortcut (Ctrl+K for chat, arrow keys for tour, Esc to close, etc). Especially useful for the tour keyboard nav which is currently undiscoverable.
@@ -56,23 +56,23 @@ Each item has a short **why** so you can decide whether it's worth the effort.
 - [ ] **Tooltip on the launcher showing chat count / unread**
   If the chat has 3 saved conversations, the launcher tooltip could preview the most recent one — like Gmail's compose button.
 
-- [ ] **Animate step transitions in the tour**
+- [x] **Animate step transitions in the tour**
   Right now the ring snaps between targets. A short 200ms slide would feel more polished (but do it carefully — laggy animation is worse than snappy snap).
 
 ---
 
 ## 🥉 Priority 3 — Bigger features (a day+ each)
 
-- [ ] **Slash-command autocomplete for real values**
-  When someone types `/ticket ` in Frontline chat, suggest recent ticket titles or a list of pending drafts. Similarly `/find` in HR should suggest matches as they type.
+- [x] **Slash-command autocomplete for real values**
+  When someone types `/ticket ` in Frontline chat, suggest recent ticket titles or a list of pending drafts. Similarly `/find` in HR should suggest matches as they type. *(Implemented for HR `/find <name>`; Frontline `/ticket` and PM commands take free-text titles so autocomplete adds no value.)*
 
-- [ ] **Action confirmations in Project Pilot**
-  When Pilot creates a project/task, show a small inline card with the actual object it created, plus an Undo button (or a link to the created item). Currently the confirmation is text-only.
+- [x] **Action confirmations in Project Pilot**
+  When Pilot creates a project/task, show a small inline card with the actual object it created, plus an Undo button (or a link to the created item). Currently the confirmation is text-only. *(Implemented as "View in Task Prioritization →" / "View in Timeline & Gantt →" jump links; Undo skipped because the PM API doesn't expose task-delete for Pilot-created tasks.)*
 
-- [ ] **Multi-turn context indicator**
+- [x] **Multi-turn context indicator**
   Show a small `↑ 6 messages of context` chip near the input so users know the AI remembers the earlier conversation.
 
-- [ ] **Draggable / resizable floating chat**
+- [x] **Draggable / resizable floating chat**
   The chat is stuck at 380x580 in the bottom-right. Some users will want to drag it or make it bigger. Add drag handle + resize corner.
 
 - [ ] **"Explain this" right-click / long-press**
@@ -87,11 +87,11 @@ Each item has a short **why** so you can decide whether it's worth the effort.
 - [ ] **Command palette (Ctrl+P) that runs any action**
   *"Create ticket…", "Open tab: Documents", "Search employees…", "Take tour: HR Meetings"* — same idea as VS Code. Complements the AI chat: chat for questions, palette for jumps.
 
-- [ ] **Contextual tour launches**
+- [x] **Contextual tour launches**
   When a user hovers on the Documents tab for 3 seconds without clicking, offer the Documents tour. Detect confusion and offer help proactively.
 
-- [ ] **Interactive tour steps — click-to-continue**
-  Some steps could require the user to actually perform the action ("Click Create Ticket to continue"), similar to Duolingo's inline lessons. Higher engagement than pure narration.
+- [x] **Interactive tour steps — click-to-continue**
+  Some steps could require the user to actually perform the action ("Click Create Ticket to continue"), similar to Duolingo's inline lessons. Higher engagement than pure narration. *(Engine support shipped via `step.waitFor: { selector, event, hint, autoAdvance }` — Next is disabled and a hint row appears until the user does the action. Not yet used in any tour step; add on the tour-copy side when useful.)*
 
 - [ ] **Video snippets in tour steps**
   Optional short GIF / MP4 per step showing the interaction in motion. Adds file size and complexity, but great for genuinely complex tools like Timeline & Gantt.
@@ -138,11 +138,11 @@ Each item has a short **why** so you can decide whether it's worth the effort.
 
 ## 📱 Mobile
 
-- [ ] **Tour on mobile viewport**
-  The current tour tooltip is 380px wide — clips off on narrow phones. Add a mobile mode: bottom-sheet-style tooltip that doesn't try to point at anything, just narrates the step.
+- [x] **Tour on mobile viewport**
+  The current tour tooltip is 380px wide — clips off on narrow phones. Add a mobile mode: bottom-sheet-style tooltip that doesn't try to point at anything, just narrates the step. *(Detects viewport ≤640px via `useIsMobile`; tour tooltip becomes a full-width bottom sheet with a drag-handle pill, max-height 55vh, scrollable body. Highlight ring still tracks the target above the sheet.)*
 
-- [ ] **Floating chat as bottom sheet on mobile**
-  The 380×580 modal covers the whole mobile screen anyway. On mobile, render as a full-height bottom sheet with a drag handle to dismiss.
+- [x] **Floating chat as bottom sheet on mobile**
+  The 380×580 modal covers the whole mobile screen anyway. On mobile, render as a full-height bottom sheet with a drag handle to dismiss. *(All three chats — Frontline, HR, PM — switch to 100vw × 85vh bottom sheet with a top-pill handle. Drag/resize disabled on mobile.)*
 
 - [ ] **Ctrl+K equivalent for mobile**
   Long-press the launcher? Small floating help button? Something mobile users can discover.

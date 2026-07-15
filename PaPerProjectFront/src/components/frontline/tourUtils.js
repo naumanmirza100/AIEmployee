@@ -1,7 +1,34 @@
 // Small shared utilities for the tour-hint system used by Frontline / HR / PM.
 // Keeps per-dashboard files thin.
 
+import { useState, useEffect } from 'react';
 import { hasSeenTutorial } from './FrontlineTutorial';
+
+// --- Mobile viewport detection ------------------------------------------
+// Matches Tailwind's `sm` breakpoint. Everything below 640px is treated
+// as "mobile" for the tour + chat bottom-sheet modes.
+
+const MOBILE_QUERY = '(max-width: 640px)';
+
+export function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia(MOBILE_QUERY).matches;
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const onChange = (e) => setIsMobile(e.matches);
+    // Older browsers used addListener; keep both for safety.
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
+      else mq.removeListener(onChange);
+    };
+  }, []);
+  return isMobile;
+}
 
 // --- First-login "Take the Tour" spotlight ---------------------------------
 // Fires a one-time pulse animation on the header button so users notice it

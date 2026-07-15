@@ -15,7 +15,7 @@ import {
 } from './pmLocalStore';
 import pmAgentService from '@/services/pmAgentService';
 import { useToast } from '@/components/ui/use-toast';
-import { useDraggableResizable, ContextIndicator, ResizeCorner } from '../frontline/chatShellUtils';
+import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle } from '../frontline/chatShellUtils';
 
 const PM_LAST_MODE_KEY = 'pm_fc_last_mode_v1';
 
@@ -387,7 +387,8 @@ const PMFloatingChat = () => {
           style={geomStyle}
         >
           <ResizeCorner handleProps={resizeHandleProps} />
-          {/* Header — also acts as the drag handle */}
+          <MobileSheetHandle />
+          {/* Header — also acts as the drag handle on desktop */}
           <div
             data-tour-pmfc="header"
             {...dragHandleProps}

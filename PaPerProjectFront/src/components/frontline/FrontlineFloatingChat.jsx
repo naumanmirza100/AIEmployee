@@ -26,7 +26,7 @@ import {
 } from './frontlineLocalStore';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { useToast } from '@/components/ui/use-toast';
-import { useDraggableResizable, ContextIndicator, ResizeCorner } from './chatShellUtils';
+import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle } from './chatShellUtils';
 
 const SAMPLE_PROMPTS = [
   "How do I reset a customer's password?",
@@ -449,9 +449,10 @@ const FrontlineFloatingChat = () => {
           className="fixed z-[9990] rounded-2xl border border-[#3a295a] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
           style={geomStyle}
         >
-          {/* Resize corner (top-left) */}
+          {/* Resize corner (top-left) — hidden on mobile */}
           <ResizeCorner handleProps={resizeHandleProps} />
-          {/* Header — also acts as the drag handle */}
+          <MobileSheetHandle />
+          {/* Header — also acts as the drag handle on desktop */}
           <div
             data-tour-fc="header"
             {...dragHandleProps}

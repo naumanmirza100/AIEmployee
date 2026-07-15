@@ -12,6 +12,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowUp } from 'lucide-react';
+import { useIsMobile } from './tourUtils';
+
+// Re-export so chat files that already import from chatShellUtils can grab
+// the mobile flag without a second import.
+export { useIsMobile };
 
 const MIN_WIDTH = 340;
 const MIN_HEIGHT = 380;
@@ -23,6 +28,7 @@ const DEFAULT_HEIGHT = 580;
 export function useDraggableResizable(storageKey, { defaultWidth = DEFAULT_WIDTH, defaultHeight = DEFAULT_HEIGHT } = {}) {
   const key = `${storageKey}__geom_v1`;
   const [geom, setGeom] = useState(() => readGeom(key, { defaultWidth, defaultHeight }));
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     try { localStorage.setItem(key, JSON.stringify(geom)); } catch (_) { /* ignore */ }
@@ -100,16 +106,39 @@ export function useDraggableResizable(storageKey, { defaultWidth = DEFAULT_WIDTH
     },
   };
 
-  const containerStyle = {
-    right: geom.right,
-    bottom: geom.bottom,
-    width: geom.width,
-    height: geom.height,
-    maxHeight: 'calc(100vh - 40px)',
-    maxWidth: 'calc(100vw - 32px)',
-  };
+  // On mobile, render as a full-width bottom sheet — the desktop drag/resize
+  // model doesn't make sense on a phone.
+  const containerStyle = isMobile
+    ? {
+        left: 0,
+        right: 0,
+        bottom: 0,
+        top: 'auto',
+        width: '100vw',
+        height: '85vh',
+        maxHeight: '85vh',
+        maxWidth: '100vw',
+        borderRadius: '16px 16px 0 0',
+      }
+    : {
+        right: geom.right,
+        bottom: geom.bottom,
+        width: geom.width,
+        height: geom.height,
+        maxHeight: 'calc(100vh - 40px)',
+        maxWidth: 'calc(100vw - 32px)',
+      };
 
-  return { containerStyle, dragHandleProps, resizeHandleProps };
+  // On mobile we disable drag + resize so the sheet doesn't move under a fat finger.
+  const mobileSafeDrag = isMobile ? { style: {}, title: undefined } : dragHandleProps;
+  const mobileSafeResize = isMobile ? { onMouseDown: () => {} } : resizeHandleProps;
+
+  return {
+    containerStyle,
+    dragHandleProps: mobileSafeDrag,
+    resizeHandleProps: mobileSafeResize,
+    isMobile,
+  };
 }
 
 function readGeom(key, { defaultWidth, defaultHeight }) {
@@ -153,15 +182,30 @@ export const ContextIndicator = ({ count }) => {
 
 // ---------- Resize corner visual ----------------------------------------
 
-export const ResizeCorner = ({ handleProps }) => (
-  <div
-    {...handleProps}
-    title="Drag to resize"
-    className="absolute top-0 left-0 w-4 h-4 cursor-nwse-resize z-10 group"
-    style={{ userSelect: 'none' }}
-  >
-    <svg viewBox="0 0 16 16" className="w-full h-full opacity-30 group-hover:opacity-70 transition-opacity">
-      <path d="M2 14 L14 2 M6 14 L14 6 M10 14 L14 10" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-    </svg>
-  </div>
-);
+export const ResizeCorner = ({ handleProps }) => {
+  const isMobile = useIsMobile();
+  if (isMobile) return null;
+  return (
+    <div
+      {...handleProps}
+      title="Drag to resize"
+      className="absolute top-0 left-0 w-4 h-4 cursor-nwse-resize z-10 group"
+      style={{ userSelect: 'none' }}
+    >
+      <svg viewBox="0 0 16 16" className="w-full h-full opacity-30 group-hover:opacity-70 transition-opacity">
+        <path d="M2 14 L14 2 M6 14 L14 6 M10 14 L14 10" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      </svg>
+    </div>
+  );
+};
+
+// ---------- Mobile bottom-sheet drag handle -----------------------------
+// A small pill at the top of the chat, similar to iOS/Android sheets.
+// Purely visual — the mobile chat is fixed and dismissed via the header X.
+// Renders nothing on desktop.
+
+export const MobileSheetHandle = () => {
+  const isMobile = useIsMobile();
+  if (!isMobile) return null;
+  return <div className="w-10 h-1 rounded-full bg-white/25 mx-auto my-1.5 shrink-0" aria-hidden="true" />;
+};

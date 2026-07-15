@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ChevronLeft, ChevronRight, GraduationCap } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { useIsMobile } from './tourUtils';
 
 const DEFAULT_STORAGE_KEY = 'frontline_tutorial_seen_v1';
 
@@ -173,6 +174,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
   const stepsArr = steps && steps.length ? steps : MAIN_TOUR_STEPS;
   const storeKey = storageKey || DEFAULT_STORAGE_KEY;
   const { toast } = useToast();
+  const isMobile = useIsMobile();
 
   const [index, setIndex] = useState(0);
   const [targetRect, setTargetRect] = useState(null);
@@ -462,50 +464,46 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
         />
       )}
 
-      {/* Highlight ring around target — its box-shadow dims everything OUTSIDE
-          the ring while leaving the target itself at full brightness. */}
-      {targetRect && !isCentered && (
-        <>
-          {/* Transparent click-catcher over the dimmed area so clicks outside
-              the highlight don't fall through to the app underneath. */}
-          <div className="fixed inset-0 z-[9997] pointer-events-auto" />
-          <div
-            className="fixed z-[9999] pointer-events-none rounded-xl"
-            style={{
-              top: targetRect.top - 6,
-              left: targetRect.left - 6,
-              width: targetRect.width + 12,
-              height: targetRect.height + 12,
-              boxShadow: '0 0 0 3px #f59e0b, 0 0 0 9999px rgba(2,3,8,0.72)',
-              animation: 'fltPulse 1.8s ease-in-out infinite',
-            }}
-          />
-        </>
-      )}
-
-      {/* Tooltip */}
+      {/* Tooltip — bottom sheet on mobile, positioned tooltip on desktop */}
       <div
         ref={tooltipRef}
-        className="fixed z-[10000] rounded-xl border border-[#3a295a] bg-[#161630] shadow-2xl"
+        className={`fixed z-[10000] border border-[#3a295a] bg-[#161630] shadow-2xl ${
+          isMobile ? 'rounded-t-2xl' : 'rounded-xl'
+        }`}
         style={
-          isCentered
+          isMobile
             ? {
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                width: `min(${TOOLTIP_WIDTH}px, calc(100vw - 32px))`,
-                padding: '1.25rem 1.5rem',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100%',
+                maxHeight: '55vh',
+                overflowY: 'auto',
+                padding: '0.75rem 1rem 1rem',
+                transition: 'transform 220ms cubic-bezier(0.4, 0, 0.2, 1)',
               }
-            : {
-                top: tooltipPos.top,
-                left: tooltipPos.left,
-                width: TOOLTIP_WIDTH,
-                maxWidth: 'calc(100vw - 16px)',
-                padding: '1.25rem 1.5rem',
-                transition: 'top 220ms cubic-bezier(0.4, 0, 0.2, 1), left 220ms cubic-bezier(0.4, 0, 0.2, 1)',
-              }
+            : isCentered
+              ? {
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: `min(${TOOLTIP_WIDTH}px, calc(100vw - 32px))`,
+                  padding: '1.25rem 1.5rem',
+                }
+              : {
+                  top: tooltipPos.top,
+                  left: tooltipPos.left,
+                  width: TOOLTIP_WIDTH,
+                  maxWidth: 'calc(100vw - 16px)',
+                  padding: '1.25rem 1.5rem',
+                  transition: 'top 220ms cubic-bezier(0.4, 0, 0.2, 1), left 220ms cubic-bezier(0.4, 0, 0.2, 1)',
+                }
         }
       >
+        {/* Mobile drag handle — visual affordance for the bottom sheet */}
+        {isMobile && (
+          <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-2" aria-hidden="true" />
+        )}
         {/* Close (X) */}
         <button
           type="button"

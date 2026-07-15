@@ -15,7 +15,7 @@ import {
 } from './hrLocalStore';
 import hrAgentService from '@/services/hrAgentService';
 import { useToast } from '@/components/ui/use-toast';
-import { useDraggableResizable, ContextIndicator, ResizeCorner } from '../frontline/chatShellUtils';
+import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle } from '../frontline/chatShellUtils';
 
 const SAMPLE_PROMPTS = [
   "What's our parental leave policy?",
@@ -361,7 +361,8 @@ const HRFloatingChat = () => {
           style={geomStyle}
         >
           <ResizeCorner handleProps={resizeHandleProps} />
-          {/* Header — also acts as the drag handle */}
+          <MobileSheetHandle />
+          {/* Header — also acts as the drag handle on desktop */}
           <div
             data-tour-hrfc="header"
             {...dragHandleProps}
