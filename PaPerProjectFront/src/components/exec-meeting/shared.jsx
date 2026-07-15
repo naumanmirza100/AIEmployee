@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar as CalendarIcon } from 'lucide-react';
+import { Calendar as CalendarIcon, Trash2, Loader2, Check } from 'lucide-react';
 
 // ── Markdown → HTML renderer (violet theme, matches this dashboard) ─────────
 export function markdownToHtml(md) {
@@ -163,9 +163,32 @@ export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
   };
 
+  // When past times aren't allowed and the chosen day is today, block any
+  // hour/minute already in the past so only "now or later" can be picked.
+  const now = new Date();
+  const isToday = selectedDate
+    && selectedDate.getFullYear() === now.getFullYear()
+    && selectedDate.getMonth() === now.getMonth()
+    && selectedDate.getDate() === now.getDate();
+  const restrictTimes = !allowPast && isToday;
+  const isHourDisabled = (h) => restrictTimes && parseInt(h, 10) < now.getHours();
+  const isMinDisabled = (m) =>
+    restrictTimes && parseInt(selectedHour, 10) === now.getHours() && parseInt(m, 10) < now.getMinutes();
+
   const handleDateSelect = (date) => {
     setCalOpen(false);
-    onChange(buildISO(date, selectedHour, selectedMin));
+    // If picking today and the currently-held hour is now in the past, bump the
+    // time forward to the next valid slot so we never emit a past datetime.
+    let hour = selectedHour, minute = selectedMin;
+    const pickIsToday = date
+      && date.getFullYear() === now.getFullYear()
+      && date.getMonth() === now.getMonth()
+      && date.getDate() === now.getDate();
+    if (!allowPast && pickIsToday && parseInt(hour, 10) < now.getHours()) {
+      hour = String(now.getHours()).padStart(2, '0');
+      minute = '00';
+    }
+    onChange(buildISO(date, hour, minute));
   };
 
   const handleHourChange = (h) => onChange(buildISO(selectedDate, h, selectedMin));
@@ -225,7 +248,7 @@ export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
           <SelectValue />
         </SelectTrigger>
         <SelectContent className="max-h-48 overflow-y-auto">
-          {HOURS.map(h => <SelectItem key={h} value={h}>{h}:00</SelectItem>)}
+          {HOURS.map(h => <SelectItem key={h} value={h} disabled={isHourDisabled(h)}>{h}:00</SelectItem>)}
         </SelectContent>
       </Select>
 
@@ -235,7 +258,7 @@ export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {MINUTES.map(m => <SelectItem key={m} value={m}>:{m}</SelectItem>)}
+          {MINUTES.map(m => <SelectItem key={m} value={m} disabled={isMinDisabled(m)}>:{m}</SelectItem>)}
         </SelectContent>
       </Select>
     </div>
@@ -406,3 +429,53 @@ export const validateMeetingLink = (url) => {
   if (!url || !url.trim()) return true; // blank is OK (auto-generated)
   return VALID_MEETING_LINK_PATTERN.test(url.trim());
 };
+
+// ── Bulk-select toolbar ─────────────────────────────────────────────────────
+// A small header row with a "select all" checkbox and, once anything is
+// selected, a count + "Delete selected" button. Used by the Tasks, Documents
+// and Notifications panels. `allIds` is the full list of selectable ids on the
+// current view; `selected` is a Set; `onToggleAll` flips between none/all.
+export const BulkSelectBar = ({ allIds, selected, onToggleAll, onDelete, deleting, label = 'item' }) => {
+  const total = allIds.length;
+  const count = selected.size;
+  const allChecked = total > 0 && count === total;
+  if (total === 0) return null;
+  return (
+    <div className="flex items-center justify-between px-1 py-1">
+      <button type="button" onClick={onToggleAll} className="flex items-center gap-2 cursor-pointer select-none group">
+        <SelectCheckbox checked={allChecked} indeterminate={count > 0 && !allChecked} onChange={onToggleAll} />
+        <span className="text-xs text-white/50 group-hover:text-white/70 transition-colors">
+          {count > 0 ? `${count} selected` : 'Select all'}
+        </span>
+      </button>
+      {count > 0 && (
+        <Button size="sm" variant="ghost" onClick={onDelete} disabled={deleting}
+          className="h-7 px-3 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1.5">
+          {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          Delete selected ({count})
+        </Button>
+      )}
+    </div>
+  );
+};
+
+// A custom-styled checkbox (light-purple to match the dashboard) for selecting
+// an item in a bulk list. Renders a rounded box that fills violet with a white
+// check when selected. `indeterminate` shows a dash (used by "select all").
+export const SelectCheckbox = ({ checked, indeterminate = false, onChange }) => (
+  <span
+    role="checkbox"
+    aria-checked={checked}
+    tabIndex={0}
+    onClick={e => { e.stopPropagation(); onChange && onChange(e); }}
+    onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); onChange && onChange(e); } }}
+    className={`inline-flex items-center justify-center h-4 w-4 rounded-[5px] border cursor-pointer flex-shrink-0 transition-all ${
+      checked || indeterminate
+        ? 'bg-violet-500 border-violet-400 shadow-[0_0_6px_0_rgba(162,89,255,0.5)]'
+        : 'bg-violet-500/10 border-violet-400/40 hover:border-violet-400/70 hover:bg-violet-500/20'
+    }`}
+  >
+    {checked && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+    {indeterminate && !checked && <span className="h-0.5 w-2 rounded-full bg-white" />}
+  </span>
+);

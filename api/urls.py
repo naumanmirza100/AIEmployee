@@ -888,10 +888,12 @@ urlpatterns = [
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/documents/?$', exec_meeting_api.meeting_documents, name='exec_meeting_documents'),  # GET
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/participants/?$', exec_meeting_api.meeting_participants, name='exec_meeting_participants'),  # GET, POST, DELETE
     re_path(r'^exec-meeting/meetings/suggest-slots/?$', exec_meeting_api.meeting_suggest_slots, name='exec_meeting_suggest_slots'),  # GET
+    re_path(r'^exec-meeting/meetings/check-conflicts/?$', exec_meeting_api.meeting_check_conflicts, name='exec_meeting_check_conflicts'),  # POST
     re_path(r'^exec-meeting/users/search/?$', exec_meeting_api.search_company_users, name='exec_users_search'),  # GET ?q=
 
     # Action Items
     re_path(r'^exec-meeting/action-items/(?P<item_id>\d+)/?$', exec_meeting_api.action_item_detail, name='exec_action_item_detail'),  # GET, PATCH
+    re_path(r'^exec-meeting/action-items/(?P<item_id>\d+)/convert-to-task/?$', exec_meeting_api.action_item_convert_to_task, name='exec_action_item_convert_to_task'),  # POST
 
     # Tasks
     re_path(r'^exec-meeting/tasks/?$', exec_meeting_api.task_list, name='exec_task_list'),  # GET, POST
@@ -912,7 +914,9 @@ urlpatterns = [
     # Notifications
     re_path(r'^exec-meeting/notifications/?$', exec_meeting_api.notification_list, name='exec_notification_list'),  # GET
     re_path(r'^exec-meeting/notifications/mark-all-read/?$', exec_meeting_api.notification_mark_all_read, name='exec_notification_mark_all_read'),  # PATCH
+    re_path(r'^exec-meeting/notifications/bulk-delete/?$', exec_meeting_api.notification_bulk_delete, name='exec_notification_bulk_delete'),  # POST
     re_path(r'^exec-meeting/notifications/(?P<notification_id>\d+)/read/?$', exec_meeting_api.notification_mark_read, name='exec_notification_mark_read'),  # PATCH
+    re_path(r'^exec-meeting/notifications/(?P<notification_id>\d+)/?$', exec_meeting_api.notification_delete, name='exec_notification_delete'),  # DELETE
     re_path(r'^exec-meeting/notifications/daily-digest/?$', exec_meeting_api.notification_daily_digest, name='exec_notification_daily_digest'),  # POST
 
     # Chat — per sub-agent

@@ -96,6 +96,7 @@ If any field is unclear, use sensible defaults. Return ONLY JSON, no explanation
                     'title': meeting.title,
                     'scheduled_at': meeting.scheduled_at.isoformat(),
                     'duration_minutes': meeting.duration_minutes,
+                    'status': meeting.status,
                 })
         # deduplicate by id
         seen = set()
