@@ -15,6 +15,9 @@ import {
 } from './pmLocalStore';
 import pmAgentService from '@/services/pmAgentService';
 import { useToast } from '@/components/ui/use-toast';
+import { useDraggableResizable, ContextIndicator, ResizeCorner } from '../frontline/chatShellUtils';
+
+const PM_LAST_MODE_KEY = 'pm_fc_last_mode_v1';
 
 // Two "modes" — the same UI drives both, backed by different service methods
 // and different localStorage histories.
@@ -63,7 +66,16 @@ const PMFloatingChat = () => {
   const { toast } = useToast();
 
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState('pilot'); // 'pilot' | 'qa'
+  // Preserve the last-used mode across sessions
+  const [mode, setMode] = useState(() => {
+    try {
+      const raw = localStorage.getItem(PM_LAST_MODE_KEY);
+      return raw === 'qa' || raw === 'pilot' ? raw : 'pilot';
+    } catch (_) { return 'pilot'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(PM_LAST_MODE_KEY, mode); } catch (_) { /* ignore */ }
+  }, [mode]);
   const [showHistory, setShowHistory] = useState(false);
 
   // Separate conversation state per mode. Keeps the two chats independent.
@@ -84,6 +96,7 @@ const PMFloatingChat = () => {
 
   // Stores — refresh whenever mode changes or chat is opened
   const [history, setHistory] = useState(() => listPMChatHistory('pilot'));
+  const { containerStyle: geomStyle, dragHandleProps, resizeHandleProps } = useDraggableResizable('pm_fc', { defaultWidth: 440, defaultHeight: 600 });
   const [recents, setRecents] = useState(() => listPMRecentlyViewed());
 
   const messagesEndRef = useRef(null);
@@ -370,14 +383,16 @@ const PMFloatingChat = () => {
       {/* Modal */}
       {open && createPortal(
         <div
-          className="fixed bottom-6 right-6 z-[9990] w-[440px] max-w-[calc(100vw-32px)] rounded-2xl border border-[#1e3a5f] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
-          style={{ height: '600px', maxHeight: 'calc(100vh - 100px)' }}
+          className="fixed z-[9990] rounded-2xl border border-[#1e3a5f] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
+          style={geomStyle}
         >
-          {/* Header */}
+          <ResizeCorner handleProps={resizeHandleProps} />
+          {/* Header — also acts as the drag handle */}
           <div
             data-tour-pmfc="header"
-            className="flex items-center justify-between px-3 py-2.5 border-b border-white/10"
-            style={{ background: 'linear-gradient(90deg, #06b6d4 0%, #3b82f6 100%)' }}
+            {...dragHandleProps}
+            className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 select-none"
+            style={{ ...dragHandleProps.style, background: 'linear-gradient(90deg, #06b6d4 0%, #3b82f6 100%)' }}
           >
             <div className="flex items-center gap-2 min-w-0">
               <Sparkles className="h-4 w-4 text-white shrink-0" />
@@ -512,13 +527,29 @@ const PMFloatingChat = () => {
                   <div className="mt-3">
                     <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold mb-1">Try one</p>
                     <div className="space-y-1">
-                      {currentMode.samples.map((sample) => (
-                        <button key={sample} type="button"
-                          onClick={() => { setInput(sample); inputRef.current?.focus(); }}
-                          className="block w-full text-left text-xs text-cyan-300/80 hover:text-cyan-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
-                          → {sample}
-                        </button>
-                      ))}
+                      {(() => {
+                        const dyn = [];
+                        (recents || []).slice(0, 2).forEach((r) => {
+                          if (mode === 'pilot') {
+                            if (r.kind === 'project') dyn.push(`Add a task to project "${r.title}"`);
+                            else if (r.kind === 'task') dyn.push(`Update the status of task "${r.title}" to In Progress`);
+                          } else {
+                            if (r.kind === 'project') dyn.push(`How is project "${r.title}" doing?`);
+                            else if (r.kind === 'task') dyn.push(`What's blocking task "${r.title}"?`);
+                            else if (r.kind === 'meeting') dyn.push(`Summarize meeting "${r.title}"`);
+                          }
+                        });
+                        const rot = currentMode.samples[Math.floor((Date.now() / 60000) % currentMode.samples.length)];
+                        const staticPool = currentMode.samples.filter((s) => s !== rot).slice(0, 2);
+                        const shown = [...dyn, rot, ...staticPool].slice(0, 3);
+                        return shown.map((sample) => (
+                          <button key={sample} type="button"
+                            onClick={() => { setInput(sample); inputRef.current?.focus(); }}
+                            className="block w-full text-left text-xs text-cyan-300/80 hover:text-cyan-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
+                            → {sample}
+                          </button>
+                        ));
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -568,6 +599,11 @@ const PMFloatingChat = () => {
           {/* Input row */}
           {!showHistory && (
             <div className="border-t border-white/10 relative" style={{ background: '#0e0e14' }}>
+              {currentConv.messages.length >= 2 && (
+                <div className="px-3 pt-2">
+                  <ContextIndicator count={Math.min(currentConv.messages.length, 6)} />
+                </div>
+              )}
               {slashOpen && filteredCommands.length > 0 && (
                 <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[#1e3a5f] bg-[#0a1929] shadow-2xl overflow-hidden">
                   <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-white/40 font-semibold">

@@ -12,7 +12,7 @@ import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 import { trackPMRecentlyViewed } from './pmLocalStore';
 
-const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
+const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   const { toast } = useToast();
   const safeProjects = Array.isArray(projects) ? projects : [];
 
@@ -640,6 +640,29 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate }) => {
                                     )}
                                     {action.project_name && !isTaskAction && action.action !== 'create_project' && (
                                       <p className="text-xs text-muted-foreground mt-1">Project: {action.project_name}</p>
+                                    )}
+                                    {/* "View in ..." jump link — helps users verify what the Pilot did */}
+                                    {action.success && onNavigate && (
+                                      <div className="mt-2 flex flex-wrap gap-2">
+                                        {isTaskAction && (
+                                          <button
+                                            type="button"
+                                            onClick={() => onNavigate('task-prioritization')}
+                                            className="text-[11px] font-medium text-violet-500 hover:text-violet-400 dark:text-violet-300 dark:hover:text-violet-200 underline underline-offset-2"
+                                          >
+                                            View in Task Prioritization →
+                                          </button>
+                                        )}
+                                        {action.action === 'create_project' && (
+                                          <button
+                                            type="button"
+                                            onClick={() => onNavigate('timeline-gantt')}
+                                            className="text-[11px] font-medium text-violet-500 hover:text-violet-400 dark:text-violet-300 dark:hover:text-violet-200 underline underline-offset-2"
+                                          >
+                                            View in Timeline & Gantt →
+                                          </button>
+                                        )}
+                                      </div>
                                     )}
                                   </div>
                                 </div>

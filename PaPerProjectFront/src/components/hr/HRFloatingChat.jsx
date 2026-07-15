@@ -15,6 +15,7 @@ import {
 } from './hrLocalStore';
 import hrAgentService from '@/services/hrAgentService';
 import { useToast } from '@/components/ui/use-toast';
+import { useDraggableResizable, ContextIndicator, ResizeCorner } from '../frontline/chatShellUtils';
 
 const SAMPLE_PROMPTS = [
   "What's our parental leave policy?",
@@ -50,10 +51,15 @@ const HRFloatingChat = () => {
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [slashActive, setSlashActive] = useState(0);
+  // Live results for /find <arg>
+  const [argResults, setArgResults] = useState(null); // null | array
+  const argDebounceRef = useRef(null);
 
   const [tourOpen, setTourOpen] = useState(false);
 
   const [history, setHistory] = useState(() => listHRChatHistory());
+  // Draggable + resizable geometry, persisted per storage key.
+  const { containerStyle: geomStyle, dragHandleProps, resizeHandleProps } = useDraggableResizable('hr_fc');
   const [recents, setRecents] = useState(() => listHRRecentlyViewed());
 
   const messagesEndRef = useRef(null);
@@ -143,8 +149,24 @@ const HRFloatingChat = () => {
       setSlashFilter(val.slice(1));
       setSlashOpen(true);
       setSlashActive(0);
+      setArgResults(null);
     } else {
       setSlashOpen(false);
+      // Debounced arg autocomplete for /find <arg>
+      const findMatch = val.match(/^\/find\s+(.+)$/i);
+      clearTimeout(argDebounceRef.current);
+      if (findMatch && findMatch[1].trim().length >= 2) {
+        const q = findMatch[1].trim();
+        argDebounceRef.current = setTimeout(async () => {
+          try {
+            const res = await hrAgentService.listHREmployees({ search: q, page_size: 5 });
+            const rows = (res?.data?.results || res?.data || []).slice(0, 5);
+            setArgResults(rows);
+          } catch (_) { setArgResults([]); }
+        }, 220);
+      } else {
+        setArgResults(null);
+      }
     }
   };
 
@@ -201,6 +223,7 @@ const HRFloatingChat = () => {
     if (q.startsWith('/')) {
       setInput('');
       setSlashOpen(false);
+      setArgResults(null);
       const handled = await runSlashCommand(q);
       if (handled) return;
     }
@@ -208,6 +231,7 @@ const HRFloatingChat = () => {
     pushMessage({ role: 'user', content: q });
     setInput('');
     setSlashOpen(false);
+    setArgResults(null);
     setSending(true);
 
     try {
@@ -333,14 +357,16 @@ const HRFloatingChat = () => {
       {/* Modal */}
       {open && createPortal(
         <div
-          className="fixed bottom-6 right-6 z-[9990] w-[420px] max-w-[calc(100vw-32px)] rounded-2xl border border-[#3a295a] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
-          style={{ height: '580px', maxHeight: 'calc(100vh - 100px)' }}
+          className="fixed z-[9990] rounded-2xl border border-[#3a295a] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
+          style={geomStyle}
         >
-          {/* Header */}
+          <ResizeCorner handleProps={resizeHandleProps} />
+          {/* Header — also acts as the drag handle */}
           <div
             data-tour-hrfc="header"
-            className="flex items-center justify-between px-3 py-2.5 border-b border-white/10"
-            style={{ background: 'linear-gradient(90deg, #8b5cf6 0%, #a78bfa 100%)' }}
+            {...dragHandleProps}
+            className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 select-none"
+            style={{ ...dragHandleProps.style, background: 'linear-gradient(90deg, #8b5cf6 0%, #a78bfa 100%)' }}
           >
             <div className="flex items-center gap-2 min-w-0">
               <Sparkles className="h-4 w-4 text-white shrink-0" />
@@ -447,13 +473,26 @@ const HRFloatingChat = () => {
                   <div className="mt-3">
                     <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold mb-1">Try one</p>
                     <div className="space-y-1">
-                      {SAMPLE_PROMPTS.map((sample) => (
-                        <button key={sample} type="button"
-                          onClick={() => { setInput(sample); inputRef.current?.focus(); }}
-                          className="block w-full text-left text-xs text-violet-300/80 hover:text-violet-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
-                          → {sample}
-                        </button>
-                      ))}
+                      {/* Dynamic samples from recent activity when we have any,
+                          otherwise fall back to the static set. */}
+                      {(() => {
+                        const dyn = [];
+                        (recents || []).slice(0, 2).forEach((r) => {
+                          if (r.kind === 'employee') dyn.push(`Tell me about ${r.title}`);
+                          else if (r.kind === 'document') dyn.push(`Summarize the HR document "${r.title}"`);
+                        });
+                        // Rotate the static pool so repeat visits show variety.
+                        const rot = SAMPLE_PROMPTS[Math.floor((Date.now() / 60000) % SAMPLE_PROMPTS.length)];
+                        const staticPool = SAMPLE_PROMPTS.filter((s) => s !== rot).slice(0, 2);
+                        const shown = [...dyn, rot, ...staticPool].slice(0, 3);
+                        return shown.map((sample) => (
+                          <button key={sample} type="button"
+                            onClick={() => { setInput(sample); inputRef.current?.focus(); }}
+                            className="block w-full text-left text-xs text-violet-300/80 hover:text-violet-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
+                            → {sample}
+                          </button>
+                        ));
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -501,6 +540,41 @@ const HRFloatingChat = () => {
           {/* Input row */}
           {!showHistory && (
             <div className="border-t border-white/10 relative" style={{ background: '#0e0e14' }}>
+              {messages.length >= 2 && (
+                <div className="px-3 pt-2">
+                  <ContextIndicator count={Math.min(messages.length, 6)} />
+                </div>
+              )}
+              {/* /find <arg> — live employee matches */}
+              {argResults && !slashOpen && (
+                <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[#3a295a] bg-[#161630] shadow-2xl overflow-hidden">
+                  <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-white/40 font-semibold">
+                    Matches
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {argResults.length === 0 ? (
+                      <div className="px-3 py-3 text-xs text-white/50">No employees found — Enter to send anyway.</div>
+                    ) : argResults.map((r) => (
+                      <button key={r.id} type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setInput(`/find ${r.work_email || r.username || r.full_name}`);
+                          setArgResults(null);
+                          setTimeout(() => inputRef.current?.focus(), 0);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-violet-500/10 transition">
+                        <div className="h-6 w-6 rounded-full bg-violet-500/20 flex items-center justify-center shrink-0 text-[10px] font-semibold text-violet-300">
+                          {(r.full_name || r.username || '?').slice(0, 1).toUpperCase()}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold text-white truncate">{r.full_name || r.username || `#${r.id}`}</div>
+                          <div className="text-[10px] text-white/50 truncate">{r.work_email || r.email || ''}{r.job_title ? ' · ' + r.job_title : ''}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {slashOpen && filteredCommands.length > 0 && (
                 <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[#3a295a] bg-[#161630] shadow-2xl overflow-hidden">
                   <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-white/40 font-semibold">

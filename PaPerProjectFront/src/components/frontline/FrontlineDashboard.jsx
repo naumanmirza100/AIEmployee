@@ -82,6 +82,10 @@ import { TAB_TOURS, HINTS } from './frontlineTutorialSteps';
 import InfoHint, { HintsProvider, useHints } from './InfoHint';
 import FrontlineFloatingChat from './FrontlineFloatingChat';
 import { trackRecentlyViewed } from './frontlineLocalStore';
+import {
+  shouldSpotlightTour, markSpotlightSeen,
+  tourAvailable, makeHoverLaunchHandlers,
+} from './tourUtils';
 import { GraduationCap, Eye, EyeOff } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { apiErrorMessage } from '@/utils/apiErrorMessage';
@@ -2574,10 +2578,27 @@ const FrontlineDashboard = () => {
     }
   }, []);
 
+  // One-time spotlight pulse on the "Take the Tour" button so users notice
+  // it after the auto-launched main tour closes. Persisted per-dashboard.
+  const [spotlightTour, setSpotlightTour] = useState(false);
+  useEffect(() => {
+    if (tutorialOpen) return;
+    if (!hasSeenTutorial()) return; // wait until main tour is done
+    if (!shouldSpotlightTour('fl')) return;
+    setSpotlightTour(true);
+    const t = setTimeout(() => { setSpotlightTour(false); markSpotlightSeen('fl'); }, 5500);
+    return () => clearTimeout(t);
+  }, [tutorialOpen]);
+
   const handleReplayTutorial = () => {
+    setSpotlightTour(false);
+    markSpotlightSeen('fl');
     resetTutorial();
     setTutorialOpen(true);
   };
+
+  // Sibling tab-tour keys for the "skip all" checkbox in every tour instance.
+  const flTabTourKeys = React.useMemo(() => Object.values(TAB_TOURS).map((t) => t.key), []);
 
   // Auto-launch the per-tab tour the first time the user visits a given tab.
   useEffect(() => {
@@ -3464,19 +3485,36 @@ const FrontlineDashboard = () => {
     >
     <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
       {/* Take the Tour + Hints toggle */}
-      <div className="flex justify-end items-center gap-2">
+      <div className="flex justify-end items-center gap-2 relative">
         <HintsToggleButton />
         <button
           type="button"
           onClick={handleReplayTutorial}
           data-tour="replay"
           title="Replay the onboarding tutorial"
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-amber-400/40 bg-amber-400/10 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 hover:text-amber-200 transition"
+          className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-amber-400/40 bg-amber-400/10 text-amber-300 text-sm font-semibold hover:bg-amber-400/20 hover:text-amber-200 transition ${spotlightTour ? 'flt-spotlight' : ''}`}
         >
           <GraduationCap className="h-4 w-4" />
           Take the Tour
         </button>
+        {spotlightTour && (
+          <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-amber-400/40 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap flt-spotlight-tip">
+            👋 Take the tour anytime from here
+            <span className="absolute -top-1 right-6 h-2 w-2 bg-[#161630] border-t border-l border-amber-400/40 rotate-45" />
+          </div>
+        )}
       </div>
+      <style>{`
+        @keyframes fltSpotlight {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4), 0 0 0 0 rgba(245, 158, 11, 0.2); }
+          50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.15), 0 0 0 12px rgba(245, 158, 11, 0.08); }
+        }
+        .flt-spotlight { animation: fltSpotlight 1.6s ease-in-out infinite; }
+        @keyframes fltDotPulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50%      { transform: scale(1.3); opacity: 0.7; }
+        }
+      `}</style>
 
       {/* Stats Overview */}
       <div data-tour="stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
@@ -3592,12 +3630,19 @@ const FrontlineDashboard = () => {
           >
             {FRONTLINE_TAB_ITEMS.map((item) => {
               const TabIcon = item.icon;
+              const tour = TAB_TOURS[item.value];
+              const showBadge = tour && tourAvailable(tour.key);
+              const hoverHandlers = tour ? makeHoverLaunchHandlers({
+                tourStorageKey: tour.key,
+                onLaunch: () => setActiveTabTour(item.value),
+              }) : {};
               return (
                 <TabsTrigger
                   key={item.value}
                   value={item.value}
                   data-tour-tab={item.value}
-                  className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+                  {...hoverHandlers}
+                  className="relative whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                   style={activeTab === item.value
                     ? {
                         background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
@@ -3615,6 +3660,13 @@ const FrontlineDashboard = () => {
                 >
                   <TabIcon className="h-4 w-4 mr-2" />
                   {item.label}
+                  {showBadge && (
+                    <span
+                      title="Tour available — hover to launch or click 'Tour this tab' inside"
+                      className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[#1a1333]"
+                      style={{ animation: 'fltDotPulse 2s ease-in-out infinite' }}
+                    />
+                  )}
                 </TabsTrigger>
               );
             })}
@@ -5431,6 +5483,7 @@ const FrontlineDashboard = () => {
         open={tutorialOpen}
         onClose={() => setTutorialOpen(false)}
         setActiveTab={setActiveTab}
+        siblingKeys={flTabTourKeys}
       />
 
       {/* Per-tab guided tour */}
@@ -5440,6 +5493,7 @@ const FrontlineDashboard = () => {
           onClose={() => setActiveTabTour(null)}
           steps={TAB_TOURS[activeTabTour].steps}
           storageKey={TAB_TOURS[activeTabTour].key}
+          siblingKeys={flTabTourKeys.filter((k) => k !== TAB_TOURS[activeTabTour].key)}
         />
       )}
     </div>

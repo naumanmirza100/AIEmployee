@@ -26,6 +26,7 @@ import {
 } from './frontlineLocalStore';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { useToast } from '@/components/ui/use-toast';
+import { useDraggableResizable, ContextIndicator, ResizeCorner } from './chatShellUtils';
 
 const SAMPLE_PROMPTS = [
   "How do I reset a customer's password?",
@@ -100,6 +101,8 @@ const FrontlineFloatingChat = () => {
 
   // Reactive stores (re-read from localStorage when we need to show them)
   const [history, setHistory] = useState(() => listChatHistory());
+  // Draggable + resizable geometry, persisted per storage key.
+  const { containerStyle: geomStyle, dragHandleProps, resizeHandleProps } = useDraggableResizable('frontline_fc');
   const [recents, setRecents] = useState(() => listRecentlyViewed());
 
   const messagesEndRef = useRef(null);
@@ -443,14 +446,17 @@ const FrontlineFloatingChat = () => {
       {/* Chat modal */}
       {open && createPortal(
         <div
-          className="fixed bottom-6 right-6 z-[9990] w-[420px] max-w-[calc(100vw-32px)] rounded-2xl border border-[#3a295a] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
-          style={{ height: '580px', maxHeight: 'calc(100vh - 100px)' }}
+          className="fixed z-[9990] rounded-2xl border border-[#3a295a] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
+          style={geomStyle}
         >
-          {/* Header */}
+          {/* Resize corner (top-left) */}
+          <ResizeCorner handleProps={resizeHandleProps} />
+          {/* Header — also acts as the drag handle */}
           <div
             data-tour-fc="header"
-            className="flex items-center justify-between px-3 py-2.5 border-b border-white/10"
-            style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)' }}
+            {...dragHandleProps}
+            className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 select-none"
+            style={{ ...dragHandleProps.style, background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)' }}
           >
             <div className="flex items-center gap-2 min-w-0">
               <Sparkles className="h-4 w-4 text-white shrink-0" />
@@ -568,13 +574,23 @@ const FrontlineFloatingChat = () => {
                   <div className="mt-3">
                     <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold mb-1">Try one</p>
                     <div className="space-y-1">
-                      {SAMPLE_PROMPTS.map((sample) => (
-                        <button key={sample} type="button"
-                          onClick={() => { setInput(sample); inputRef.current?.focus(); }}
-                          className="block w-full text-left text-xs text-amber-300/80 hover:text-amber-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
-                          → {sample}
-                        </button>
-                      ))}
+                      {(() => {
+                        const dyn = [];
+                        (recents || []).slice(0, 2).forEach((r) => {
+                          if (r.kind === 'ticket') dyn.push(`Tell me about ticket #${r.id}: ${r.title}`);
+                          else if (r.kind === 'document') dyn.push(`Summarize the document "${r.title}"`);
+                        });
+                        const rot = SAMPLE_PROMPTS[Math.floor((Date.now() / 60000) % SAMPLE_PROMPTS.length)];
+                        const staticPool = SAMPLE_PROMPTS.filter((s) => s !== rot).slice(0, 2);
+                        const shown = [...dyn, rot, ...staticPool].slice(0, 3);
+                        return shown.map((sample) => (
+                          <button key={sample} type="button"
+                            onClick={() => { setInput(sample); inputRef.current?.focus(); }}
+                            className="block w-full text-left text-xs text-amber-300/80 hover:text-amber-200 hover:bg-white/[0.04] rounded px-2 py-1 transition">
+                            → {sample}
+                          </button>
+                        ));
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -624,6 +640,12 @@ const FrontlineFloatingChat = () => {
           {/* Input row — always rendered, hidden behind history view visually */}
           {!showHistory && (
             <div className="border-t border-white/10 relative" style={{ background: '#0e0e14' }}>
+              {/* Multi-turn context indicator */}
+              {messages.length >= 2 && (
+                <div className="px-3 pt-2">
+                  <ContextIndicator count={Math.min(messages.length, 6)} />
+                </div>
+              )}
               {/* Slash-command menu */}
               {slashOpen && filteredCommands.length > 0 && (
                 <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[#3a295a] bg-[#161630] shadow-2xl overflow-hidden">

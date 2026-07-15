@@ -57,6 +57,10 @@ import PMFloatingChat from '@/components/pm-agent/PMFloatingChat';
 import {
   PM_MAIN_TOUR_STEPS, PM_TAB_TOURS, PM_HINTS, PM_MAIN_TOUR_KEY,
 } from '@/components/pm-agent/pmTutorialSteps';
+import {
+  shouldSpotlightTour, markSpotlightSeen,
+  tourAvailable, makeHoverLaunchHandlers,
+} from '@/components/frontline/tourUtils';
 import { GraduationCap, Eye, EyeOff } from 'lucide-react';
 
 const PM_TAB_ITEMS = [
@@ -96,10 +100,24 @@ const ProjectManagerDashboardPage = () => {
     return () => clearTimeout(t);
   }, [activeTab, tutorialOpen]);
 
+  // One-time spotlight on "Take the Tour"
+  const [spotlightTour, setSpotlightTour] = useState(false);
+  useEffect(() => {
+    if (tutorialOpen) return;
+    if (!hasSeenTutorial(PM_MAIN_TOUR_KEY)) return;
+    if (!shouldSpotlightTour('pm')) return;
+    setSpotlightTour(true);
+    const t = setTimeout(() => { setSpotlightTour(false); markSpotlightSeen('pm'); }, 5500);
+    return () => clearTimeout(t);
+  }, [tutorialOpen]);
+
   const handleReplayTutorial = () => {
+    setSpotlightTour(false);
+    markSpotlightSeen('pm');
     resetTutorial(PM_MAIN_TOUR_KEY);
     setTutorialOpen(true);
   };
+  const pmTabTourKeys = React.useMemo(() => Object.values(PM_TAB_TOURS).map((t) => t.key), []);
   const handleReplayTabTour = (tabKey) => {
     const tour = PM_TAB_TOURS[tabKey];
     if (!tour) return;
@@ -363,19 +381,36 @@ const ProjectManagerDashboardPage = () => {
           >
           <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
           {/* Top bar: Hints toggle + Take the Tour */}
-          <div className="flex justify-end items-center gap-2">
+          <div className="flex justify-end items-center gap-2 relative">
             <HintsToggleButton />
             <button
               type="button"
               onClick={handleReplayTutorial}
               data-tour-pm="replay"
               title="Replay the onboarding tutorial"
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-sm font-semibold hover:bg-cyan-500/20 hover:text-cyan-100 transition"
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-sm font-semibold hover:bg-cyan-500/20 hover:text-cyan-100 transition ${spotlightTour ? 'pm-spotlight' : ''}`}
             >
               <GraduationCap className="h-4 w-4" />
               Take the Tour
             </button>
+            {spotlightTour && (
+              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-cyan-400/40 bg-[#0a1929] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+                👋 Take the tour anytime from here
+                <span className="absolute -top-1 right-6 h-2 w-2 bg-[#0a1929] border-t border-l border-cyan-400/40 rotate-45" />
+              </div>
+            )}
           </div>
+          <style>{`
+            @keyframes pmSpotlight {
+              0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.4), 0 0 0 0 rgba(6, 182, 212, 0.2); }
+              50%      { box-shadow: 0 0 0 6px rgba(6, 182, 212, 0.15), 0 0 0 12px rgba(6, 182, 212, 0.08); }
+            }
+            .pm-spotlight { animation: pmSpotlight 1.6s ease-in-out infinite; }
+            @keyframes pmDotPulse {
+              0%, 100% { transform: scale(1); opacity: 1; }
+              50%      { transform: scale(1.3); opacity: 0.7; }
+            }
+          `}</style>
 
           {/* Loading indicator */}
           {loading && (
@@ -500,12 +535,19 @@ const ProjectManagerDashboardPage = () => {
                   >
                     {PM_TAB_ITEMS.map((item) => {
                       const TabIcon = item.icon;
+                      const tour = PM_TAB_TOURS[item.value];
+                      const showBadge = tour && tourAvailable(tour.key);
+                      const hoverHandlers = tour ? makeHoverLaunchHandlers({
+                        tourStorageKey: tour.key,
+                        onLaunch: () => setActiveTabTour(item.value),
+                      }) : {};
                       return (
                         <TabsTrigger
                           key={item.value}
                           value={item.value}
                           data-tour-pm-tab={item.value}
-                          className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+                          {...hoverHandlers}
+                          className="relative whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                           style={activeTab === item.value
                             ? {
                                 background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
@@ -523,6 +565,13 @@ const ProjectManagerDashboardPage = () => {
                         >
                           <TabIcon className="h-4 w-4 mr-2" />
                           {item.label}
+                          {showBadge && (
+                            <span
+                              title="Tour available — hover to launch or click 'Tour this tab' inside"
+                              className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-cyan-400 ring-2 ring-[#1a1333]"
+                              style={{ animation: 'pmDotPulse 2s ease-in-out infinite' }}
+                            />
+                          )}
                         </TabsTrigger>
                       );
                     })}
@@ -613,7 +662,7 @@ const ProjectManagerDashboardPage = () => {
 
                 <TabsContent value="project-pilot" className="mt-6">
                   <div className="flex justify-end mb-3"><TabTourButton tabKey="project-pilot" /></div>
-                  <ErrorBoundary><ProjectPilotAgent projects={projects || []} onProjectUpdate={fetchProjects} /></ErrorBoundary>
+                  <ErrorBoundary><ProjectPilotAgent projects={projects || []} onProjectUpdate={fetchProjects} onNavigate={setActiveTab} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="task-prioritization" className="mt-6">
@@ -655,6 +704,7 @@ const ProjectManagerDashboardPage = () => {
         setActiveTab={setActiveTab}
         steps={PM_MAIN_TOUR_STEPS}
         storageKey={PM_MAIN_TOUR_KEY}
+        siblingKeys={pmTabTourKeys}
       />
 
       {/* Per-tab guided tour */}
@@ -664,6 +714,7 @@ const ProjectManagerDashboardPage = () => {
           onClose={() => setActiveTabTour(null)}
           steps={PM_TAB_TOURS[activeTabTour].steps}
           storageKey={PM_TAB_TOURS[activeTabTour].key}
+          siblingKeys={pmTabTourKeys.filter((k) => k !== PM_TAB_TOURS[activeTabTour].key)}
         />
       )}
 
