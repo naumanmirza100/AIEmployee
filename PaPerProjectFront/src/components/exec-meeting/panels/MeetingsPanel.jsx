@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import {
   Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight, Trash2, Check, X,
 } from 'lucide-react';
-import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar } from '../shared';
+import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar, Pagination } from '../shared';
 
 const MEETING_STATUS_OPTIONS = [
   { value: 'scheduled', label: 'Scheduled' },
@@ -28,6 +28,7 @@ export const MeetingsPanel = ({
   convertActionItem, convertedActionItemIds, clearMeetingNotes, removeMeetingAgenda,
   focusMeetingId, setFocusMeetingId,
   filters = {}, setFilters = () => {}, filterUsers = [],
+  pageMeta = null, onPageChange = () => {},
 }) => {
   const filtersActive = !!(filters.search || filters.status || filters.date || filters.participant);
   // When a notification navigates here, scroll the target meeting into view and
@@ -381,6 +382,7 @@ export const MeetingsPanel = ({
           })}
         </div>
       )}
+      <Pagination meta={pageMeta} onChange={onPageChange} itemLabel="meeting" />
     </div>
   );
 };

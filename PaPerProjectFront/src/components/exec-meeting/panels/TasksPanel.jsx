@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import {
   CARD_STYLE, ROW_STYLE, priorityBadge, statusBadge, AssigneeAvatars, EmptyState,
-  BulkSelectBar, SelectCheckbox, FilterBar,
+  BulkSelectBar, SelectCheckbox, FilterBar, Pagination,
 } from '../shared';
 
 const TASK_STATUS_OPTIONS = [
@@ -33,6 +33,7 @@ export const TasksPanel = ({
   setSubtaskParentTask, setConfirmDeleteTaskId,
   selectedTaskIds, toggleSelected, setSelectedTaskIds, bulkDeleteTasks, bulkDeleting,
   filters = {}, setFilters = () => {},
+  pageMeta = null, onPageChange = () => {},
 }) => {
   const filtersActive = !!(filters.search || filters.status || filters.priority || filters.date);
   return (
@@ -234,6 +235,7 @@ export const TasksPanel = ({
         </div>
         </>
       )}
+      <Pagination meta={pageMeta} onChange={onPageChange} itemLabel="task" />
     </div>
   );
 };

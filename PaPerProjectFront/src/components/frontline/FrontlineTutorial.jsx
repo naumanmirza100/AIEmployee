@@ -105,7 +105,11 @@ const TOOLTIP_WIDTH = 380;
 const TOOLTIP_HEIGHT_ESTIMATE = 220;
 const MARGIN = 16;
 
-function computePosition(rect, placement) {
+// `tooltipH` is the tooltip's real measured height when known; before the first
+// measurement we fall back to the rough estimate. Using the real height in the
+// flip/clamp math keeps a tall card (long body + 12 progress dots) from
+// overflowing past the bottom edge, which cut off the footer buttons.
+function computePosition(rect, placement, tooltipH = TOOLTIP_HEIGHT_ESTIMATE) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   let top = 0;
@@ -114,7 +118,7 @@ function computePosition(rect, placement) {
 
   function place(p) {
     if (p === 'bottom') { top = rect.bottom + MARGIN; left = rect.left; }
-    else if (p === 'top') { top = rect.top - TOOLTIP_HEIGHT_ESTIMATE - MARGIN; left = rect.left; }
+    else if (p === 'top') { top = rect.top - tooltipH - MARGIN; left = rect.left; }
     else if (p === 'right') { top = rect.top; left = rect.right + MARGIN; }
     else if (p === 'left') { top = rect.top; left = rect.left - TOOLTIP_WIDTH - MARGIN; }
   }
@@ -123,11 +127,14 @@ function computePosition(rect, placement) {
 
   if (pl === 'right' && left + TOOLTIP_WIDTH > vw - 8) { pl = 'left'; place(pl); }
   if (pl === 'left' && left < 8) { pl = 'right'; place(pl); }
-  if (pl === 'bottom' && top + TOOLTIP_HEIGHT_ESTIMATE > vh - 8) { pl = 'top'; place(pl); }
+  if (pl === 'bottom' && top + tooltipH > vh - 8) { pl = 'top'; place(pl); }
   if (pl === 'top' && top < 8) { pl = 'bottom'; place(pl); }
 
   left = Math.max(8, Math.min(left, vw - TOOLTIP_WIDTH - 8));
-  top = Math.max(8, Math.min(top, vh - TOOLTIP_HEIGHT_ESTIMATE - 8));
+  // Clamp against the real height so the card never runs off the bottom. If the
+  // card is taller than the viewport, pin it to the top (8px) so the header +
+  // body stay visible rather than the footer being pushed off-screen.
+  top = Math.max(8, Math.min(top, Math.max(8, vh - tooltipH - 8)));
 
   return { top, left, placement: pl };
 }
@@ -186,6 +193,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
     let cancelled = false;
     let rafId = null;
     let lastRect = null;
+    let lastTooltipH = TOOLTIP_HEIGHT_ESTIMATE;
     let scrollAttempted = false;
     let missingFrames = 0;
     let fellBackToCenter = false;
@@ -236,8 +244,17 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
         return;
       }
 
-      if (!rectsEqual(rect, lastRect)) {
+      // Real rendered height of the tooltip card (falls back to the estimate on
+      // the very first frame, before the card has painted for this step).
+      const tooltipH = tooltipRef.current
+        ? tooltipRef.current.getBoundingClientRect().height
+        : TOOLTIP_HEIGHT_ESTIMATE;
+
+      // Recompute when the target moves OR when the card's height changed enough
+      // to shift the clamp (e.g. a taller step just rendered).
+      if (!rectsEqual(rect, lastRect) || Math.abs(tooltipH - lastTooltipH) > 1) {
         lastRect = rect;
+        lastTooltipH = tooltipH;
         // Copy — DOMRect is live-ish and freezing avoids surprises
         setTargetRect({
           top: rect.top,
@@ -247,7 +264,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
           right: rect.right,
           bottom: rect.bottom,
         });
-        setTooltipPos(computePosition(rect, step.placement || 'bottom'));
+        setTooltipPos(computePosition(rect, step.placement || 'bottom', tooltipH));
       }
 
       // Scroll into view only once per step, and only if truly off-screen
@@ -373,6 +390,8 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
                 left: '50%',
                 transform: 'translate(-50%, -50%)',
                 width: `min(${TOOLTIP_WIDTH}px, calc(100vw - 32px))`,
+                maxHeight: 'calc(100vh - 32px)',
+                overflowY: 'auto',
                 padding: '1.25rem 1.5rem',
               }
             : {
@@ -380,6 +399,11 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
                 left: tooltipPos.left,
                 width: TOOLTIP_WIDTH,
                 maxWidth: 'calc(100vw - 16px)',
+                // Never let the card exceed the viewport; if a step's content is
+                // taller than the space available below its clamped top, the card
+                // scrolls internally so the Next/Back footer is always reachable.
+                maxHeight: 'calc(100vh - 16px)',
+                overflowY: 'auto',
                 padding: '1.25rem 1.5rem',
               }
         }

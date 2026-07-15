@@ -14,7 +14,7 @@ import {
 import {
   Loader2, FileText, RefreshCw, Trash2, MoreHorizontal,
 } from 'lucide-react';
-import { CARD_STYLE, ROW_STYLE, EmptyState, fmtUtc, BulkSelectBar, SelectCheckbox, FilterBar } from '../shared';
+import { CARD_STYLE, ROW_STYLE, EmptyState, fmtUtc, BulkSelectBar, SelectCheckbox, FilterBar, Pagination } from '../shared';
 
 const DOC_TYPE_LABELS = { agenda: 'Agenda', minutes: 'Minutes', briefing: 'Briefing', report: 'Report', other: 'Other' };
 const DOC_TYPE_FILTER_OPTIONS = [
@@ -40,6 +40,7 @@ export const DocumentsPanel = ({
   generateAiDoc, loadDocuments, applyMeetingNotesToDoc, setViewDoc, downloadDocPdf, deleteDoc,
   selectedDocIds, toggleSelected, setSelectedDocIds, bulkDeleteDocs, bulkDeleting,
   filters = {}, setFilters = () => {},
+  pageMeta = null, onPageChange = () => {},
 }) => {
   const filtersActive = !!(filters.search || filters.doc_type || filters.date);
   return (
@@ -325,6 +326,7 @@ export const DocumentsPanel = ({
           </>
         )}
         </div>
+        <Pagination meta={pageMeta} onChange={onPageChange} itemLabel="document" />
       </div>
     </div>
   );

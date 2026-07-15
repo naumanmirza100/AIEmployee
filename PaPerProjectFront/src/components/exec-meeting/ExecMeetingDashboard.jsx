@@ -29,7 +29,7 @@ import execMeetingService from '@/services/execMeetingService';
 import {
   markdownToHtml, CARD_STYLE, ROW_STYLE, fmtUtc,
   StatCard, priorityBadge, statusBadge,
-  AssigneeAvatars, EmptyState, BulkSelectBar, SelectCheckbox, FilterBar,
+  AssigneeAvatars, EmptyState, BulkSelectBar, SelectCheckbox, FilterBar, Pagination,
 } from './shared';
 import {
   ScheduleMeetingDialog, MeetingEditDialog,
@@ -76,6 +76,18 @@ const ExecMeetingDashboard = () => {
   const [docFilters, setDocFilters] = useState({ search: '', doc_type: '', date: '' });
   const [notifFilters, setNotifFilters] = useState({ search: '', category: '', unread_only: false });
   const [meetingFilterUsers, setMeetingFilterUsers] = useState([]); // for the "by user" dropdown
+
+  // ── Pagination. `page` is the current page per tab; `*Page` meta holds the
+  // backend's { page, total_pages, total, has_next, has_prev } for the controls.
+  const PAGE_SIZE = 8;
+  const [meetingPage, setMeetingPage] = useState(1);
+  const [taskPage, setTaskPage] = useState(1);
+  const [docPage, setDocPage] = useState(1);
+  const [notifPage, setNotifPage] = useState(1);
+  const [meetingPageMeta, setMeetingPageMeta] = useState(null);
+  const [taskPageMeta, setTaskPageMeta] = useState(null);
+  const [docPageMeta, setDocPageMeta] = useState(null);
+  const [notifPageMeta, setNotifPageMeta] = useState(null);
 
   // Dialogs
   const [showMeetingDialog, setShowMeetingDialog] = useState(false);
@@ -164,27 +176,29 @@ const ExecMeetingDashboard = () => {
   // ── Filter-driven refetch. The search box is debounced (300ms) so typing
   // doesn't fire a request per keystroke; dropdown / date changes apply at once.
   // Each effect only runs while its tab is active to avoid background fetches.
+  // Any filter change jumps back to page 1 (the old page may not exist in the
+  // newly-filtered, smaller result set).
   useEffect(() => {
     if (activeTab !== 'meetings') return;
-    const t = setTimeout(() => loadMeetings(meetingFilters), 300);
+    const t = setTimeout(() => { setMeetingPage(1); loadMeetings(meetingFilters, 1); }, 300);
     return () => clearTimeout(t);
   }, [meetingFilters.search, meetingFilters.status, meetingFilters.date, meetingFilters.participant]);
 
   useEffect(() => {
     if (activeTab !== 'tasks') return;
-    const t = setTimeout(() => loadTasks(taskFilters), 300);
+    const t = setTimeout(() => { setTaskPage(1); loadTasks(taskFilters, 1); }, 300);
     return () => clearTimeout(t);
   }, [taskFilters.search, taskFilters.status, taskFilters.priority, taskFilters.date]);
 
   useEffect(() => {
     if (activeTab !== 'documents') return;
-    const t = setTimeout(() => loadDocuments(docFilters), 300);
+    const t = setTimeout(() => { setDocPage(1); loadDocuments(docFilters, 1); }, 300);
     return () => clearTimeout(t);
   }, [docFilters.search, docFilters.doc_type, docFilters.date]);
 
   useEffect(() => {
     if (activeTab !== 'notifications') return;
-    const t = setTimeout(() => loadNotifications(notifFilters), 300);
+    const t = setTimeout(() => { setNotifPage(1); loadNotifications(notifFilters, 1); }, 300);
     return () => clearTimeout(t);
   }, [notifFilters.search, notifFilters.category, notifFilters.unread_only]);
 
@@ -200,17 +214,23 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadMeetings = async (filters = meetingFilters) => {
+  const loadMeetings = async (filters = meetingFilters, page = meetingPage) => {
     setMeetingsLoading(true);
     try {
-      const data = await execMeetingService.getMeetings(filters);
+      const data = await execMeetingService.getMeetings({ ...filters, page, page_size: PAGE_SIZE });
       setMeetings(data.meetings || []);
+      setMeetingPageMeta(data.pagination || null);
     } catch {
       setMeetings([]);
+      setMeetingPageMeta(null);
     } finally {
       setMeetingsLoading(false);
     }
   };
+
+  // Change page: update state + fetch that page immediately (the debounced
+  // filter effects don't watch `page`, so we drive the fetch here).
+  const goToMeetingPage = (p) => { setMeetingPage(p); loadMeetings(meetingFilters, p); };
 
   // One-time load of the user list that powers the Meetings "by user" dropdown.
   const loadMeetingFilterUsers = async () => {
@@ -242,29 +262,35 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadTasks = async (filters = taskFilters) => {
+  const loadTasks = async (filters = taskFilters, page = taskPage) => {
     setTasksLoading(true);
     try {
-      const data = await execMeetingService.getTasks(filters);
+      const data = await execMeetingService.getTasks({ ...filters, page, page_size: PAGE_SIZE });
       setTasks(data.tasks || []);
+      setTaskPageMeta(data.pagination || null);
     } catch {
       setTasks([]);
+      setTaskPageMeta(null);
     } finally {
       setTasksLoading(false);
     }
   };
 
-  const loadNotifications = async (filters = notifFilters) => {
+  const loadNotifications = async (filters = notifFilters, page = notifPage) => {
     setNotifsLoading(true);
     try {
-      const data = await execMeetingService.getNotifications(filters);
+      const data = await execMeetingService.getNotifications({ ...filters, page, page_size: PAGE_SIZE });
       setNotifications(data.notifications || []);
+      setNotifPageMeta(data.pagination || null);
     } catch {
       setNotifications([]);
+      setNotifPageMeta(null);
     } finally {
       setNotifsLoading(false);
     }
   };
+  const goToTaskPage = (p) => { setTaskPage(p); loadTasks(taskFilters, p); };
+  const goToNotifPage = (p) => { setNotifPage(p); loadNotifications(notifFilters, p); };
 
   const loadDigest = async () => {
     setDigestLoading(true);
@@ -280,17 +306,20 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadDocuments = async (filters = docFilters) => {
+  const loadDocuments = async (filters = docFilters, page = docPage) => {
     setDocsLoading(true);
     try {
-      const data = await execMeetingService.listDocuments(filters);
+      const data = await execMeetingService.listDocuments({ ...filters, page, page_size: PAGE_SIZE });
       setSavedDocs(data.documents || []);
+      setDocPageMeta(data.pagination || null);
     } catch {
       setSavedDocs([]);
+      setDocPageMeta(null);
     } finally {
       setDocsLoading(false);
     }
   };
+  const goToDocPage = (p) => { setDocPage(p); loadDocuments(docFilters, p); };
 
   // When a meeting is linked in the document generator, pull whatever the AI
   // Notetaker already extracted for it (summary, key decisions, action items)
@@ -933,6 +962,7 @@ const ExecMeetingDashboard = () => {
         </div>
         </>
       )}
+      <Pagination meta={notifPageMeta} onChange={goToNotifPage} itemLabel="notification" />
     </div>
   );
 
@@ -961,6 +991,7 @@ const ExecMeetingDashboard = () => {
         focusMeetingId={focusMeetingId} setFocusMeetingId={setFocusMeetingId}
         filters={meetingFilters} setFilters={setMeetingFilters}
         filterUsers={meetingFilterUsers}
+        pageMeta={meetingPageMeta} onPageChange={goToMeetingPage}
       />
     ),
     tasks: () => (
@@ -976,6 +1007,7 @@ const ExecMeetingDashboard = () => {
         setSelectedTaskIds={setSelectedTaskIds} bulkDeleteTasks={bulkDeleteTasks}
         bulkDeleting={bulkDeleting}
         filters={taskFilters} setFilters={setTaskFilters}
+        pageMeta={taskPageMeta} onPageChange={goToTaskPage}
       />
     ),
     calendar: () => (
@@ -1004,6 +1036,7 @@ const ExecMeetingDashboard = () => {
         setSelectedDocIds={setSelectedDocIds} bulkDeleteDocs={bulkDeleteDocs}
         bulkDeleting={bulkDeleting}
         filters={docFilters} setFilters={setDocFilters}
+        pageMeta={docPageMeta} onPageChange={goToDocPage}
       />
     ),
     notifications: notificationsPanel,

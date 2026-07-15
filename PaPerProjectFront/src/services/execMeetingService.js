@@ -41,6 +41,8 @@ const execMeetingService = {
     if (params.search) q.set('search', params.search);
     if (params.date) q.set('date', params.date);
     if (params.participant) q.set('participant', params.participant);
+    if (params.page) q.set('page', params.page);
+    if (params.page_size) q.set('page_size', params.page_size);
     const qs = q.toString();
     return companyApi.get(`${BASE}/meetings${qs ? `?${qs}` : ''}`);
   },
@@ -65,6 +67,8 @@ const execMeetingService = {
     if (params.priority) q.set('priority', params.priority);
     if (params.search)   q.set('search', params.search);
     if (params.date)     q.set('date', params.date);
+    if (params.page)      q.set('page', params.page);
+    if (params.page_size) q.set('page_size', params.page_size);
     const qs = q.toString();
     return companyApi.get(`${BASE}/tasks${qs ? `?${qs}` : ''}`);
   },
@@ -88,6 +92,8 @@ const execMeetingService = {
     if (params.doc_type) q.set('doc_type', params.doc_type);
     if (params.search)   q.set('search', params.search);
     if (params.date)     q.set('date', params.date);
+    if (params.page)      q.set('page', params.page);
+    if (params.page_size) q.set('page_size', params.page_size);
     const qs = q.toString();
     return companyApi.get(`${BASE}/documents${qs ? `?${qs}` : ''}`);
   },
@@ -106,6 +112,8 @@ const execMeetingService = {
     if (params.unread_only) q.set('unread', 'true');
     if (params.category)    q.set('category', params.category);
     if (params.search)      q.set('search', params.search);
+    if (params.page)        q.set('page', params.page);
+    if (params.page_size)   q.set('page_size', params.page_size);
     const qs = q.toString();
     return companyApi.get(`${BASE}/notifications${qs ? `?${qs}` : ''}`);
   },

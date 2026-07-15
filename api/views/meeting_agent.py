@@ -676,6 +676,51 @@ def _serialize_notification(notif):
     }
 
 
+# ---------------------------------------------------------------------------
+# Pagination
+# ---------------------------------------------------------------------------
+# Shared, dependency-free page slicing for the exec-meeting list endpoints.
+# Reads ?page= and ?page_size= from the request, clamps them to sane bounds,
+# and returns (page_queryset, meta) where meta describes the full result set
+# so the frontend can render "Page X of Y" controls. Total count is computed
+# once on the (already filtered) queryset before slicing.
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
+
+def _paginate(qs, request, default_size=DEFAULT_PAGE_SIZE):
+    """Slice a queryset for the requested page. Returns (items, meta)."""
+    try:
+        page = int(request.query_params.get('page', 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.query_params.get('page_size', default_size))
+    except (TypeError, ValueError):
+        page_size = default_size
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
+
+    total = qs.count()
+    total_pages = max((total + page_size - 1) // page_size, 1)
+    # Snap an out-of-range page back to the last real page.
+    if page > total_pages:
+        page = total_pages
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = list(qs[start:end])
+    meta = {
+        'page': page,
+        'page_size': page_size,
+        'total': total,
+        'total_pages': total_pages,
+        'has_next': page < total_pages,
+        'has_prev': page > 1,
+    }
+    return items, meta
+
+
 # ===========================================================================
 # MEETINGS
 # ===========================================================================
@@ -804,8 +849,9 @@ def meeting_list(request):
                 ).distinct()
             except (ValueError, TypeError):
                 pass
-        data = [_serialize_meeting(m) for m in qs[:50]]
-        return Response({'status': 'success', 'meetings': data, 'count': len(data)})
+        page_items, meta = _paginate(qs, request)
+        data = [_serialize_meeting(m) for m in page_items]
+        return Response({'status': 'success', 'meetings': data, 'count': len(data), 'pagination': meta})
 
     # POST — manual create
     title = request.data.get('title', '').strip()
@@ -1416,7 +1462,9 @@ def task_list(request):
         if date_filter:
             # due_date is stored as a DateField (or ISO string) — match the day.
             qs = qs.filter(due_date=date_filter)
-        return Response({'status': 'success', 'tasks': [_serialize_task(t) for t in qs[:100]], 'count': qs.count()})
+        page_items, meta = _paginate(qs, request)
+        data = [_serialize_task(t) for t in page_items]
+        return Response({'status': 'success', 'tasks': data, 'count': len(data), 'pagination': meta})
 
     title = request.data.get('title', '').strip()
     if not title:
@@ -2006,15 +2054,16 @@ def standalone_document_list(request):
             qs = qs.filter(created_at__date=day)
         except (ValueError, TypeError):
             pass
+    page_items, meta = _paginate(qs, request)
     docs = [
         {
             'id': d.id, 'doc_type': d.doc_type, 'title': d.title,
             'content': d.content, 'ai_generated': d.ai_generated,
             'created_at': d.created_at.isoformat(),
         }
-        for d in qs[:100]
+        for d in page_items
     ]
-    return Response({'status': 'success', 'documents': docs, 'count': len(docs)})
+    return Response({'status': 'success', 'documents': docs, 'count': len(docs), 'pagination': meta})
 
 
 @api_view(['GET', 'DELETE'])
@@ -2079,9 +2128,10 @@ def notification_list(request):
     if search:
         qs = qs.filter(models.Q(title__icontains=search) | models.Q(message__icontains=search))
 
-    notifications = [_serialize_notification(n) for n in qs[:50]]
+    page_items, meta = _paginate(qs, request)
+    notifications = [_serialize_notification(n) for n in page_items]
     unread_count = ExecNotification.objects.filter(company_user=company_user, is_read=False).count()
-    return Response({'status': 'success', 'notifications': notifications, 'unread_count': unread_count})
+    return Response({'status': 'success', 'notifications': notifications, 'unread_count': unread_count, 'pagination': meta})
 
 
 @api_view(['PATCH'])

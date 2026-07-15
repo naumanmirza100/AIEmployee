@@ -426,9 +426,10 @@ const Documents = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <Button 
-              onClick={() => setCreateExpanded(!createExpanded)} 
-              size="lg" 
+            <Button
+              onClick={() => setCreateExpanded(!createExpanded)}
+              size="lg"
+              data-tour-mkt="docs-create"
               className={cn(
                 "shrink-0 gap-2 transition-all",
                 createExpanded ? 'bg-secondary hover:bg-secondary/90' : 'bg-primary/50 hover:bg-primary/30',
@@ -623,7 +624,7 @@ const Documents = () => {
         <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3" data-tour-mkt="docs-search">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input

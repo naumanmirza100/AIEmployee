@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar as CalendarIcon, Trash2, Loader2, Check, Search, X, SlidersHorizontal } from 'lucide-react';
+import { Calendar as CalendarIcon, Trash2, Loader2, Check, Search, X, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // ── Markdown → HTML renderer (violet theme, matches this dashboard) ─────────
 export function markdownToHtml(md) {
@@ -622,3 +622,94 @@ export const FilterBar = ({
     )}
   </div>
 );
+
+// ── Pagination ───────────────────────────────────────────────────────────────
+// Prev / numbered-pages / Next control for the exec-meeting list panels. Driven
+// entirely by the `pagination` meta the backend returns
+// ({ page, total_pages, total, has_next, has_prev }). Renders nothing when
+// there is a single page (or no meta). `onChange(pageNumber)` is called when
+// the user picks a page; the parent re-fetches with ?page=.
+export const Pagination = ({ meta, onChange, itemLabel = 'item' }) => {
+  // Nothing to show only when there's no meta or no items at all.
+  if (!meta || !meta.total) return null;
+  const { page, total_pages, total, page_size, has_prev, has_next } = meta;
+  const multiPage = total_pages > 1;
+
+  // Range of items visible on the current page, e.g. "1–8 of 9".
+  const size = page_size || total;
+  const rangeStart = total === 0 ? 0 : (page - 1) * size + 1;
+  const rangeEnd = Math.min(page * size, total);
+
+  // Compact window of page numbers around the current page (max 5), with the
+  // first/last always reachable via the arrows.
+  const windowSize = 5;
+  let start = Math.max(1, page - Math.floor(windowSize / 2));
+  let end = Math.min(total_pages, start + windowSize - 1);
+  start = Math.max(1, Math.min(start, end - windowSize + 1));
+  const pages = [];
+  for (let p = start; p <= end; p++) pages.push(p);
+
+  const btn = 'h-8 min-w-8 px-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center';
+
+  return (
+    <div className="flex items-center justify-between gap-3 mt-3 px-1 flex-wrap">
+      <p className="text-white/40 text-xs">
+        {multiPage ? (
+          <>Showing {rangeStart}–{rangeEnd} of {total.toLocaleString()} {itemLabel}{total === 1 ? '' : 's'} · page {page} of {total_pages}</>
+        ) : (
+          <>{total.toLocaleString()} {itemLabel}{total === 1 ? '' : 's'}</>
+        )}
+      </p>
+      {multiPage && (
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => has_prev && onChange(page - 1)}
+          disabled={!has_prev}
+          className={`${btn} ${has_prev ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-white/20 cursor-not-allowed'}`}
+          title="Previous page"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+
+        {start > 1 && (
+          <>
+            <button type="button" onClick={() => onChange(1)} className={`${btn} text-white/60 hover:bg-white/10 hover:text-white`}>1</button>
+            {start > 2 && <span className="text-white/30 px-0.5">…</span>}
+          </>
+        )}
+
+        {pages.map(p => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange(p)}
+            className={`${btn} ${p === page
+              ? 'bg-violet-600 text-white shadow-[0_0_8px_0_rgba(162,89,255,0.5)]'
+              : 'text-white/60 hover:bg-white/10 hover:text-white'}`}
+          >
+            {p}
+          </button>
+        ))}
+
+        {end < total_pages && (
+          <>
+            {end < total_pages - 1 && <span className="text-white/30 px-0.5">…</span>}
+            <button type="button" onClick={() => onChange(total_pages)} className={`${btn} text-white/60 hover:bg-white/10 hover:text-white`}>{total_pages}</button>
+          </>
+        )}
+
+        <button
+          type="button"
+          onClick={() => has_next && onChange(page + 1)}
+          disabled={!has_next}
+          className={`${btn} ${has_next ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-white/20 cursor-not-allowed'}`}
+          title="Next page"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+      )}
+    </div>
+  );
+};
