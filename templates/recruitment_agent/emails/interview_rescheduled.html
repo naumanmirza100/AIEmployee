@@ -5,107 +5,62 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interview Rescheduled</title>
 </head>
-<body style="margin:0;padding:0;background-color:#f0f0f5;font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+<body style="margin:0;padding:0;background:#f4f4f6;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;-webkit-font-smoothing:antialiased;">
 
-    <!-- Wrapper -->
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f0f5;padding:40px 16px;">
+    <!-- Preheader -->
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your {{ job_title }} interview has a new time: {{ scheduled_display|default:selected_slot }}.</div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f6;padding:32px 16px;">
         <tr>
             <td align="center">
-                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 
-                    <!-- Header -->
+                    <!-- Accent bar (amber = time-sensitive) -->
+                    <tr><td style="height:4px;background:#d97706;font-size:0;line-height:0;">&nbsp;</td></tr>
+
+                    <!-- Masthead -->
                     <tr>
-                        <td style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:40px 40px 32px;text-align:center;">
-                            <div style="width:64px;height:64px;background:rgba(255,255,255,0.2);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;">
-                                <img src="https://img.icons8.com/fluency/48/calendar.png" alt="" width="36" height="36" style="display:block;" />
-                            </div>
-                            <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.3px;">Interview Rescheduled</h1>
-                            <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">Your interview time has been updated</p>
+                        <td style="padding:28px 40px 0;">
+                            <p style="margin:0;font-size:13px;font-weight:700;letter-spacing:0.4px;color:#111827;">Pay Per Project</p>
+                        </td>
+                    </tr>
+
+                    <!-- Title -->
+                    <tr>
+                        <td style="padding:24px 40px 0;">
+                            <p style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#6b7280;">Interview update</p>
+                            <h1 style="margin:0;font-size:23px;font-weight:600;line-height:1.3;color:#111827;">Your interview has been rescheduled</h1>
                         </td>
                     </tr>
 
                     <!-- Body -->
                     <tr>
-                        <td style="padding:36px 40px 20px;">
-                            <p style="margin:0 0 20px;font-size:16px;color:#1a1a2e;line-height:1.6;">Dear <strong>{{ candidate_name }}</strong>,</p>
-                            <p style="margin:0 0 24px;font-size:15px;color:#444;line-height:1.7;">We would like to inform you that your interview for the <strong style="color:#4f46e5;">{{ job_title }}</strong> position has been rescheduled. Please review the updated details below.</p>
+                        <td style="padding:20px 40px 4px;">
+                            <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#374151;">Dear {{ candidate_name }},</p>
+                            <p style="margin:0 0 8px;font-size:15px;line-height:1.65;color:#374151;">We're sorry for the change of plans. Your interview for the <strong>{{ job_title }}</strong> position has been rescheduled. The updated details are below.</p>
                         </td>
                     </tr>
 
-                    <!-- Updated Details Card -->
+                    <!-- Updated details -->
                     <tr>
-                        <td style="padding:0 40px 24px;">
-                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef3c7;border-radius:12px;border:1px solid #fde68a;">
+                        <td style="padding:16px 40px 8px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;">
                                 <tr>
-                                    <td style="padding:20px 24px 8px;">
-                                        <p style="margin:0;font-size:13px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.8px;">Updated Interview Details</p>
+                                    <td style="padding:14px 20px;border-bottom:1px solid #f1f1f4;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Position</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ job_title }}</span>
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td style="padding:12px 24px 20px;">
-                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                                            <tr>
-                                                <td style="padding:8px 0;border-bottom:1px solid #fde68a;">
-                                                    <span style="font-size:12px;color:#a16207;text-transform:uppercase;letter-spacing:0.5px;display:block;">Position</span>
-                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ job_title }}</span>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:8px 0;border-bottom:1px solid #fde68a;">
-                                                    <span style="font-size:12px;color:#a16207;text-transform:uppercase;letter-spacing:0.5px;display:block;">Interview Type</span>
-                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ interview_type }}</span>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:8px 0;">
-                                                    <span style="font-size:12px;color:#a16207;text-transform:uppercase;letter-spacing:0.5px;display:block;">New Date & Time</span>
-                                                    <span style="font-size:16px;color:#d97706;font-weight:700;display:block;margin-top:2px;">{{ scheduled_display|default:selected_slot }}</span>
-                                                </td>
-                                            </tr>
-                                        </table>
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-
-                    <!-- Checklist -->
-                    <tr>
-                        <td style="padding:0 40px 24px;">
-                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8f7ff;border-radius:12px;border:1px solid #e8e5ff;">
-                                <tr>
-                                    <td style="padding:20px 24px 8px;">
-                                        <p style="margin:0;font-size:13px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:0.8px;">Please Remember To</p>
+                                    <td style="padding:14px 20px;border-bottom:1px solid #f1f1f4;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Interview type</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ interview_type }}</span>
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td style="padding:12px 24px 20px;">
-                                        <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                                            <tr>
-                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
-                                                    <span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
-                                                    Update your calendar with the new time
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
-                                                    <span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
-                                                    Arrive on time (or join online 5 minutes early)
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
-                                                    <span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
-                                                    Bring a copy of your resume
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:6px 0;font-size:14px;color:#444;line-height:1.6;">
-                                                    <span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:50%;margin-right:12px;vertical-align:middle;"></span>
-                                                    Prepare any questions you may have
-                                                </td>
-                                            </tr>
-                                        </table>
+                                    <td style="padding:14px 20px;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">New date &amp; time</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ scheduled_display|default:selected_slot }}</span>
                                     </td>
                                 </tr>
                             </table>
@@ -113,10 +68,11 @@
                     </tr>
 
                     {% if interview_type == 'ONLINE' %}
+                    <!-- Online note -->
                     <tr>
-                        <td style="padding:0 40px 24px;">
-                            <p style="margin:0;font-size:13px;color:#888;line-height:1.6;background:#fafafa;padding:14px 18px;border-radius:10px;border-left:3px solid #6366f1;">
-                                <strong style="color:#555;">Online Interview:</strong> You will receive an updated meeting link via a separate email.
+                        <td style="padding:16px 40px 4px;">
+                            <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.6;padding-left:14px;border-left:2px solid #e5e7eb;">
+                                This is an online interview. An updated meeting link for the new time will follow in a separate email.
                             </p>
                         </td>
                     </tr>
@@ -124,16 +80,16 @@
 
                     <!-- Sign-off -->
                     <tr>
-                        <td style="padding:0 40px 36px;">
-                            <p style="margin:0 0 4px;font-size:15px;color:#444;line-height:1.6;">We apologize for any inconvenience and look forward to meeting you!</p>
-                            <p style="margin:16px 0 0;font-size:15px;color:#444;">Best regards,<br><strong style="color:#1a1a2e;">Recruitment Team</strong></p>
+                        <td style="padding:22px 40px 32px;">
+                            <p style="margin:0 0 2px;font-size:15px;color:#374151;line-height:1.6;">Thank you for your flexibility. We look forward to speaking with you.</p>
+                            <p style="margin:14px 0 0;font-size:15px;color:#374151;">Best regards,<br><strong style="color:#111827;">Recruitment Team</strong></p>
                         </td>
                     </tr>
 
                     <!-- Footer -->
                     <tr>
-                        <td style="background:#fafafa;padding:20px 40px;text-align:center;border-top:1px solid #f0f0f0;">
-                            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">This is an automated reschedule notification.</p>
+                        <td style="padding:18px 40px;border-top:1px solid #f1f1f4;">
+                            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">Sent by Pay Per Project · This is an automated message, please don't reply directly.</p>
                         </td>
                     </tr>
 

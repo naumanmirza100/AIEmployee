@@ -727,6 +727,11 @@ GOOGLE_REFRESH_TOKEN = os.getenv('GOOGLE_REFRESH_TOKEN', '')  # legacy/global; p
 # in the console, e.g. http://localhost:8000/api/company/integrations/google-calendar/callback
 GOOGLE_OAUTH_REDIRECT_URI = os.getenv('GOOGLE_OAUTH_REDIRECT_URI', '')
 
+# Jitsi Meet base URL — used as a fallback video link for online interviews
+# when a Google Meet link can't be created. Default is the public Jitsi server;
+# set JITSI_BASE_URL to your self-hosted instance if you have one.
+JITSI_BASE_URL = os.getenv('JITSI_BASE_URL', 'https://meet.jit.si')
+
 # Frontend base URL (React app) – for CORS, Stripe success/cancel redirects. Set FRONTEND_URL in .env.
 FRONTEND_URL = (os.getenv('FRONTEND_URL') or '').rstrip('/')
 # Backend base URL (Django server) – for links in emails (e.g. interview slot selection page). Set BACKEND_URL in .env (e.g. http://localhost:8000 or https://api.yourapp.com).

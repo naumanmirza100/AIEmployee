@@ -277,14 +277,14 @@ def process_cvs(request):
                             if _parsed_email:
                                 _app = (
                                     _JobApp.objects
-                                    .filter(job=job_desc, email__iexact=_parsed_email, cv_record__isnull=True)
+                                    .filter(job=job_desc, email__iexact=_parsed_email, cv_records__isnull=True)
                                     .first()
                                 )
                             # Fallback: filename match
                             if not _app:
                                 _app = (
                                     _JobApp.objects
-                                    .filter(job=job_desc, cv_file_name=uploaded_file.name, cv_record__isnull=True)
+                                    .filter(job=job_desc, cv_file_name=uploaded_file.name, cv_records__isnull=True)
                                     .first()
                                 )
                             if _app:
@@ -769,9 +769,10 @@ def list_job_applications(request, job_description_id):
             ai_analysed = False
             cv_record_id = None
             try:
-                if app.cv_record:
+                _rec = app.cv_records.first()
+                if _rec:
                     ai_analysed = True
-                    cv_record_id = app.cv_record.id
+                    cv_record_id = _rec.id
             except Exception:
                 pass
 
@@ -1739,6 +1740,25 @@ def _get_parsed_email_and_name(parsed):
     return (email or None), name
 
 
+def _reject_recipient(cv_record):
+    """Resolve (email, name) for a rejection email. Prefer the real
+    JobApplication (form data) over AI-parsed CV text."""
+    _app = getattr(cv_record, 'job_application', None)
+    if _app and getattr(_app, 'email', None):
+        name = f"{_app.first_name or ''} {_app.last_name or ''}".strip() or 'Candidate'
+        return (_app.email or '').strip() or None, name
+    # Fallback: AI-parsed data from the CV
+    parsed = getattr(cv_record, 'parsed_json', None)
+    if parsed:
+        try:
+            parsed = json.loads(parsed) if isinstance(parsed, str) else parsed
+        except (TypeError, ValueError):
+            parsed = None
+    if parsed:
+        return _get_parsed_email_and_name(parsed)
+    return None, 'Candidate'
+
+
 def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, email_settings, log_service):
     """
     If this CV record has no existing interview and has candidate email,
@@ -1998,9 +2018,84 @@ def bulk_update_cv_records(request):
             id__in=ids,
             job_description__company_user=company_user
         )
+
+        # Candidates whose interview is already COMPLETED are locked — their
+        # decision can't be changed anymore. Skip them and report back.
+        completed_ids = set(
+            Interview.objects.filter(
+                cv_record__in=qs, status='COMPLETED'
+            ).values_list('cv_record_id', flat=True)
+        )
+        skipped_completed = len(completed_ids)
+        if completed_ids:
+            qs = qs.exclude(id__in=completed_ids)
+
+        # Nothing left to update — every selected candidate has finished interviewing.
+        if not qs.exists():
+            return Response({
+                'status': 'error',
+                'message': (
+                    f"{skipped_completed} candidate(s) have already completed their interview — "
+                    f"their status can no longer be changed."
+                ),
+                'skipped_completed': skipped_completed,
+                'updated_count': 0,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Capture old decisions before bulk update for audit trail
         old_decisions = {cv.id: cv.qualification_decision for cv in qs.only('id', 'qualification_decision')}
+        remaining_ids = list(old_decisions.keys())
         updated_count = qs.update(qualification_decision=decision)
+
+        # Moving a candidate OUT of INTERVIEW (to REJECT/HOLD) removes their
+        # still-open interview so they leave the interview section. We keep
+        # COMPLETED interviews (historical record) but drop PENDING/SCHEDULED/
+        # RESCHEDULED ones — so if the company later sets them to INTERVIEW
+        # again, a fresh interview is scheduled and the invite email is re-sent.
+        #
+        # Like a traditional ATS: if the candidate had *confirmed* a slot
+        # (SCHEDULED / RESCHEDULED) we email them that it's cancelled; a bare
+        # PENDING invite (not yet confirmed) is removed silently.
+        removed_interviews = 0
+        cancel_emails_sent = 0
+        reject_emails_sent = 0
+        if decision in ('REJECT', 'HOLD') and remaining_ids:
+            _agent = InterviewSchedulingAgent(log_service=LogService())
+
+            # REJECT: send each candidate a respectful "application update" email —
+            # whether or not they ever had an interview. This is the candidate's
+            # closure, so it replaces the interview-cancelled email on rejection.
+            if decision == 'REJECT':
+                for cv in CVRecord.objects.filter(id__in=remaining_ids).select_related('job_description', 'job_application'):
+                    r_email, r_name = _reject_recipient(cv)
+                    if not r_email:
+                        continue
+                    job_title = (cv.job_description.title if cv.job_description else '') or 'the position'
+                    try:
+                        if _agent.send_rejection_email(r_name, r_email, job_title):
+                            reject_emails_sent += 1
+                    except Exception as _re:
+                        logger.warning(f"Rejection email failed for cv_record {cv.id}: {_re}")
+
+            # Remove still-open interviews so the candidate leaves the interview
+            # section. For HOLD (not a rejection), a *confirmed* interview still
+            # gets a cancellation email; PENDING is removed silently.
+            open_interviews = list(
+                Interview.objects.filter(cv_record_id__in=remaining_ids).exclude(status='COMPLETED')
+            )
+            for iv in open_interviews:
+                if decision == 'HOLD' and iv.status in ('SCHEDULED', 'RESCHEDULED'):
+                    try:
+                        if _agent.send_cancellation_email(iv):
+                            cancel_emails_sent += 1
+                    except Exception as _ce:
+                        logger.warning(f"Cancellation email failed for interview {iv.id}: {_ce}")
+                iv.delete()
+                removed_interviews += 1
+            logger.info(
+                f"Bulk {decision}: removed {removed_interviews} open interview(s), "
+                f"sent {reject_emails_sent} rejection + {cancel_emails_sent} cancellation email(s)."
+            )
 
         # Log decision changes
         full_name = getattr(company_user, 'full_name', '') or ''
@@ -2042,7 +2137,7 @@ def bulk_update_cv_records(request):
                 cv_records = CVRecord.objects.filter(
                     id__in=ids,
                     job_description__company_user=company_user
-                ).select_related('job_description')
+                ).exclude(id__in=completed_ids).select_related('job_description')
                 for cv in cv_records:
                     sched_status, sched_detail = _schedule_interview_for_cv_record(cv, company_user, interview_agent, email_settings, log_service)
                     if sched_status == 'sent':
@@ -2061,7 +2156,7 @@ def bulk_update_cv_records(request):
                     'message': f'Updated {updated_count} CV record(s) to INTERVIEW. Could not send invitation emails: {str(e)}'
                 })
 
-        message = f'Updated {updated_count} CV record(s) to {decision}'
+        message = f'Updated {updated_count} candidate(s) to {decision}'
         if decision == 'INTERVIEW':
             if emails_sent > 0:
                 message += f'. Interview invitation email sent to {emails_sent} candidate(s).'
@@ -2075,15 +2170,39 @@ def bulk_update_cv_records(request):
                 else:
                     message += '. No invitation emails sent (check: no email in CV, or already has interview).'
 
+        # Note the rejection emails sent.
+        if decision == 'REJECT' and reject_emails_sent:
+            message += f'. Sent an application update email to {reject_emails_sent} candidate(s).'
+
+        # Note removed open interviews when moving candidates to REJECT/HOLD.
+        if decision in ('REJECT', 'HOLD') and removed_interviews:
+            message += f'. Removed {removed_interviews} interview(s) from the interview section'
+            if cancel_emails_sent:
+                message += f' and emailed {cancel_emails_sent} candidate(s) about the cancellation'
+            message += '.'
+
+        # Tell the user about candidates that were locked because they already interviewed.
+        if skipped_completed:
+            message += (
+                f'. Skipped {skipped_completed} candidate(s) whose interview is already '
+                f'completed — their status can no longer be changed.'
+            )
+
         payload = {
             'status': 'success',
             'updated_count': updated_count,
+            'skipped_completed': skipped_completed,
             'message': message
         }
         if decision == 'INTERVIEW':
             payload['emails_sent'] = emails_sent
             if skip_reasons:
                 payload['skip_reasons'] = skip_reasons
+        if decision in ('REJECT', 'HOLD'):
+            payload['removed_interviews'] = removed_interviews
+            payload['cancel_emails_sent'] = cancel_emails_sent
+        if decision == 'REJECT':
+            payload['reject_emails_sent'] = reject_emails_sent
         return Response(payload)
     except (ValueError, TypeError) as e:
         return Response({

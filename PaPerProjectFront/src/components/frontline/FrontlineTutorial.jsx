@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ChevronLeft, ChevronRight, GraduationCap } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { useIsMobile } from './tourUtils';
 
 const DEFAULT_STORAGE_KEY = 'frontline_tutorial_seen_v1';
 
@@ -148,18 +149,50 @@ export function hasSeenTutorial(key = DEFAULT_STORAGE_KEY) {
 }
 
 export function resetTutorial(key = DEFAULT_STORAGE_KEY) {
-  try { localStorage.removeItem(key); } catch (_) { /* ignore */ }
+  try {
+    localStorage.removeItem(key);
+    localStorage.removeItem(progressKeyFor(key));
+  } catch (_) { /* ignore */ }
 }
 
-const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) => {
+// --- Resume-progress helpers ---
+// Progress is a small integer: the step index the user last saw. Saved on
+// every advance so an accidental close can be resumed. Cleared on Finish.
+function progressKeyFor(key) { return `${key}__progress`; }
+
+export function saveTutorialProgress(key, index) {
+  try { localStorage.setItem(progressKeyFor(key), String(index)); } catch (_) { /* ignore */ }
+}
+
+export function getTutorialProgress(key) {
+  try {
+    const raw = localStorage.getItem(progressKeyFor(key));
+    if (raw == null) return 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch (_) { return 0; }
+}
+
+export function clearTutorialProgress(key) {
+  try { localStorage.removeItem(progressKeyFor(key)); } catch (_) { /* ignore */ }
+}
+
+const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, siblingKeys = [] }) => {
   const stepsArr = steps && steps.length ? steps : MAIN_TOUR_STEPS;
   const storeKey = storageKey || DEFAULT_STORAGE_KEY;
   const { toast } = useToast();
+  const isMobile = useIsMobile();
 
   const [index, setIndex] = useState(0);
   const [targetRect, setTargetRect] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0, placement: 'bottom' });
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
+  const [skipSiblings, setSkipSiblings] = useState(false);
+  // Resume prompt when reopening a tour that was closed mid-way.
+  const [resumePrompt, setResumePrompt] = useState(null); // null | { atIndex }
+  // Interactive-step gate: when a step declares waitFor, Next is disabled
+  // until the user actually does the described action.
+  const [interactiveGate, setInteractiveGate] = useState(false);
   const tooltipRef = useRef(null);
 
   const step = stepsArr[index];
@@ -168,8 +201,23 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
 
   useEffect(() => {
     if (!open) return;
-    setIndex(0);
+    // If the user has partial progress from a previous session, ask before
+    // jumping back in. Otherwise start from step 0 as usual.
+    const progress = getTutorialProgress(storeKey);
+    if (progress > 0 && progress < stepsArr.length) {
+      setResumePrompt({ atIndex: progress });
+      setIndex(0);
+    } else {
+      setResumePrompt(null);
+      setIndex(0);
+    }
   }, [open]);
+
+  // Persist progress on every step change so a mid-tour close can be resumed.
+  useEffect(() => {
+    if (!open) return;
+    if (index > 0) saveTutorialProgress(storeKey, index);
+  }, [index, open, storeKey]);
 
   // Switch tab if this step needs it
   useEffect(() => {
@@ -177,7 +225,49 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
     if (step.tab && typeof setActiveTab === 'function') {
       setActiveTab(step.tab);
     }
+    // Optional per-step side-effect for reaching UI that isn't visible by
+    // default (e.g. clicking an internal sub-tab). Fires slightly after
+    // any outer tab switch so the target is present.
+    if (typeof step.onEnter === 'function') {
+      const t = setTimeout(() => {
+        try { step.onEnter(); } catch (_) { /* non-fatal */ }
+      }, step.tab ? 240 : 40);
+      return () => clearTimeout(t);
+    }
   }, [open, index, step, setActiveTab]);
+
+  // Interactive step: if the step declares `waitFor: { selector, event }`,
+  // the Next button is disabled until the user does that action. Great for
+  // "click Create Ticket to continue" style steps.
+  useEffect(() => {
+    if (!open || !step) { setInteractiveGate(false); return; }
+    const wf = step.waitFor;
+    if (!wf || !wf.selector) { setInteractiveGate(false); return; }
+    setInteractiveGate(true); // block Next until fired
+    const evt = wf.event || 'click';
+    let cleanup = () => {};
+    const attach = () => {
+      const el = document.querySelector(wf.selector);
+      if (!el) return false;
+      const handler = () => {
+        setInteractiveGate(false);
+        if (wf.autoAdvance) setTimeout(() => next(), 200);
+      };
+      el.addEventListener(evt, handler, { once: true });
+      cleanup = () => el.removeEventListener(evt, handler);
+      return true;
+    };
+    // If the target isn't in the DOM yet, keep retrying briefly.
+    if (!attach()) {
+      let tries = 0;
+      const t = setInterval(() => {
+        if (attach() || ++tries > 40) clearInterval(t);
+      }, 100);
+      return () => { clearInterval(t); cleanup(); };
+    }
+    return () => cleanup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, index, step]);
 
   // Continuously track target element position + size while the step is active.
   // The dashboard's DOM shifts a lot after tab switches (Radix commits, async
@@ -324,6 +414,14 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
   const confirmSkip = () => {
     setShowSkipConfirm(false);
     markTutorialSeen(storeKey);
+    // If the user opted in, also mark every sibling tour (e.g. all tab tours
+    // for this dashboard) as seen so they don't get auto-launched later.
+    if (skipSiblings && Array.isArray(siblingKeys)) {
+      siblingKeys.forEach((k) => { if (k && k !== storeKey) markTutorialSeen(k); });
+    }
+    // Skipping = user is done for now; clear progress so a later replay
+    // starts fresh instead of showing a Resume prompt.
+    clearTutorialProgress(storeKey);
     onClose && onClose();
   };
 
@@ -331,6 +429,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
 
   const handleFinish = () => {
     markTutorialSeen(storeKey);
+    clearTutorialProgress(storeKey);
     // Little celebration + reminder that other tours can still be replayed.
     try {
       toast({
@@ -341,6 +440,17 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
     onClose && onClose();
   };
 
+  // Resume-prompt handlers
+  const handleResume = () => {
+    if (resumePrompt) setIndex(resumePrompt.atIndex);
+    setResumePrompt(null);
+  };
+  const handleRestart = () => {
+    clearTutorialProgress(storeKey);
+    setIndex(0);
+    setResumePrompt(null);
+  };
+
   if (!open || !step) return null;
 
   const isCentered = step.placement === 'center' || !targetRect;
@@ -348,9 +458,9 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
   const tour = (
     <>
       {/* Full-screen backdrop — ONLY for centered steps (no highlighted element).
-          When a target IS highlighted, the ring's own giant box-shadow acts as
-          the backdrop-with-a-cutout, so a second full-screen dim here would
-          also darken the highlighted area and make its content look dull. */}
+          When a target IS highlighted, the ring's own giant box-shadow below acts
+          as the backdrop-with-a-cutout. Painting a second full-screen dim here
+          would also darken the highlighted area and make its content look dull. */}
       {isCentered && (
         <div
           className="fixed inset-0 z-[9998] pointer-events-auto"
@@ -358,56 +468,75 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
         />
       )}
 
-      {/* Highlight ring around target — its box-shadow dims everything OUTSIDE
-          the ring while leaving the target itself at full brightness. */}
+      {/* Transparent click-catcher over the dimmed area so clicks outside the
+          highlight don't fall through to the app underneath. */}
       {targetRect && !isCentered && (
-        <>
-          {/* Transparent click-catcher over the dimmed area so clicks outside
-              the highlight don't fall through to the app underneath. */}
-          <div className="fixed inset-0 z-[9997] pointer-events-auto" />
-          <div
-            className="fixed z-[9999] pointer-events-none rounded-xl"
-            style={{
-              top: targetRect.top - 6,
-              left: targetRect.left - 6,
-              width: targetRect.width + 12,
-              height: targetRect.height + 12,
-              boxShadow: '0 0 0 3px #f59e0b, 0 0 0 9999px rgba(2,3,8,0.72)',
-              animation: 'fltPulse 1.8s ease-in-out infinite',
-            }}
-          />
-        </>
+        <div className="fixed inset-0 z-[9997] pointer-events-auto" />
       )}
 
-      {/* Tooltip */}
+      {/* Highlight ring around target — animates smoothly between step targets */}
+      {targetRect && !isCentered && (
+        <div
+          className="fixed z-[9999] pointer-events-none rounded-xl"
+          style={{
+            top: targetRect.top - 6,
+            left: targetRect.left - 6,
+            width: targetRect.width + 12,
+            height: targetRect.height + 12,
+            boxShadow: '0 0 0 3px #f59e0b, 0 0 0 9999px rgba(2,3,8,0.72)',
+            animation: 'fltPulse 1.8s ease-in-out infinite',
+            transition: 'top 220ms cubic-bezier(0.4, 0, 0.2, 1), left 220ms cubic-bezier(0.4, 0, 0.2, 1), width 220ms cubic-bezier(0.4, 0, 0.2, 1), height 220ms cubic-bezier(0.4, 0, 0.2, 1)',
+          }}
+        />
+      )}
+
+      {/* Tooltip — bottom sheet on mobile, positioned tooltip on desktop */}
       <div
         ref={tooltipRef}
-        className="fixed z-[10000] rounded-xl border border-[#3a295a] bg-[#161630] shadow-2xl"
+        className={`fixed z-[10000] border border-[#3a295a] bg-[#161630] shadow-2xl ${
+          isMobile ? 'rounded-t-2xl' : 'rounded-xl'
+        }`}
         style={
-          isCentered
+          isMobile
             ? {
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                width: `min(${TOOLTIP_WIDTH}px, calc(100vw - 32px))`,
-                maxHeight: 'calc(100vh - 32px)',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100%',
+                maxHeight: '55vh',
                 overflowY: 'auto',
-                padding: '1.25rem 1.5rem',
+                padding: '0.75rem 1rem 1rem',
+                transition: 'transform 220ms cubic-bezier(0.4, 0, 0.2, 1)',
               }
-            : {
-                top: tooltipPos.top,
-                left: tooltipPos.left,
-                width: TOOLTIP_WIDTH,
-                maxWidth: 'calc(100vw - 16px)',
-                // Never let the card exceed the viewport; if a step's content is
-                // taller than the space available below its clamped top, the card
-                // scrolls internally so the Next/Back footer is always reachable.
-                maxHeight: 'calc(100vh - 16px)',
-                overflowY: 'auto',
-                padding: '1.25rem 1.5rem',
-              }
+            : isCentered
+              ? {
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: `min(${TOOLTIP_WIDTH}px, calc(100vw - 32px))`,
+                  maxHeight: 'calc(100vh - 32px)',
+                  overflowY: 'auto',
+                  padding: '1.25rem 1.5rem',
+                }
+              : {
+                  top: tooltipPos.top,
+                  left: tooltipPos.left,
+                  width: TOOLTIP_WIDTH,
+                  maxWidth: 'calc(100vw - 16px)',
+                  // Never let the card exceed the viewport; if a step's content is
+                  // taller than the space available below its clamped top, the card
+                  // scrolls internally so the Next/Back footer is always reachable.
+                  maxHeight: 'calc(100vh - 16px)',
+                  overflowY: 'auto',
+                  padding: '1.25rem 1.5rem',
+                  transition: 'top 220ms cubic-bezier(0.4, 0, 0.2, 1), left 220ms cubic-bezier(0.4, 0, 0.2, 1)',
+                }
         }
       >
+        {/* Mobile drag handle — visual affordance for the bottom sheet */}
+        {isMobile && (
+          <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-2" aria-hidden="true" />
+        )}
         {/* Close (X) */}
         <button
           type="button"
@@ -440,6 +569,14 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
         <h3 className="text-lg font-bold text-white mb-2 pr-4">{step.title}</h3>
         <p className="text-sm text-white/70 leading-relaxed mb-4">{step.body}</p>
 
+        {/* Interactive step waiting indicator */}
+        {interactiveGate && step?.waitFor?.hint && (
+          <div className="mb-3 -mt-2 flex items-center gap-2 text-xs text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-md px-2 py-1.5">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-300 animate-pulse" />
+            <span>{step.waitFor.hint}</span>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-between gap-2">
           <button
@@ -463,10 +600,12 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
             <button
               type="button"
               onClick={handleNext}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition"
+              disabled={interactiveGate}
+              title={interactiveGate ? (step?.waitFor?.hint || 'Do the action first to continue.') : undefined}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
-                boxShadow: '0 0 8px 0 #f59e0b55',
+                boxShadow: interactiveGate ? 'none' : '0 0 8px 0 #f59e0b55',
               }}
             >
               {isLast ? (
@@ -484,6 +623,46 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
           </div>
         </div>
       </div>
+
+      {/* Resume prompt — shown when the tour opens and the user has partial
+          progress saved from a previous session. */}
+      {resumePrompt && (
+        <>
+          <div className="fixed inset-0 z-[10001]" style={{ background: 'rgba(2, 3, 8, 0.55)' }} />
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            className="fixed z-[10002] rounded-xl border border-[#3a295a] bg-[#161630] shadow-2xl"
+            style={{
+              top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+              width: 'min(400px, calc(100vw - 32px))', padding: '1.25rem 1.5rem',
+            }}
+          >
+            <div className="flex items-start gap-3 mb-3">
+              <div className="shrink-0 h-9 w-9 rounded-full bg-amber-400/15 border border-amber-400/40 flex items-center justify-center">
+                <GraduationCap className="h-5 w-5 text-amber-300" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-white mb-1">Pick up where you left off?</h3>
+                <p className="text-sm text-white/70 leading-relaxed">
+                  You closed this tour on <span className="text-amber-300 font-semibold">step {resumePrompt.atIndex + 1}</span> of {stepsArr.length}. Resume from there, or start over from the beginning.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <button type="button" onClick={handleRestart}
+                className="px-3.5 py-1.5 text-xs font-semibold rounded-md border border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white transition">
+                Start over
+              </button>
+              <button type="button" onClick={handleResume} autoFocus
+                className="inline-flex items-center gap-1 px-3.5 py-1.5 text-xs font-semibold rounded-md text-white transition"
+                style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', boxShadow: '0 0 8px 0 #f59e0b55' }}>
+                Resume at step {resumePrompt.atIndex + 1}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Skip-confirmation modal — replaces the browser's window.confirm
           with a card in the same visual language as the tour. */}
@@ -519,6 +698,19 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey }) =
                 </p>
               </div>
             </div>
+            {Array.isArray(siblingKeys) && siblingKeys.length > 0 && (
+              <label className="flex items-start gap-2 mt-1 mb-2 pl-12 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={skipSiblings}
+                  onChange={(e) => setSkipSiblings(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 accent-amber-500"
+                />
+                <span className="text-xs text-white/70 leading-relaxed">
+                  Also skip the other <span className="text-amber-300 font-semibold">{siblingKeys.length}</span> tab tours for this dashboard. You can still replay any of them from its "Tour this tab" button.
+                </span>
+              </label>
+            )}
             <div className="flex items-center justify-end gap-2 mt-4">
               <button
                 type="button"

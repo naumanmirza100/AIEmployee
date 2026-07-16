@@ -17,8 +17,28 @@ from recruitment_agent.models import (
 from api.serializers.career import JobDescriptionSerializer, CareerApplicationSerializer, JobApplicationSerializer
 from api.permissions import IsCompanyUser, IsCompanyUserOnly
 from api.authentication import CompanyUserTokenAuthentication
-from core.models import CompanyUser, Company
+from core.models import CompanyUser, Company, CompanyModulePurchase
 from api.views.recruitment_agent import _make_agents
+
+
+def _company_has_recruitment_agent(company):
+    """True only if the company has an active Recruitment Agent purchase.
+
+    Mirrors reply_draft_agent.permissions.company_has_module: DB is the source
+    of truth, and an active-but-expired purchase is lazily flipped to expired.
+    """
+    if company is None:
+        return False
+    from django.utils import timezone
+    purchase = CompanyModulePurchase.objects.filter(
+        company=company, module_name='recruitment_agent'
+    ).first()
+    if not purchase:
+        return False
+    if purchase.status == 'active' and purchase.expires_at and timezone.now() > purchase.expires_at:
+        purchase.status = 'expired'
+        purchase.save(update_fields=['status'])
+    return purchase.is_active()
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +316,16 @@ def process_job_applicants(request, jobId):
     try:
         company_user = request.user
         company = company_user.company
+
+        # Gate: AI processing requires an active Recruitment Agent purchase.
+        if not _company_has_recruitment_agent(company):
+            return Response({
+                'status': 'error',
+                'message': 'AI processing requires an active Recruitment Agent. '
+                           'Purchase it from the AI Agents tab to enable this.',
+                'module_name': 'recruitment_agent',
+            }, status=status.HTTP_403_FORBIDDEN)
+
         job = get_object_or_404(JobDescription, id=jobId, company_user=company_user)
 
         # Verify interview settings are complete (same guard as process_cvs)
@@ -327,7 +357,7 @@ def process_job_applicants(request, jobId):
 
         # Fetch unprocessed applications (no linked cv_record yet)
         unprocessed = list(
-            JobApplication.objects.filter(job=job, cv_record__isnull=True).order_by('applied_at')
+            JobApplication.objects.filter(job=job, cv_records__isnull=True).order_by('applied_at')
         )
 
         if not unprocessed:
@@ -498,10 +528,32 @@ def process_job_applicants(request, jobId):
                         pass
 
         processed_count = sum(1 for r in results if not r.get('skipped'))
+        skipped_results = [r for r in results if r.get('skipped')]
+        skipped_count = len(skipped_results)
+        # Distinct skip reasons so the UI can tell the user *why* nothing happened
+        skip_reasons = []
+        for r in skipped_results:
+            reason = r.get('reason')
+            if reason and reason not in skip_reasons:
+                skip_reasons.append(reason)
+
+        if processed_count == 0 and skipped_count > 0:
+            reason_text = '; '.join(skip_reasons[:3]) if skip_reasons else 'unknown error'
+            message = (
+                f'0 of {len(unprocessed)} application(s) processed. '
+                f'{skipped_count} skipped. Reason: {reason_text}'
+            )
+        else:
+            message = f'Processed {processed_count} of {len(unprocessed)} application(s).'
+            if skipped_count:
+                message += f' {skipped_count} skipped.'
+
         return Response({
             'status': 'success',
-            'message': f'Processed {processed_count} of {len(unprocessed)} application(s).',
+            'message': message,
             'processed': processed_count,
+            'skipped': skipped_count,
+            'skip_reasons': skip_reasons,
             'total': len(unprocessed),
             'results': results,
         }, status=status.HTTP_200_OK)

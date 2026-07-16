@@ -9,6 +9,9 @@ import {
   Plus, ChevronsLeft, ChevronsRight, Bot, Download
 } from 'lucide-react';
 import Skeleton from '@/components/common/Skeleton';
+import InfoHint from '../frontline/InfoHint';
+import { PM_HINTS } from './pmTutorialSteps';
+import { trackPMRecentlyViewed } from './pmLocalStore';
 
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -208,6 +211,7 @@ export default function MeetingScheduler() {
   };
 
   const downloadIcs = (meeting) => {
+    trackPMRecentlyViewed({ kind: 'meeting', id: meeting.id, title: meeting.title || `Meeting #${meeting.id}` });
     const start = new Date(meeting.proposed_time);
     const end = new Date(start.getTime() + (meeting.duration_minutes || 30) * 60000);
     const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
@@ -328,6 +332,7 @@ export default function MeetingScheduler() {
       <div className="flex w-full max-w-full relative max-h-[calc(100vh-40px)]">
         {/* ========== SIDEBAR ========== */}
         <div
+          data-tour-pm-ms="sidebar"
           className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
@@ -346,7 +351,10 @@ export default function MeetingScheduler() {
               style={{ background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)', borderTopLeftRadius: 16 }}
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-base font-semibold text-white/90 tracking-wide">Meetings</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base font-semibold text-white/90 tracking-wide">Meetings</span>
+                  <InfoHint {...PM_HINTS.pmMsSidebar} />
+                </div>
                 <button onClick={() => setShowChatHistory(false)} title="Close sidebar"
                   className="h-8 w-8 flex items-center justify-center rounded-full border border-white/20 hover:border-violet-400/60 bg-black/30 hover:bg-violet-700/20 transition-all duration-150">
                   <ChevronsLeft className="h-4 w-4 text-white/80" />
@@ -374,10 +382,11 @@ export default function MeetingScheduler() {
                       <circle cx="7" cy="7" r="5" /><line x1="15" y1="15" x2="11" y2="11" />
                     </svg>
                   </button>
-                  <button onClick={newChat} title="New chat"
+                  <button data-tour-pm-ms="new-chat" onClick={newChat} title="New chat"
                     className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150">
                     <Plus className="h-4 w-4 text-white/80" />
                   </button>
+                  <InfoHint {...PM_HINTS.pmMsNewChat} />
                 </div>
               )}
             </div>
@@ -442,15 +451,18 @@ export default function MeetingScheduler() {
                 </CardDescription>
               </div>
               {/* Tab toggle */}
-              <div className="flex items-center gap-1 bg-muted/30 rounded-lg p-1 mr-2">
-                <button onClick={() => setActiveTab('chat')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'chat' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  <MessageCircle className="h-3.5 w-3.5 inline mr-1" /> Chat
-                </button>
-                <button onClick={() => setActiveTab('meetings')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'meetings' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  <Calendar className="h-3.5 w-3.5 inline mr-1" /> Meetings
-                </button>
+              <div className="flex items-center gap-1.5 mr-2">
+                <div data-tour-pm-ms="tab-toggle" className="flex items-center gap-1 bg-muted/30 rounded-lg p-1">
+                  <button onClick={() => setActiveTab('chat')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'chat' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    <MessageCircle className="h-3.5 w-3.5 inline mr-1" /> Chat
+                  </button>
+                  <button onClick={() => setActiveTab('meetings')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'meetings' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    <Calendar className="h-3.5 w-3.5 inline mr-1" /> Meetings
+                  </button>
+                </div>
+                <InfoHint {...PM_HINTS.pmMsTabToggle} />
               </div>
             </div>
             <Button variant={showChatHistory ? 'ghost' : 'outline'} size="sm" onClick={() => setShowChatHistory((v) => !v)}
@@ -552,8 +564,10 @@ export default function MeetingScheduler() {
 
                 {/* Input area */}
                 <div className="shrink-0 border-t border-white/[0.07] p-4">
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-start">
+                    <div className="pt-3"><InfoHint {...PM_HINTS.pmMsInput} /></div>
                     <textarea
+                      data-tour-pm-ms="input"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={handleKeyDown}
@@ -561,9 +575,10 @@ export default function MeetingScheduler() {
                       className="flex-1 min-h-[44px] max-h-[120px] resize-none rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-violet-500/50 focus:border-violet-500/30"
                       rows={1}
                     />
-                    <Button onClick={handleSend} disabled={!input.trim() || loading} className="bg-violet-600 hover:bg-violet-700 h-[44px] px-4" size="icon">
+                    <Button data-tour-pm-ms="send" onClick={handleSend} disabled={!input.trim() || loading} className="bg-violet-600 hover:bg-violet-700 h-[44px] px-4" size="icon">
                       <Send className="w-4 h-4" />
                     </Button>
+                    <div className="pt-3"><InfoHint {...PM_HINTS.pmMsSend} /></div>
                   </div>
                 </div>
               </>
@@ -571,7 +586,11 @@ export default function MeetingScheduler() {
 
             {/* ========== MEETINGS TAB ========== */}
             {activeTab === 'meetings' && (
-              <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
+              <div data-tour-pm-ms="list" className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs uppercase tracking-wider text-white/40 font-semibold">Your meetings</span>
+                  <InfoHint {...PM_HINTS.pmMsList} />
+                </div>
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h3 className="text-sm font-medium text-white/65">Your Meetings</h3>
                   <Button onClick={fetchMeetings} disabled={meetingsLoading} variant="outline" size="sm" className="border-white/[0.08] text-white/65">
@@ -686,7 +705,8 @@ export default function MeetingScheduler() {
 
                       {/* Actions */}
                       {m.status !== 'accepted' && m.status !== 'withdrawn' && (
-                        <div className="flex gap-2 pt-1 flex-wrap">
+                        <div data-tour-pm-ms="respond" className="flex gap-2 pt-1 flex-wrap items-center">
+                          <InfoHint {...PM_HINTS.pmMsRespond} />
                           {respondingTo === m.id ? (
                             <div className="w-full space-y-2 bg-white/[0.03] rounded-lg p-3">
                               <input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Reason (optional)"

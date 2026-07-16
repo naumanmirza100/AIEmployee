@@ -32,6 +32,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
+import InfoHint from '../frontline/InfoHint';
+import { HR_HINTS } from './hrTutorialSteps';
 
 // ---------- markdown helper (lifted from PM/HR Q&A) ----------
 function markdownToHtml(markdown) {
@@ -371,6 +373,7 @@ export default function HRMeetingScheduler() {
       <div className="flex w-full max-w-full relative max-h-[calc(100vh-200px)]">
         {/* SIDEBAR */}
         <div
+          data-tour-hrmeet="sidebar"
           className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
@@ -384,7 +387,10 @@ export default function HRMeetingScheduler() {
             <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
                  style={{ background: 'linear-gradient(180deg, rgba(60,30,90,0.22) 0%, rgba(36,18,54,0.85) 100%)' }}>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-base font-semibold text-white/90 tracking-wide">Meetings</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base font-semibold text-white/90 tracking-wide">Meetings</span>
+                  <InfoHint {...HR_HINTS.hrMeetSidebar} />
+                </div>
                 <button onClick={() => setShowChatHistory(false)} title="Close sidebar"
                   className="h-8 w-8 flex items-center justify-center rounded-full border border-white/20 hover:border-violet-400/60 bg-black/30 hover:bg-violet-700/20">
                   <ChevronsLeft className="h-4 w-4 text-white/80" />
@@ -411,10 +417,11 @@ export default function HRMeetingScheduler() {
                         <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
                       </svg>
                     </button>
-                    <button title="New chat" onClick={newChat}
+                    <button data-tour-hrmeet="new-chat" title="New chat" onClick={newChat}
                             className="h-7 w-7 flex items-center justify-center rounded-full hover:bg-white/5">
                       <Plus className="h-4 w-4 text-violet-400" />
                     </button>
+                    <InfoHint {...HR_HINTS.hrMeetNewChat} />
                   </div>
                 </div>
               )}
@@ -482,15 +489,18 @@ export default function HRMeetingScheduler() {
                 </CardDescription>
               </div>
             </div>
-            <div className="flex gap-1 rounded-lg border border-white/[0.08] p-0.5">
-              <button onClick={() => setActiveTab('chat')}
-                className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 ${activeTab === 'chat' ? 'bg-violet-600/30 text-violet-200' : 'text-white/60 hover:bg-white/[0.04]'}`}>
-                <MessageCircle className="h-3.5 w-3.5" /> Chat
-              </button>
-              <button onClick={() => setActiveTab('meetings')}
-                className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 ${activeTab === 'meetings' ? 'bg-violet-600/30 text-violet-200' : 'text-white/60 hover:bg-white/[0.04]'}`}>
-                <Calendar className="h-3.5 w-3.5" /> Meetings ({stats.total})
-              </button>
+            <div className="flex items-center gap-1.5">
+              <div data-tour-hrmeet="tabs" className="flex gap-1 rounded-lg border border-white/[0.08] p-0.5">
+                <button onClick={() => setActiveTab('chat')}
+                  className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 ${activeTab === 'chat' ? 'bg-violet-600/30 text-violet-200' : 'text-white/60 hover:bg-white/[0.04]'}`}>
+                  <MessageCircle className="h-3.5 w-3.5" /> Chat
+                </button>
+                <button onClick={() => setActiveTab('meetings')}
+                  className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 ${activeTab === 'meetings' ? 'bg-violet-600/30 text-violet-200' : 'text-white/60 hover:bg-white/[0.04]'}`}>
+                  <Calendar className="h-3.5 w-3.5" /> Meetings ({stats.total})
+                </button>
+              </div>
+              <InfoHint {...HR_HINTS.hrMeetTabs} />
             </div>
           </CardHeader>
 
@@ -504,8 +514,11 @@ export default function HRMeetingScheduler() {
                       <div className="h-12 w-12 rounded-2xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3">
                         <Bot className="h-6 w-6 text-violet-400" />
                       </div>
-                      <div className="text-sm font-medium text-white/90 mb-1">Schedule HR meetings in plain English</div>
-                      <div className="text-xs max-w-md space-y-1">
+                      <div className="text-sm font-medium text-white/90 mb-1 flex items-center gap-1.5">
+                        Schedule HR meetings in plain English
+                        <InfoHint {...HR_HINTS.hrMeetChatSamples} />
+                      </div>
+                      <div data-tour-hrmeet="chat-samples" className="text-xs max-w-md space-y-1">
                         <div><em>"Schedule a 1:1 with Bilal tomorrow at 3pm for 30 minutes"</em></div>
                         <div><em>"Book a performance review with Noor next Tuesday at 10am"</em></div>
                         <div><em>"Set up an exit interview with Abdullah for Friday afternoon"</em></div>
@@ -576,7 +589,9 @@ export default function HRMeetingScheduler() {
                 </div>
 
                 <div className="border-t border-white/[0.06] px-3 py-3 flex items-end gap-2">
+                  <InfoHint {...HR_HINTS.hrMeetChatInput} className="mb-2" />
                   <Textarea
+                    data-tour-hrmeet="chat-input"
                     rows={2}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -584,10 +599,11 @@ export default function HRMeetingScheduler() {
                     placeholder='e.g. "Schedule a 1:1 with Bilal tomorrow at 3pm"'
                     className="flex-1 resize-none bg-white/[0.03] border-white/[0.08]"
                   />
-                  <Button onClick={handleSend} disabled={loading || !input.trim()}>
+                  <Button data-tour-hrmeet="chat-send" onClick={handleSend} disabled={loading || !input.trim()}>
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     <span className="ml-1 hidden sm:inline">Send</span>
                   </Button>
+                  <InfoHint {...HR_HINTS.hrMeetChatSend} className="mb-2" />
                 </div>
               </>
             )}
@@ -596,19 +612,25 @@ export default function HRMeetingScheduler() {
             {activeTab === 'meetings' && (
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
                 {/* Stats banner */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <StatCard label="Total" value={stats.total} />
-                  <StatCard label="Upcoming" value={stats.upcoming} />
-                  <StatCard label="Completed" value={stats.completed} />
-                  <StatCard label="Cancelled" value={stats.cancelled} />
+                <div className="flex items-center gap-1.5">
+                  <div data-tour-hrmeet="stats" className="grid grid-cols-2 md:grid-cols-4 gap-3 flex-1">
+                    <StatCard label="Total" value={stats.total} />
+                    <StatCard label="Upcoming" value={stats.upcoming} />
+                    <StatCard label="Completed" value={stats.completed} />
+                    <StatCard label="Cancelled" value={stats.cancelled} />
+                  </div>
+                  <InfoHint {...HR_HINTS.hrMeetStats} />
                 </div>
 
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-white/50">{meetings.length} meeting{meetings.length === 1 ? '' : 's'}</span>
-                  <Button variant="outline" size="sm" onClick={fetchMeetings} disabled={meetingsLoading}>
-                    {meetingsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    <span className="ml-1">Refresh</span>
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    <Button data-tour-hrmeet="refresh" variant="outline" size="sm" onClick={fetchMeetings} disabled={meetingsLoading}>
+                      {meetingsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      <span className="ml-1">Refresh</span>
+                    </Button>
+                    <InfoHint {...HR_HINTS.hrMeetRefresh} />
+                  </div>
                 </div>
 
                 {meetingsLoading ? (
@@ -668,7 +690,8 @@ export default function HRMeetingScheduler() {
                                 </div>
                               )}
                             </div>
-                            <div className="flex flex-col gap-1 shrink-0">
+                            <div data-tour-hrmeet="meeting-actions" className="flex flex-col gap-1 shrink-0">
+                              <InfoHint {...HR_HINTS.hrMeetRowActions} className="self-end mb-0.5" />
                               <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => downloadIcs(m)} disabled={!m.scheduled_at}>
                                 <Download className="h-3 w-3 mr-1" /> .ics
                               </Button>

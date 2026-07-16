@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, createContext, useContext, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
 
 const POPOVER_WIDTH = 320;
 const POPOVER_HEIGHT_ESTIMATE = 140;
@@ -29,14 +30,29 @@ const HintsContext = createContext({
 
 export function HintsProvider({ children }) {
   const [enabled, setEnabledState] = useState(readEnabled);
+  const { toast } = useToast();
+  // Suppress the initial-mount toast; only fire on genuine user toggles.
+  const isFirstToggle = useRef(true);
 
   const setEnabled = useCallback((next) => {
     setEnabledState((prev) => {
       const val = typeof next === 'function' ? next(prev) : !!next;
       try { localStorage.setItem(HINTS_ENABLED_KEY, val ? '1' : '0'); } catch (_) { /* ignore */ }
+      // Fire a brief confirmation toast so the flip is discoverable.
+      if (!isFirstToggle.current && val !== prev) {
+        try {
+          toast({
+            title: val ? 'Hints on' : 'Hints off',
+            description: val
+              ? 'The ! help icons are visible on every element.'
+              : 'The ! help icons are hidden. Click the toggle again to show them.',
+          });
+        } catch (_) { /* toaster not mounted */ }
+      }
+      isFirstToggle.current = false;
       return val;
     });
-  }, []);
+  }, [toast]);
 
   const toggle = useCallback(() => setEnabled((v) => !v), [setEnabled]);
 
