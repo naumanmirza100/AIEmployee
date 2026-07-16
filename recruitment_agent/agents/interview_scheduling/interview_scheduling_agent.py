@@ -44,6 +44,24 @@ def _company_for_interview(interview: 'Interview'):
     return None
 
 
+def _create_jitsi_meet_link(interview: 'Interview') -> str:
+    """Build a Jitsi Meet room URL for the interview. Jitsi needs no API/auth —
+    the room is created on first join — so this always works and is used as a
+    fallback when Google Meet can't be generated.
+
+    The room name is unique + hard to guess (interview id + confirmation token /
+    a random suffix), so only people with the link can join.
+    """
+    import re
+    base = (getattr(settings, 'JITSI_BASE_URL', '') or 'https://meet.jit.si').rstrip('/')
+    token = getattr(interview, 'confirmation_token', None) or uuid.uuid4().hex
+    # Keep the room name readable but unique and URL-safe.
+    role = (getattr(interview, 'job_role', '') or 'Interview')
+    slug = re.sub(r'[^A-Za-z0-9]+', '', role)[:24] or 'Interview'
+    room = f"PPP-{slug}-{interview.id}-{str(token)[:16]}"
+    return f"{base}/{room}"
+
+
 def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60) -> Optional[str]:
     """
     Create a Google Calendar event with a Meet link on the *company's* connected
@@ -125,9 +143,8 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
         logger.warning("google-auth / google-api-python-client not installed — skipping Meet link.")
         return None
     except Exception as exc:
-        logger.error(f"Failed to create Google Meet link for interview {interview.id}: {exc}")
-        print(f"❌ Google Meet link creation failed: {exc}")
-        print("   → The company may need to reconnect Google Calendar in Recruitment → Settings → Integrations.")
+        logger.error(f"Failed to create Google Meet link for interview {interview.id}: {exc}", exc_info=True)
+        logger.error("The company may need to reconnect Google Calendar, or the Calendar API may be disabled in the Google Cloud project.")
         return None
 
 
@@ -838,16 +855,18 @@ class InterviewSchedulingAgent:
                 interview.selected_slot = selected_slot_display
                 interview.save()
 
-            # Generate Google Meet link and persist it
-            meet_link = _create_google_meet_link(interview)
-            if meet_link:
-                interview.meeting_link = meet_link
-                interview.save(update_fields=['meeting_link'])
-            else:
-                logger.warning(
-                    f"Google Meet link was not generated for interview {interview.id}. "
-                    "Recruiter should add the meeting link manually from the dashboard."
-                )
+            # Generate a meeting link for online interviews and persist it.
+            # Prefer Google Meet (uses the company's connected calendar); if that
+            # isn't available (calendar not connected, API disabled, etc.), fall
+            # back to a Jitsi room so an online interview always has a link.
+            if (getattr(interview, 'interview_type', 'ONLINE') or 'ONLINE') == 'ONLINE':
+                meet_link = _create_google_meet_link(interview)
+                if not meet_link:
+                    meet_link = _create_jitsi_meet_link(interview)
+                    logger.info(f"Using Jitsi fallback meeting link for interview {interview.id}.")
+                if meet_link:
+                    interview.meeting_link = meet_link
+                    interview.save(update_fields=['meeting_link'])
 
             # Send confirmation email
             confirmation_sent = self.send_confirmation_email(interview)
@@ -1335,6 +1354,66 @@ class InterviewSchedulingAgent:
         except Exception as e:
             print(f"✗ Reschedule email failed for interview {interview.id}: {e}")
             self._log_error("reschedule_email_error", {"interview_id": interview.id, "error": str(e)})
+            return False
+
+    def send_cancellation_email(self, interview: Interview) -> bool:
+        """Notify the candidate that their scheduled interview has been cancelled.
+        Sent when a candidate with a confirmed interview is moved out of the
+        interview stage (e.g. rejected). Must go to the candidate."""
+        try:
+            job_title = self._get_job_title_for_email(interview)
+            clean_job_title = self._clean_email_header(job_title)
+            if len(clean_job_title) > 50:
+                clean_job_title = clean_job_title[:47] + "..."
+            subject = f"Interview Cancelled - {clean_job_title}"
+            scheduled_dt = interview.scheduled_datetime
+            scheduled_display = scheduled_dt.strftime('%A, %B %d, %Y at %I:%M %p') if scheduled_dt else (interview.selected_slot or '')
+            context = {
+                'candidate_name': interview.candidate_name,
+                'job_title': job_title,
+                'scheduled_display': scheduled_display,
+            }
+            message = render_to_string('recruitment_agent/emails/interview_cancelled.txt', context)
+            html_message = render_to_string('recruitment_agent/emails/interview_cancelled.html', context)
+            from_email = self._clean_email_header((getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com') or '').strip())
+            to_email = self._clean_email_header(interview.candidate_email)
+            if not to_email:
+                print("⚠ Cancellation email skipped: no candidate email for interview", interview.id)
+                return False
+            send_mail(subject, message, from_email, [to_email], html_message=html_message, fail_silently=False)
+            print(f"✓ Cancellation email sent to candidate: {to_email} (interview {interview.id})")
+            return True
+        except Exception as e:
+            print(f"✗ Cancellation email failed for interview {interview.id}: {e}")
+            self._log_error("cancellation_email_error", {"interview_id": interview.id, "error": str(e)})
+            return False
+
+    def send_rejection_email(self, candidate_name: str, candidate_email: str, job_title: str) -> bool:
+        """Send a respectful 'application update' (rejection) email to a candidate.
+        Works without an Interview object — sent whenever a candidate is rejected,
+        whether or not they ever had an interview."""
+        try:
+            to_email = self._clean_email_header((candidate_email or '').strip())
+            if not to_email:
+                print("⚠ Rejection email skipped: no candidate email")
+                return False
+            clean_job_title = self._clean_email_header(job_title or 'the position')
+            if len(clean_job_title) > 50:
+                clean_job_title = clean_job_title[:47] + "..."
+            subject = f"Application Update - {clean_job_title}"
+            context = {
+                'candidate_name': (candidate_name or 'Candidate').strip() or 'Candidate',
+                'job_title': job_title or 'the position',
+            }
+            message = render_to_string('recruitment_agent/emails/application_rejected.txt', context)
+            html_message = render_to_string('recruitment_agent/emails/application_rejected.html', context)
+            from_email = self._clean_email_header((getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com') or '').strip())
+            send_mail(subject, message, from_email, [to_email], html_message=html_message, fail_silently=False)
+            print(f"✓ Rejection email sent to candidate: {to_email}")
+            return True
+        except Exception as e:
+            print(f"✗ Rejection email failed for {candidate_email}: {e}")
+            self._log_error("rejection_email_error", {"email": candidate_email, "error": str(e)})
             return False
 
     def send_followup_reminder(
