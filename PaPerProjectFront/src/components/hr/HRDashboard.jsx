@@ -54,6 +54,10 @@ import {
   HR_MAIN_TOUR_STEPS, HR_TAB_TOURS, HR_HINTS, HR_MAIN_TOUR_KEY,
 } from './hrTutorialSteps';
 import { trackHRRecentlyViewed } from './hrLocalStore';
+import {
+  shouldSpotlightTour, markSpotlightSeen,
+  tourAvailable, makeHoverLaunchHandlers,
+} from '../frontline/tourUtils';
 import { GraduationCap, Eye, EyeOff } from 'lucide-react';
 
 // ---------- Tab metadata ----------
@@ -105,10 +109,25 @@ const HRDashboard = () => {
     return () => clearTimeout(t);
   }, [activeTab, tutorialOpen]);
 
+  // One-time spotlight on "Take the Tour" after the main tour closes
+  const [spotlightTour, setSpotlightTour] = useState(false);
+  useEffect(() => {
+    if (tutorialOpen) return;
+    if (!hasSeenTutorial(HR_MAIN_TOUR_KEY)) return;
+    if (!shouldSpotlightTour('hr')) return;
+    setSpotlightTour(true);
+    const t = setTimeout(() => { setSpotlightTour(false); markSpotlightSeen('hr'); }, 5500);
+    return () => clearTimeout(t);
+  }, [tutorialOpen]);
+
   const handleReplayTutorial = () => {
+    setSpotlightTour(false);
+    markSpotlightSeen('hr');
     resetTutorial(HR_MAIN_TOUR_KEY);
     setTutorialOpen(true);
   };
+  // Sibling tab-tour keys for the skip-all checkbox in every HR tour instance.
+  const hrTabTourKeys = React.useMemo(() => Object.values(HR_TAB_TOURS).map((t) => t.key), []);
   const handleReplayTabTour = (tabKey) => {
     const tour = HR_TAB_TOURS[tabKey];
     if (!tour) return;
@@ -800,19 +819,36 @@ const HRDashboard = () => {
         <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
 
           {/* Top bar: Hints toggle + Take the Tour */}
-          <div className="flex justify-end items-center gap-2">
+          <div className="flex justify-end items-center gap-2 relative">
             <HintsToggleButton />
             <button
               type="button"
               onClick={handleReplayTutorial}
               data-tour-hr="replay"
               title="Replay the onboarding tutorial"
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-violet-400/40 bg-violet-500/10 text-violet-200 text-sm font-semibold hover:bg-violet-500/20 hover:text-violet-100 transition"
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-violet-400/40 bg-violet-500/10 text-violet-200 text-sm font-semibold hover:bg-violet-500/20 hover:text-violet-100 transition ${spotlightTour ? 'hr-spotlight' : ''}`}
             >
               <GraduationCap className="h-4 w-4" />
               Take the Tour
             </button>
+            {spotlightTour && (
+              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-violet-400/40 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+                👋 Take the tour anytime from here
+                <span className="absolute -top-1 right-6 h-2 w-2 bg-[#161630] border-t border-l border-violet-400/40 rotate-45" />
+              </div>
+            )}
           </div>
+          <style>{`
+            @keyframes hrSpotlight {
+              0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4), 0 0 0 0 rgba(139, 92, 246, 0.2); }
+              50%      { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.15), 0 0 0 12px rgba(139, 92, 246, 0.08); }
+            }
+            .hr-spotlight { animation: hrSpotlight 1.6s ease-in-out infinite; }
+            @keyframes hrDotPulse {
+              0%, 100% { transform: scale(1); opacity: 1; }
+              50%      { transform: scale(1.3); opacity: 0.7; }
+            }
+          `}</style>
 
           {/* Header */}
           <div className="flex items-center gap-3">
@@ -913,12 +949,19 @@ const HRDashboard = () => {
               >
                 {HR_TAB_ITEMS.map((item) => {
                   const TabIcon = item.icon;
+                  const tour = HR_TAB_TOURS[item.value];
+                  const showBadge = tour && tourAvailable(tour.key);
+                  const hoverHandlers = tour ? makeHoverLaunchHandlers({
+                    tourStorageKey: tour.key,
+                    onLaunch: () => setActiveTabTour(item.value),
+                  }) : {};
                   return (
                     <TabsTrigger
                       key={item.value}
                       value={item.value}
                       data-tour-hr-tab={item.value}
-                      className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+                      {...hoverHandlers}
+                      className="relative whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
                       style={activeTab === item.value
                         ? {
                             background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
@@ -936,6 +979,13 @@ const HRDashboard = () => {
                     >
                       <TabIcon className="h-4 w-4 mr-2" />
                       {item.label}
+                      {showBadge && (
+                        <span
+                          title="Tour available — hover to launch or click 'Tour this tab' inside"
+                          className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-violet-400 ring-2 ring-[#1a1333]"
+                          style={{ animation: 'hrDotPulse 2s ease-in-out infinite' }}
+                        />
+                      )}
                     </TabsTrigger>
                   );
                 })}
@@ -2140,6 +2190,7 @@ const HRDashboard = () => {
         setActiveTab={setActiveTab}
         steps={HR_MAIN_TOUR_STEPS}
         storageKey={HR_MAIN_TOUR_KEY}
+        siblingKeys={hrTabTourKeys}
       />
 
       {/* Per-tab guided tour */}
@@ -2149,6 +2200,7 @@ const HRDashboard = () => {
           onClose={() => setActiveTabTour(null)}
           steps={HR_TAB_TOURS[activeTabTour].steps}
           storageKey={HR_TAB_TOURS[activeTabTour].key}
+          siblingKeys={hrTabTourKeys.filter((k) => k !== HR_TAB_TOURS[activeTabTour].key)}
         />
       )}
     </div>

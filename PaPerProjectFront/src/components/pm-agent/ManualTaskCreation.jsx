@@ -9,6 +9,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Plus } from 'lucide-react';
 import { companyApi } from '@/services/companyAuthService';
 import { DateTimePicker } from '@/components/common/DatePicker';
+import InfoHint from '../frontline/InfoHint';
+import { PM_HINTS } from './pmTutorialSteps';
 
 const ManualTaskCreation = ({ onTaskCreated }) => {
   const { toast } = useToast();
@@ -194,8 +196,8 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Project Selection */}
-            <div className="md:col-span-2">
-              <Label htmlFor="project_id">Project *</Label>
+            <div className="md:col-span-2" data-tour-pm-ct="project">
+              <Label htmlFor="project_id" className="flex items-center gap-1.5">Project * <InfoHint {...PM_HINTS.pmCtProject} /></Label>
               <Select 
                 value={formData.project_id} 
                 onValueChange={(value) => handleChange('project_id', value)}
@@ -215,8 +217,8 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
             </div>
 
             {/* Task Title */}
-            <div className="md:col-span-2">
-              <Label htmlFor="title">Task Title *</Label>
+            <div className="md:col-span-2" data-tour-pm-ct="title">
+              <Label htmlFor="title" className="flex items-center gap-1.5">Task Title * <InfoHint {...PM_HINTS.pmCtTitle} /></Label>
               <Input
                 id="title"
                 value={formData.title}
@@ -227,8 +229,8 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
             </div>
 
             {/* Description */}
-            <div className="md:col-span-2">
-              <Label htmlFor="description">Description</Label>
+            <div className="md:col-span-2" data-tour-pm-ct="desc">
+              <Label htmlFor="description" className="flex items-center gap-1.5">Description <InfoHint {...PM_HINTS.pmCtDesc} /></Label>
               <Textarea
                 id="description"
                 value={formData.description}
@@ -239,8 +241,8 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
             </div>
 
             {/* Status */}
-            <div>
-              <Label htmlFor="status">Status</Label>
+            <div data-tour-pm-ct="status">
+              <Label htmlFor="status" className="flex items-center gap-1.5">Status <InfoHint {...PM_HINTS.pmCtStatus} /></Label>
               <Select value={formData.status} onValueChange={(value) => handleChange('status', value)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -256,8 +258,8 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
             </div>
 
             {/* Priority */}
-            <div>
-              <Label htmlFor="priority">Priority</Label>
+            <div data-tour-pm-ct="priority">
+              <Label htmlFor="priority" className="flex items-center gap-1.5">Priority <InfoHint {...PM_HINTS.pmCtPriority} /></Label>
               <Select value={formData.priority} onValueChange={(value) => handleChange('priority', value)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -271,8 +273,8 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
             </div>
 
             {/* Deadline — popover calendar + time picker (drop-in replacement for native datetime-local) */}
-            <div>
-              <Label htmlFor="due_date">Deadline</Label>
+            <div data-tour-pm-ct="duedate">
+              <Label htmlFor="due_date" className="flex items-center gap-1.5">Deadline <InfoHint {...PM_HINTS.pmCtDueDate} /></Label>
               <DateTimePicker
                 id="due_date"
                 value={formData.due_date}
@@ -297,8 +299,8 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
             </div>
 
             {/* Assignee */}
-            <div className="md:col-span-2">
-              <Label htmlFor="assignee_id">Assign To</Label>
+            <div className="md:col-span-2" data-tour-pm-ct="assignee">
+              <Label htmlFor="assignee_id" className="flex items-center gap-1.5">Assign To <InfoHint {...PM_HINTS.pmCtAssignee} /></Label>
               <Select 
                 value={formData.assignee_id || "none"} 
                 onValueChange={(value) => handleChange('assignee_id', value === "none" ? "" : value)}
@@ -319,7 +321,8 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end items-center gap-2" data-tour-pm-ct="submit">
+            <InfoHint {...PM_HINTS.pmCtSubmit} />
             <Button type="submit" disabled={loading || !formData.project_id}>
               {loading ? (
                 <>

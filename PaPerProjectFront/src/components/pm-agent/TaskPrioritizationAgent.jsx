@@ -8,6 +8,8 @@ import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Target, ListChecks, AlertTriangle, Users } from 'lucide-react';
 import ProgressLoader from '@/components/common/ProgressLoader';
+import InfoHint from '../frontline/InfoHint';
+import { PM_HINTS } from './pmTutorialSteps';
 import {
   PieChart,
   Pie,
@@ -186,9 +188,10 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <label className="text-sm font-medium mb-2 block">
+          <div data-tour-pm-tp="project-select">
+            <label className="text-sm font-medium mb-2 flex items-center gap-1.5">
               Select Project
+              <InfoHint {...PM_HINTS.pmTpProjectSelect} />
             </label>
             <Select value={selectedProjectId || "none"} onValueChange={setSelectedProjectId} disabled={safeProjects.length === 0}>
               <SelectTrigger>
@@ -211,21 +214,30 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {actions.map((actionItem) => {
               const Icon = actionItem.icon;
+              const hintKey = actionItem.value === 'prioritize_and_order' ? 'pmTpActionPrioritize'
+                : actionItem.value === 'bottlenecks' ? 'pmTpActionBottlenecks'
+                : 'pmTpActionDelegation';
+              const anchor = actionItem.value === 'prioritize_and_order' ? 'action-prioritize'
+                : actionItem.value === 'bottlenecks' ? 'action-bottlenecks'
+                : 'action-delegation';
               return (
-                <Button
-                  key={actionItem.value}
-                  variant={action === actionItem.value ? 'default' : 'outline'}
-                  onClick={() => handleAction(actionItem.value)}
-                  disabled={loading || !selectedProjectId}
-                  className="justify-start"
-                >
-                  <Icon className="h-4 w-4 mr-2" />
-                  {actionItem.label}
-                </Button>
+                <div key={actionItem.value} data-tour-pm-tp={anchor} className="flex items-center gap-1.5">
+                  <Button
+                    variant={action === actionItem.value ? 'default' : 'outline'}
+                    onClick={() => handleAction(actionItem.value)}
+                    disabled={loading || !selectedProjectId}
+                    className="justify-start flex-1"
+                  >
+                    <Icon className="h-4 w-4 mr-2" />
+                    {actionItem.label}
+                  </Button>
+                  <InfoHint {...PM_HINTS[hintKey]} />
+                </div>
               );
             })}
           </div>
 
+          <div data-tour-pm-tp="generate-subtasks" className="flex items-center gap-1.5">
           <Button
             variant="outline"
             onClick={handleGenerateSubtasks}
@@ -244,6 +256,8 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
               </>
             )}
           </Button>
+          <InfoHint {...PM_HINTS.pmTpGenerateSubtasks} />
+          </div>
         </CardContent>
       </Card>
 
@@ -259,9 +273,9 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
       />
 
       {result && (
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card data-tour-pm-tp="results" className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader>
-            <CardTitle>Analysis Results</CardTitle>
+            <CardTitle className="flex items-center gap-1.5">Analysis Results <InfoHint {...PM_HINTS.pmTpResults} /></CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Tasks with priorities and order - SHOW FIRST */}

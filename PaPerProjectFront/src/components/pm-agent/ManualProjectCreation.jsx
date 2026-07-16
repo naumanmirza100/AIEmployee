@@ -10,6 +10,8 @@ import { Loader2, Plus, X } from 'lucide-react';
 import { companyApi } from '@/services/companyAuthService';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { DatePicker } from '@/components/common/DatePicker';
+import InfoHint from '../frontline/InfoHint';
+import { PM_HINTS } from './pmTutorialSteps';
 
 const ManualProjectCreation = ({ onProjectCreated }) => {
   const { toast } = useToast();
@@ -179,8 +181,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Project Name */}
-            <div className="md:col-span-2">
-              <Label htmlFor="name">Project Name *</Label>
+            <div className="md:col-span-2" data-tour-pm-cp="name">
+              <Label htmlFor="name" className="flex items-center gap-1.5">Project Name * <InfoHint {...PM_HINTS.pmCpName} /></Label>
               <Input
                 id="name"
                 value={formData.name}
@@ -191,8 +193,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
             </div>
 
             {/* Description */}
-            <div className="md:col-span-2">
-              <Label htmlFor="description">Description</Label>
+            <div className="md:col-span-2" data-tour-pm-cp="desc">
+              <Label htmlFor="description" className="flex items-center gap-1.5">Description <InfoHint {...PM_HINTS.pmCpDesc} /></Label>
               <Textarea
                 id="description"
                 value={formData.description}
@@ -203,8 +205,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
             </div>
 
             {/* Status */}
-            <div>
-              <Label htmlFor="status">Status</Label>
+            <div data-tour-pm-cp="status">
+              <Label htmlFor="status" className="flex items-center gap-1.5">Status <InfoHint {...PM_HINTS.pmCpStatus} /></Label>
               <Select value={formData.status} onValueChange={(value) => handleChange('status', value)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -222,8 +224,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
             </div>
 
             {/* Priority */}
-            <div>
-              <Label htmlFor="priority">Priority</Label>
+            <div data-tour-pm-cp="priority">
+              <Label htmlFor="priority" className="flex items-center gap-1.5">Priority <InfoHint {...PM_HINTS.pmCpPriority} /></Label>
               <Select value={formData.priority} onValueChange={(value) => handleChange('priority', value)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -259,8 +261,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
             </div>
 
             {/* Industry */}
-            <div>
-              <Label htmlFor="industry_id">Industry</Label>
+            <div data-tour-pm-cp="industry">
+              <Label htmlFor="industry_id" className="flex items-center gap-1.5">Industry <InfoHint {...PM_HINTS.pmCpIndustry} /></Label>
               <Select 
                 value={formData.industry_id || "none"} 
                 onValueChange={(value) => handleChange('industry_id', value === "none" ? "" : value)}
@@ -281,8 +283,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
             </div>
 
             {/* Budget Min */}
-            <div>
-              <Label htmlFor="budget_min">Budget Min</Label>
+            <div data-tour-pm-cp="budget">
+              <Label htmlFor="budget_min" className="flex items-center gap-1.5">Budget Min <InfoHint {...PM_HINTS.pmCpBudget} /></Label>
               <Input
                 id="budget_min"
                 type="number"
@@ -319,8 +321,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
             </div>
 
             {/* Deadline (the project's end / due date — single field) */}
-            <div>
-              <Label htmlFor="deadline">Deadline</Label>
+            <div data-tour-pm-cp="deadline">
+              <Label htmlFor="deadline" className="flex items-center gap-1.5">Deadline <InfoHint {...PM_HINTS.pmCpDeadline} /></Label>
               <DatePicker
                 id="deadline"
                 value={formData.deadline}
@@ -331,7 +333,8 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end items-center gap-2" data-tour-pm-cp="submit">
+            <InfoHint {...PM_HINTS.pmCpSubmit} />
             <Button type="submit" disabled={loading}>
               {loading ? (
                 <>

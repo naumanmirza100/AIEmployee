@@ -13,6 +13,8 @@ import WorkflowSuggestionsView from './WorkflowSuggestionsView';
 import CalendarScheduleView from './CalendarScheduleView';
 import SmartNotifications from './SmartNotifications';
 import NotificationSettings from './NotificationSettings';
+import InfoHint from '../frontline/InfoHint';
+import { PM_HINTS } from './pmTutorialSteps';
 
 const TOOLS = [
   {
@@ -139,10 +141,13 @@ export default function PMToolsHub() {
   return (
     <div className="space-y-4">
       <div className="mb-2">
-        <h3 className="text-lg font-semibold text-white">AI Tools</h3>
+        <h3 className="text-lg font-semibold text-white flex items-center gap-1.5">
+          AI Tools
+          <InfoHint {...PM_HINTS.pmToolsGrid} />
+        </h3>
         <p className="text-sm text-white/40 mt-1">Select a tool to get started</p>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div data-tour-pm-tools="grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {TOOLS.map((tool) => {
           const Icon = tool.icon;
           return (
