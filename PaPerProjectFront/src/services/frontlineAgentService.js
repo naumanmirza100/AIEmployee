@@ -76,42 +76,69 @@ export const getDocument = async (documentId) => {
 };
 
 /**
- * Upload document
+ * Upload document.
+ *
+ * Pass `options.onProgress({ loaded, total, percent })` to receive live
+ * byte-level upload progress. We use XHR under the hood because `fetch`
+ * still can't report upload-side progress in a portable way.
+ * `options.signal` (AbortSignal) cancels an in-flight upload.
  */
 export const uploadDocument = async (file, title, description, documentType = 'knowledge_base', options = {}) => {
-  try {
-    const token = localStorage.getItem('company_auth_token');
+  const token = localStorage.getItem('company_auth_token');
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('title', title || file.name);
-    formData.append('description', description || '');
-    formData.append('document_type', documentType);
-    // Optional new fields (Phase 2 Batch 5): visibility, retention, new-version, chunking
-    if (options.visibility) formData.append('visibility', options.visibility);
-    if (options.retentionDays) formData.append('retention_days', String(options.retentionDays));
-    if (options.parentDocumentId) formData.append('parent_document_id', String(options.parentDocumentId));
-    if (options.chunkSize) formData.append('chunk_size', String(options.chunkSize));
-    if (options.chunkOverlap != null) formData.append('chunk_overlap', String(options.chunkOverlap));
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('title', title || file.name);
+  formData.append('description', description || '');
+  formData.append('document_type', documentType);
+  // Optional new fields (Phase 2 Batch 5): visibility, retention, new-version, chunking
+  if (options.visibility) formData.append('visibility', options.visibility);
+  if (options.retentionDays) formData.append('retention_days', String(options.retentionDays));
+  if (options.parentDocumentId) formData.append('parent_document_id', String(options.parentDocumentId));
+  if (options.chunkSize) formData.append('chunk_size', String(options.chunkSize));
+  if (options.chunkOverlap != null) formData.append('chunk_overlap', String(options.chunkOverlap));
 
-    const response = await fetch(`${API_BASE_URL}/frontline/documents/upload/`, {
-      method: 'POST',
-      headers: token ? { 'Authorization': `Token ${token}` } : {},
-      body: formData,
-    });
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}/frontline/documents/upload/`, true);
+    if (token) xhr.setRequestHeader('Authorization', `Token ${token}`);
 
-    const data = await response.json();
-    if (!response.ok && response.status !== 202) {
-      throw new Error(data.message || data.error || `HTTP ${response.status}`);
+    if (typeof options.onProgress === 'function' && xhr.upload) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          options.onProgress({
+            loaded: e.loaded,
+            total: e.total,
+            percent: Math.round((e.loaded / e.total) * 100),
+          });
+        }
+      };
     }
-    if (data.status === 'error') {
-      throw new Error(data.message || data.error || 'Upload failed');
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch { data = {}; }
+      const ok = (xhr.status >= 200 && xhr.status < 300) || xhr.status === 202;
+      if (!ok) {
+        const err = new Error(data.message || data.error || `HTTP ${xhr.status}`);
+        err.status = xhr.status;
+        return reject(err);
+      }
+      if (data.status === 'error') {
+        return reject(new Error(data.message || data.error || 'Upload failed'));
+      }
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.onabort = () => reject(Object.assign(new Error('Upload aborted'), { aborted: true }));
+
+    if (options.signal) {
+      if (options.signal.aborted) { xhr.abort(); return; }
+      options.signal.addEventListener('abort', () => xhr.abort(), { once: true });
     }
-    return data;
-  } catch (error) {
-    console.error('Upload document error:', error);
-    throw error;
-  }
+
+    xhr.send(formData);
+  });
 };
 
 /** Poll a document's async processing status. */
@@ -170,16 +197,37 @@ export const deleteDocument = async (documentId) => {
  * @param {string} question
  * @param {{ scope_document_type?: string[], scope_document_ids?: number[] }} options - Optional scope to restrict answers to document type(s) and/or specific document IDs
  */
+// Client-side timeout for Knowledge Q&A. Very large documents (200+ pages) can
+// push the semantic-search + LLM round-trip past 60s. Rather than let the UI
+// spin forever with no feedback, we abort after 90s and surface an actionable
+// error the user can act on ("try a smaller question, or wait for indexing").
+const KNOWLEDGE_QA_TIMEOUT_MS = 90_000;
+
 export const knowledgeQA = async (question, options = {}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), KNOWLEDGE_QA_TIMEOUT_MS);
   try {
     const body = { question };
     if (options.scope_document_type?.length) body.scope_document_type = options.scope_document_type;
     if (options.scope_document_ids?.length) body.scope_document_ids = options.scope_document_ids;
-    const response = await companyApi.post('/frontline/knowledge/qa', body);
+    const response = await companyApi.post('/frontline/knowledge/qa', body, { signal: controller.signal });
     return response;
   } catch (error) {
+    // AbortError surfaces as DOMException with name='AbortError'. Rewrite it
+    // into a user-facing message the UI can render inline.
+    if (error?.name === 'AbortError' || /aborted|timeout/i.test(String(error?.message))) {
+      const friendly = new Error(
+        "The answer is taking longer than expected (over 90 seconds). This can happen with very large documents. " +
+        "Try a shorter or more specific question, narrow the scope to fewer documents, or wait a minute and try again — large uploads may still be indexing."
+      );
+      friendly.status = 408;
+      friendly.timeout = true;
+      throw friendly;
+    }
     console.error('Knowledge Q&A error:', error);
     throw error;
+  } finally {
+    clearTimeout(timer);
   }
 };
 

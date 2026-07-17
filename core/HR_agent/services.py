@@ -13,14 +13,134 @@ the embedding stack. The HR-specific bits are:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
+import threading
 from typing import List, Optional
 
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+try:
+    import numpy as _np  # type: ignore
+    _HAS_NUMPY = True
+except Exception:  # pragma: no cover - numpy is standard on servers but fall back gracefully
+    _np = None
+    _HAS_NUMPY = False
+
+
+# ---------------------------------------------------------------------------
+# In-process caches. Cheap wins that dominate query latency for large docs:
+#   * `_CHUNK_EMBEDDING_CACHE` — parsed numpy vectors keyed by chunk_id so we
+#     stop paying `json.loads` on every retrieval call.
+#   * `_QUERY_EMBEDDING_CACHE` — most-recent question embeddings, since a user
+#     often re-asks or refines the same question multiple times.
+#   * `_CHUNK_JUNK_CACHE` — flags chunks that look like TOC/index rows so we
+#     skip them at retrieval time even for docs indexed before the chunker fix.
+# All bounded by `_CACHE_MAX` to avoid memory bloat.
+# ---------------------------------------------------------------------------
+_CACHE_LOCK = threading.Lock()
+_CHUNK_EMBEDDING_CACHE: dict = {}    # chunk_id -> vector (numpy array or list)
+_CHUNK_JUNK_CACHE: dict = {}         # chunk_id -> bool
+_QUERY_EMBEDDING_CACHE: dict = {}    # sha256(query) -> vector
+_CACHE_MAX = 20_000                  # cap total chunk-embedding entries
+
+
+def _parse_embedding(raw):
+    """Return a vector suitable for cosine math, or None. Uses numpy when
+    available. Called from `_semantic_score`; results are cached per chunk."""
+    if raw is None:
+        return None
+    try:
+        vec = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    if not vec:
+        return None
+    if _HAS_NUMPY:
+        try:
+            arr = _np.asarray(vec, dtype=_np.float32)
+            if arr.size == 0:
+                return None
+            return arr
+        except Exception:
+            return vec
+    return vec
+
+
+def _cache_get_chunk_vec(chunk_id: int, raw):
+    """Fetch a chunk's parsed embedding vector, using the module-level cache."""
+    with _CACHE_LOCK:
+        hit = _CHUNK_EMBEDDING_CACHE.get(chunk_id)
+        if hit is not None:
+            return hit
+    vec = _parse_embedding(raw)
+    if vec is None:
+        return None
+    with _CACHE_LOCK:
+        if len(_CHUNK_EMBEDDING_CACHE) >= _CACHE_MAX:
+            # Cheapest eviction: drop half the cache. Prevents unbounded growth.
+            for k in list(_CHUNK_EMBEDDING_CACHE.keys())[: _CACHE_MAX // 2]:
+                _CHUNK_EMBEDDING_CACHE.pop(k, None)
+        _CHUNK_EMBEDDING_CACHE[chunk_id] = vec
+    return vec
+
+
+def _cache_get_query_vec(query: str, embedding_service):
+    """Fetch (and cache) an embedding vector for a query string."""
+    key = hashlib.sha256((query or '').strip().lower().encode('utf-8')).hexdigest()
+    with _CACHE_LOCK:
+        hit = _QUERY_EMBEDDING_CACHE.get(key)
+        if hit is not None:
+            return hit
+    raw = embedding_service.generate_embedding(query)
+    if not raw:
+        return None
+    vec = _parse_embedding(raw)
+    if vec is None:
+        return None
+    with _CACHE_LOCK:
+        if len(_QUERY_EMBEDDING_CACHE) > 512:
+            for k in list(_QUERY_EMBEDDING_CACHE.keys())[:256]:
+                _QUERY_EMBEDDING_CACHE.pop(k, None)
+        _QUERY_EMBEDDING_CACHE[key] = vec
+    return vec
+
+
+def _semantic_score(qvec, cvec):
+    """Cosine similarity, using numpy when available."""
+    if qvec is None or cvec is None:
+        return None
+    if _HAS_NUMPY and isinstance(qvec, _np.ndarray) and isinstance(cvec, _np.ndarray):
+        if qvec.shape != cvec.shape:
+            return None
+        denom = float(_np.linalg.norm(qvec)) * float(_np.linalg.norm(cvec))
+        if denom == 0.0:
+            return None
+        return float(_np.dot(qvec, cvec) / denom)
+    return _cosine(qvec, cvec)
+
+
+def _is_junk_chunk(chunk_id, text) -> bool:
+    """Cached wrapper around the chunker's TOC/index heuristic."""
+    with _CACHE_LOCK:
+        hit = _CHUNK_JUNK_CACHE.get(chunk_id)
+        if hit is not None:
+            return hit
+    try:
+        from hr_agent.chunking import _looks_like_toc_or_index
+        verdict = _looks_like_toc_or_index(text or '')
+    except Exception:
+        verdict = False
+    with _CACHE_LOCK:
+        if len(_CHUNK_JUNK_CACHE) >= _CACHE_MAX:
+            for k in list(_CHUNK_JUNK_CACHE.keys())[: _CACHE_MAX // 2]:
+                _CHUNK_JUNK_CACHE.pop(k, None)
+        _CHUNK_JUNK_CACHE[chunk_id] = verdict
+    return verdict
 
 
 HR_RANKED_CONFIDENTIALITY = ['public', 'employee', 'manager', 'hr_only']
@@ -136,23 +256,31 @@ class HRKnowledgeService:
         if not doc_ids:
             return []
 
-        chunks = HRDocumentChunk.objects.filter(document_id__in=doc_ids).select_related('document')
+        # Pull only the columns we actually need for scoring. `select_related`
+        # is dropped — we only need `document.title` for the small subset that
+        # ranks; we re-fetch those with `document_id__in` at the very end.
+        chunks_qs = HRDocumentChunk.objects.filter(
+            document_id__in=doc_ids,
+        ).only('id', 'document_id', 'embedding', 'chunk_text',
+               'section_heading', 'page_number', 'chunk_index')
 
         # Semantic via embedding service if available
         semantic_hits: list[tuple[int, float]] = []
         if self.embedding_service.is_available():
-            qvec = self.embedding_service.generate_embedding(query)
-            if qvec:
-                # Walk chunks once — fine at scaffold scale; swap in FAISS later
-                # mirroring `Frontline_agent.vector_store`.
-                for c in chunks:
+            qvec = _cache_get_query_vec(query, self.embedding_service)
+            if qvec is not None:
+                # Iterate in a streaming loop; the cache turns repeat queries
+                # into ~free cosine math. Junk chunks (TOC/index) are skipped
+                # so retrievals on legacy indices don't return dot-leader lines.
+                for c in chunks_qs.iterator(chunk_size=500):
                     if not c.embedding:
                         continue
-                    try:
-                        vec = json.loads(c.embedding) if isinstance(c.embedding, str) else c.embedding
-                    except Exception:
+                    if _is_junk_chunk(c.id, c.chunk_text):
                         continue
-                    score = _cosine(qvec, vec)
+                    cvec = _cache_get_chunk_vec(c.id, c.embedding)
+                    if cvec is None:
+                        continue
+                    score = _semantic_score(qvec, cvec)
                     if score is not None:
                         semantic_hits.append((c.id, score))
                 semantic_hits.sort(key=lambda x: x[1], reverse=True)
@@ -163,7 +291,7 @@ class HRKnowledgeService:
         # whose heading matches even if the body text doesn't.
         from django.db.models import Q as _Q
         keyword_hits: list[int] = list(
-            chunks.filter(
+            chunks_qs.filter(
                 _Q(chunk_text__icontains=query[:80])
                 | _Q(section_heading__icontains=query[:80])
             ).values_list('id', flat=True)[:50]
@@ -182,11 +310,19 @@ class HRKnowledgeService:
         if not ordered:
             return []
 
-        chunk_map = {c.id: c for c in chunks.filter(id__in=[cid for cid, _ in ordered])}
+        # Re-fetch only the small ranked subset with document title joined in.
+        top_ids = [cid for cid, _ in ordered]
+        chunk_map = {c.id: c for c in HRDocumentChunk.objects
+                     .filter(id__in=top_ids)
+                     .select_related('document')}
         out: list[dict] = []
         for cid, _ in ordered:
             c = chunk_map.get(cid)
             if not c:
+                continue
+            # Defense-in-depth: keyword branch can surface junk chunks that
+            # the semantic branch already rejected.
+            if _is_junk_chunk(c.id, c.chunk_text):
                 continue
             heading = getattr(c, 'section_heading', '') or ''
             page = getattr(c, 'page_number', None)

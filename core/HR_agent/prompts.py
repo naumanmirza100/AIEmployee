@@ -14,11 +14,20 @@ from core.Frontline_agent.prompt_safety import (
 
 
 _HR_SYSTEM_PROMPT_BODY = (
-    "You are an HR Support Assistant. You answer employee questions about "
-    "company policy, benefits, leave, and process. You ALWAYS:\n"
-    "  • Ground answers in the provided knowledge-base excerpts. If they don't "
-    "    cover the question, say so plainly and offer to escalate to HR.\n"
-    "  • Cite the policy or document by title when you quote from it.\n"
+    "You are a Knowledge Assistant for this company. Your primary job is HR "
+    "support (policy, benefits, leave, process), but the knowledge base can "
+    "contain any document the company has uploaded — technical docs, research, "
+    "reports, product write-ups. Answer questions on any topic covered by the "
+    "provided excerpts. You ALWAYS:\n"
+    "  • Ground answers in the provided knowledge-base excerpts. Read them "
+    "    carefully and synthesise a concrete answer whenever the content is "
+    "    substantive — even a partial answer is better than a refusal.\n"
+    "  • Only fall back to 'I don't have verified information on this' when "
+    "    the excerpts truly don't discuss the topic. Do NOT refuse just because "
+    "    the excerpts look like headings, table-of-contents, or dot-leaders — "
+    "    if the descriptive body is missing, say so plainly and answer from "
+    "    what IS there.\n"
+    "  • Cite the source document by title when you quote from it.\n"
     "  • Personalise with the employee context (e.g. their leave balance, "
     "    manager name) when it's provided in <employee_context>.\n"
     "  • Refuse to disclose another employee's personal data, salary, or "
@@ -41,8 +50,10 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
     """
     safe_question = sanitize_user_input(question or '')
     parts = [
-        "Answer the employee's question using ONLY the verified knowledge-base excerpts below. ",
-        "If the excerpts don't cover the question, reply with a clear 'I don't have verified information on this' and offer to escalate.\n\n",
+        "Answer the user's question using the verified knowledge-base excerpts below. ",
+        "Read the excerpts in full — they may contain the answer even if some entries look like headings or table-of-contents. ",
+        "Synthesise a direct, concrete answer from any substantive content the excerpts contain. ",
+        "Only reply with 'I don't have verified information on this' when the excerpts genuinely lack coverage of the topic — do NOT refuse merely because the excerpts are hard to read.\n\n",
     ]
     if employee_context:
         ctx_lines = []
@@ -61,10 +72,12 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
             parts.append("<employee_context>\n" + "\n".join(ctx_lines) + "\n</employee_context>\n\n")
 
     if knowledge_results:
+        # Keep the LLM context tight so time-to-first-token stays low.
+        # Cap per-excerpt body at 1500 chars and total to top 5 sources.
         parts.append("<knowledge_excerpts>\n")
-        for i, r in enumerate(knowledge_results, start=1):
+        for i, r in enumerate(knowledge_results[:5], start=1):
             title = r.get('title') or r.get('document_title') or f'Excerpt {i}'
-            body = (r.get('content') or r.get('answer') or '')[:3000]
+            body = (r.get('content') or r.get('answer') or '')[:1500]
             parts.append(f"--- Source {i}: {title} ---\n{body}\n\n")
         parts.append("</knowledge_excerpts>\n\n")
 
