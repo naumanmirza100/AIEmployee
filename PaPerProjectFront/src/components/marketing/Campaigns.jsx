@@ -13,12 +13,24 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Loader2, Plus, TrendingUp, Pause, Play, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Loader2, Plus, TrendingUp, Pause, Play, Trash2, ChevronLeft, ChevronRight,
+  Megaphone, Calendar, Users, Target, Mail, RefreshCw,
+} from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import OutreachCampaign from './OutreachCampaign';
 import CampaignFilterBar from './CampaignFilterBar';
 
 const PAGE_SIZE = 10;
+
+// Left-edge stripe colour per status — mirrors getStatusColor below.
+const STATUS_ACCENT = {
+  active: 'bg-emerald-500',
+  paused: 'bg-amber-500',
+  completed: 'bg-blue-500',
+  draft: 'bg-white/20',
+  default: 'bg-white/20',
+};
 
 const Campaigns = ({ onRefresh }) => {
   const { toast } = useToast();
@@ -83,18 +95,20 @@ const Campaigns = ({ onRefresh }) => {
     setSelected(new Set());
   }, [campaigns]);
 
+  // Tinted for the dark dashboard. These were light-theme classes
+  // (bg-green-100 / text-green-800), which rendered as harsh white blocks here.
   const getStatusColor = (status) => {
     switch (status) {
       case 'active':
-        return 'bg-green-100 text-green-800';
+        return 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
       case 'paused':
-        return 'bg-yellow-100 text-yellow-800';
+        return 'bg-amber-500/15 text-amber-300 border border-amber-500/30';
       case 'completed':
-        return 'bg-blue-100 text-blue-800';
+        return 'bg-blue-500/15 text-blue-300 border border-blue-500/30';
       case 'draft':
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-white/10 text-white/60 border border-white/15';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-white/10 text-white/60 border border-white/15';
     }
   };
 
@@ -150,8 +164,18 @@ const Campaigns = ({ onRefresh }) => {
       </div>
 
       <div data-tour-mkt="camp-list" className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold text-white">Your Campaigns</h3>
+      <div className="flex justify-between items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0">
+            <Megaphone className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-white leading-tight">Your Campaigns</h3>
+            <p className="text-xs text-white/40">
+              {total > 0 ? `${total} campaign${total === 1 ? '' : 's'}` : 'No campaigns yet'}
+            </p>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
             <Button
@@ -165,6 +189,7 @@ const Campaigns = ({ onRefresh }) => {
             </Button>
           )}
           <Button onClick={() => fetchCampaigns(page)} variant="outline" size="sm" disabled={loading}>
+            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
         </div>
@@ -187,13 +212,24 @@ const Campaigns = ({ onRefresh }) => {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : campaigns.length === 0 ? (
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
-          <CardContent className="py-8 text-center">
-            <p className="text-white/60">
-              {(filters.search || filters.status || filters.date)
-                ? 'No campaigns match these filters.'
-                : 'No campaigns found. Create your first campaign to get started.'}
-            </p>
+        <Card className="border-white/10 bg-black/20 backdrop-blur-sm border-dashed">
+          <CardContent className="py-12 text-center">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center mx-auto mb-3">
+              <Megaphone className="h-5 w-5 text-white/25" />
+            </div>
+            {(filters.search || filters.status || filters.date) ? (
+              <>
+                <p className="text-white/70 text-sm font-medium">No campaigns match these filters</p>
+                <p className="text-white/35 text-xs mt-1">Try adjusting your search or filters.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-white/70 text-sm font-medium">No campaigns yet</p>
+                <p className="text-white/35 text-xs mt-1">
+                  Use the Outreach &amp; Campaign Agent above to create your first one.
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -206,26 +242,35 @@ const Campaigns = ({ onRefresh }) => {
                 onCheckedChange={toggleSelectAll}
                 id="select-all"
               />
-              <label htmlFor="select-all" className="text-sm text-white/70 cursor-pointer select-none">
+              <label htmlFor="select-all" className="text-xs text-white/50 hover:text-white/80 cursor-pointer select-none transition-colors">
                 Select all
               </label>
+              {selected.size > 0 && (
+                <span className="text-xs text-primary">{selected.size} selected</span>
+              )}
             </div>
           )}
 
-          <div className={`grid gap-4 transition-opacity duration-200 ${filtering ? 'opacity-50' : 'opacity-100'}`}>
+          <div className={`grid gap-3 transition-opacity duration-200 ${filtering ? 'opacity-50' : 'opacity-100'}`}>
             {campaigns.map((campaign) => {
               const isActive = campaign.status === 'active';
               const isChecked = selected.has(campaign.id);
+              const accent = STATUS_ACCENT[campaign.status] || STATUS_ACCENT.default;
               return (
                 <Card
                   key={campaign.id}
                   onClick={() => navigate(`/marketing/dashboard/campaign/${campaign.id}`)}
-                  className={`border-white/10 bg-black/20 backdrop-blur-sm transition-colors cursor-pointer hover:bg-white/[0.03] ${isChecked ? 'ring-1 ring-primary' : ''}`}
+                  className={`group relative overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm transition-all cursor-pointer hover:bg-white/[0.04] hover:border-primary/30 ${
+                    isChecked ? 'ring-1 ring-primary border-primary/40' : ''
+                  }`}
                 >
-                  <CardHeader>
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-start gap-3">
-                        <div className="pt-1" onClick={(e) => e.stopPropagation()}>
+                  {/* Status accent stripe — makes each card's state readable at a glance */}
+                  <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${accent}`} />
+
+                  <CardHeader className="pb-3 pl-5">
+                    <div className="flex justify-between items-start gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="pt-0.5" onClick={(e) => e.stopPropagation()}>
                           <Checkbox
                             checked={isChecked}
                             onCheckedChange={() => toggleSelect(campaign.id)}
@@ -233,41 +278,51 @@ const Campaigns = ({ onRefresh }) => {
                             title={isActive ? 'Active campaigns cannot be deleted' : undefined}
                           />
                         </div>
-                        <div>
-                          <CardTitle className="text-lg text-white">{campaign.name}</CardTitle>
-                          <p className="text-sm text-white/60 mt-1">{campaign.description}</p>
+                        <div className="min-w-0">
+                          <CardTitle className="text-base text-white truncate group-hover:text-primary transition-colors">
+                            {campaign.name}
+                          </CardTitle>
+                          {campaign.description && (
+                            <p className="text-sm text-white/50 mt-1 line-clamp-2">{campaign.description}</p>
+                          )}
                         </div>
                       </div>
-                      <Badge className={getStatusColor(campaign.status)}>
-                        {campaign.status}
-                      </Badge>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge className={`${getStatusColor(campaign.status)} capitalize text-[11px] font-medium`}>
+                          {campaign.status}
+                        </Badge>
+                        <ChevronRight className="h-4 w-4 text-white/20 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                      </div>
                     </div>
                   </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <p className="text-white/60">Start Date</p>
-                        <p className="font-semibold">
-                          {campaign.start_date ? new Date(campaign.start_date).toLocaleDateString() : 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-white/60">End Date</p>
-                        <p className="font-semibold">
-                          {campaign.end_date ? new Date(campaign.end_date).toLocaleDateString() : 'N/A'}
-                        </p>
-                      </div>
+
+                  <CardContent className="pl-5 pt-0">
+                    {/* Compact meta row — icons carry the meaning, so the labels
+                        that used to take a whole line each are gone. */}
+                    <div className="flex items-center gap-x-5 gap-y-2 flex-wrap text-xs text-white/50 border-t border-white/5 pt-3">
+                      <span className="inline-flex items-center gap-1.5" title="Start date">
+                        <Calendar className="h-3.5 w-3.5 text-white/30" />
+                        {campaign.start_date ? new Date(campaign.start_date).toLocaleDateString() : '—'}
+                        <span className="text-white/20">→</span>
+                        {campaign.end_date ? new Date(campaign.end_date).toLocaleDateString() : '—'}
+                      </span>
                       {campaign.target_leads != null && (
-                        <div>
-                          <p className="text-white/60">Target Leads</p>
-                          <p className="font-semibold">{campaign.target_leads}</p>
-                        </div>
+                        <span className="inline-flex items-center gap-1.5" title="Target leads">
+                          <Users className="h-3.5 w-3.5 text-white/30" />
+                          <span className="text-white/80 font-medium">{campaign.target_leads}</span> leads
+                        </span>
                       )}
                       {campaign.target_conversions != null && (
-                        <div>
-                          <p className="text-white/60">Target Conversions</p>
-                          <p className="font-semibold">{campaign.target_conversions}</p>
-                        </div>
+                        <span className="inline-flex items-center gap-1.5" title="Target conversions">
+                          <Target className="h-3.5 w-3.5 text-white/30" />
+                          <span className="text-white/80 font-medium">{campaign.target_conversions}</span> conversions
+                        </span>
+                      )}
+                      {campaign.type && (
+                        <span className="inline-flex items-center gap-1.5 capitalize" title="Campaign type">
+                          <Mail className="h-3.5 w-3.5 text-white/30" />
+                          {campaign.type}
+                        </span>
                       )}
                     </div>
                   </CardContent>

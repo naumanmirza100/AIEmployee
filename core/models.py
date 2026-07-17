@@ -5,6 +5,76 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 
+# ---------------------------------------------------------------------------
+# Agent catalogue helpers
+#
+# These resolve the agent list from the `Agent` table (defined further down).
+# They're declared up here because model class bodies above that definition
+# reference them in `choices=`; the lookup itself only runs at call time, so the
+# forward reference to Agent is safe.
+# ---------------------------------------------------------------------------
+
+class _LazyAgentChoices:
+    """A lazily-resolved, list-like `choices` value backed by the Agent table.
+
+    Django 5.0 accepts a callable for `choices`; this project is on 4.2, which
+    requires an *iterable*. So instead of a plain list (frozen at import — the
+    very coupling this table removes) we hand Django an object that re-queries on
+    every iteration. Adding an Agent row therefore updates validation and admin
+    dropdowns with no code change and no migration.
+
+    Yields [] when the table isn't queryable yet (fresh DB during `migrate`, where
+    models import before their own migration has run).
+    """
+
+    def __init__(self, purchasable_only=False):
+        self.purchasable_only = purchasable_only
+
+    def _pairs(self):
+        try:
+            qs = Agent.objects.filter(is_active=True)
+            if self.purchasable_only:
+                qs = qs.filter(is_purchasable=True)
+            return [(a.slug, a.name) for a in qs]
+        except Exception:
+            return []
+
+    def __iter__(self):
+        return iter(self._pairs())
+
+    def __len__(self):
+        return len(self._pairs())
+
+    def __getitem__(self, i):
+        return self._pairs()[i]
+
+    def __contains__(self, item):
+        return item in self._pairs()
+
+    def __bool__(self):
+        return bool(self._pairs())
+
+    def __eq__(self, other):
+        # Django's migration autodetector compares `choices` between states. Always
+        # comparing equal keeps a new agent row from generating a no-op migration.
+        return True if isinstance(other, (_LazyAgentChoices, list)) else NotImplemented
+
+    def __hash__(self):
+        return hash('_LazyAgentChoices')
+
+    def deconstruct(self):
+        # Serialised into migrations as a plain empty list: the real values live in
+        # the DB, and freezing a snapshot into migration files would defeat the point.
+        return ('builtins.list', [], {})
+
+    def __repr__(self):
+        return repr(self._pairs())
+
+
+get_agent_choices = _LazyAgentChoices()
+get_purchasable_agent_choices = _LazyAgentChoices(purchasable_only=True)
+
+
 class Industry(models.Model):
     """Industry categories for projects"""
     name = models.CharField(max_length=255)
@@ -695,16 +765,14 @@ class CompanyUser(models.Model):
 
 
 class CompanyModulePurchase(models.Model):
-    """Track which modules a company has purchased"""
-    MODULE_CHOICES = [
-        ('recruitment_agent', 'Recruitment Agent'),
-        ('marketing_agent', 'Marketing Agent'),
-        ('project_manager_agent', 'Project Manager Agent'),
-        ('frontline_agent', 'Frontline Agent'),
-        ('operations_agent', 'Operations Agent'),
-        ('reply_draft_agent', 'Reply Draft Agent'),
-        ('hr_agent', 'HR Support Agent'),
-    ]
+    """Track which modules a company has purchased.
+
+    `module_name` holds an Agent.slug. It used to be validated against a
+    hand-written MODULE_CHOICES list that had drifted out of sync with the agent
+    catalogue — ai_sdr_agent and exec_meeting_agent were missing, so those two
+    could never be purchased even though they were otherwise fully set up. It now
+    resolves from the Agent table, so a new agent is purchasable on insert.
+    """
 
     STATUS_CHOICES = [
         ('active', 'Active'),
@@ -712,9 +780,9 @@ class CompanyModulePurchase(models.Model):
         ('expired', 'Expired'),
         ('trial', 'Trial'),
     ]
-    
+
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='module_purchases')
-    module_name = models.CharField(max_length=50, choices=MODULE_CHOICES)
+    module_name = models.CharField(max_length=50, choices=get_purchasable_agent_choices)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     price_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Price paid at time of purchase")
     purchased_by = models.ForeignKey(CompanyUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchases_made')
@@ -736,9 +804,23 @@ class CompanyModulePurchase(models.Model):
             models.Index(fields=['status', 'expires_at']),
         ]
     
+    def get_module_name_display(self):
+        """Human label for the purchased module.
+
+        Overrides Django's auto-generated version, which resolves only against
+        the *current* `choices`. A retired or de-listed agent would otherwise
+        render as a raw slug on historical purchases, so we look the name up in
+        the Agent table irrespective of is_active/is_purchasable, and fall back
+        to a humanised slug if the row is gone entirely.
+        """
+        agent = Agent.objects.filter(slug=self.module_name).only('name').first()
+        if agent:
+            return agent.name
+        return (self.module_name or '').replace('_', ' ').title()
+
     def __str__(self):
         return f"{self.company.name} - {self.get_module_name_display()} ({self.status})"
-    
+
     def is_active(self):
         """Check if purchase is currently active"""
         if self.status != 'active':
@@ -1859,17 +1941,86 @@ class TaskAttachment(models.Model):
 # API Key Management + Per-Agent Token Quotas
 # ============================================================================
 
-AGENT_CHOICES = [
-    ('recruitment_agent', 'Recruitment Agent'),
-    ('marketing_agent', 'Marketing Agent'),
-    ('project_manager_agent', 'Project Manager Agent'),
-    ('frontline_agent', 'Frontline Agent'),
-    ('operations_agent', 'Operations Agent'),
-    ('reply_draft_agent', 'Reply Draft Agent'),
-    ('hr_agent', 'HR Support Agent'),
-    ('ai_sdr_agent', 'AI SDR Agent'),
-    ('exec_meeting_agent', 'AI Executive Meeting Assistant'),
-]
+class Agent(models.Model):
+    """The catalogue of AI agents the platform sells — the single source of truth.
+
+    Adding a new agent is a DB row, not a code change: every admin dropdown,
+    filter and pricing screen reads this table via `GET /api/agents/`. Historically
+    the list lived in hand-maintained `choices=` lists duplicated across the models,
+    the API-key service and the frontend, which drifted (AI SDR and Exec Meeting
+    were sellable as API keys but missing from MODULE_CHOICES, so they could never
+    be purchased). Keep this table authoritative — don't re-introduce literal lists.
+
+    `slug` is the stable machine key used everywhere (e.g. 'recruitment_agent') and
+    is what other tables store; it must not change once rows reference it.
+    """
+    slug = models.SlugField(
+        max_length=50, unique=True, db_index=True,
+        help_text="Stable machine key, e.g. 'recruitment_agent'. Never change once in use.",
+    )
+    name = models.CharField(max_length=100, help_text='Display name shown in the UI.')
+    description = models.TextField(
+        blank=True, default='',
+        help_text='Short marketing blurb shown on the pricing / module cards.',
+    )
+    features = models.JSONField(
+        default=list, blank=True,
+        help_text='List of feature bullet strings shown on the pricing card.',
+    )
+    default_provider = models.CharField(
+        max_length=20, default='groq',
+        help_text="LLM provider this agent uses by default (e.g. 'groq', 'openai').",
+    )
+    # Purchasable = appears in the module/purchase flow. An agent can exist and be
+    # configurable (API keys, pricing) while not yet on sale.
+    is_purchasable = models.BooleanField(
+        default=True, help_text='Whether companies can buy this agent as a module.',
+    )
+    # is_active=False hides the agent from dropdowns//api/agents/ without deleting
+    # it, so historical purchases and usage rows keep resolving their slug.
+    is_active = models.BooleanField(
+        default=True, db_index=True,
+        help_text='Uncheck to retire an agent — hides it from lists without breaking existing rows.',
+    )
+    sort_order = models.PositiveIntegerField(
+        default=0, help_text='Lower numbers appear first in lists.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sort_order', 'name']
+        verbose_name = 'Agent'
+        verbose_name_plural = 'Agents'
+
+    def __str__(self):
+        return self.name
+
+
+# Backwards-compatible name: reads live from the Agent table. Kept so the many
+# existing `AGENT_CHOICES` consumers — `for slug, label in AGENT_CHOICES`,
+# `dict(AGENT_CHOICES)`, `{s for s, _ in AGENT_CHOICES}` — keep working unchanged.
+AGENT_CHOICES = get_agent_choices
+
+
+class _AgentDefaultProvider:
+    """Lazily DB-backed stand-in for the old `AGENT_DEFAULT_PROVIDER` dict.
+
+    Callers only ever do `.get(agent_name, fallback)`, so that's what we support.
+    """
+
+    def get(self, agent_name, default='openai'):
+        try:
+            agent = Agent.objects.filter(slug=agent_name).only('default_provider').first()
+            return agent.default_provider if agent and agent.default_provider else default
+        except Exception:
+            return default
+
+    def __getitem__(self, agent_name):
+        try:
+            return Agent.objects.get(slug=agent_name).default_provider
+        except Exception as exc:
+            raise KeyError(agent_name) from exc
 
 PROVIDER_CHOICES = [
     ('openai', 'OpenAI'),
@@ -1914,7 +2065,7 @@ class CompanyAPIKey(models.Model):
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='api_keys')
-    agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
+    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
     mode = models.CharField(max_length=10, choices=MODE_CHOICES)
     encrypted_key = models.TextField(help_text='Fernet-encrypted provider key')
@@ -1984,7 +2135,7 @@ class AgentTokenQuota(models.Model):
     an admin approves a managed-key request.
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='agent_quotas')
-    agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
+    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
     # DB was renamed out-of-band to platform_* / managed_* variants. Model field
     # names kept stable for code compatibility; db_column maps to the actual column.
     included_tokens = models.BigIntegerField(default=DEFAULT_FREE_TOKENS, db_column='platform_included_tokens')
@@ -2099,7 +2250,7 @@ class KeyRequest(models.Model):
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_requests')
     requested_by = models.ForeignKey(CompanyUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='key_requests')
-    agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES)
+    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
     note = models.TextField(blank=True)
     # Company specifies how long they want the key (monthly / yearly).
@@ -2145,7 +2296,7 @@ class AdminPricingConfig(models.Model):
     Snapshot-style: pricing applies going forward; existing subscriptions
     should snapshot the numbers they were sold at.
     """
-    agent_name = models.CharField(max_length=50, choices=AGENT_CHOICES, unique=True)
+    agent_name = models.CharField(max_length=50, choices=get_agent_choices, unique=True)
     # Pricing label shown on admin pricing page as "per month"
     monthly_flat_usd = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
@@ -2184,6 +2335,14 @@ class AdminPricingConfig(models.Model):
     class Meta:
         verbose_name = 'Admin Pricing Config'
         verbose_name_plural = 'Admin Pricing Configs'
+
+    def get_agent_name_display(self):
+        """Human label, resolved from the Agent table (see the equivalent
+        override on CompanyModulePurchase for why this isn't Django's default)."""
+        agent = Agent.objects.filter(slug=self.agent_name).only('name').first()
+        if agent:
+            return agent.name
+        return (self.agent_name or '').replace('_', ' ').title()
 
     def __str__(self):
         return f"{self.get_agent_name_display()} — ${self.monthly_flat_usd}/mo"
@@ -2249,14 +2408,7 @@ class PlatformAPIKey(models.Model):
 # returns a key the agent actually knows how to consume. Superadmin can make
 # this DB-configurable in a later iteration if a company needs a different
 # provider for a specific agent.
-AGENT_DEFAULT_PROVIDER = {
-    'recruitment_agent': 'groq',
-    'marketing_agent': 'groq',
-    'project_manager_agent': 'groq',
-    'frontline_agent': 'openai',
-    'operations_agent': 'groq',
-    'reply_draft_agent': 'groq',
-    'hr_agent': 'groq',
-    'ai_sdr_agent': 'groq',
-    'exec_meeting_agent': 'groq',
-}
+# Now resolved per-agent from Agent.default_provider (see _AgentDefaultProvider),
+# so a new agent brings its own provider with it instead of needing this map
+# edited in lockstep.
+AGENT_DEFAULT_PROVIDER = _AgentDefaultProvider()

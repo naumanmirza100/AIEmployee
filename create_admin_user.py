@@ -26,7 +26,6 @@ try:
     # Check if user exists
     try:
         user = User.objects.get(email=email)
-        print(f"[OK] User {email} already exists")
         
         # Make them admin
         user.is_staff = True
@@ -34,7 +33,6 @@ try:
         if password:
             user.set_password(password)
         user.save()
-        print(f"[SUCCESS] Successfully made {email} an admin (is_staff=True, is_superuser=True)")
         
     except User.DoesNotExist:
         # Create new user
