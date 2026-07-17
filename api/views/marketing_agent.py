@@ -216,12 +216,28 @@ def list_campaigns(request):
         user = _get_or_create_user_for_company_user(company_user)
         
         campaigns = Campaign.objects.filter(owner=user).order_by('-created_at')
-        
+
         # Optional filters
         status_filter = request.GET.get('status')
         if status_filter:
             campaigns = campaigns.filter(status=status_filter)
-        
+
+        # Free-text search over campaign name + description.
+        search = (request.GET.get('search') or '').strip()
+        if search:
+            campaigns = campaigns.filter(
+                Q(name__icontains=search) | Q(description__icontains=search)
+            )
+
+        # Filter by the calendar day a campaign starts on (YYYY-MM-DD).
+        date_filter = (request.GET.get('date') or '').strip()
+        if date_filter:
+            try:
+                day = datetime.strptime(date_filter, '%Y-%m-%d').date()
+                campaigns = campaigns.filter(start_date=day)
+            except (ValueError, TypeError):
+                pass
+
         # Pagination
         page = int(request.GET.get('page', 1))
         limit = int(request.GET.get('limit', 20))

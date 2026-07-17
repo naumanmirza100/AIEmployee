@@ -205,6 +205,15 @@ class ExecutiveTask(models.Model):
         on_delete=models.SET_NULL,
         related_name='linked_tasks',
     )
+    # Set when this task was created by converting a meeting action item. Lets
+    # us flip that action item back to 'open' if the task is later deleted, so
+    # the "Convert to task" state stays truthful.
+    source_action_item = models.ForeignKey(
+        'MeetingActionItem',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='converted_tasks',
+    )
     # Flat one-level parent/child link — a subtask is a full ExecutiveTask
     # with its own status/priority/assignees, just nested under a parent for
     # display and progress rollup. Subtasks of subtasks are not supported

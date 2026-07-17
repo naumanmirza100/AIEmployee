@@ -16,6 +16,7 @@ import {
 import { Loader2, Plus, TrendingUp, Pause, Play, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import OutreachCampaign from './OutreachCampaign';
+import CampaignFilterBar from './CampaignFilterBar';
 
 const PAGE_SIZE = 10;
 
@@ -23,21 +24,31 @@ const Campaigns = ({ onRefresh }) => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);   // full-screen spinner: first load only
+  const [filtering, setFiltering] = useState(false); // subtle: search / filter refetch
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
+  // Filters (server-side). Search is debounced; status/date apply at once.
+  const [filters, setFilters] = useState({ search: '', status: '', date: '' });
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const fetchCampaigns = useCallback(async (pageNum = 1) => {
+  // `quiet` refetches (search/filter typing) keep the current list on screen and
+  // only show a small inline spinner — no full-panel flash on every keystroke.
+  const fetchCampaigns = useCallback(async (pageNum = 1, activeFilters = filters, quiet = false) => {
     try {
-      setLoading(true);
+      if (quiet) setFiltering(true);
+      else setLoading(true);
       const response = await marketingAgentService.listCampaigns({
         page: pageNum,
         limit: PAGE_SIZE,
+        search: activeFilters.search,
+        status: activeFilters.status,
+        date: activeFilters.date,
       });
       if (response?.status === 'success' && response?.data) {
         setCampaigns(response.data.campaigns || []);
@@ -48,12 +59,24 @@ const Campaigns = ({ onRefresh }) => {
       setCampaigns([]);
     } finally {
       setLoading(false);
+      setFiltering(false);
     }
-  }, [onRefresh]);
+  }, [onRefresh, filters]);
 
   useEffect(() => {
     fetchCampaigns(page);
   }, [page]);
+
+  // Any filter change resets to page 1 and re-fetches (search debounced 300ms).
+  // `quiet` = true so the list stays put and only a small spinner shows.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setPage(1);
+      fetchCampaigns(1, filters, true);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.search, filters.status, filters.date]);
 
   // Clear selection when campaigns change (page change, refresh, etc.)
   useEffect(() => {
@@ -122,8 +145,11 @@ const Campaigns = ({ onRefresh }) => {
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
-      <OutreachCampaign onCampaignCreated={() => fetchCampaigns(page)} />
+      <div data-tour-mkt="camp-create">
+        <OutreachCampaign onCampaignCreated={() => fetchCampaigns(page)} />
+      </div>
 
+      <div data-tour-mkt="camp-list" className="space-y-6">
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold text-white">Your Campaigns</h3>
         <div className="flex items-center gap-2">
@@ -144,6 +170,18 @@ const Campaigns = ({ onRefresh }) => {
         </div>
       </div>
 
+      <CampaignFilterBar
+        dataTour="camp-filters"
+        search={filters.search}
+        onSearchChange={(v) => setFilters((f) => ({ ...f, search: v }))}
+        status={filters.status}
+        onStatusChange={(v) => setFilters((f) => ({ ...f, status: v }))}
+        date={filters.date}
+        onDateChange={(v) => setFilters((f) => ({ ...f, date: v }))}
+        onClear={() => setFilters({ search: '', status: '', date: '' })}
+        loading={filtering}
+      />
+
       {loading ? (
         <div className="flex justify-center py-8">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -151,7 +189,11 @@ const Campaigns = ({ onRefresh }) => {
       ) : campaigns.length === 0 ? (
         <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-8 text-center">
-            <p className="text-white/60">No campaigns found. Create your first campaign to get started.</p>
+            <p className="text-white/60">
+              {(filters.search || filters.status || filters.date)
+                ? 'No campaigns match these filters.'
+                : 'No campaigns found. Create your first campaign to get started.'}
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -170,7 +212,7 @@ const Campaigns = ({ onRefresh }) => {
             </div>
           )}
 
-          <div className="grid gap-4">
+          <div className={`grid gap-4 transition-opacity duration-200 ${filtering ? 'opacity-50' : 'opacity-100'}`}>
             {campaigns.map((campaign) => {
               const isActive = campaign.status === 'active';
               const isChecked = selected.has(campaign.id);
@@ -236,34 +278,44 @@ const Campaigns = ({ onRefresh }) => {
         </>
       )}
 
-      {/* Pagination */}
-      {!loading && total > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-4 pb-2 border-t">
-          <p className="text-sm text-muted-foreground">
-            Showing page {page} of {totalPages} ({total} total campaigns)
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+      {/* Pagination — count always shows; Prev/Next only when multi-page. */}
+      {!loading && total > 0 && (() => {
+        const rangeStart = (page - 1) * PAGE_SIZE + 1;
+        const rangeEnd = Math.min(page * PAGE_SIZE, total);
+        const multiPage = totalPages > 1;
+        return (
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 pb-2 border-t">
+            <p className="text-sm text-muted-foreground">
+              {multiPage
+                ? `Showing ${rangeStart}–${rangeEnd} of ${total} campaigns · page ${page} of ${totalPages}`
+                : `${total} campaign${total === 1 ? '' : 's'}`}
+            </p>
+            {multiPage && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
+      </div>
       </div>
 
       {/* Bulk Delete Confirmation Dialog */}
