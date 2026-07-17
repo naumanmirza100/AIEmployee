@@ -6,6 +6,7 @@ import { getCompanyUser } from '@/services/companyAuthService';
 import { verifySession, getPurchasedModules } from '@/services/modulePurchaseService';
 
 const CACHE_KEY = 'company_purchased_modules';
+const REDIRECT_DELAY_MS = 2000;
 
 const ModulePurchaseSuccessPage = () => {
   const navigate = useNavigate();
@@ -53,6 +54,16 @@ const ModulePurchaseSuccessPage = () => {
 
   const isCompanyUser = !!getCompanyUser();
 
+  // Show the success screen briefly, then take the user to the dashboard themselves.
+  // Only on a clean activation — on error they stay put so they can read what happened.
+  const shouldAutoRedirect = !verifying && !error && isCompanyUser && (!sessionId || verified);
+
+  useEffect(() => {
+    if (!shouldAutoRedirect) return;
+    const timer = setTimeout(() => navigate('/company/dashboard'), REDIRECT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [shouldAutoRedirect, navigate]);
+
   if (verifying) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center px-4 py-16">
@@ -81,9 +92,10 @@ const ModulePurchaseSuccessPage = () => {
             <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">{error}</p>
           )}
         </div>
-        {sessionId && !error && (
-          <p className="text-xs text-muted-foreground font-mono">
-            Session: {sessionId.slice(0, 20)}…
+        {shouldAutoRedirect && (
+          <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Taking you to your dashboard…
           </p>
         )}
         <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">

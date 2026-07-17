@@ -6,9 +6,11 @@ Document Processing, Summarization, Analytics, Knowledge Q&A, Authoring, Notific
 import os
 import hashlib
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -25,6 +27,10 @@ from operations_agent.models import (
 from core.api_key_service import KeyServiceError
 
 logger = logging.getLogger(__name__)
+
+# How recently an identical generation counts as the same request, so a retry
+# after an apparent failure reuses that document instead of duplicating it.
+DUPLICATE_GENERATION_WINDOW_SECONDS = 120
 
 
 # ──────────────────────────────────────────────
@@ -746,23 +752,15 @@ def ask_qa_question(request):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-        if not chat:
-            # New chat — temporary title, updated after answer
-            chat = OperationsChat.objects.create(
-                company=company, user=user, title=question[:60] or 'New chat',
-            )
-
-        # Build chat history from DB
+        # Build chat history from DB (empty for a brand-new chat)
         existing_msgs = list(
             chat.messages.order_by('created_at').values('role', 'content')
-        )
+        ) if chat else []
 
-        # Persist user message
-        OperationsChatMessage.objects.create(
-            chat=chat, role='user', content=question,
-        )
-
-        # Run agent
+        # Run the agent BEFORE writing anything. If it raises (bad key, quota
+        # exhausted, …) we must not leave behind a chat holding only the user's
+        # question — that orphan is what made every failed ask spawn a second
+        # chat in the sidebar when the user retried.
         from operations_agent.agents.knowledge_qa_agent import OperationsKnowledgeQAAgent
         agent = OperationsKnowledgeQAAgent()
         agent.company_id = company.id
@@ -777,19 +775,33 @@ def ask_qa_question(request):
         answer_text = result.get('answer') or 'Sorry, I could not produce an answer.'
         sources = result.get('sources') or []
 
-        # Persist assistant message even on soft errors so the user sees something
-        assistant_msg = OperationsChatMessage.objects.create(
-            chat=chat,
-            role='assistant',
-            content=answer_text,
-            sources=sources,
-            response_data={'success': bool(result.get('success'))},
-        )
+        # Persist the whole exchange atomically: chat (if new) + both messages
+        # land together, or not at all.
+        with transaction.atomic():
+            if not chat:
+                chat = OperationsChat.objects.create(
+                    company=company, user=user,
+                    title=(result.get('suggested_title') or question[:60] or 'New chat')[:255],
+                )
+                is_new_chat = True
+            else:
+                is_new_chat = False
 
-        # If this was a new chat and the first exchange, upgrade the title
-        if chat.messages.count() <= 2 and result.get('suggested_title'):
-            chat.title = result['suggested_title'][:255]
-        chat.save(update_fields=['title', 'updated_at'])
+            OperationsChatMessage.objects.create(
+                chat=chat, role='user', content=question,
+            )
+            assistant_msg = OperationsChatMessage.objects.create(
+                chat=chat,
+                role='assistant',
+                content=answer_text,
+                sources=sources,
+                response_data={'success': bool(result.get('success'))},
+            )
+
+            # Title the chat from its first exchange only.
+            if not is_new_chat and chat.messages.count() <= 2 and result.get('suggested_title'):
+                chat.title = result['suggested_title'][:255]
+            chat.save(update_fields=['title', 'updated_at'])
 
         return Response({
             'status': 'success',
@@ -1312,20 +1324,46 @@ def stream_generate_document(request):
 
             # Persist to DB
             try:
-                doc = OperationsGeneratedDocument.objects.create(
-                    company=company,
-                    generated_by=user,
-                    title=final_payload['title'][:500],
-                    template_type=resolved_template,
-                    tone=resolved_tone,
-                    prompt=prompt,
-                    content=final_payload['content_markdown'],
-                    version=1,
-                    edit_history=[],
-                    tokens_used=final_payload.get('tokens_used') or {},
+                # A retry of the same request must not leave a twin behind. The
+                # client can give up (network blip, tab close) while this
+                # generator keeps running server-side and saves anyway; the user
+                # then sees a failure, retries, and ends up with two identical
+                # v1 documents. Reuse an untouched identical doc saved moments
+                # ago instead of creating another.
+                doc = (
+                    OperationsGeneratedDocument.objects
+                    .filter(
+                        company=company,
+                        generated_by=user,
+                        prompt=prompt,
+                        template_type=resolved_template,
+                        tone=resolved_tone,
+                        version=1,
+                        created_at__gte=timezone.now() - timedelta(seconds=DUPLICATE_GENERATION_WINDOW_SECONDS),
+                    )
+                    .order_by('-created_at')
+                    .first()
                 )
-                if valid_refs:
-                    doc.reference_documents.set(valid_refs)
+                if doc:
+                    logger.info(
+                        'stream_generate_document: reusing recent identical doc %s for company %s',
+                        doc.id, company.id,
+                    )
+                else:
+                    doc = OperationsGeneratedDocument.objects.create(
+                        company=company,
+                        generated_by=user,
+                        title=final_payload['title'][:500],
+                        template_type=resolved_template,
+                        tone=resolved_tone,
+                        prompt=prompt,
+                        content=final_payload['content_markdown'],
+                        version=1,
+                        edit_history=[],
+                        tokens_used=final_payload.get('tokens_used') or {},
+                    )
+                    if valid_refs:
+                        doc.reference_documents.set(valid_refs)
             except Exception as db_err:
                 logger.error(f'stream_generate_document DB save error: {db_err}', exc_info=True)
                 yield _emit('error', {'message': f'Could not save document: {db_err}'})
@@ -1333,6 +1371,11 @@ def stream_generate_document(request):
 
             yield _emit('done', {'document': _serialize_generated(doc, include_content=True)})
 
+        except GeneratorExit:
+            # Client hung up mid-stream. Django closes the generator here; do not
+            # save, or the user gets a document they never saw finish.
+            logger.info('stream_generate_document: client disconnected, discarding generation')
+            raise
         except KeyServiceError as e:
             yield _emit('error', {'message': e.user_message, 'error_code': e.reason})
         except Exception as e:

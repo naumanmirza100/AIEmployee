@@ -22,6 +22,43 @@ const getCompanyUser = () => {
 };
 
 /**
+ * Wipe the local session. Shared by an explicit logout and by an expired one.
+ */
+const clearCompanySession = () => {
+  localStorage.removeItem('company_auth_token');
+  localStorage.removeItem('company_user');
+  localStorage.removeItem('company_purchased_modules');
+  sessionStorage.removeItem('recruitment_ai_modal_shown');
+  sessionStorage.removeItem('operations_upload_modal_shown');
+  sessionStorage.removeItem('operations_authoring_onboarded');
+};
+
+/**
+ * The server rejected our token — it was deleted (logged out elsewhere) or the
+ * account was deactivated. Send the user to login with an explanation instead
+ * of letting a bare 403 surface as a broken page.
+ *
+ * Note this keys off the DRF error code, not the bare 403: module-access and
+ * quota blocks are 403 too, and those must NOT log anyone out.
+ */
+const handleExpiredSession = (errorData) => {
+  const code = errorData?.detail?.code || errorData?.code;
+  const detail = String(errorData?.detail || '');
+  const isDeadToken =
+    code === 'authentication_failed' ||
+    /invalid token|authentication failed|inactive/i.test(detail);
+
+  if (!isDeadToken) return false;
+  // Already heading to login (e.g. several requests failed at once) — don't stack redirects.
+  if (window.location.pathname === '/company/login') return true;
+
+  clearCompanySession();
+  const reason = /inactive/i.test(detail) ? 'inactive' : 'expired';
+  window.location.replace(`/company/login?session=${reason}`);
+  return true;
+};
+
+/**
  * Base API request function for company routes
  * options.responseType === 'blob' → returns blob (for file downloads), otherwise parses JSON
  */
@@ -60,7 +97,24 @@ const companyApiRequest = async (endpoint, options = {}) => {
       } catch {
         errorData = { message: `HTTP error! status: ${response.status}` };
       }
-      const error = new Error(errorData.message || `HTTP error! status: ${response.status}`);
+
+      // A dead token means this session is over — bounce to login rather than
+      // letting every caller render its own 403. Skipped for /company/logout,
+      // which is allowed to fail quietly while we clear state anyway.
+      if (
+        (response.status === 403 || response.status === 401) &&
+        !endpoint.includes('/company/logout')
+      ) {
+        if (handleExpiredSession(errorData)) {
+          const err = new Error('Your session has ended. Please log in again.');
+          err.status = response.status;
+          err.data = errorData;
+          err.sessionExpired = true;
+          throw err;
+        }
+      }
+
+      const error = new Error(errorData.message || errorData.detail || `HTTP error! status: ${response.status}`);
       error.status = response.status;
       error.data = errorData;
       throw error;
@@ -287,15 +341,9 @@ const logoutCompany = async () => {
   } catch (_) {
     // Even if the server call fails, clear local storage
   } finally {
-    localStorage.removeItem('company_auth_token');
-    localStorage.removeItem('company_user');
-    localStorage.removeItem('company_purchased_modules');
-    // Reset per-session UI flags so the next login is treated as fresh
-    // (e.g. the recruitment "Create Job with AI" auto-open modal and the
-    // operations "Upload Document" auto-open modal).
-    sessionStorage.removeItem('recruitment_ai_modal_shown');
-    sessionStorage.removeItem('operations_upload_modal_shown');
-    sessionStorage.removeItem('operations_authoring_onboarded');
+    // Also resets per-session UI flags so the next login is treated as fresh
+    // (e.g. the recruitment "Create Job with AI" and operations upload modals).
+    clearCompanySession();
   }
 };
 

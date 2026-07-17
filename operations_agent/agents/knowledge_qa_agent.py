@@ -10,11 +10,19 @@ instead of raising, so the chat UI never crashes.
 """
 
 import logging
+import operator
 import re
+from functools import reduce
 from typing import Dict, List, Optional, Tuple
 
+from django.db.models import Q
+
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
-from operations_agent.models import OperationsDocument, OperationsDocumentChunk
+from operations_agent.models import (
+    OperationsDocument,
+    OperationsDocumentChunk,
+    OperationsDocumentSummary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +305,15 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
 
         docs = OperationsDocument.objects.filter(company_id=company_id).order_by('-created_at')
         total = docs.count()
-        if total == 0:
+        # Files summarised via the Summarization tab are a separate library, but
+        # they're still "documents the user has" as far as this question goes.
+        summaries = (
+            OperationsDocumentSummary.objects
+            .filter(company_id=company_id).order_by('-created_at')
+        )
+        summary_total = summaries.count()
+
+        if total == 0 and summary_total == 0:
             return {
                 'success': True,
                 'answer': (
@@ -309,25 +325,43 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
                 'suggested_title': 'Documents overview',
             }
 
-        # Build a markdown table of documents
-        lines = [
-            f"You have **{total} document{'s' if total != 1 else ''}** in your library.",
-            '',
-            '## Document Library',
-            '',
-            '| # | Title | Type | Pages | Uploaded |',
-            '|---|-------|------|-------|----------|',
-        ]
-        for idx, d in enumerate(docs[:50], start=1):
-            title = (d.title or d.original_filename or 'Untitled').replace('|', '\\|')
+        lines = []
+        if total:
+            lines += [
+                f"You have **{total} document{'s' if total != 1 else ''}** in your library"
+                + (f" and **{summary_total} summarised file{'s' if summary_total != 1 else ''}**." if summary_total else "."),
+                '',
+                '## Document Library',
+                '',
+                '| # | Title | Type | Pages | Uploaded |',
+                '|---|-------|------|-------|----------|',
+            ]
+            for idx, d in enumerate(docs[:50], start=1):
+                title = (d.title or d.original_filename or 'Untitled').replace('|', '\\|')
+                lines.append(
+                    f"| {idx} | {title} | {d.file_type.upper()} | {d.page_count or '-'} | "
+                    f"{d.created_at.strftime('%Y-%m-%d')} |"
+                )
+            if total > 50:
+                lines.append('')
+                lines.append(f"_Showing first 50 of {total} documents._")
+        else:
             lines.append(
-                f"| {idx} | {title} | {d.file_type.upper()} | {d.page_count or '-'} | "
-                f"{d.created_at.strftime('%Y-%m-%d')} |"
+                f"You have **{summary_total} summarised file{'s' if summary_total != 1 else ''}** "
+                f"and no documents in your main library yet."
             )
 
-        if total > 50:
-            lines.append('')
-            lines.append(f"_Showing first 50 of {total} documents._")
+        if summary_total:
+            lines += [
+                '',
+                '## Summarised Files',
+                '',
+                '| # | File | Summarised |',
+                '|---|------|-----------|',
+            ]
+            for idx, s in enumerate(summaries[:50], start=1):
+                name = (s.original_filename or 'Untitled').replace('|', '\\|')
+                lines.append(f"| {idx} | {name} | {s.created_at.strftime('%Y-%m-%d')} |")
 
         # Breakdown by type
         from collections import Counter
@@ -394,7 +428,12 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         company_id: int,
         document_ids: Optional[List[int]],
     ) -> Tuple[str, List[Dict], bool]:
-        """Keyword-based retrieval over OperationsDocumentChunk.
+        """Keyword-based retrieval over OperationsDocumentChunk *and*
+        OperationsDocumentSummary.
+
+        Summaries are uploaded through the Summarization tab and live in their own
+        table with no chunks, so they used to be invisible here — a user could
+        summarise a file and then be told nothing matched when they asked about it.
 
         Returns (context_text, sources, is_relevant) where is_relevant is True only
         when at least one chunk actually matched the question's keywords. When
@@ -408,21 +447,40 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         chunk_qs = OperationsDocumentChunk.objects.filter(
             document__company_id=company_id,
             document__is_processed=True,
-        ).select_related('document')
+        )
 
         if document_ids:
             chunk_qs = chunk_qs.filter(document_id__in=document_ids)
 
-        # Pull a reasonable working set then score in Python.
-        # We don't want to load everything on huge libraries → limit to 500 chunks,
-        # prioritising recent documents.
-        chunk_qs = chunk_qs.order_by('-document__created_at', 'chunk_index')[:500]
+        # Push keyword matching into the database so we only pull chunks that
+        # actually contain a query term. Previously this loaded the 500 most
+        # recent chunks in full and scored them in Python, so ~90% of the
+        # `content` blobs streamed over the join+sort were discarded on arrival.
+        # On SQL Server that took 30s+ (often minutes), which is why the chat sat
+        # in "searching…" forever.
+        keyword_q = reduce(operator.or_, (Q(content__icontains=tok) for tok in set(tokens)))
 
-        scored: List[Tuple[int, OperationsDocumentChunk]] = []
-        for ch in chunk_qs:
-            s = _score_chunk(ch.content, tokens)
+        # Fetch ONLY the columns we need, as dicts rather than model instances.
+        candidate_rows = list(
+            chunk_qs.filter(keyword_q)
+            .order_by('-document__created_at', 'chunk_index')
+            .values(
+                'content', 'page_number', 'document_id',
+                'document__title', 'document__original_filename',
+            )[:200]
+        )
+
+        scored: List[Tuple[int, Dict]] = []
+        for row in candidate_rows:
+            s = _score_chunk(row.get('content') or '', tokens)
             if s > 0:
-                scored.append((s, ch))
+                scored.append((s, row))
+
+        # Summaries live in their own table with no chunks. Search them too, unless
+        # the user pinned the question to specific documents (those ids address
+        # OperationsDocument rows, which summaries are not part of).
+        if not document_ids:
+            scored.extend(self._score_summaries(company_id, tokens))
 
         # Fallback: if no keyword matches, grab summary/parsed_text of most recent docs
         if not scored:
@@ -435,10 +493,11 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         parts: List[str] = []
         sources: List[Dict] = []
         total_chars = 0
-        for _, ch in top:
-            doc = ch.document
-            header = f"[Source: {doc.title or doc.original_filename} | Page {ch.page_number or 'n/a'}]"
-            content = ch.content.strip()
+        for _, row in top:
+            title = row.get('document__title') or row.get('document__original_filename')
+            page = row.get('page_number')
+            header = f"[Source: {title} | Page {page or 'n/a'}]"
+            content = (row.get('content') or '').strip()
             # Trim very long chunks
             if len(content) > 2500:
                 content = content[:2500] + '…'
@@ -448,9 +507,10 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             parts.append(block)
             total_chars += len(block)
             sources.append({
-                'title': doc.title or doc.original_filename,
-                'page': ch.page_number,
-                'document_id': doc.id,
+                'title': title,
+                'page': page,
+                'document_id': row.get('document_id'),
+                'summary_id': row.get('summary_id'),
             })
 
         # Deduplicate sources by (title, page)
@@ -464,6 +524,47 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             unique_sources.append(s)
 
         return '\n---\n'.join(parts), unique_sources, True
+
+    def _score_summaries(self, company_id: int, tokens: List[str]) -> List[Tuple[int, Dict]]:
+        """Keyword-score standalone summaries from the Summarization tab.
+
+        Rows are shaped like chunk rows so the caller's ranking and rendering
+        treat both sources identically.
+        """
+        keyword_q = reduce(
+            operator.or_,
+            (Q(rich_summary__icontains=tok) | Q(original_filename__icontains=tok)
+             for tok in set(tokens)),
+        )
+        rows = (
+            OperationsDocumentSummary.objects
+            .filter(company_id=company_id)
+            .filter(keyword_q)
+            .order_by('-created_at')
+            .values('id', 'original_filename', 'rich_summary', 'key_findings')[:50]
+        )
+
+        scored: List[Tuple[int, Dict]] = []
+        for row in rows:
+            body = row.get('rich_summary') or ''
+            findings = row.get('key_findings') or []
+            if isinstance(findings, list) and findings:
+                body = f"{body}\n\nKey findings:\n" + '\n'.join(
+                    f"- {f}" for f in findings if isinstance(f, str)
+                )
+            score = _score_chunk(body, tokens)
+            if score <= 0:
+                continue
+            scored.append((score, {
+                'content': body,
+                'page_number': None,
+                'document_id': None,
+                'summary_id': row['id'],
+                # Flagged in the title so the LLM cites it as a summary, not the source file.
+                'document__title': f"{row['original_filename']} (summary)",
+                'document__original_filename': row['original_filename'],
+            }))
+        return scored
 
     def _fallback_context(
         self,

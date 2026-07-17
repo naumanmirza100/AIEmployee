@@ -57,6 +57,14 @@ class OperationsDocument(models.Model):
     class Meta:
         app_label = 'operations_agent'
         ordering = ['-created_at']
+        indexes = [
+            # Speeds the Knowledge-QA retrieval filter+ordering
+            # (company_id, is_processed) join with `-created_at` ordering.
+            models.Index(
+                fields=['company', 'is_processed', '-created_at'],
+                name='ops_doc_company_proc_created',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.title} ({self.file_type})"
