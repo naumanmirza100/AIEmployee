@@ -150,11 +150,12 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
                 source = result.get('source', 'Unknown')
                 doc_type = result.get('type', 'unknown')
                 
-                # Use the content as-is (already preprocessed by get_answer)
-                # Only truncate if extremely long (over 15000 chars) to avoid token limits
-                if len(answer_content) > 15000:
-                    answer_content = answer_content[:15000] + '\n\n[... content truncated ...]'
-                
+                # Cap at 6000 chars — enough for the LLM to synthesise a good
+                # answer but tight enough to keep time-to-first-token low on
+                # very large documents. (Was 15000 which measurably slowed TTFT.)
+                if len(answer_content) > 6000:
+                    answer_content = answer_content[:6000] + '\n\n[... content truncated ...]'
+
                 item_text += f"Source: {source}\n   Type: {doc_type}\n   Content Length: {len(answer_content)} chars\n\nDocument Content:\n{answer_content}"
             
             # Handle format from search_knowledge (has 'question' or 'title' keys)
@@ -163,9 +164,10 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
             elif 'title' in result:
                 # Use more content for documents to help LLM generate better answers
                 content = result.get('content', 'N/A')
-                # For documents, use up to 3000 chars to give LLM more context
-                if len(content) > 3000:
-                    content_preview = content[:3000] + '...'
+                # Cap per-excerpt at 1500 chars to keep the prompt tight —
+                # this dominates time-to-first-token on large docs.
+                if len(content) > 1500:
+                    content_preview = content[:1500] + '...'
                 else:
                     content_preview = content
                 similarity = result.get('similarity_score', 'N/A')

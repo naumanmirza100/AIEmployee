@@ -1099,6 +1099,47 @@ def get_hr_document(request, document_id):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def get_hr_document_status(request, document_id):
+    """Lightweight indexing-progress endpoint. Returns just the fields the UI
+    needs to render an "indexing…" progress bar. Skips the access-log write
+    that `get_hr_document` does, so a 1-2s poll loop doesn't spam the audit
+    trail (indexing progress is not a document *read*)."""
+    try:
+        company = request.user.company
+        d = (HRDocument.objects
+             .filter(pk=document_id, company=company)
+             .only('id', 'processing_status', 'processing_error',
+                   'is_indexed', 'chunks_processed', 'chunks_total',
+                   'file_size', 'updated_at')
+             .first())
+        if not d:
+            return Response({'status': 'error', 'message': 'Document not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        total = int(d.chunks_total or 0)
+        done = int(d.chunks_processed or 0)
+        percent = int(round((done / total) * 100)) if total > 0 else (
+            100 if d.is_indexed else 0
+        )
+        return Response({'status': 'success', 'data': {
+            'id': d.id,
+            'processing_status': d.processing_status,
+            'processing_error': d.processing_error or '',
+            'is_indexed': bool(d.is_indexed),
+            'chunks_processed': done,
+            'chunks_total': total,
+            'percent': percent,
+            'updated_at': d.updated_at.isoformat() if d.updated_at else None,
+        }})
+    except Exception:
+        logger.exception("get_hr_document_status failed")
+        return Response({'status': 'error', 'message': 'Failed to load status'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['DELETE', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])

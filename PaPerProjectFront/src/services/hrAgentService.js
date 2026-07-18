@@ -108,30 +108,75 @@ export const deleteHRKnowledgeChat = async (chatId) => {
 
 // ---------- Documents ----------
 /** Upload an HR document (multipart). `options` may carry document_type,
- *  confidentiality, employee_id, retention_days. */
+ *  confidentiality, employee_id, retention_days.
+ *
+ *  Pass `options.onProgress({ loaded, total, percent })` to receive real
+ *  upload-byte progress. We use XHR under the hood because `fetch` still
+ *  can't report upload-side progress in a portable way.
+ */
 export const uploadHRDocument = async (file, title, description, options = {}) => {
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const token = localStorage.getItem('company_auth_token');
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('title', title || file.name);
+  fd.append('description', description || '');
+  if (options.document_type) fd.append('document_type', options.document_type);
+  if (options.confidentiality) fd.append('confidentiality', options.confidentiality);
+  if (options.employee_id != null) fd.append('employee_id', String(options.employee_id));
+  if (options.retention_days != null) fd.append('retention_days', String(options.retention_days));
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}/hr/documents/upload/`, true);
+    if (token) xhr.setRequestHeader('Authorization', `Token ${token}`);
+
+    if (typeof options.onProgress === 'function' && xhr.upload) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          options.onProgress({
+            loaded: e.loaded,
+            total: e.total,
+            percent: Math.round((e.loaded / e.total) * 100),
+          });
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch { data = {}; }
+      const ok = (xhr.status >= 200 && xhr.status < 300) || xhr.status === 202;
+      if (!ok) {
+        const err = new Error(data.message || `HTTP ${xhr.status}`);
+        err.status = xhr.status;
+        return reject(err);
+      }
+      if (data.status === 'error') {
+        return reject(new Error(data.message || 'Upload failed'));
+      }
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.onabort = () => reject(Object.assign(new Error('Upload aborted'), { aborted: true }));
+
+    if (options.signal) {
+      if (options.signal.aborted) { xhr.abort(); return; }
+      options.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+
+    xhr.send(fd);
+  });
+};
+
+/** Poll indexing progress for a single HR document. Returns
+ *  { processing_status, chunks_processed, chunks_total, percent, is_indexed }. */
+export const getHRDocumentStatus = async (documentId) => {
   try {
-    const { API_BASE_URL } = await import('@/config/apiConfig');
-    const token = localStorage.getItem('company_auth_token');
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('title', title || file.name);
-    fd.append('description', description || '');
-    if (options.document_type) fd.append('document_type', options.document_type);
-    if (options.confidentiality) fd.append('confidentiality', options.confidentiality);
-    if (options.employee_id != null) fd.append('employee_id', String(options.employee_id));
-    if (options.retention_days != null) fd.append('retention_days', String(options.retention_days));
-    const res = await fetch(`${API_BASE_URL}/hr/documents/upload/`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Token ${token}` } : {},
-      body: fd,
-    });
-    const data = await res.json();
-    if (!res.ok && res.status !== 202) throw new Error(data.message || `HTTP ${res.status}`);
-    if (data.status === 'error') throw new Error(data.message || 'Upload failed');
-    return data;
+    const response = await companyApi.get(`/hr/documents/${documentId}/status`);
+    return response;
   } catch (error) {
-    console.error('Upload HR document error:', error);
+    console.error('Get HR document status error:', error);
     throw error;
   }
 };
@@ -1071,6 +1116,7 @@ export default {
   updateHRKnowledgeChat,
   deleteHRKnowledgeChat,
   uploadHRDocument,
+  getHRDocumentStatus,
   listHRDocuments,
   getHRDocument,
   deleteHRDocument,
