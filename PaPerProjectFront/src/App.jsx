@@ -42,6 +42,7 @@ import CompanySignupPage from '@/pages/CompanySignupPage';
 import CompanyProfilePage from '@/pages/CompanyProfilePage';
 import CompanyDashboardPage from '@/pages/CompanyDashboardPage';
 import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
+import NotificationsPage from '@/pages/NotificationsPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
 import UserDashboardPage from '@/pages/UserDashboardPage';
 import MarketingAgentPage from '@/pages/MarketingAgentPage';
@@ -126,6 +127,8 @@ import { useTranslation } from 'react-i18next';
             <Route path="/company/dashboard" element={<CompanyDashboardPage />} />
             <Route path="/company/dashboard/:tab" element={<CompanyDashboardPage />} />
             <Route path="/company/settings/api-keys" element={<AgentKeysSettingsPage />} />
+            {/* Full-detail notification list — the navbar dropdown links here */}
+            <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/company/profile" element={<CompanyProfilePage />} />
             <Route path="/company/profile/:tab" element={<CompanyProfilePage />} />
             

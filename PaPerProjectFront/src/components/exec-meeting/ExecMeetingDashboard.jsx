@@ -1106,12 +1106,12 @@ const ExecMeetingDashboard = () => {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList data-tour-em="tabs" className="hidden md:flex flex-wrap gap-1.5 h-auto p-1.5 mb-6 bg-[#1a1333] border border-[#3a295a] rounded-xl">
+          <TabsList data-tour-em="tabs" className="hidden md:flex w-full gap-1.5 h-auto p-1.5 mb-6 bg-[#1a1333] border border-[#3a295a] rounded-xl">
             {TAB_ITEMS.map(t => (
               <TabsTrigger
                 key={t.value}
                 value={t.value}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 data-[state=inactive]:text-white/50 data-[state=inactive]:hover:text-white/80 data-[state=active]:text-white data-[state=active]:border-none data-[state=inactive]:border-[#2d2342] data-[state=inactive]:border"
+                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 data-[state=inactive]:text-white/50 data-[state=inactive]:hover:text-white/80 data-[state=active]:text-white data-[state=active]:border-none data-[state=inactive]:border-[#2d2342] data-[state=inactive]:border"
                 style={activeTab === t.value ? {
                   background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
                   boxShadow: '0 0 12px 0 rgba(162,89,255,0.45)',

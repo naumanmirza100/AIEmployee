@@ -9,6 +9,7 @@ from api.views import blog
 from api.views import review
 from api.views import contact
 from api.views import consultation
+from api.views import agents
 from api.views import pricing
 from api.views import payment
 from api.views import referral
@@ -126,6 +127,9 @@ urlpatterns = [
     re_path(r'^consultations/list/?$', consultation.list_consultations, name='list_consultations'),  # GET
     re_path(r'^consultations/(?P<id>\d+)/?$', consultation.get_consultation, name='get_consultation'),
     
+    # Agent catalogue — source of truth for agent dropdowns/filters everywhere
+    re_path(r'^agents/?$', agents.list_agents, name='list_agents'),
+
     # Pricing endpoints
     re_path(r'^pricing/plans/?$', pricing.list_pricing_plans, name='list_pricing_plans'),
     re_path(r'^pricing/subscriptions/?$', pricing.list_subscriptions, name='list_subscriptions'),  # GET
