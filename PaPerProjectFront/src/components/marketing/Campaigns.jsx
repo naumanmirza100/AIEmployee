@@ -20,6 +20,7 @@ import {
 import marketingAgentService from '@/services/marketingAgentService';
 import OutreachCampaign from './OutreachCampaign';
 import CampaignFilterBar from './CampaignFilterBar';
+import HoverTip from '@/components/common/HoverTip';
 
 const PAGE_SIZE = 10;
 
@@ -178,20 +179,24 @@ const Campaigns = ({ onRefresh }) => {
         </div>
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={deleting}
-              onClick={() => setDeleteConfirmOpen(true)}
-            >
-              {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-              Delete ({selected.size})
-            </Button>
+            <HoverTip tip="Delete the selected campaigns permanently">
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={deleting}
+                onClick={() => setDeleteConfirmOpen(true)}
+              >
+                {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                Delete ({selected.size})
+              </Button>
+            </HoverTip>
           )}
-          <Button onClick={() => fetchCampaigns(page)} variant="outline" size="sm" disabled={loading}>
-            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          <HoverTip tip="Reload the campaigns list">
+            <Button onClick={() => fetchCampaigns(page)} variant="outline" size="sm" disabled={loading}>
+              <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </HoverTip>
         </div>
       </div>
 

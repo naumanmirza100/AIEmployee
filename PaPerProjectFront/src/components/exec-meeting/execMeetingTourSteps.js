@@ -5,6 +5,65 @@
 
 export const EXEC_MEETING_TOUR_KEY = 'exec_meeting_tutorial_seen_v1';
 
+// localStorage key for the auto "How it works" modal (shown once on first visit,
+// before the guided tour). Kept separate from the tour key so the two are
+// independent — resetting one doesn't reset the other.
+export const EXEC_MEETING_HOWITWORKS_KEY = 'exec_meeting_howitworks_seen_v1';
+
+// High-level "what this agent does for you" steps for the HowItWorksModal.
+// Icon names are the string keys resolved in ExecMeetingDashboard (kept as
+// strings here so this stays a plain data module with no React imports).
+// Titles are kept to roughly one line and bodies to a similar length (~2 lines)
+// so every card reads as the same size — an even, structured row rather than a
+// ragged one. Keep new steps to this shape.
+export const EXEC_MEETING_HOWITWORKS_STEPS = [
+  {
+    icon: 'Users',
+    title: 'Add your team',
+    body: 'Add users from the Dashboard they appear in the Users tab, ready to assign.',
+  },
+  {
+    icon: 'CalendarClock',
+    title: 'Schedule a meeting',
+    body: 'Create a meeting and the AI drafts its description and agenda for you.',
+  },
+  {
+    icon: 'Mail',
+    title: 'Participants get invited',
+    body: 'Everyone added to the meeting gets an email invite and updates if it changes.',
+  },
+  {
+    icon: 'Sparkles',
+    title: 'AI takes the notes',
+    body: 'Paste the transcript and AI extracts the summary, decisions and action items.',
+  },
+  {
+    icon: 'ListChecks',
+    title: 'Tasks & subtasks',
+    body: 'Action items become tasks. Add subtasks and assign an owner to each.',
+  },
+  {
+    icon: 'Mail',
+    title: 'Assignees get emailed',
+    body: 'Whoever owns a task or subtask is emailed and again whenever it changes.',
+  },
+  {
+    icon: 'CalendarDays',
+    title: 'AI plans your week',
+    body: '“Plan This Week” builds an optimised schedule with focus blocks, export as PDF.',
+  },
+  {
+    icon: 'FileText',
+    title: 'Generate documents',
+    body: 'Pick a type and link a meeting to fill it in or start from a blank template.',
+  },
+  {
+    icon: 'Bell',
+    title: 'Proactive reminders',
+    body: 'Reminders, overdue alerts and a daily digest land in Notifications for you.',
+  },
+];
+
 export const EXEC_MEETING_TOUR_STEPS = [
   {
     title: 'Welcome to your Meeting Assistant 👋',

@@ -9,6 +9,71 @@
 
 export const MARKETING_TOUR_KEY = 'marketing_tutorial_seen_v3';
 
+// localStorage key for the auto "How it works" modal (shown once on first visit,
+// before the guided tour). Separate from the tour key so the two are independent.
+export const MARKETING_HOWITWORKS_KEY = 'marketing_howitworks_seen_v1';
+
+// High-level "what this agent does for you" steps for the HowItWorksModal.
+// Icon names are string keys resolved in MarketingDashboard. Keep titles to ~1
+// line and bodies to ~2 lines so every card reads as the same size.
+export const MARKETING_HOWITWORKS_STEPS = [
+  {
+    icon: 'Mail',
+    title: 'Connect an email account',
+    body: 'Add the account campaigns send from (SMTP or provider) test it and you\'re ready.',
+  },
+  {
+    icon: 'Megaphone',
+    title: 'Let AI build a campaign',
+    body: 'Tell the Outreach Agent your goal and it drafts the whole email campaign for you.',
+  },
+  {
+    icon: 'Users',
+    title: 'Generate & enrich leads',
+    body: 'The AI finds and enriches leads for your campaign so you\'re not starting from zero.',
+  },
+  {
+    icon: 'Sparkles',
+    title: 'AI builds the sequence',
+    body: 'The AI drafts a multi-step email sequence the first touch plus timed follow-ups.',
+  },
+  {
+    icon: 'Mail',
+    title: 'Smart follow-ups by reply',
+    body: 'AI reads each reply and picks the next email interested, not interested or a question all get the right follow-up.',
+  },
+  {
+    icon: 'Send',
+    title: 'Launch the campaign',
+    body: 'Hit launch and every email in the sequence sends on schedule no manual sending.',
+  },
+  {
+    icon: 'TrendingUp',
+    title: 'Track performance live',
+    body: 'Opens, clicks, replies and conversions update in real time on each campaign.',
+  },
+  {
+    icon: 'Sparkles',
+    title: 'Ask AI about your results',
+    body: 'Type a question about your campaigns and AI answers in plain language from your campaign data.',
+  },
+  {
+    icon: 'BarChart3',
+    title: 'AI generates charts',
+    body: 'Ask for a graph of any campaign stat and AI builds it save charts and pin them to your dashboard.',
+  },
+  {
+    icon: 'FileText',
+    title: 'Research & documents',
+    body: 'Run AI market research and generate documents, all saved in a searchable library.',
+  },
+  {
+    icon: 'Bell',
+    title: 'Proactive health checks',
+    body: 'AI monitors campaigns and raises alerts in Notifications when something needs you.',
+  },
+];
+
 export const MARKETING_TOUR_STEPS = [
   // ── Intro ────────────────────────────────────────────────────────────────
   {
