@@ -2659,6 +2659,11 @@ const FrontlineDashboard = () => {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadDescription, setUploadDescription] = useState('');
+  // Two-stage progress: bytes-uploaded % followed by chunk-embed indexing %.
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [indexProgress, setIndexProgress] = useState({
+    status: 'idle', percent: 0, done: 0, total: 0, error: '',
+  });
   
   // Knowledge Q&A (chat-based)
   const [chats, setChats] = useState([]);
@@ -2898,9 +2903,15 @@ const FrontlineDashboard = () => {
     }
   };
 
-  // Load document list for Q&A scope when user selects "Specific documents"
+  // Load the document list eagerly when the Q&A tab is opened, and cache it.
+  // Previously we only fetched after the user switched to "Specific documents"
+  // mode, which produced a noticeable cold-start delay in the dropdown.
   useEffect(() => {
-    if (qaScopeMode !== 'documents') return;
+    if (activeTab !== 'qa') return;
+    // Already loaded? Skip — the list rarely changes within a session, and
+    // any doc uploaded during the session bumps `documents` state which we
+    // include below.
+    if (qaDocumentsList.length > 0) return;
     let cancelled = false;
     (async () => {
       setQaDocumentsLoading(true);
@@ -2915,7 +2926,21 @@ const FrontlineDashboard = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [qaScopeMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // Refresh the doc list when the top-level `documents` state changes
+  // (e.g. after upload), so newly-added docs appear in the scope dropdown.
+  useEffect(() => {
+    if (activeTab !== 'qa') return;
+    if (!documents || documents.length === 0) return;
+    // Merge: existing list stays, new ones are added by id.
+    setQaDocumentsList((prev) => {
+      const seen = new Set(prev.map((d) => d.id));
+      const additions = documents.filter((d) => !seen.has(d.id));
+      return additions.length ? [...additions, ...prev] : prev;
+    });
+  }, [documents, activeTab]);
 
   const fetchDashboard = async () => {
     try {
@@ -2946,30 +2971,46 @@ const FrontlineDashboard = () => {
       return;
     }
 
+    setUploading(true);
+    setUploadProgress(0);
+    setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '' });
+
     try {
-      setUploading(true);
       const response = await frontlineAgentService.uploadDocument(
         uploadFile,
         uploadTitle || uploadFile.name,
         uploadDescription,
-        'knowledge_base'
+        'knowledge_base',
+        { onProgress: ({ percent }) => setUploadProgress(percent) },
       );
+      setUploadProgress(100);
 
-      // Backend returns 'accepted' (202) when processing was enqueued asynchronously,
-      // or 'success' when processed inline. Treat either as a successful upload.
-      if (response.status === 'success' || response.status === 'accepted') {
-        const mode = response?.data?.dispatch_mode;
+      if (!(response.status === 'success' || response.status === 'accepted')) {
+        throw new Error(response.message || 'Upload failed');
+      }
+      const documentId = response?.data?.id;
+      const initialStatus = response?.data?.processing_status;
+      const mode = response?.data?.dispatch_mode;
+
+      if (initialStatus === 'ready') {
+        setIndexProgress({ status: 'ready', percent: 100, done: 0, total: 0, error: '' });
         toast({
           title: 'Success!',
-          description: mode === 'inline'
-            ? 'Document uploaded and indexed.'
-            : 'Document uploaded — processing in the background.',
+          description: mode === 'inline' ? 'Document uploaded and indexed.' : 'Ready.',
         });
-        setShowUploadDialog(false);
-        setUploadFile(null);
-        setUploadTitle('');
-        setUploadDescription('');
-        fetchDashboard();
+        finishFrontlineUploadFlow();
+        return;
+      }
+
+      setIndexProgress({ status: 'processing', percent: 0, done: 0, total: 0, error: '' });
+      if (documentId) {
+        await pollFrontlineIndexingProgress(documentId);
+      } else {
+        toast({
+          title: 'Success!',
+          description: 'Document uploaded — processing in the background.',
+        });
+        finishFrontlineUploadFlow();
       }
     } catch (error) {
       toast({
@@ -2977,9 +3018,72 @@ const FrontlineDashboard = () => {
         description: error.message || 'Failed to upload document',
         variant: 'destructive',
       });
-    } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
+  };
+
+  const finishFrontlineUploadFlow = () => {
+    setUploading(false);
+    // Small delay so the user sees the 100% state before the dialog resets.
+    setTimeout(() => {
+      setShowUploadDialog(false);
+      setUploadFile(null);
+      setUploadTitle('');
+      setUploadDescription('');
+      setUploadProgress(0);
+      setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '' });
+      fetchDashboard();
+    }, 700);
+  };
+
+  const pollFrontlineIndexingProgress = async (documentId) => {
+    const startedAt = Date.now();
+    const MAX_MS = 5 * 60 * 1000;
+    const INTERVAL_MS = 1500;
+
+    while (Date.now() - startedAt < MAX_MS) {
+      try {
+        const res = await frontlineAgentService.getDocumentStatus(documentId);
+        const s = res?.data || {};
+        // Frontline endpoint returns `progress_percent`; HR returns `percent`.
+        // Prefer whichever is defined so this handler works with either shape.
+        const percent = Number(
+          s.percent != null ? s.percent : (s.progress_percent != null ? s.progress_percent : 0)
+        );
+        setIndexProgress({
+          status: s.processing_status || 'processing',
+          percent: Math.round(percent),
+          done: Number(s.chunks_processed || 0),
+          total: Number(s.chunks_total || 0),
+          error: s.processing_error || '',
+        });
+        if (s.processing_status === 'ready') {
+          toast({ title: 'Indexing complete', description: `${s.chunks_total || 0} chunk(s) embedded.` });
+          finishFrontlineUploadFlow();
+          return;
+        }
+        if (s.processing_status === 'failed') {
+          toast({
+            title: 'Indexing failed',
+            description: s.processing_error || 'The document could not be indexed.',
+            variant: 'destructive',
+          });
+          setUploading(false);
+          return;
+        }
+      } catch (err) {
+        console.warn('Frontline indexing status poll error:', err);
+      }
+      await new Promise((r) => setTimeout(r, INTERVAL_MS));
+    }
+    toast({
+      title: 'Still indexing',
+      description: 'Taking longer than expected. Progress will continue in the background — refresh the list to check.',
+    });
+    setUploading(false);
+    setShowUploadDialog(false);
+    fetchDashboard();
   };
 
   const handleDeleteDocument = async (documentId) => {
@@ -4498,11 +4602,32 @@ const FrontlineDashboard = () => {
                                 {!qaDocumentsLoading &&
                                   qaDocumentsList
                                     .filter((d) => !qaScopeDocumentIds.includes(d.id))
-                                    .map((d) => (
-                                      <SelectItem key={d.id} value={String(d.id)}>
-                                        {d.title || `Document ${d.id}`}
-                                      </SelectItem>
-                                    ))}
+                                    .map((d) => {
+                                      // Surface indexing state — a doc that's still
+                                      // being processed can't be queried, and a very
+                                      // large one just landed will show 'processing'
+                                      // for a while. Marking it disabled prevents
+                                      // the user from picking a doc that will hang.
+                                      const status = d.processing_status || (d.is_indexed ? 'ready' : 'pending');
+                                      const notReady = status !== 'ready';
+                                      const badge = {
+                                        processing: '⏳ processing',
+                                        pending:    '⏳ queued',
+                                        failed:     '⚠️ failed',
+                                      }[status];
+                                      return (
+                                        <SelectItem
+                                          key={d.id}
+                                          value={String(d.id)}
+                                          disabled={notReady}
+                                        >
+                                          <span className={notReady ? 'opacity-60' : ''}>
+                                            {d.title || `Document ${d.id}`}
+                                            {badge ? ` — ${badge}` : ''}
+                                          </span>
+                                        </SelectItem>
+                                      );
+                                    })}
                               </SelectContent>
                             </Select>
                           )}
@@ -5334,9 +5459,62 @@ const FrontlineDashboard = () => {
                 onChange={(e) => setUploadDescription(e.target.value)}
               />
             </div>
+            {uploading && (
+              <div className="space-y-3 rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
+                <div>
+                  <div className="flex items-center justify-between text-xs text-white/70 mb-1.5">
+                    <span className="flex items-center gap-1.5">
+                      <Upload className="h-3.5 w-3.5 text-violet-300" />
+                      {uploadProgress < 100 ? 'Uploading file…' : 'Upload complete'}
+                    </span>
+                    <span className="font-mono text-white/60">{uploadProgress}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-200 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+                {(uploadProgress >= 100 || indexProgress.status !== 'idle') && (
+                  <div>
+                    <div className="flex items-center justify-between text-xs text-white/70 mb-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <Loader2 className={`h-3.5 w-3.5 text-amber-300 ${indexProgress.status === 'processing' ? 'animate-spin' : ''}`} />
+                        {indexProgress.status === 'ready'
+                          ? 'Indexing complete'
+                          : indexProgress.status === 'failed'
+                            ? 'Indexing failed'
+                            : indexProgress.total > 0
+                              ? `Indexing chunks ${indexProgress.done}/${indexProgress.total}`
+                              : 'Preparing document for search…'}
+                      </span>
+                      <span className="font-mono text-white/60">{indexProgress.percent}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-200 ease-out ${
+                          indexProgress.status === 'failed'
+                            ? 'bg-red-500/70'
+                            : indexProgress.status === 'ready'
+                              ? 'bg-emerald-500/80'
+                              : 'bg-gradient-to-r from-amber-500 to-orange-500'
+                        }`}
+                        style={{ width: `${indexProgress.percent}%` }}
+                      />
+                    </div>
+                    {indexProgress.status === 'failed' && indexProgress.error && (
+                      <div className="mt-1.5 text-[11px] text-red-300/90">
+                        {indexProgress.error}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowUploadDialog(false)}>
+            <Button variant="outline" onClick={() => setShowUploadDialog(false)} disabled={uploading}>
               Cancel
             </Button>
             <Button onClick={handleFileUpload} disabled={uploading || !uploadFile}>

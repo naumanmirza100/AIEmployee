@@ -7180,8 +7180,11 @@ def sla_dashboard(request):
     ).exclude(status__in=['resolved', 'closed', 'auto_resolved']).count()
 
     # Per-priority breakdown
+    # Strip the model's default `ordering = ['-created_at']` before .values() —
+    # SQL Server refuses to order by a column not in the GROUP BY, and the
+    # aggregate below implicitly groups by `priority`.
     from django.db.models import Count, Q
-    priority_breakdown = list(qs.values('priority').annotate(
+    priority_breakdown = list(qs.order_by().values('priority').annotate(
         total=Count('id'),
         breached=Count('id', filter=Q(sla_due_at__lt=now) & ~Q(status__in=['resolved', 'closed', 'auto_resolved'])),
     ))
@@ -7189,7 +7192,7 @@ def sla_dashboard(request):
         row['breach_pct'] = round((row['breached'] / row['total']) * 100, 1) if row['total'] else 0.0
 
     # Top assignees by breach %
-    assignee_rows = list(qs.exclude(assigned_to__isnull=True).values(
+    assignee_rows = list(qs.order_by().exclude(assigned_to__isnull=True).values(
         'assigned_to', 'assigned_to__email',
     ).annotate(
         total=Count('id'),

@@ -60,7 +60,7 @@ class HRAgent(BaseAgent):
                 prompt=prompt,
                 system_prompt=self.system_prompt,
                 temperature=0.3,
-                max_tokens=500,
+                max_tokens=400,
             )
             return {
                 'success': True,

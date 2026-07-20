@@ -175,6 +175,7 @@ def process_hr_document(self, document_id):
             logger.info("process_hr_document: doc %s chunked section-aware (%d chunks)",
                         document_id, len(chunk_pairs))
         else:
+            from hr_agent.chunking import _looks_like_toc_or_index
             chunk_pairs = []
             start = 0
             step = max(1, chunk_size - overlap)
@@ -182,7 +183,8 @@ def process_hr_document(self, document_id):
                 raw = text_to_chunk[start:start + chunk_size]
                 page = _page_for_offset(start)
                 clean = _PAGE_MARKER_RE.sub('', raw)
-                chunk_pairs.append((clean, '', page))
+                if clean.strip() and not _looks_like_toc_or_index(clean):
+                    chunk_pairs.append((clean, '', page))
                 start += step
 
         document.chunks_total = len(chunk_pairs)

@@ -758,6 +758,7 @@ urlpatterns = [
     re_path(r'^hr/documents/?$', hr_agent.list_hr_documents, name='hr_list_documents'),  # GET
     re_path(r'^hr/documents/upload/?$', hr_agent.upload_hr_document, name='hr_upload_document'),  # POST
     re_path(r'^hr/documents/(?P<document_id>\d+)/?$', hr_agent.get_hr_document, name='hr_get_document'),  # GET
+    re_path(r'^hr/documents/(?P<document_id>\d+)/status/?$', hr_agent.get_hr_document_status, name='hr_get_document_status'),  # GET
     re_path(r'^hr/documents/(?P<document_id>\d+)/summarize/?$', hr_agent.summarize_hr_document, name='hr_summarize_document'),  # POST
     re_path(r'^hr/documents/(?P<document_id>\d+)/extract/?$', hr_agent.extract_hr_document, name='hr_extract_document'),  # POST
     re_path(r'^hr/documents/(?P<document_id>\d+)/delete/?$', hr_agent.delete_hr_document, name='hr_delete_document'),  # DELETE/POST

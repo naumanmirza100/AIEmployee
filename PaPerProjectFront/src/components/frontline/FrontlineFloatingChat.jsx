@@ -14,6 +14,7 @@ import {
   FileText,
   Plus,
   Slash,
+  Upload,
 } from 'lucide-react';
 import InfoHint, { useHints } from './InfoHint';
 import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from './FrontlineTutorial';
@@ -90,6 +91,11 @@ const FrontlineFloatingChat = () => {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Live upload + indexing progress for the file the user just dropped.
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [indexProgress, setIndexProgress] = useState({
+    status: 'idle', percent: 0, done: 0, total: 0, error: '', fileName: '',
+  });
 
   // Slash-menu state
   const [slashOpen, setSlashOpen] = useState(false);
@@ -338,18 +344,41 @@ const FrontlineFloatingChat = () => {
       content: `📎 Uploading: ${file.name} (${Math.round(file.size / 1024)} KB)`,
     });
     setUploading(true);
+    setUploadProgress(0);
+    setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '', fileName: file.name });
     try {
-      const res = await frontlineAgentService.uploadDocument(file, file.name, '', 'knowledge_base');
-      if (res && (res.status === 'success' || res.status === 'accepted') && res.data) {
-        const doc = res.data;
+      const res = await frontlineAgentService.uploadDocument(file, file.name, '', 'knowledge_base', {
+        onProgress: ({ percent }) => setUploadProgress(percent),
+      });
+      setUploadProgress(100);
+      if (!(res && (res.status === 'success' || res.status === 'accepted') && res.data)) {
+        throw new Error((res && res.message) || 'Upload failed');
+      }
+      const doc = res.data;
+      const documentId = doc.id;
+
+      if (doc.processing_status === 'ready') {
+        setIndexProgress({ status: 'ready', percent: 100, done: 0, total: 0, error: '', fileName: file.name });
+        pushMessage({
+          role: 'assistant',
+          content: `Uploaded and indexed "${doc.title || file.name}". You can ask questions about it now.`,
+          system: true,
+        });
+        toast({ title: 'Document uploaded', description: doc.title || file.name });
+        finishFrontlineFloatingUpload();
+        return;
+      }
+
+      setIndexProgress({ status: 'processing', percent: 0, done: 0, total: 0, error: '', fileName: file.name });
+      if (documentId) {
+        await pollFrontlineFloatingIndexingProgress(documentId, file.name, doc.title);
+      } else {
         pushMessage({
           role: 'assistant',
           content: `Uploaded "${doc.title || file.name}". The AI can now reference it once indexing completes.`,
           system: true,
         });
-        toast({ title: 'Document uploaded', description: doc.title || file.name });
-      } else {
-        throw new Error((res && res.message) || 'Upload failed');
+        finishFrontlineFloatingUpload();
       }
     } catch (err) {
       pushMessage({
@@ -357,9 +386,70 @@ const FrontlineFloatingChat = () => {
         content: `Upload failed: ${err.message || 'Unknown error'}`,
         error: true,
       });
-    } finally {
       setUploading(false);
+      setUploadProgress(0);
+      setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '', fileName: '' });
     }
+  };
+
+  const finishFrontlineFloatingUpload = () => {
+    setTimeout(() => {
+      setUploading(false);
+      setUploadProgress(0);
+      setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '', fileName: '' });
+    }, 800);
+  };
+
+  const pollFrontlineFloatingIndexingProgress = async (documentId, fileName, docTitle) => {
+    const startedAt = Date.now();
+    const MAX_MS = 5 * 60 * 1000;
+    const INTERVAL_MS = 1500;
+
+    while (Date.now() - startedAt < MAX_MS) {
+      try {
+        const res = await frontlineAgentService.getDocumentStatus(documentId);
+        const s = res?.data || {};
+        const percent = Number(
+          s.percent != null ? s.percent : (s.progress_percent != null ? s.progress_percent : 0)
+        );
+        setIndexProgress({
+          status: s.processing_status || 'processing',
+          percent: Math.round(percent),
+          done: Number(s.chunks_processed || 0),
+          total: Number(s.chunks_total || 0),
+          error: s.processing_error || '',
+          fileName,
+        });
+        if (s.processing_status === 'ready') {
+          pushMessage({
+            role: 'assistant',
+            content: `Indexed "${docTitle || fileName}" (${s.chunks_total || 0} chunk(s)). Ask me anything about it.`,
+            system: true,
+          });
+          toast({ title: 'Indexing complete', description: docTitle || fileName });
+          finishFrontlineFloatingUpload();
+          return;
+        }
+        if (s.processing_status === 'failed') {
+          pushMessage({
+            role: 'assistant',
+            content: `Indexing failed: ${s.processing_error || 'The document could not be indexed.'}`,
+            error: true,
+          });
+          setUploading(false);
+          return;
+        }
+      } catch (err) {
+        console.warn('Frontline floating chat indexing poll error:', err);
+      }
+      await new Promise((r) => setTimeout(r, INTERVAL_MS));
+    }
+    pushMessage({
+      role: 'assistant',
+      content: `Still indexing "${docTitle || fileName}" — this can take a while for large documents. It will finish in the background.`,
+      system: true,
+    });
+    setUploading(false);
   };
 
   // ----- Keyboard within the input ----------------------------------------
@@ -626,11 +716,67 @@ const FrontlineFloatingChat = () => {
                   </div>
                 ))
               )}
-              {(sending || uploading) && (
+              {sending && !uploading && (
                 <div className="flex justify-start">
                   <div className="bg-white/[0.06] border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-white/60" />
-                    <span className="text-xs text-white/60">{uploading ? 'Uploading…' : 'Searching knowledge base…'}</span>
+                    <span className="text-xs text-white/60">Searching knowledge base…</span>
+                  </div>
+                </div>
+              )}
+              {uploading && (
+                <div className="flex justify-start">
+                  <div className="w-full max-w-[92%] bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2.5 space-y-2.5">
+                    {indexProgress.fileName && (
+                      <div className="text-[11px] text-white/50 truncate">📎 {indexProgress.fileName}</div>
+                    )}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] text-white/70 mb-1">
+                        <span className="flex items-center gap-1.5">
+                          <Upload className="h-3 w-3 text-violet-300" />
+                          {uploadProgress < 100 ? 'Uploading file…' : 'Upload complete'}
+                        </span>
+                        <span className="font-mono text-white/50">{uploadProgress}%</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-200 ease-out"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                    {(uploadProgress >= 100 || indexProgress.status !== 'idle') && (
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] text-white/70 mb-1">
+                          <span className="flex items-center gap-1.5">
+                            <Loader2 className={`h-3 w-3 text-amber-300 ${indexProgress.status === 'processing' ? 'animate-spin' : ''}`} />
+                            {indexProgress.status === 'ready'
+                              ? 'Indexing complete'
+                              : indexProgress.status === 'failed'
+                                ? 'Indexing failed'
+                                : indexProgress.total > 0
+                                  ? `Indexing ${indexProgress.done}/${indexProgress.total} chunks`
+                                  : 'Preparing document…'}
+                          </span>
+                          <span className="font-mono text-white/50">{indexProgress.percent}%</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-200 ease-out ${
+                              indexProgress.status === 'failed'
+                                ? 'bg-red-500/70'
+                                : indexProgress.status === 'ready'
+                                  ? 'bg-emerald-500/80'
+                                  : 'bg-gradient-to-r from-amber-500 to-orange-500'
+                            }`}
+                            style={{ width: `${indexProgress.percent}%` }}
+                          />
+                        </div>
+                        {indexProgress.status === 'failed' && indexProgress.error && (
+                          <div className="mt-1 text-[10px] text-red-300/90">{indexProgress.error}</div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

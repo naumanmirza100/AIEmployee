@@ -173,7 +173,7 @@ class FrontlineAgent(BaseAgent):
                 prompt=prompt,
                 system_prompt=self.system_prompt,
                 temperature=0.3,  # Low temperature for factual responses
-                max_tokens=500
+                max_tokens=400,   # Shorter answers = faster streaming / less TTFT
             )
             
             logger.info("Answer generated from verified knowledge base")
