@@ -116,6 +116,45 @@ def _split_long_section(section: str, max_size: int, overlap: int) -> List[str]:
     return out
 
 
+_DOT_LEADER_RE = re.compile(r'\.{3,}|(?:\.\s){3,}')
+_PAGE_NUM_ONLY_RE = re.compile(r'^\s*(?:page\s*)?\d{1,4}\s*$', re.IGNORECASE)
+_WORD_RE = re.compile(r'[A-Za-z]{2,}')
+
+
+def _looks_like_toc_or_index(text: str) -> bool:
+    """Return True when the chunk is a table-of-contents / index / cover page
+    with no substantive content. We check three heuristics:
+
+    * A large fraction of lines contain dot-leaders (``. . . . 58``) — the
+      classic TOC pattern.
+    * Most non-empty lines are just page numbers.
+    * After stripping dots / page-numbers / punctuation, fewer than 40 letters
+      of actual text remain.
+    """
+    if not text:
+        return True
+    stripped = text.strip()
+    if not stripped:
+        return True
+
+    lines = [ln.strip() for ln in stripped.splitlines() if ln.strip()]
+    if not lines:
+        return True
+
+    dot_leader_lines = sum(1 for ln in lines if _DOT_LEADER_RE.search(ln))
+    page_num_lines = sum(1 for ln in lines if _PAGE_NUM_ONLY_RE.match(ln))
+    junk_ratio = (dot_leader_lines + page_num_lines) / max(len(lines), 1)
+    if junk_ratio >= 0.5 and len(lines) >= 3:
+        return True
+
+    # Total letters (a-z) — strips dot leaders, digits, whitespace, punctuation.
+    letters = sum(len(m.group(0)) for m in _WORD_RE.finditer(stripped))
+    if letters < 40:
+        return True
+
+    return False
+
+
 def chunk_with_headings(text: str, *, max_chunk_size: int = 4000,
                         overlap: int = 200) -> List[Tuple[str, str]]:
     """Top-level chunker. Detects sections, then sub-splits long ones.
@@ -123,7 +162,9 @@ def chunk_with_headings(text: str, *, max_chunk_size: int = 4000,
     Returns a flat list of ``(chunk_text, section_heading)`` tuples where
     ``section_heading`` is the detected heading that opened the section
     (empty string for preamble text or non-section-aware doc types).
-    Each chunk text is ≤ ``max_chunk_size`` characters.
+    Each chunk text is ≤ ``max_chunk_size`` characters. Chunks that look like
+    table-of-contents pages, index pages, or cover-only pages are dropped so
+    they don't pollute retrieval.
     """
     if not text:
         return []
@@ -132,8 +173,11 @@ def chunk_with_headings(text: str, *, max_chunk_size: int = 4000,
     for heading, section_text in sections:
         for chunk in _split_long_section(section_text, max_chunk_size, overlap):
             chunk = chunk.strip()
-            if chunk:
-                out.append((chunk, heading))
+            if not chunk:
+                continue
+            if _looks_like_toc_or_index(chunk):
+                continue
+            out.append((chunk, heading))
     return out
 
 

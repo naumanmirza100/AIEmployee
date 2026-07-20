@@ -35,7 +35,7 @@ export const EXEC_MEETING_TOUR_STEPS = [
     tab: 'tasks',
     selector: '[data-tour-em="tab-tasks"]',
     title: 'Tasks',
-    body: 'Track executive tasks with priority, status, due dates and assignees. Add subtasks (with a progress bar), let AI prioritise the whole list, or bulk-select and delete. Edit / add-subtask / delete are right on each row.',
+    body: 'Track executive tasks with priority, status, due dates and assignees. Add subtasks (with a progress bar), or bulk-select and delete. Edit / add-subtask / delete are right on each row.',
     placement: 'bottom',
   },
   {

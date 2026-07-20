@@ -2,7 +2,10 @@
 Frontline Agent Services
 Enterprise-level service layer for knowledge retrieval and ticket automation
 """
+import hashlib
+import json as _json_top
 import logging
+import threading
 from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 from django.utils import timezone
@@ -13,6 +16,130 @@ from .rules import TicketClassificationRules
 from .embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
+
+try:
+    import numpy as _np  # type: ignore
+    _HAS_NUMPY = True
+except Exception:  # pragma: no cover - fall back gracefully
+    _np = None
+    _HAS_NUMPY = False
+
+
+# ---------------------------------------------------------------------------
+# In-process caches for the legacy JSON-scan retrieval path. FAISS is already
+# fast; these caches only kick in when FAISS isn't available (or hasn't been
+# built yet). They pay off huge on 200-page docs where we would otherwise
+# `json.loads` every chunk's embedding on every query.
+#
+#   * `_CHUNK_EMBEDDING_CACHE` — parsed vectors keyed by chunk_id (numpy).
+#   * `_QUERY_EMBEDDING_CACHE` — recent question embeddings, keyed by hash.
+#   * `_CHUNK_JUNK_CACHE`      — flags chunks that look like TOC/index rows so
+#                                docs indexed before the chunker fix still get
+#                                cleaned up at query time.
+# Bounded by `_CACHE_MAX` to avoid unbounded growth.
+# ---------------------------------------------------------------------------
+_CACHE_LOCK = threading.Lock()
+_CHUNK_EMBEDDING_CACHE: dict = {}
+_CHUNK_JUNK_CACHE: dict = {}
+_QUERY_EMBEDDING_CACHE: dict = {}
+_CACHE_MAX = 20_000
+
+
+def _fl_parse_embedding(raw):
+    if raw is None:
+        return None
+    try:
+        vec = _json_top.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    if not vec:
+        return None
+    if _HAS_NUMPY:
+        try:
+            arr = _np.asarray(vec, dtype=_np.float32)
+            if arr.size == 0:
+                return None
+            return arr
+        except Exception:
+            return vec
+    return vec
+
+
+def _fl_cache_get_chunk_vec(chunk_id: int, raw):
+    with _CACHE_LOCK:
+        hit = _CHUNK_EMBEDDING_CACHE.get(chunk_id)
+        if hit is not None:
+            return hit
+    vec = _fl_parse_embedding(raw)
+    if vec is None:
+        return None
+    with _CACHE_LOCK:
+        if len(_CHUNK_EMBEDDING_CACHE) >= _CACHE_MAX:
+            for k in list(_CHUNK_EMBEDDING_CACHE.keys())[: _CACHE_MAX // 2]:
+                _CHUNK_EMBEDDING_CACHE.pop(k, None)
+        _CHUNK_EMBEDDING_CACHE[chunk_id] = vec
+    return vec
+
+
+def _fl_cache_get_query_vec(query: str, embedding_service):
+    key = hashlib.sha256((query or '').strip().lower().encode('utf-8')).hexdigest()
+    with _CACHE_LOCK:
+        hit = _QUERY_EMBEDDING_CACHE.get(key)
+        if hit is not None:
+            return hit
+    raw = embedding_service.generate_embedding(query)
+    if not raw:
+        return None
+    vec = _fl_parse_embedding(raw)
+    if vec is None:
+        return None
+    with _CACHE_LOCK:
+        if len(_QUERY_EMBEDDING_CACHE) > 512:
+            for k in list(_QUERY_EMBEDDING_CACHE.keys())[:256]:
+                _QUERY_EMBEDDING_CACHE.pop(k, None)
+        _QUERY_EMBEDDING_CACHE[key] = vec
+    return vec
+
+
+def _fl_cosine(qvec, cvec):
+    if qvec is None or cvec is None:
+        return None
+    if _HAS_NUMPY and isinstance(qvec, _np.ndarray) and isinstance(cvec, _np.ndarray):
+        if qvec.shape != cvec.shape:
+            return None
+        denom = float(_np.linalg.norm(qvec)) * float(_np.linalg.norm(cvec))
+        if denom == 0.0:
+            return None
+        return float(_np.dot(qvec, cvec) / denom)
+    # Fallback: caller can still use embedding_service.cosine_similarity if needed
+    try:
+        dot = sum(x * y for x, y in zip(qvec, cvec))
+        import math as _m
+        na = _m.sqrt(sum(x * x for x in qvec))
+        nb = _m.sqrt(sum(y * y for y in cvec))
+        if na == 0 or nb == 0:
+            return None
+        return dot / (na * nb)
+    except Exception:
+        return None
+
+
+def _fl_is_junk_chunk(chunk_id, text) -> bool:
+    with _CACHE_LOCK:
+        hit = _CHUNK_JUNK_CACHE.get(chunk_id)
+        if hit is not None:
+            return hit
+    try:
+        from Frontline_agent.chunking import looks_like_toc_or_index
+        verdict = looks_like_toc_or_index(text or '')
+    except Exception:
+        verdict = False
+    with _CACHE_LOCK:
+        if len(_CHUNK_JUNK_CACHE) >= _CACHE_MAX:
+            for k in list(_CHUNK_JUNK_CACHE.keys())[: _CACHE_MAX // 2]:
+                _CHUNK_JUNK_CACHE.pop(k, None)
+        _CHUNK_JUNK_CACHE[chunk_id] = verdict
+    return verdict
 
 
 class KnowledgeService:
@@ -207,6 +334,10 @@ class KnowledgeService:
             keyword_results = []
             matching_chunks = all_chunks.filter(chunk_text__icontains=query)[:50]
             for chunk in matching_chunks:
+                # Defense-in-depth: legacy docs indexed before the chunker's
+                # TOC filter existed can still have junk chunks in the DB.
+                if _fl_is_junk_chunk(chunk.id, chunk.chunk_text):
+                    continue
                 page_label = f" p.{chunk.page_number}" if chunk.page_number else ""
                 keyword_results.append({
                     'chunk_id': chunk.id,
@@ -313,6 +444,11 @@ class KnowledgeService:
                         c = chunk_map.get(cid)
                         if c is None:
                             continue
+                        # Legacy docs indexed before the chunker's TOC filter
+                        # existed can still have junk vectors in FAISS. Drop
+                        # them from the output rather than rebuilding indices.
+                        if _fl_is_junk_chunk(c.id, c.chunk_text):
+                            continue
                         page_label = f" p.{c.page_number}" if c.page_number else ""
                         out.append({
                             'chunk_id': c.id,
@@ -329,25 +465,51 @@ class KnowledgeService:
         # ---- Legacy JSON-scan fallback -----------------------------------
         # Used when faiss isn't installed, the tenant has no built index yet,
         # or the FAISS call returned no hits (e.g. dim mismatch mid-rebuild).
+        # Optimised path: numpy cosine, in-process parsed-embedding cache, and
+        # skip TOC/junk chunks. Query embedding is cached at the caller site
+        # (see `_search_documents`) so passing it through here doesn't re-embed.
         semantic_results = []
-        chunks_with_embeddings = all_chunks.exclude(embedding__isnull=True).exclude(embedding='')
-        for chunk in chunks_with_embeddings:
+        # Cache the query vector in a numpy form once for the whole loop.
+        if _HAS_NUMPY:
             try:
-                chunk_emb = _json.loads(chunk.embedding) if isinstance(chunk.embedding, str) else chunk.embedding
-                similarity = self.embedding_service.cosine_similarity(query_embedding, chunk_emb)
-                page_label = f" p.{chunk.page_number}" if chunk.page_number else ""
-                semantic_results.append({
-                    'chunk_id': chunk.id,
-                    'document_id': chunk.document_id,
-                    'score': similarity,
-                    'content': chunk.chunk_text,
-                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index}{page_label})",
-                    'file_format': chunk.document.file_format,
-                    'document_type': chunk.document.document_type,
-                    'page_number': chunk.page_number,
-                })
+                qvec = _np.asarray(query_embedding, dtype=_np.float32)
             except Exception:
-                pass
+                qvec = query_embedding
+        else:
+            qvec = query_embedding
+        # Streaming iterator + column pruning — avoids materialising all chunks
+        # for large docs (200-page thesis → hundreds of chunks).
+        chunks_with_embeddings = (
+            all_chunks.exclude(embedding__isnull=True).exclude(embedding='')
+            .only('id', 'document_id', 'embedding', 'chunk_text',
+                  'chunk_index', 'page_number', 'document__title',
+                  'document__file_format', 'document__document_type')
+        )
+        for chunk in chunks_with_embeddings.iterator(chunk_size=500):
+            if _fl_is_junk_chunk(chunk.id, chunk.chunk_text):
+                continue
+            cvec = _fl_cache_get_chunk_vec(chunk.id, chunk.embedding)
+            if cvec is None:
+                continue
+            similarity = _fl_cosine(qvec, cvec)
+            if similarity is None:
+                # Fall back to the embedding_service's cosine only if numpy
+                # couldn't compute (dim mismatch, non-numeric payload).
+                try:
+                    similarity = self.embedding_service.cosine_similarity(query_embedding, cvec)
+                except Exception:
+                    continue
+            page_label = f" p.{chunk.page_number}" if chunk.page_number else ""
+            semantic_results.append({
+                'chunk_id': chunk.id,
+                'document_id': chunk.document_id,
+                'score': similarity,
+                'content': chunk.chunk_text,
+                'title': f"{chunk.document.title} (Chunk {chunk.chunk_index}{page_label})",
+                'file_format': chunk.document.file_format,
+                'document_type': chunk.document.document_type,
+                'page_number': chunk.page_number,
+            })
         semantic_results.sort(key=lambda x: x['score'], reverse=True)
         return semantic_results[:50]
 

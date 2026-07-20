@@ -178,6 +178,7 @@ def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_
               {(_email_divider() + link_row) if link_row else ''}
             </table>
             {desc_block}
+            {agenda_block}
           </td>
         </tr>
       </table>
@@ -554,6 +555,17 @@ def _parse_datetime(value):
         return None
 
 
+def _is_weekend(due_date):
+    """True if a YYYY-MM-DD string (or date) falls on Saturday/Sunday."""
+    if not due_date:
+        return False
+    try:
+        d = due_date if hasattr(due_date, 'weekday') else datetime.strptime(str(due_date)[:10], '%Y-%m-%d').date()
+        return d.weekday() >= 5  # 5 = Saturday, 6 = Sunday
+    except (ValueError, TypeError):
+        return False
+
+
 def _serialize_meeting(meeting, include_participants=False):
     data = {
         'id': meeting.id,
@@ -664,6 +676,51 @@ def _serialize_notification(notif):
     }
 
 
+# ---------------------------------------------------------------------------
+# Pagination
+# ---------------------------------------------------------------------------
+# Shared, dependency-free page slicing for the exec-meeting list endpoints.
+# Reads ?page= and ?page_size= from the request, clamps them to sane bounds,
+# and returns (page_queryset, meta) where meta describes the full result set
+# so the frontend can render "Page X of Y" controls. Total count is computed
+# once on the (already filtered) queryset before slicing.
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
+
+def _paginate(qs, request, default_size=DEFAULT_PAGE_SIZE):
+    """Slice a queryset for the requested page. Returns (items, meta)."""
+    try:
+        page = int(request.query_params.get('page', 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.query_params.get('page_size', default_size))
+    except (TypeError, ValueError):
+        page_size = default_size
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
+
+    total = qs.count()
+    total_pages = max((total + page_size - 1) // page_size, 1)
+    # Snap an out-of-range page back to the last real page.
+    if page > total_pages:
+        page = total_pages
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = list(qs[start:end])
+    meta = {
+        'page': page,
+        'page_size': page_size,
+        'total': total,
+        'total_pages': total_pages,
+        'has_next': page < total_pages,
+        'has_prev': page > 1,
+    }
+    return items, meta
+
+
 # ===========================================================================
 # MEETINGS
 # ===========================================================================
@@ -702,6 +759,15 @@ def schedule_meeting_ai(request):
                 result['conflicts'] = conflicts
                 result['message'] = 'Meeting has conflicts. Review before creating.'
             else:
+                # AI may hand back "null"/"none"/non-ISO for the recurrence end
+                # date — coerce anything unparseable to None so the DB doesn't reject it.
+                rec_end_raw = parsed.get('recurrence_end_date')
+                rec_end = None
+                if rec_end_raw and str(rec_end_raw).strip().lower() not in ('null', 'none', 'n/a', 'tbd', ''):
+                    try:
+                        rec_end = datetime.strptime(str(rec_end_raw)[:10], '%Y-%m-%d').date()
+                    except (ValueError, TypeError):
+                        rec_end = None
                 meeting = ExecutiveMeeting.objects.create(
                     organizer=company_user,
                     title=parsed.get('title', 'Executive Meeting'),
@@ -712,7 +778,7 @@ def schedule_meeting_ai(request):
                     duration_minutes=duration,
                     timezone_name=parsed.get('timezone_name', 'UTC'),
                     recurrence=parsed.get('recurrence', 'none'),
-                    recurrence_end_date=parsed.get('recurrence_end_date'),
+                    recurrence_end_date=rec_end,
                 )
                 result['meeting'] = _serialize_meeting(meeting)
                 result['message'] = 'Meeting created successfully.'
@@ -759,11 +825,33 @@ def meeting_list(request):
 
     if request.method == 'GET':
         status_filter = request.query_params.get('status')
+        search = (request.query_params.get('search') or '').strip()
+        date_filter = (request.query_params.get('date') or '').strip()
+        participant_id = (request.query_params.get('participant') or '').strip()
         qs = ExecutiveMeeting.objects.filter(organizer=company_user).select_related('organizer')
         if status_filter:
             qs = qs.filter(status=status_filter)
-        data = [_serialize_meeting(m) for m in qs[:50]]
-        return Response({'status': 'success', 'meetings': data, 'count': len(data)})
+        if search:
+            qs = qs.filter(models.Q(title__icontains=search) | models.Q(description__icontains=search))
+        if date_filter:
+            # Filter by the calendar day the meeting is scheduled on (YYYY-MM-DD).
+            try:
+                day = datetime.strptime(date_filter, '%Y-%m-%d').date()
+                qs = qs.filter(scheduled_at__date=day)
+            except (ValueError, TypeError):
+                pass
+        if participant_id:
+            # Meetings a given company user takes part in (organizer or invitee).
+            try:
+                pid = int(participant_id)
+                qs = qs.filter(
+                    models.Q(organizer_id=pid) | models.Q(participants__company_user_id=pid)
+                ).distinct()
+            except (ValueError, TypeError):
+                pass
+        page_items, meta = _paginate(qs, request)
+        data = [_serialize_meeting(m) for m in page_items]
+        return Response({'status': 'success', 'meetings': data, 'count': len(data), 'pagination': meta})
 
     # POST — manual create
     title = request.data.get('title', '').strip()
@@ -793,6 +881,33 @@ def meeting_list(request):
         recurrence=request.data.get('recurrence', 'none'),
     )
     return Response({'status': 'success', 'meeting': _serialize_meeting(meeting)}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def meeting_filter_users(request):
+    """Distinct participants (real users) across the current user's meetings —
+    powers the 'by user' dropdown on the Meetings filter bar. The company
+    account itself (the organizer) is intentionally excluded — the dropdown
+    lists the actual people invited to meetings, not the account owner."""
+    from core.models import CompanyUser
+    company_user = request.user
+    from meeting_agent.models import ExecutiveMeetingParticipant
+    my_meeting_ids = ExecutiveMeeting.objects.filter(
+        organizer=company_user
+    ).values_list('id', flat=True)
+    # Participant user ids across those meetings, minus the organizer/account.
+    part_ids = set(
+        ExecutiveMeetingParticipant.objects.filter(
+            meeting_id__in=list(my_meeting_ids)
+        ).values_list('company_user_id', flat=True)
+    )
+    part_ids.discard(company_user.id)
+    users = CompanyUser.objects.filter(id__in=part_ids).order_by('full_name')
+    data = [{'id': u.id, 'full_name': u.full_name, 'email': u.email} for u in users]
+    return Response({'status': 'success', 'users': data, 'count': len(data)})
 
 
 @api_view(['GET', 'PATCH', 'DELETE'])
@@ -1112,12 +1227,20 @@ def meeting_notes(request, meeting_id):
                 'id', 'title', 'description', 'status', 'priority',
                 'due_date', 'ai_extracted', 'assignee_id',
             ))
+            # Titles of tasks already created from this meeting — lets the UI
+            # keep showing "Task created" on matching action items across page
+            # reloads, without storing any link on the action item itself.
+            converted_titles = [
+                (t or '').strip().lower()
+                for t in meeting.linked_tasks.values_list('title', flat=True)
+            ]
             return Response({'status': 'success', 'notes': {
                 'id': note.id,
                 'ai_summary': note.ai_summary,
                 'key_decisions': note.key_decisions,
                 'raw_transcript': note.raw_transcript,
                 'action_items': action_items,
+                'converted_titles': converted_titles,
             }})
         except MeetingNote.DoesNotExist:
             return Response({'status': 'success', 'notes': None})
@@ -1143,31 +1266,65 @@ def meeting_notes(request, meeting_id):
             },
         )
 
-        # Save AI-extracted action items
+        # Re-generating gives a fresh set of action items — wipe the old set
+        # completely first. Any tasks created from them are standalone, so this
+        # is safe and avoids duplicating/resurrecting old items.
+        meeting.action_items.all().delete()
+        kept_titles = set()
+
+        # The LLM sometimes returns the string "null"/"none"/"tbd" (or a
+        # non-ISO date) for due_date — none of which the date column accepts.
+        # Keep only a clean YYYY-MM-DD value, otherwise store no date.
+        def _clean_due(raw):
+            if not raw:
+                return None
+            s = str(raw).strip()
+            if s.lower() in ('null', 'none', 'n/a', 'tbd', ''):
+                return None
+            try:
+                return datetime.strptime(s[:10], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                return None
+
+        valid_priorities = ('low', 'medium', 'high', 'critical')
+
         created_items = []
         for item_data in result.get('action_items', []):
+            title = (item_data.get('title') or 'Action Item').strip()
+            if title.lower() in kept_titles:
+                continue  # already exists as a kept (done/converted) item
+            prio = str(item_data.get('priority', 'medium')).strip().lower()
+            if prio not in valid_priorities:
+                prio = 'medium'
             item = MeetingActionItem.objects.create(
                 meeting=meeting,
-                title=item_data.get('title', 'Action Item'),
-                description=item_data.get('description', ''),
-                due_date=item_data.get('due_date') or None,
-                priority=item_data.get('priority', 'medium'),
+                title=title,
+                description=item_data.get('description', '') or '',
+                due_date=_clean_due(item_data.get('due_date')),
+                priority=prio,
                 ai_extracted=True,
             )
+            kept_titles.add(title.lower())  # also dedupe within this batch
             created_items.append({'id': item.id, 'title': item.title})
 
-        # Notify the organizer that action items were extracted, so they don't
-        # sit unseen inside the Notes panel (these have no due date, so the
-        # separate "overdue action item" scan never surfaces them).
+        # Notify the organizer that action items were extracted. Re-generating
+        # a transcript replaces the old notification for THIS meeting instead of
+        # stacking a new one each time (avoids spam). The meeting name is spelled
+        # out as "the '<name>' meeting" so it's easy to tell which meeting.
         if created_items:
+            ExecNotification.objects.filter(
+                company_user_id=company_user.id,
+                notification_type='action_items_added',
+                meeting=meeting,
+            ).delete()
             ExecNotification.objects.create(
                 company_user_id=company_user.id,
                 notification_type='action_items_added',
                 severity='info',
-                title=f"{len(created_items)} action item(s) from “{meeting.title}”",
+                title=f"{len(created_items)} action item(s) from the “{meeting.title}” meeting",
                 message=(
                     f"AI pulled {len(created_items)} action item(s) out of the notes for "
-                    f"“{meeting.title}”: " + ', '.join(ci['title'] for ci in created_items[:5])
+                    f"the “{meeting.title}” meeting: " + ', '.join(ci['title'] for ci in created_items[:5])
                     + ('…' if len(created_items) > 5 else '')
                 ),
                 meeting=meeting,
@@ -1185,6 +1342,22 @@ def meeting_notes(request, meeting_id):
     except Exception as e:
         logger.error("meeting_notes POST error: %s", e)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecCRUDThrottle])
+def meeting_notes_delete(request, meeting_id):
+    """Clear a meeting's AI notes — deletes the MeetingNote (summary + key
+    decisions + transcript) and ALL its extracted action items, for a clean
+    slate. Any tasks created from those action items are standalone, so deleting
+    the action items doesn't affect them."""
+    company_user = request.user
+    meeting = get_object_or_404(ExecutiveMeeting, id=meeting_id, organizer=company_user)
+    MeetingNote.objects.filter(meeting=meeting).delete()
+    meeting.action_items.all().delete()
+    return Response({'status': 'success', 'message': 'Meeting notes cleared.'})
 
 
 # ===========================================================================
@@ -1224,12 +1397,13 @@ def action_item_detail(request, item_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([ExecCRUDThrottle])
 def action_item_convert_to_task(request, item_id):
-    """Turn a meeting action item into a trackable ExecutiveTask.
+    """Turn a meeting action item into a standalone ExecutiveTask.
 
-    The new task carries the action item's title/description/priority/due date
-    and is linked back to its meeting. The action item is marked 'done' so it
-    doesn't get converted twice. Body (optional): { parent_task_id } to create
-    it as a subtask of an existing task instead of a standalone one."""
+    The new task copies the action item's title/description/priority/due date and
+    is linked to the meeting only (for reference). It has NO ongoing link to the
+    action item — the action item is left completely untouched (not marked done,
+    no back-reference), so the two live independently. Body (optional):
+    { parent_task_id } to create it as a subtask of an existing task."""
     company_user = request.user
     item = get_object_or_404(MeetingActionItem, id=item_id, meeting__organizer=company_user)
 
@@ -1238,6 +1412,14 @@ def action_item_convert_to_task(request, item_id):
         parent = get_object_or_404(ExecutiveTask, id=parent_task_id, company_user=company_user)
         if parent.parent_task_id:
             return Response({'status': 'error', 'message': 'Subtasks cannot be nested more than one level deep.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Same title-uniqueness rule as manual task creation. If a matching task
+    # already exists this action item was effectively already converted.
+    if ExecutiveTask.objects.filter(company_user=company_user, title__iexact=(item.title or '').strip()).exists():
+        return Response(
+            {'status': 'error', 'message': f'A task titled “{item.title}” already exists.'},
+            status=status.HTTP_409_CONFLICT,
+        )
 
     task = ExecutiveTask.objects.create(
         company_user=company_user,
@@ -1248,9 +1430,6 @@ def action_item_convert_to_task(request, item_id):
         linked_meeting=item.meeting,
         parent_task_id=parent_task_id,
     )
-    # Mark the source action item done so it isn't converted again.
-    item.status = 'done'
-    item.save(update_fields=['status'])
     return Response({'status': 'success', 'task': _serialize_task(task), 'message': 'Action item converted to task.'}, status=status.HTTP_201_CREATED)
 
 
@@ -1269,6 +1448,8 @@ def task_list(request):
     if request.method == 'GET':
         status_filter = request.query_params.get('status')
         priority_filter = request.query_params.get('priority')
+        search = (request.query_params.get('search') or '').strip()
+        date_filter = (request.query_params.get('date') or '').strip()
         # Top-level list only — subtasks ride along nested under their parent
         # (via _serialize_task's 'subtasks' key) instead of appearing twice.
         qs = ExecutiveTask.objects.filter(company_user=company_user, parent_task__isnull=True)
@@ -1276,13 +1457,34 @@ def task_list(request):
             qs = qs.filter(status=status_filter)
         if priority_filter:
             qs = qs.filter(priority=priority_filter)
-        return Response({'status': 'success', 'tasks': [_serialize_task(t) for t in qs[:100]], 'count': qs.count()})
+        if search:
+            qs = qs.filter(models.Q(title__icontains=search) | models.Q(description__icontains=search))
+        if date_filter:
+            # due_date is stored as a DateField (or ISO string) — match the day.
+            qs = qs.filter(due_date=date_filter)
+        page_items, meta = _paginate(qs, request)
+        data = [_serialize_task(t) for t in page_items]
+        return Response({'status': 'success', 'tasks': data, 'count': len(data), 'pagination': meta})
 
     title = request.data.get('title', '').strip()
     if not title:
         return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # No two tasks for the same user may share a title (top-level and subtasks
+    # both counted) — keeps the list unambiguous and makes meeting action-item
+    # "Task created" matching reliable.
+    if ExecutiveTask.objects.filter(company_user=company_user, title__iexact=title).exists():
+        return Response(
+            {'status': 'error', 'message': f'A task titled “{title}” already exists.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
     due_date = request.data.get('due_date') or None
+    if _is_weekend(due_date):
+        return Response(
+            {'status': 'error', 'message': 'Task deadlines can\'t fall on a weekend. Pick a weekday.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     parent_task_id = request.data.get('parent_task_id') or None
     parent = None
     if parent_task_id:
@@ -1349,6 +1551,24 @@ def task_detail(request, task_id):
         return Response({'status': 'success', 'task': _serialize_task(task)})
 
     if request.method == 'PATCH':
+        # Renaming to an existing title is a duplicate too — block it.
+        if 'title' in request.data:
+            new_title = (request.data.get('title') or '').strip()
+            if not new_title:
+                return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            if ExecutiveTask.objects.filter(
+                company_user=company_user, title__iexact=new_title,
+            ).exclude(id=task.id).exists():
+                return Response(
+                    {'status': 'error', 'message': f'A task titled “{new_title}” already exists.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+        # No weekend deadlines.
+        if 'due_date' in request.data and _is_weekend(request.data.get('due_date')):
+            return Response(
+                {'status': 'error', 'message': 'Task deadlines can\'t fall on a weekend. Pick a weekday.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         for field in ['title', 'description', 'status', 'priority', 'due_date', 'ai_reasoning']:
             if field in request.data:
                 setattr(task, field, request.data[field] or None if field == 'due_date' else request.data[field])
@@ -1427,23 +1647,48 @@ def task_prioritize_ai(request):
         agent = _get_agent('task_prioritization', company_user)
         result = agent.prioritize_tasks(tasks_data, context)
 
-        # Apply AI priorities back to DB
+        from datetime import timedelta as _timedelta
+        today = timezone.now().date()
+
+        def _sanitize_suggested_date(raw):
+            """AI dates can be past or on a weekend. Pull anything before today up
+            to today, then push any Saturday/Sunday forward to the next Monday."""
+            if not raw:
+                return None
+            try:
+                d = datetime.strptime(str(raw)[:10], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                return None
+            if d < today:
+                d = today
+            while d.weekday() >= 5:  # 5=Sat, 6=Sun -> move to Monday
+                d = d + _timedelta(days=1)
+            return d
+
+        # Apply AI priorities back to DB. Priority is clamped to low/medium/high
+        # (a stray 'critical' becomes 'high'); suggested dates are sanitized so
+        # they never land in the past or on a weekend. Also fix up the returned
+        # `result` so the UI shows the same clean values.
         updated = 0
         for item in result:
+            # Normalise the priority the UI will display.
+            p = str(item.get('priority', '')).strip().lower()
+            if p == 'critical':
+                p = 'high'
+            item['priority'] = p if p in ('low', 'medium', 'high') else 'medium'
+            # Clean the suggested date for display regardless of whether it maps
+            # to a real task (never show a past/weekend date to the user).
+            clean_due = _sanitize_suggested_date(item.get('suggested_due_date'))
+            item['suggested_due_date'] = clean_due.isoformat() if clean_due else None
             tid = item.get('id')
             if tid:
                 try:
                     t = ExecutiveTask.objects.get(id=tid, company_user=company_user)
-                    if item.get('priority') in ['low', 'medium', 'high', 'critical']:
-                        t.priority = item['priority']
+                    t.priority = item['priority']
                     if item.get('ai_reasoning'):
                         t.ai_reasoning = item['ai_reasoning']
-                    if item.get('suggested_due_date') and not t.due_date:
-                        from datetime import date
-                        try:
-                            t.due_date = datetime.strptime(item['suggested_due_date'], '%Y-%m-%d').date()
-                        except ValueError:
-                            pass
+                    if clean_due and not t.due_date:
+                        t.due_date = clean_due
                     t.save(update_fields=['priority', 'ai_reasoning', 'due_date'])
                     updated += 1
                 except ExecutiveTask.DoesNotExist:
@@ -1489,6 +1734,14 @@ def calendar_plan_week(request):
     company_user = request.user
     week_start = request.data.get('week_start', timezone.now().strftime('%Y-%m-%d'))
     include_past_tasks = bool(request.data.get('include_past_tasks', False))
+    # Work-hours window the user wants tasks scheduled within (defaults 9–17).
+    try:
+        work_start_hour = int(request.data.get('work_start_hour', 9))
+        work_end_hour = int(request.data.get('work_end_hour', 17))
+    except (ValueError, TypeError):
+        work_start_hour, work_end_hour = 9, 17
+    work_start_hour = max(0, min(23, work_start_hour))
+    work_end_hour = max(work_start_hour + 1, min(24, work_end_hour))
 
     from datetime import date as _date, timedelta as _td
     try:
@@ -1512,8 +1765,12 @@ def calendar_plan_week(request):
                 'status': m.status,
             })
 
+    # Top-level tasks only — subtasks are pulled in via the nested-flatten loop
+    # below (as "Parent → subtask"). Without this filter a subtask would also
+    # match here and show up a second time as a standalone item.
     tasks_qs = ExecutiveTask.objects.filter(
-        company_user=company_user, status__in=['todo', 'in_progress']
+        company_user=company_user, status__in=['todo', 'in_progress'],
+        parent_task__isnull=True,
     )
     if include_past_tasks:
         # Past + this week only — never show future (next week+) tasks
@@ -1530,27 +1787,50 @@ def calendar_plan_week(request):
     # Flatten for the planner: each task AND each of its subtasks becomes its own
     # schedulable line item, so subtasks show up in the weekly plan too (not just
     # buried inside their parent). Subtasks are prefixed with the parent title.
+    # A subtask belongs in this week based on ITS OWN due date, independent of
+    # when the parent is due (parent could be next week while a subtask is due
+    # this week, or vice-versa).
+    def _subtask_in_window(st):
+        if st.get('status') in ('done', 'completed', 'cancelled'):
+            return False
+        st_due = (st.get('due_date') or '')[:10]
+        if not st_due:
+            return True  # undated subtask rides along with its parent
+        if include_past_tasks:
+            return st_due <= _week_end_date.isoformat()
+        return _week_start_date.isoformat() <= st_due <= _week_end_date.isoformat()
+
     tasks = []
+    seen_subtask_ids = set()
     for t in tasks_qs[:30]:
         s = _serialize_task(t)
         subtasks = s.pop('subtasks', []) or []
         tasks.append(s)
         for st in subtasks:
-            # Include any subtask that is still open — anything that isn't
-            # finished/cancelled (so 'review' and 'blocked' count too, not just
-            # 'todo'/'in_progress'). Then apply the same week window as parents.
-            if st.get('status') in ('done', 'completed', 'cancelled'):
+            if not _subtask_in_window(st):
                 continue
-            st_due = (st.get('due_date') or '')[:10]
-            if st_due:
-                if include_past_tasks:
-                    if st_due > _week_end_date.isoformat():
-                        continue
-                else:
-                    if not (_week_start_date.isoformat() <= st_due <= _week_end_date.isoformat()):
-                        continue
+            seen_subtask_ids.add(st.get('id'))
             st = {**st, 'title': f"{t.title} → {st.get('title')}", 'is_subtask': True}
             tasks.append(st)
+
+    # Catch subtasks whose OWN due date is in this week but whose parent isn't
+    # (so the parent wasn't in tasks_qs and the loop above never saw them).
+    orphan_subs = ExecutiveTask.objects.filter(
+        company_user=company_user, status__in=['todo', 'in_progress'],
+        parent_task__isnull=False,
+    ).exclude(parent_task__in=tasks_qs).select_related('parent_task')
+    if include_past_tasks:
+        orphan_subs = orphan_subs.filter(due_date__isnull=False, due_date__lte=_week_end_date)
+    else:
+        orphan_subs = orphan_subs.filter(due_date__gte=_week_start_date, due_date__lte=_week_end_date)
+    for st in orphan_subs[:30]:
+        if st.id in seen_subtask_ids:
+            continue
+        s = _serialize_task(st, include_subtasks=False)
+        parent_title = st.parent_task.title if st.parent_task else ''
+        s['title'] = (f"{parent_title} → " if parent_title else '') + s['title']
+        s['is_subtask'] = True
+        tasks.append(s)
 
     logger.info("calendar_plan_week: user=%s week_start=%s meetings=%d tasks=%d include_past=%s",
                 company_user.id, week_start, len(meetings), len(tasks), include_past_tasks)
@@ -1578,7 +1858,7 @@ def calendar_plan_week(request):
 
     try:
         agent = _get_agent('calendar_planner', company_user)
-        plan = agent.plan_week(meetings, tasks, week_start)
+        plan = agent.plan_week(meetings, tasks, week_start, work_start_hour, work_end_hour)
         logger.info("calendar_plan_week: plan keys=%s daily_plans=%s",
                     list(plan.keys()) if plan else None,
                     len(plan.get('daily_plans', [])) if plan else 0)
@@ -1760,18 +2040,30 @@ def standalone_document_list(request):
     from meeting_agent.models import ExecStandaloneDocument
     company_user = request.user
     doc_type = request.query_params.get('doc_type')
+    search = (request.query_params.get('search') or '').strip()
+    date_filter = (request.query_params.get('date') or '').strip()
     qs = ExecStandaloneDocument.objects.filter(company_user=company_user)
     if doc_type:
         qs = qs.filter(doc_type=doc_type)
+    if search:
+        qs = qs.filter(models.Q(title__icontains=search) | models.Q(content__icontains=search))
+    if date_filter:
+        # Documents created on a given calendar day (YYYY-MM-DD).
+        try:
+            day = datetime.strptime(date_filter, '%Y-%m-%d').date()
+            qs = qs.filter(created_at__date=day)
+        except (ValueError, TypeError):
+            pass
+    page_items, meta = _paginate(qs, request)
     docs = [
         {
             'id': d.id, 'doc_type': d.doc_type, 'title': d.title,
             'content': d.content, 'ai_generated': d.ai_generated,
             'created_at': d.created_at.isoformat(),
         }
-        for d in qs[:100]
+        for d in page_items
     ]
-    return Response({'status': 'success', 'documents': docs, 'count': len(docs)})
+    return Response({'status': 'success', 'documents': docs, 'count': len(docs), 'pagination': meta})
 
 
 @api_view(['GET', 'DELETE'])
@@ -1809,16 +2101,37 @@ def notification_list(request):
     company_user = request.user
     unread_only = request.query_params.get('unread', 'false').lower() == 'true'
     severity = request.query_params.get('severity')
+    category = (request.query_params.get('category') or '').strip().lower()
+    search = (request.query_params.get('search') or '').strip()
+
+    # Group notification types into two high-level buckets the UI filters on.
+    # Action-item notifications are surfaced from a meeting's notes, so they
+    # belong under "meeting" even though they mention tasks.
+    MEETING_TYPES = [
+        'meeting_reminder', 'meeting_invite', 'meeting_update',
+        'meeting_cancelled', 'participant_response', 'calendar_conflict',
+        'action_items_added', 'action_item_due', 'action_item_overdue',
+    ]
+    TASK_TYPES = [
+        'task_due', 'task_overdue',
+    ]
 
     qs = ExecNotification.objects.filter(company_user=company_user)
     if unread_only:
         qs = qs.filter(is_read=False)
     if severity:
         qs = qs.filter(severity=severity)
+    if category == 'meeting':
+        qs = qs.filter(notification_type__in=MEETING_TYPES)
+    elif category == 'task':
+        qs = qs.filter(notification_type__in=TASK_TYPES)
+    if search:
+        qs = qs.filter(models.Q(title__icontains=search) | models.Q(message__icontains=search))
 
-    notifications = [_serialize_notification(n) for n in qs[:50]]
+    page_items, meta = _paginate(qs, request)
+    notifications = [_serialize_notification(n) for n in page_items]
     unread_count = ExecNotification.objects.filter(company_user=company_user, is_read=False).count()
-    return Response({'status': 'success', 'notifications': notifications, 'unread_count': unread_count})
+    return Response({'status': 'success', 'notifications': notifications, 'unread_count': unread_count, 'pagination': meta})
 
 
 @api_view(['PATCH'])

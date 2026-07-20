@@ -57,8 +57,12 @@ import marketingAgentService, {
 import MarketingQA from './MarketingQA';
 import MarketResearch from './MarketResearch';
 import Campaigns from './Campaigns';
+import CampaignFilterBar from './CampaignFilterBar';
 import Documents from './Documents';
 import Notifications from './Notifications';
+import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '@/components/frontline/FrontlineTutorial';
+import { MARKETING_TOUR_STEPS, MARKETING_TOUR_KEY } from './marketingTourSteps';
+import { GraduationCap } from 'lucide-react';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -142,8 +146,10 @@ const MarketingDashboard = () => {
   const [searchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'dashboard');
+  const [tourOpen, setTourOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [campaignsLoading, setCampaignsLoading] = useState(true);
+  const [campaignsLoading, setCampaignsLoading] = useState(true);   // full spinner: first load / page change
+  const [campaignsFiltering, setCampaignsFiltering] = useState(false); // subtle: search / filter refetch
   const [emailAccountsLoading, setEmailAccountsLoading] = useState(false);
   const [emailAccounts, setEmailAccounts] = useState([]);
   const [stats, setStats] = useState({
@@ -153,6 +159,7 @@ const MarketingDashboard = () => {
   const [campaigns, setCampaigns] = useState([]);
   const [campaignsPage, setCampaignsPage] = useState(1);
   const [campaignsTotal, setCampaignsTotal] = useState(0);
+  const [campaignFilters, setCampaignFilters] = useState({ search: '', status: '', date: '' });
   const [selectedCampaigns, setSelectedCampaigns] = useState(new Set());
   const [dashboardDeleting, setDashboardDeleting] = useState(false);
   const [dashboardDeleteConfirmOpen, setDashboardDeleteConfirmOpen] = useState(false);
@@ -190,6 +197,19 @@ const MarketingDashboard = () => {
   useEffect(() => {
     fetchStats();
   }, []);
+
+  // Auto-launch the guided tour the first time this user lands on the dashboard.
+  useEffect(() => {
+    if (!hasSeenTutorial(MARKETING_TOUR_KEY)) {
+      const t = setTimeout(() => setTourOpen(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const handleReplayTour = () => {
+    resetTutorial(MARKETING_TOUR_KEY);
+    setTourOpen(true);
+  };
 
   // Deep-link support: /marketing/dashboard?tab=email jumps straight to that tab,
   // including when navigating here again while already mounted on this route.
@@ -278,12 +298,16 @@ const MarketingDashboard = () => {
     }
   };
 
-  const fetchCampaigns = async (page = 1) => {
+  const fetchCampaigns = async (page = 1, activeFilters = campaignFilters, quiet = false) => {
     try {
-      setCampaignsLoading(true);
+      if (quiet) setCampaignsFiltering(true);
+      else setCampaignsLoading(true);
       const response = await marketingAgentService.listCampaigns({
         page,
         limit: DASHBOARD_CAMPAIGNS_PAGE_SIZE,
+        search: activeFilters.search,
+        status: activeFilters.status,
+        date: activeFilters.date,
       });
       if (response?.status === 'success' && response?.data) {
         setCampaigns(response.data.campaigns || []);
@@ -294,8 +318,22 @@ const MarketingDashboard = () => {
       setCampaignsTotal(0);
     } finally {
       setCampaignsLoading(false);
+      setCampaignsFiltering(false);
     }
   };
+
+  // Filter change → back to page 1 and re-fetch (search debounced 300ms).
+  // `quiet` keeps the table on screen with a small spinner instead of a flash.
+  // Only active on the dashboard tab to avoid background fetches.
+  useEffect(() => {
+    if (activeTab !== 'dashboard') return;
+    const t = setTimeout(() => {
+      setCampaignsPage(1);
+      fetchCampaigns(1, campaignFilters, true);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignFilters.search, campaignFilters.status, campaignFilters.date]);
 
   // Clear campaign selection when campaigns list changes
   useEffect(() => {
@@ -799,10 +837,29 @@ const MarketingDashboard = () => {
       {(() => {
         // Make renderChart globally available
         const renderChart = window.renderChart;
-        return null; 
+        return null;
       })()}
+
+      {/* Header row — Marketing title + replay-tour button */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Megaphone className="h-5 w-5 text-[#a259ff]" />
+          <h2 className="text-lg font-semibold text-white">Marketing Agent</h2>
+        </div>
+        <button
+          type="button"
+          onClick={handleReplayTour}
+          data-tour-mkt="replay"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition"
+          style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', boxShadow: '0 0 8px 0 #a259ff55' }}
+        >
+          <GraduationCap className="h-3.5 w-3.5" />
+          Take the Tour
+        </button>
+      </div>
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8 w-full">
+      <div data-tour-mkt="stats" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8 w-full">
         {[
           {
             label: 'Total Campaigns',
@@ -874,6 +931,7 @@ const MarketingDashboard = () => {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="pb-1">
           <TabsList
+            data-tour-mkt="tabs"
             className="grid w-full grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
             style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
           >
@@ -890,6 +948,7 @@ const MarketingDashboard = () => {
               <TabsTrigger
                 key={item.value}
                 value={item.value}
+                data-tour-mkt={`tab-${item.value}`}
                 className="w-full min-w-0 px-2 sm:px-3 py-2 text-sm font-medium rounded-md border transition-all duration-150 relative flex items-center justify-center gap-2"
                 style={activeTab === item.value
                   ? {
@@ -921,7 +980,7 @@ const MarketingDashboard = () => {
           </TabsList>
         </div>
 
-        <TabsContent value="dashboard" className="space-y-4">
+        <TabsContent value="dashboard" data-tour-mkt="page-dashboard" className="space-y-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -965,7 +1024,7 @@ const MarketingDashboard = () => {
 
 
                   {/* Campaigns list (like backend campaigns_list.html) */}
-                  <div>
+                  <div data-tour-mkt="dash-campaigns">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Campaigns</h3>
                       {selectedCampaigns.size > 0 && (
@@ -980,6 +1039,20 @@ const MarketingDashboard = () => {
                         </Button>
                       )}
                     </div>
+
+                    <CampaignFilterBar
+                      className="mb-3"
+                      dataTour="dash-filters"
+                      search={campaignFilters.search}
+                      onSearchChange={(v) => setCampaignFilters((f) => ({ ...f, search: v }))}
+                      status={campaignFilters.status}
+                      onStatusChange={(v) => setCampaignFilters((f) => ({ ...f, status: v }))}
+                      date={campaignFilters.date}
+                      onDateChange={(v) => setCampaignFilters((f) => ({ ...f, date: v }))}
+                      onClear={() => setCampaignFilters({ search: '', status: '', date: '' })}
+                      loading={campaignsFiltering}
+                    />
+
                     {campaignsLoading ? (
                       <div className="flex justify-center py-6">
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -987,7 +1060,11 @@ const MarketingDashboard = () => {
                     ) : campaigns.length === 0 ? (
                       <div className="border-muted-foreground/30 bg-muted/20 p-8 text-center">
                         <Megaphone className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-                        <p className="text-sm text-muted-foreground mb-4">No campaigns yet.</p>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          {(campaignFilters.search || campaignFilters.status || campaignFilters.date)
+                            ? 'No campaigns match these filters.'
+                            : 'No campaigns yet.'}
+                        </p>
                         <Button size="lg" className="gap-2" onClick={() => setActiveTab('campaigns')}>
                           <Plus className="h-5 w-5" />
                           Create campaign
@@ -995,7 +1072,7 @@ const MarketingDashboard = () => {
                       </div>
                     ) : (
                       <>
-                        <div className=" overflow-hidden">
+                        <div className={`overflow-hidden transition-opacity duration-200 ${campaignsFiltering ? 'opacity-50' : 'opacity-100'}`}>
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="bg-muted/50 border-b">
@@ -1060,33 +1137,43 @@ const MarketingDashboard = () => {
                             </tbody>
                           </table>
                         </div>
-                        {campaignsTotal > DASHBOARD_CAMPAIGNS_PAGE_SIZE && (
-                          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 mt-4 border-t">
-                            <p className="text-sm text-muted-foreground">
-                              Showing page {campaignsPage} of {Math.max(1, Math.ceil(campaignsTotal / DASHBOARD_CAMPAIGNS_PAGE_SIZE))} ({campaignsTotal} total campaigns)
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={campaignsPage <= 1 || campaignsLoading}
-                                onClick={() => setCampaignsPage((p) => Math.max(1, p - 1))}
-                              >
-                                <ChevronLeft className="h-4 w-4" />
-                                Previous
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={campaignsPage >= Math.ceil(campaignsTotal / DASHBOARD_CAMPAIGNS_PAGE_SIZE) || campaignsLoading}
-                                onClick={() => setCampaignsPage((p) => p + 1)}
-                              >
-                                Next
-                                <ChevronRight className="h-4 w-4" />
-                              </Button>
+                        {campaignsTotal > 0 && (() => {
+                          const totalPages = Math.max(1, Math.ceil(campaignsTotal / DASHBOARD_CAMPAIGNS_PAGE_SIZE));
+                          const multiPage = totalPages > 1;
+                          const rangeStart = (campaignsPage - 1) * DASHBOARD_CAMPAIGNS_PAGE_SIZE + 1;
+                          const rangeEnd = Math.min(campaignsPage * DASHBOARD_CAMPAIGNS_PAGE_SIZE, campaignsTotal);
+                          return (
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 mt-4 border-t">
+                              <p className="text-sm text-muted-foreground">
+                                {multiPage
+                                  ? `Showing ${rangeStart}–${rangeEnd} of ${campaignsTotal} campaigns · page ${campaignsPage} of ${totalPages}`
+                                  : `${campaignsTotal} campaign${campaignsTotal === 1 ? '' : 's'}`}
+                              </p>
+                              {multiPage && (
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={campaignsPage <= 1 || campaignsLoading}
+                                    onClick={() => setCampaignsPage((p) => Math.max(1, p - 1))}
+                                  >
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Previous
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={campaignsPage >= totalPages || campaignsLoading}
+                                    onClick={() => setCampaignsPage((p) => p + 1)}
+                                  >
+                                    Next
+                                    <ChevronRight className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </>
                     )}
                   </div>
@@ -1125,7 +1212,7 @@ const MarketingDashboard = () => {
           )}
         </TabsContent>
 
-        <TabsContent value="email" className="space-y-4">
+        <TabsContent value="email" data-tour-mkt="page-email" className="space-y-4">
           <div className="relative flex gap-4">
             <Card className={`border-white/10 bg-black/20 backdrop-blur-sm ${selectedAccount ? 'flex-1 min-w-0' : 'w-full'}`}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -1135,7 +1222,7 @@ const MarketingDashboard = () => {
                     Accounts used to send campaign emails. Click an account to see details in the sidebar.
                   </CardDescription>
                 </div>
-                <Button variant="default" size="sm" onClick={openAddEmailAccount}>
+                <Button variant="default" size="sm" onClick={openAddEmailAccount} data-tour-mkt="email-add">
                   <Plus className="h-4 w-4 mr-2" />
                   Add email account
                 </Button>
@@ -1593,28 +1680,28 @@ const MarketingDashboard = () => {
           </Dialog>
         </TabsContent>
 
-        <TabsContent value="campaigns" className="!mt-2 min-h-[400px]">
+        <TabsContent value="campaigns" data-tour-mkt="page-campaigns" className="!mt-2 min-h-[400px]">
           <Campaigns onRefresh={fetchStats} />
         </TabsContent>
 
-        <TabsContent value="qa" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
+        <TabsContent value="qa" data-tour-mkt="page-qa" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
           <MarketingQA />
         </TabsContent>
 
-        <TabsContent value="research" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
+        <TabsContent value="research" data-tour-mkt="page-research" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
           <MarketResearch />
         </TabsContent>
 
-        <TabsContent value="documents">
+        <TabsContent value="documents" data-tour-mkt="page-documents">
           <Documents />
         </TabsContent>
 
-        <TabsContent value="notifications">
+        <TabsContent value="notifications" data-tour-mkt="page-notifications">
           <Notifications onUnreadCountChange={fetchNotificationUnreadCount} />
         </TabsContent>
 
-        <TabsContent value="saved-graphs" className="!mt-2">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <TabsContent value="saved-graphs" data-tour-mkt="page-saved-graphs" className="!mt-2">
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm" data-tour-mkt="graphs-card">
             <CardHeader>
               <CardTitle className="text-white flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-amber-500" />
@@ -1892,6 +1979,15 @@ const MarketingDashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Guided tour — reuses the shared FrontlineTutorial overlay. */}
+      <FrontlineTutorial
+        open={tourOpen}
+        onClose={() => setTourOpen(false)}
+        setActiveTab={setActiveTab}
+        steps={MARKETING_TOUR_STEPS}
+        storageKey={MARKETING_TOUR_KEY}
+      />
     </div>
   );
 };

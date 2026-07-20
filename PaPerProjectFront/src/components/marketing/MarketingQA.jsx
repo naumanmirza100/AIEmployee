@@ -3539,7 +3539,7 @@ const MarketingQA = () => {
           </CardContent>
 
           {/* Input form */}
-          <div className="shrink-0   p-4 rounded-b-2xl">
+          <div className="shrink-0   p-4 rounded-b-2xl" data-tour-mkt="qa-composer">
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="relative">
                 <div

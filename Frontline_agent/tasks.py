@@ -91,6 +91,7 @@ def process_document(self, document_id):
                     break
             return page
 
+        from Frontline_agent.chunking import looks_like_toc_or_index
         chunks = []
         start = 0
         step = max(1, chunk_size - overlap)
@@ -100,7 +101,11 @@ def process_document(self, document_id):
             # Strip page markers from the stored text so they don't pollute
             # retrieval or LLM prompts.
             clean_chunk = _PAGE_MARKER_RE.sub('', raw_chunk)
-            chunks.append((clean_chunk, chunk_page))
+            # Drop table-of-contents / index / cover-only fragments — they
+            # match keywords densely but contain no real content, and would
+            # otherwise crowd out substantive chunks during retrieval.
+            if clean_chunk.strip() and not looks_like_toc_or_index(clean_chunk):
+                chunks.append((clean_chunk, chunk_page))
             start += step
 
         document.chunks_total = len(chunks)

@@ -38,7 +38,25 @@ from core.models import (
 )
 
 
-VALID_AGENTS = {name for name, _ in AGENT_CHOICES}
+class _ValidAgents:
+    """Live set of valid agent slugs, resolved from the Agent table per check.
+
+    Must not be a plain set built at import time: this module is imported before
+    the DB is necessarily queryable, and a snapshot would go stale the moment a
+    new agent row is added — the exact coupling this table removes.
+    """
+
+    def __contains__(self, agent_name):
+        return agent_name in {slug for slug, _ in AGENT_CHOICES}
+
+    def __iter__(self):
+        return iter({slug for slug, _ in AGENT_CHOICES})
+
+    def __len__(self):
+        return len({slug for slug, _ in AGENT_CHOICES})
+
+
+VALID_AGENTS = _ValidAgents()
 
 
 class KeyServiceError(Exception):

@@ -808,7 +808,7 @@ const Notifications = ({ onUnreadCountChange }) => {
       </motion.div>
 
       {/* Monitor section with enhanced design */}
-      <motion.div variants={itemVariants}>
+      <motion.div variants={itemVariants} data-tour-mkt="notif-monitor">
         <Card className="relative overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
           <div className="absolute inset-0 bg-grid-white/5 [mask-image:radial-gradient(ellipse_at_center,white,transparent)]" />
           <CardHeader className="relative pb-3">
@@ -916,7 +916,7 @@ const Notifications = ({ onUnreadCountChange }) => {
       </motion.div>
 
       {/* Unread notifications with filters */}
-      <motion.div variants={itemVariants}>
+      <motion.div variants={itemVariants} data-tour-mkt="notif-inbox">
         <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
           <CardHeader className="pb-4">
             <div className="flex flex-wrap items-center justify-between gap-4">

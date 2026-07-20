@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2,
-  ChevronsLeft, ChevronsRight, Bot, Search,
+  ChevronsLeft, ChevronsRight, Bot, Search, Upload, Lightbulb, AlertCircle,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 import InfoHint from '../frontline/InfoHint';
@@ -88,7 +88,7 @@ function markdownToHtml(markdown) {
 }
 
 
-const HRKnowledgeQAAgent = () => {
+const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
   const { toast } = useToast();
   const messagesEndRef = useRef(null);
 
@@ -466,8 +466,59 @@ const HRKnowledgeQAAgent = () => {
                             </div>
                           )}
                           {msg.responseData?.has_verified_info === false && (
-                            <div className="mt-2 text-[11px] text-amber-300/80">
-                              No verified info — escalating to HR.
+                            <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/[0.06] p-3 space-y-2.5">
+                              <div className="flex items-center gap-1.5 text-amber-300 text-xs font-semibold">
+                                <AlertCircle className="h-3.5 w-3.5" />
+                                Why you saw this
+                              </div>
+                              <div className="text-[12px] text-white/75 leading-relaxed">
+                                I couldn't find a confident answer in your company's HR knowledge base. This usually means one of these:
+                              </div>
+                              <ul className="text-[12px] text-white/70 space-y-1 pl-4 list-disc marker:text-amber-300/60">
+                                <li>No HR documents have been uploaded (or indexed) for your company yet.</li>
+                                <li>Your question was too short / conversational (e.g. &ldquo;hey&rdquo;) — try a specific policy question.</li>
+                                <li>The topic exists in your docs but isn't phrased in a way the search could match — try different keywords.</li>
+                              </ul>
+                              <div className="pt-1">
+                                <div className="flex items-center gap-1.5 text-white/80 text-xs font-semibold mb-1.5">
+                                  <Lightbulb className="h-3.5 w-3.5 text-amber-300" />
+                                  Try one of these
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {[
+                                    'How many PTO days do I get?',
+                                    'What is the parental leave policy?',
+                                    'How do I request time off?',
+                                    'What benefits are included in my package?',
+                                  ].map((s) => (
+                                    <button
+                                      key={s}
+                                      type="button"
+                                      onClick={() => setQuestion(s)}
+                                      className="px-2 py-1 rounded-md border border-white/[0.08] bg-white/[0.03] hover:bg-violet-500/10 hover:border-violet-400/30 text-[11px] text-white/75 hover:text-white transition-colors"
+                                    >
+                                      {s}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              {onGoToDocuments && (
+                                <div className="pt-1 flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={onGoToDocuments}
+                                    className="h-7 text-[11px] gap-1 border-violet-400/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-200 hover:text-white"
+                                  >
+                                    <Upload className="h-3 w-3" />
+                                    Upload HR documents
+                                  </Button>
+                                  <span className="text-[11px] text-white/40">
+                                    Your question will still be routed to HR for follow-up.
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </>

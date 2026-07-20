@@ -1110,7 +1110,7 @@ const MarketResearch = () => {
           </CardContent>
 
           {/* Input form */}
-          <div className="shrink-0 p-4 rounded-b-2xl">
+          <div className="shrink-0 p-4 rounded-b-2xl" data-tour-mkt="research-composer">
             <form onSubmit={handleSubmit} className="space-y-3">
               {/* Main input row */}
               <div className="relative">

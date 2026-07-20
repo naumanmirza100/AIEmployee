@@ -1,8 +1,25 @@
 from django.contrib import admin
 from .models import (
-    Project, Task, Subtask, TeamMember, Meeting, 
+    Agent, Project, Task, Subtask, TeamMember, Meeting,
     ActionItem, Workflow, WorkflowStep, WorkflowExecution, Analytics, UserProfile
 )
+
+
+@admin.register(Agent)
+class AgentAdmin(admin.ModelAdmin):
+    """Add an agent here and it appears in every admin dropdown/filter and on
+    the pricing cards — no code change needed. `slug` is referenced by purchase,
+    API-key and quota rows, so treat it as immutable once saved."""
+    list_display = ['name', 'slug', 'default_provider', 'is_active', 'is_purchasable', 'sort_order']
+    list_filter = ['is_active', 'is_purchasable', 'default_provider']
+    search_fields = ['name', 'slug', 'description']
+    list_editable = ['is_active', 'is_purchasable', 'sort_order']
+    ordering = ['sort_order', 'name']
+
+    def get_readonly_fields(self, request, obj=None):
+        # Editable on create, frozen afterwards: other tables store this slug as
+        # a plain string, so changing it would orphan their rows.
+        return ['slug'] if obj else []
 
 
 @admin.register(Project)
