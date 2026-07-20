@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import HoverTip from '@/components/common/HoverTip';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ChevronLeft } from 'lucide-react';
@@ -1130,17 +1131,21 @@ const MarketResearch = () => {
                 >
                   <div className="flex gap-2.5 items-center">
                     <Select value={researchType} onValueChange={setResearchType}>
-                      <SelectTrigger
-                        className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
-                        style={{
-                          background: '#111118',
-                          border: '1.5px solid rgba(139, 92, 246, 0.55)',
-                          boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
-                          color: '#e2e2f0',
-                        }}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
+                      {/* Wrap only the trigger, not the whole Select, so the tip
+                          doesn't linger over the dropdown options. */}
+                      <HoverTip tip="Choose the type of research to run">
+                        <SelectTrigger
+                          className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
+                          style={{
+                            background: '#111118',
+                            border: '1.5px solid rgba(139, 92, 246, 0.55)',
+                            boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
+                            color: '#e2e2f0',
+                          }}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                      </HoverTip>
                       <SelectContent
                         className="rounded-xl"
                         style={{
@@ -1194,37 +1199,41 @@ const MarketResearch = () => {
                       </div>
                     </div>
 
-                    <Button 
-                      type="submit" 
-                      disabled={loading || !topic.trim()}
-                      className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
-                      style={{
-                        background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
-                        boxShadow: '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
-                        color: '#ffffff',
-                      }}
-                    >
-                      {loading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                    </Button>
+                    <HoverTip tip="Run the research">
+                      <Button
+                        type="submit"
+                        disabled={loading || !topic.trim()}
+                        className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
+                        style={{
+                          background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
+                          boxShadow: '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                          color: '#ffffff',
+                        }}
+                      >
+                        {loading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </HoverTip>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="h-11 w-11 rounded-full border-0 text-white/80 hover:text-white"
-                      style={{
-                        background: '#111118',
-                        border: '1.5px solid rgba(139, 92, 246, 0.30)',
-                        boxShadow: '0 0 12px rgba(139, 92, 246, 0.15)',
-                      }}
-                      onClick={() => setShowContext(!showContext)}
-                    >
-                      <Filter className={cn("h-4 w-4", showContext ? "text-violet-300" : "text-white/80")} />
-                    </Button>
+                    <HoverTip tip="Add more context like industry & region to the prompt">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-11 w-11 rounded-full border-0 text-white/80 hover:text-white"
+                        style={{
+                          background: '#111118',
+                          border: '1.5px solid rgba(139, 92, 246, 0.30)',
+                          boxShadow: '0 0 12px rgba(139, 92, 246, 0.15)',
+                        }}
+                        onClick={() => setShowContext(!showContext)}
+                      >
+                        <Filter className={cn("h-4 w-4", showContext ? "text-violet-300" : "text-white/80")} />
+                      </Button>
+                    </HoverTip>
                   </div>
  {/* Context inputs */}
                   <AnimatePresence>

@@ -2,7 +2,9 @@
 AI Reply Analyzer
 Analyzes email replies to determine if the lead is interested (positive) or not interested (negative)
 """
+import json
 import logging
+import re
 from typing import Dict, Optional
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
 
@@ -22,21 +24,30 @@ Your job is to analyze email replies from leads and determine:
 
 Return your analysis in a structured format."""
     
-    def analyze_reply(self, reply_subject: str, reply_content: str, campaign_name: str = '') -> Dict:
+    def analyze_reply(self, reply_subject: str, reply_content: str, campaign_name: str = '', company_id=None) -> Dict:
         """
         Analyze an email reply to determine if the lead is interested or not.
-        
+
         Args:
             reply_subject: Subject line of the reply
             reply_content: Full content of the reply email
             campaign_name: Name of the campaign (for context)
-            
+            company_id: Company the reply belongs to. Required for the AI (Groq)
+                path — the platform key service resolves the LLM key from
+                (company_id, agent_key_name). Without it, the AI call raises
+                "No API key available" and we fall back to keyword rules only.
+
         Returns:
             Dict with:
                 - interest_level: 'positive', 'negative', or 'neutral'
                 - analysis: Detailed explanation of the analysis
                 - confidence: Confidence score (0-100)
         """
+        # Let the base agent resolve this company's managed LLM key.
+        if company_id:
+            self.company_id = company_id
+            self.agent_key_name = 'marketing_agent'
+
         if not reply_content and not reply_subject:
             return {
                 'interest_level': 'neutral',
@@ -280,10 +291,9 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
                 max_tokens=500
             )
             
-            # Parse JSON response
-            import json
-            import re
-            
+            # Parse JSON response (json/re imported at module top so the
+            # `except json.JSONDecodeError` below can never hit an unbound name).
+
             # Try to extract JSON from response (may have markdown formatting)
             json_match = re.search(r'\{[^{}]*"interest_level"[^{}]*\}', response, re.DOTALL)
             if json_match:

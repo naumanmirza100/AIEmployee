@@ -22,8 +22,21 @@ from marketing_agent.models import (
 )
 from marketing_agent.services.email_service import email_service
 import logging
+import os
+import tempfile
+import time
 
 logger = logging.getLogger(__name__)
+
+# Single-run lock file. This command is scheduled every ~5 min; if a slow SMTP
+# send makes one run overlap the next (or a manual run overlaps the scheduled one),
+# two runs process the same contact before sub_sequence_step is updated and send
+# the SAME email twice (observed: identical sends at the same timestamp). The lock
+# lets only one instance run at a time; a second instance exits immediately.
+_LOCK_PATH = os.path.join(tempfile.gettempdir(), 'ppp_send_sequence_emails.lock')
+# If a run crashes without releasing the lock, treat a lock older than this as
+# stale so the command can't get wedged forever.
+_LOCK_STALE_SECONDS = 30 * 60
 
 
 class Command(BaseCommand):
@@ -36,12 +49,54 @@ class Command(BaseCommand):
             help='Run without actually sending emails',
         )
 
+    def _acquire_lock(self):
+        """Atomically create the lock file. Returns True if we got the lock.
+        Clears a stale lock (from a crashed run) first."""
+        try:
+            if os.path.exists(_LOCK_PATH):
+                age = time.time() - os.path.getmtime(_LOCK_PATH)
+                if age > _LOCK_STALE_SECONDS:
+                    os.remove(_LOCK_PATH)
+                    logger.warning('send_sequence_emails: removed stale lock (age %.0fs)', age)
+            # O_CREAT | O_EXCL fails if the file already exists — atomic guard.
+            fd = os.open(_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return True
+        except FileExistsError:
+            return False
+        except Exception as e:
+            # If locking itself breaks, don't block sending — just log it.
+            logger.warning('send_sequence_emails: lock error (%s); proceeding without lock', e)
+            return True
+
+    def _release_lock(self):
+        try:
+            if os.path.exists(_LOCK_PATH):
+                os.remove(_LOCK_PATH)
+        except Exception:
+            pass
+
     def handle(self, *args, **options):
         dry_run = options['dry_run']
 
         if dry_run:
             self.stdout.write(self.style.WARNING('[DRY RUN] No emails will be sent'))
 
+        # Prevent overlapping runs from double-sending. A second concurrent run
+        # exits here instead of re-processing the same contacts.
+        if not self._acquire_lock():
+            self.stdout.write(self.style.WARNING(
+                'send_sequence_emails already running (lock held) — skipping this run.'
+            ))
+            return
+
+        try:
+            self._run(dry_run)
+        finally:
+            self._release_lock()
+
+    def _run(self, dry_run):
         campaigns = Campaign.objects.filter(status='active')
         campaign_count = campaigns.count()
 

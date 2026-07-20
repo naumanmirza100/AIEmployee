@@ -190,7 +190,6 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
                 </SelectContent>
               </Select>
             </div>
-
           </div>
 
           {/* RIGHT column — participants */}
@@ -216,8 +215,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
                 onChange={e => searchUsers(e.target.value)}
                 placeholder="Type name or email to add…"
                 autoComplete="off"
-                className="bg-white/5 border-white/10 text-white text-sm"
-              />
+                className="bg-white/5 border-white/10 text-white text-sm" />
               {searchLoading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
               {searchResults.length > 0 && (
                 <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
@@ -242,8 +240,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
 
             {/* Placeholder when no participants yet */}
             {participants.length === 0 && (
-              <p className="text-white/20 text-xs mt-2">Search above to add team members.</p>
-            )}
+              <p className="text-white/20 text-xs mt-2">Search above to add team members.</p>)}
            <div className="space-y-1">
               <Label>Video Call Link <span className="text-white/30 text-xs">(leave blank to auto-generate)</span></Label>
               <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
@@ -253,9 +250,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
               <p className="text-white/25 text-[10px]">Supported: Google Meet, Zoom, Teams, Jitsi, Webex</p>
             </div>
           </div>
-
         </div>
-
         {/* Agenda — full width below both columns so generating it doesn't
             stretch the left column and misalign the fields. */}
         {agenda.length > 0 && (
@@ -271,6 +266,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
           </div>
         )}
 
+
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
           <Button onClick={handleSubmit} disabled={loading}>
@@ -280,12 +276,12 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
         </DialogFooter>
       </DialogContent>
 
+
       <MeetingConflictDialog
         conflicts={conflicts}
         onCancel={() => setConflicts(null)}
         onConfirm={doCreate}
-        loading={loading}
-      />
+        loading={loading}/>
     </Dialog>
   );
 };
