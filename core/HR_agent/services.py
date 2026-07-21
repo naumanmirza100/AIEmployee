@@ -170,6 +170,11 @@ class HRKnowledgeService:
         # Lazy-imported to avoid a hard dependency at scaffold time.
         from core.Frontline_agent.embedding_service import EmbeddingService
         self.embedding_service = EmbeddingService()
+        # Per-call sub-phase timing so the UI + logs can pinpoint which step
+        # is slow (query_embed / json_scan / keyword / chunk_fetch / …).
+        # Mirrors the Frontline `KnowledgeService` shape.
+        self.last_retrieval_timing: dict = {}
+        self.last_retrieval_path: str = ''
 
     def get_answer(self, question: str, *, asker_role: str = 'employee',
                    asker_employee_id: Optional[int] = None,
@@ -231,8 +236,15 @@ class HRKnowledgeService:
         `title`, `content`, `semantic_score`. Mirrors the Frontline service's
         output shape so views can render citations identically.
         """
+        import time as _time
         from hr_agent.models import HRDocument, HRDocumentChunk
 
+        # Reset per-call timing counters.
+        _t0 = _time.time()
+        self.last_retrieval_timing = {}
+        self.last_retrieval_path = ''
+
+        _t = _time.time()
         docs = HRDocument.objects.filter(
             company_id=self.company_id,
             is_indexed=True,
@@ -253,6 +265,7 @@ class HRKnowledgeService:
             docs = docs.filter(personal_ok)
 
         doc_ids = list(docs.values_list('id', flat=True))
+        self.last_retrieval_timing['doc_filter'] = int((_time.time() - _t) * 1000)
         if not doc_ids:
             return []
 
@@ -267,28 +280,78 @@ class HRKnowledgeService:
         # Semantic via embedding service if available
         semantic_hits: list[tuple[int, float]] = []
         if self.embedding_service.is_available():
+            _t = _time.time()
             qvec = _cache_get_query_vec(query, self.embedding_service)
+            self.last_retrieval_timing['query_embed'] = int((_time.time() - _t) * 1000)
             if qvec is not None:
-                # Iterate in a streaming loop; the cache turns repeat queries
-                # into ~free cosine math. Junk chunks (TOC/index) are skipped
-                # so retrievals on legacy indices don't return dot-leader lines.
-                for c in chunks_qs.iterator(chunk_size=500):
-                    if not c.embedding:
-                        continue
-                    if _is_junk_chunk(c.id, c.chunk_text):
-                        continue
-                    cvec = _cache_get_chunk_vec(c.id, c.embedding)
-                    if cvec is None:
-                        continue
-                    score = _semantic_score(qvec, cvec)
-                    if score is not None:
-                        semantic_hits.append((c.id, score))
-                semantic_hits.sort(key=lambda x: x[1], reverse=True)
-                semantic_hits = semantic_hits[:50]
+                # -------- FAISS path (O(log N)) --------
+                # Try FAISS first — for a company with 1000+ chunks this is
+                # ~10ms vs 200 seconds for the Python scan.
+                used_faiss = False
+                try:
+                    from hr_agent import vector_store as _vs
+                    if _vs.FAISS_AVAILABLE:
+                        _t_faiss = _time.time()
+                        store = _vs.get_store(self.company_id)
+                        store_ready_ms = int((_time.time() - _t_faiss) * 1000)
+                        if store is not None:
+                            self.last_retrieval_path += f'faiss(store_ready={store_ready_ms}ms)|'
+                            # Candidate set = chunk IDs surviving the confidentiality
+                            # + personal-doc gates from the DB query above.
+                            _t = _time.time()
+                            candidate_ids = set(chunks_qs.values_list('id', flat=True))
+                            self.last_retrieval_timing['faiss_candidates'] = int((_time.time() - _t) * 1000)
+                            _t = _time.time()
+                            hits = store.search(qvec, k=50, candidate_chunk_ids=candidate_ids)
+                            self.last_retrieval_timing['faiss_search'] = int((_time.time() - _t) * 1000)
+                            if hits:
+                                used_faiss = True
+                                semantic_hits = [(cid, float(score)) for cid, score in hits]
+                                self.last_retrieval_path += f'hits={len(hits)}|'
+                            else:
+                                self.last_retrieval_path += 'faiss_empty|'
+                        else:
+                            # Store couldn't be built — no chunks yet or FAISS
+                            # failed. Fall through to Python scan.
+                            self.last_retrieval_path += 'faiss_no_store|'
+                    else:
+                        self.last_retrieval_path += 'faiss_unavailable|'
+                except Exception as exc:
+                    logger.warning("HR FAISS retrieval failed: %s — falling back", exc)
+                    self.last_retrieval_path += 'faiss_error|'
+
+                # -------- Python-scan fallback --------
+                # Only runs when FAISS didn't return usable hits (no library,
+                # no built store yet, or dim mismatch). Slower but correct.
+                if not used_faiss:
+                    _t = _time.time()
+                    scanned = 0
+                    skipped_junk = 0
+                    for c in chunks_qs.iterator(chunk_size=500):
+                        scanned += 1
+                        if not c.embedding:
+                            continue
+                        if _is_junk_chunk(c.id, c.chunk_text):
+                            skipped_junk += 1
+                            continue
+                        cvec = _cache_get_chunk_vec(c.id, c.embedding)
+                        if cvec is None:
+                            continue
+                        score = _semantic_score(qvec, cvec)
+                        if score is not None:
+                            semantic_hits.append((c.id, score))
+                    semantic_hits.sort(key=lambda x: x[1], reverse=True)
+                    semantic_hits = semantic_hits[:50]
+                    self.last_retrieval_timing['json_scan'] = int((_time.time() - _t) * 1000)
+                    self.last_retrieval_timing['json_scan_chunks'] = scanned
+                    self.last_retrieval_path += f'json_scan|scanned={scanned},junk={skipped_junk}|'
+        else:
+            self.last_retrieval_path += 'no_embeddings|'
 
         # Keyword fallback (cheap) — searches both body text AND the section
         # heading so queries like "LEAVE POLICY" or "Article 4" hit chunks
         # whose heading matches even if the body text doesn't.
+        _t = _time.time()
         from django.db.models import Q as _Q
         keyword_hits: list[int] = list(
             chunks_qs.filter(
@@ -296,6 +359,7 @@ class HRKnowledgeService:
                 | _Q(section_heading__icontains=query[:80])
             ).values_list('id', flat=True)[:50]
         )
+        self.last_retrieval_timing['keyword'] = int((_time.time() - _t) * 1000)
 
         # Cheap RRF merge (k=60)
         rrf: dict[int, float] = {}
@@ -311,11 +375,23 @@ class HRKnowledgeService:
             return []
 
         # Re-fetch only the small ranked subset with document title joined in.
+        # `.only(...)` + fresh queryset from `HRDocumentChunk.objects` avoids
+        # the MSSQL query-plan issue that hit Frontline (chaining
+        # `.filter()` on top of a queryset with `select_related` triggered a
+        # pathological plan on MSSQL that cost >170s for 50 rows).
+        _t = _time.time()
         top_ids = [cid for cid, _ in ordered]
         chunk_map = {c.id: c for c in HRDocumentChunk.objects
                      .filter(id__in=top_ids)
-                     .select_related('document')}
+                     .select_related('document')
+                     .only('id', 'document_id', 'chunk_text', 'chunk_index',
+                           'section_heading', 'page_number',
+                           'document__title')}
+        self.last_retrieval_timing['chunk_fetch'] = int((_time.time() - _t) * 1000)
+
+        _t = _time.time()
         out: list[dict] = []
+        dropped_junk = 0
         for cid, _ in ordered:
             c = chunk_map.get(cid)
             if not c:
@@ -323,6 +399,7 @@ class HRKnowledgeService:
             # Defense-in-depth: keyword branch can surface junk chunks that
             # the semantic branch already rejected.
             if _is_junk_chunk(c.id, c.chunk_text):
+                dropped_junk += 1
                 continue
             heading = getattr(c, 'section_heading', '') or ''
             page = getattr(c, 'page_number', None)
@@ -337,6 +414,13 @@ class HRKnowledgeService:
                 'content': c.chunk_text,
                 'semantic_score': sem_score.get(cid),
             })
+        self.last_retrieval_timing['output_build'] = int((_time.time() - _t) * 1000)
+        self.last_retrieval_timing['search_total'] = int((_time.time() - _t0) * 1000)
+        self.last_retrieval_path += f'kept={len(out)},dropped_junk={dropped_junk}|'
+        logger.info(
+            "HR retrieval breakdown (ms): %s path=%s",
+            self.last_retrieval_timing, self.last_retrieval_path,
+        )
         return out[:max_results]
 
 

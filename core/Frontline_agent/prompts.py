@@ -47,27 +47,21 @@ Remember: Your primary goal is to help users with verified information and route
 FRONTLINE_SYSTEM_PROMPT = _FRONTLINE_SYSTEM_PROMPT_BODY + ANTI_INJECTION_SYSTEM_ADDENDUM
 
 
-FRONTLINE_KNOWLEDGE_PROMPT = """You are answering a user's question using information from uploaded documents.
+FRONTLINE_KNOWLEDGE_PROMPT = """Answer the user's question from the document snippets below.
 
 DOCUMENT CONTENT (SNIPPETS):
 {knowledge_results}
 
 USER QUESTION: {user_question}
 
-CRITICAL INSTRUCTIONS - READ CAREFULLY:
-1. Answer ONLY using the provided snippets. Do not use outside knowledge. If the answer is not present, clearly state that you don't know based on the available documents and let a human assist.
-2. The document content above may contain information about MANY different topics. You must ONLY extract and provide information that directly answers the user's question.
-3. DO NOT copy the entire document. DO NOT list all topics. DO NOT include information about unrelated topics.
-4. Extract ONLY those relevant sections and provide a clear, concise answer.
-5. If the document does NOT contain information about what the user asked, you MUST say: "I don't have verified information about this in our knowledge base. Let me create a ticket for a human agent to assist you."
-6. DO NOT provide information about topics that are not related to the user's question, even if they are in the document.
-7. Your answer should be focused and specific to the user's question only.
-
-EXAMPLE:
-- If user asks "what is vector database" and the document talks about "Project Manager Agent" and "vector database", ONLY provide information about vector database. Ignore Project Manager Agent information.
-- If user asks "what is Project Manager Agent" and the document talks about both topics, ONLY provide information about Project Manager Agent.
-
-RESPONSE TONE: Be consistent, professional, and empathetic in your reply. Avoid robotic phrasing, but do not use informal slang. Structure your answer cleanly.
+RULES:
+1. Use ONLY the provided snippets. No outside knowledge.
+2. Answer the specific question — do NOT copy the whole document or list unrelated topics.
+3. If the snippets don't contain the answer, say exactly: "I don't have verified information about this in our knowledge base. Let me create a ticket for a human agent to assist you."
+4. NO preamble. NO meta-commentary like "Based on the provided document snippets…" or "According to the document content…" — just answer directly.
+5. NO verbatim block-quotes of the snippet content — paraphrase concisely. It's fine to quote a short phrase (< 15 words) when precision matters.
+6. Keep it short: 1-3 sentences, or a tight 3-5 bullet list. Structure only when the answer is genuinely a list.
+7. Professional, empathetic tone. No slang, no robotic phrasing.
 
 RESPONSE:"""
 
@@ -150,11 +144,11 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
                 source = result.get('source', 'Unknown')
                 doc_type = result.get('type', 'unknown')
                 
-                # Cap at 6000 chars — enough for the LLM to synthesise a good
-                # answer but tight enough to keep time-to-first-token low on
-                # very large documents. (Was 15000 which measurably slowed TTFT.)
-                if len(answer_content) > 6000:
-                    answer_content = answer_content[:6000] + '\n\n[... content truncated ...]'
+                # Cap at 3500 chars. Prompt size is the single biggest lever
+                # on time-to-first-token for large docs — 3500 comfortably
+                # covers 2-3 chunks of substantive content.
+                if len(answer_content) > 3500:
+                    answer_content = answer_content[:3500] + '\n\n[... content truncated ...]'
 
                 item_text += f"Source: {source}\n   Type: {doc_type}\n   Content Length: {len(answer_content)} chars\n\nDocument Content:\n{answer_content}"
             
@@ -162,12 +156,11 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
             elif 'question' in result:
                 item_text += f"Q: {result.get('question', 'N/A')}\n   A: {result.get('answer', 'N/A')}"
             elif 'title' in result:
-                # Use more content for documents to help LLM generate better answers
                 content = result.get('content', 'N/A')
-                # Cap per-excerpt at 1500 chars to keep the prompt tight —
-                # this dominates time-to-first-token on large docs.
-                if len(content) > 1500:
-                    content_preview = content[:1500] + '...'
+                # Cap per-excerpt at 800 chars — plenty for the LLM to answer
+                # a specific question, and keeps TTFT low.
+                if len(content) > 800:
+                    content_preview = content[:800] + '...'
                 else:
                     content_preview = content
                 similarity = result.get('similarity_score', 'N/A')

@@ -2,6 +2,7 @@
 import React from 'react';
     import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
     import { AuthProvider } from '@/contexts/AuthContext';
+    import { BackgroundUploadProvider } from '@/components/shared/BackgroundUploadManager';
     import HomePage from '@/pages/HomePage';
     import HowItWorksPage from '@/pages/HowItWorksPage';
     import ReviewsPage from '@/pages/ReviewsPage';
@@ -276,7 +277,9 @@ import { useTranslation } from 'react-i18next';
       return (
         <AuthProvider>
           <Router>
-            <AppContent />
+            <BackgroundUploadProvider>
+              <AppContent />
+            </BackgroundUploadProvider>
           </Router>
         </AuthProvider>
       );
