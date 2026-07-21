@@ -16,6 +16,7 @@ from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.models import (
     CareerApplication,
     CVRecord,
+    JobApplication,
     JobDescription,
     Interview,
     RecruiterEmailSettings,
@@ -171,6 +172,34 @@ def _is_recruitment_data_question(question: str) -> bool:
     return any(kw in q for kw in _RECRUITMENT_KEYWORDS)
 
 
+# Phrases that point at a specific stored record rather than generic advice, e.g.
+# "candidate 2", "detail of that candidate", "his score", "Ameer's CV".
+_RECORD_REFERENCE_PATTERNS = [
+    re.compile(r'\b(candidate|applicant|cv|resume|interviewee)\s*#?\s*\d+\b', re.I),
+    re.compile(r'\b(this|that|the)\s+(candidate|applicant|cv|resume|person|student)\b', re.I),
+    re.compile(r'\b(his|her|their)\s+(detail|details|score|cv|resume|profile|experience|skill)', re.I),
+    re.compile(r'\b(detail|details|profile|score|status|decision|info|information)\s+(of|for|about)\b', re.I),
+    re.compile(r'\btell me about\b', re.I),
+    # Attribute asked "of/for <someone>", e.g. "skills of Ameer Hamza",
+    # "experience of John". Catches candidate questions that name no keyword.
+    re.compile(
+        r'\b(skill|skills|experience|education|qualification|qualifications|background|'
+        r'score|rating|resume|cv|profile|strength|strengths|weakness|weaknesses|'
+        r'contact|email|phone)\s+(of|for)\s+[A-Za-z]',
+        re.I,
+    ),
+]
+
+
+def _refers_to_specific_record(question: str) -> bool:
+    """True when the user is asking about a particular stored candidate/job.
+
+    Such questions must go through the DB path even if they also ask for generic
+    interview questions — answering them without data made the LLM invent people.
+    """
+    return any(p.search(question or '') for p in _RECORD_REFERENCE_PATTERNS)
+
+
 def _is_general_knowledge_question(question: str) -> bool:
     """True if question is about stacks, interview questions, recruitment tips (no DB needed)."""
     q = question.lower().strip()
@@ -278,16 +307,153 @@ def _is_simple_count_question(question: str) -> bool:
     return False
 
 
+# Words that carry no identifying weight when matching a question against real job
+# titles / candidate names. Everything else is treated as a possible subject.
+_NON_SUBJECT_WORDS = {
+    'the', 'a', 'an', 'for', 'and', 'of', 'in', 'at', 'to', 'is', 'are', 'on', 'with',
+    'by', 'or', 'not', 'no', 'my', 'me', 'i', 'do', 'does', 'did', 'has', 'have', 'had',
+    'how', 'many', 'much', 'what', 'which', 'who', 'whom', 'that', 'this', 'these',
+    'those', 'from', 'all', 'any', 'can', 'will', 'be', 'was', 'were', 'been', 'about',
+    'their', 'his', 'her', 'them', 'they', 'it', 'its', 'you', 'your', 'we', 'our',
+    'give', 'show', 'tell', 'list', 'find', 'get', 'want', 'need', 'please', 'also',
+    'job', 'jobs', 'role', 'roles', 'position', 'positions', 'candidate', 'candidates',
+    'applicant', 'applicants', 'cv', 'cvs', 'resume', 'resumes', 'interview',
+    'interviews', 'application', 'applications', 'detail', 'details', 'info',
+    'information', 'skill', 'skills', 'score', 'scores', 'status', 'applied', 'apply',
+    'total', 'count', 'number', 'active', 'inactive', 'best', 'top', 'developer',
+    'engineer', 'stack', 'ka', 'ki', 'ke', 'kitne', 'batao', 'kaun', 'konsi', 'mujhe',
+    'only', 'just', 'complete', 'full', 'description', 'requirement', 'requirements',
+    'summary', 'overview', 'more', 'other', 'another', 'each', 'every', 'both',
+}
+
+
+def _shorten(text: str, limit: int) -> str:
+    """Trim to a word boundary and say so, instead of cutting mid-word.
+
+    Used in multi-item listings only; single-item detail views show the full text.
+    """
+    text = (text or '').strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if ' ' in cut:
+        cut = cut[:cut.rfind(' ')]
+    return f"{cut.rstrip()}… _(ask about this job for the full text)_"
+
+
+# "…django job not mern", "all jobs except MERN" — whatever follows these is what
+# the user is ruling OUT, so it must not be treated as the thing they asked for.
+_EXCLUSION_PATTERN = re.compile(
+    r'\b(?:not|except|excluding|other\s+than|apart\s+from|besides|no)\b(.*)$',
+    re.I | re.DOTALL,
+)
+
+
+def _excluded_subjects(question: str) -> set:
+    """Subjects the question explicitly rules out."""
+    m = _EXCLUSION_PATTERN.search(question or '')
+    if not m:
+        return set()
+    words = re.findall(r"[A-Za-z][A-Za-z0-9'+.#-]*", m.group(1).lower())
+    return {w for w in words if len(w) > 1 and w not in _NON_SUBJECT_WORDS}
+
+
+def _question_subjects(question: str, drop_excluded: bool = True) -> set:
+    """Content words from the question that could name a job or a person.
+
+    Words after a negation ("not mern") are dropped by default so asking for one
+    job while naming another as an exclusion doesn't match the excluded one.
+    """
+    words = re.findall(r"[A-Za-z][A-Za-z0-9'+.#-]*", (question or '').lower())
+    subjects = {w for w in words if len(w) > 1 and w not in _NON_SUBJECT_WORDS}
+    if drop_excluded:
+        subjects -= _excluded_subjects(question)
+    return subjects
+
+
+def _resolve_subject(question: str, known_titles: List[str], known_names: List[str]) -> Dict[str, Any]:
+    """Match the question against the company's real jobs and candidates.
+
+    This replaces guessing from hardcoded keyword lists: the database is the only
+    source of truth for what jobs and people exist, so a new technology or a new
+    hire needs no code change. Returns which subjects matched and — importantly —
+    which named subjects matched nothing, so the caller can say "no such job"
+    instead of answering with whatever unrelated records it happens to hold.
+    """
+    subjects = _question_subjects(question)
+    if not subjects:
+        return {'matched_jobs': [], 'matched_names': [], 'unmatched': []}
+
+    # Titles and names are plain labels, not questions — never strip "negations" there.
+    title_words = {w for t in known_titles for w in _question_subjects(t, drop_excluded=False)}
+    name_words = {w for n in known_names for w in _question_subjects(n, drop_excluded=False)}
+
+    matched_jobs = sorted(subjects & title_words)
+    matched_names = sorted(subjects & name_words)
+    # A subject that matches neither a job title nor a person is only interesting
+    # when it looks like the question's actual topic, not incidental prose.
+    unmatched = sorted(subjects - title_words - name_words)
+    return {
+        'matched_jobs': matched_jobs,
+        'matched_names': matched_names,
+        'unmatched': unmatched,
+    }
+
+
+# Where a job name actually appears in a question: "…for Laravel", "Laravel job",
+# "…in Laravel role". Matching on grammar rather than a technology list means a new
+# stack needs no code change, while status words ("on hold") and typos elsewhere in
+# the sentence are not mistaken for job names.
+_JOB_SLOT_PATTERNS = [
+    re.compile(r'\bfor\s+(?:the\s+)?([A-Za-z][A-Za-z0-9+.#-]*(?:\s+[A-Za-z][A-Za-z0-9+.#-]*){0,3}?)\s*(?:jobs?|roles?|positions?)?\s*[?.!]?$', re.I),
+    re.compile(r'\b([A-Za-z][A-Za-z0-9+.#-]*(?:\s+[A-Za-z][A-Za-z0-9+.#-]*){0,3}?)\s+(?:jobs?|roles?|positions?)\b', re.I),
+    re.compile(r'\b(?:in|on)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9+.#-]*)\s+(?:jobs?|roles?|positions?)\b', re.I),
+]
+
+
+def _unmatched_job_topics(jobs: List[Dict], question: str) -> List[str]:
+    """Job names the question asks about that this company has no job for.
+
+    Reads the name out of the question's job slot ("for X", "X job") and checks it
+    against real titles — no hardcoded technology list, so any new stack works.
+    """
+    titles = [j.get('title') or '' for j in jobs]
+    title_words = {w for t in titles for w in _question_subjects(t, drop_excluded=False)}
+
+    for pattern in _JOB_SLOT_PATTERNS:
+        m = pattern.search(question or '')
+        if not m:
+            continue
+        candidate_words = _question_subjects(m.group(1))
+        if not candidate_words:
+            continue
+        # Any overlap with a real title means the job exists — nothing to report.
+        if candidate_words & title_words:
+            return []
+        return sorted(candidate_words)
+    return []
+
+
 def _find_matching_job(jobs: List[Dict], question: str) -> Optional[Dict]:
     """Find the best matching job from the question text by fuzzy-matching job titles."""
     q = question.lower().strip()
     best_match = None
     best_score = 0
 
+    # "…django job not mern" must never resolve to MERN. Drop jobs the user ruled out
+    # before scoring, otherwise the excluded name still matches its own title.
+    excluded = _excluded_subjects(question)
+
     for job in jobs:
         title = (job.get("title") or "").lower().strip()
         if not title:
             continue
+        if excluded:
+            title_terms = _question_subjects(title, drop_excluded=False)
+            # Only skip when the exclusion is what identifies this job, not when it
+            # merely shares a generic word with it.
+            if title_terms and title_terms <= excluded:
+                continue
         # Exact title match
         if title in q:
             score = len(title) * 3  # prefer longer exact matches
@@ -374,6 +540,11 @@ RULES:
 5. For job details — always show: title, status, location, department, type, description, requirements, candidate count, interview count.
 6. For candidate details — always show: name, score, decision, email if available, summary if available.
 7. Default to active jobs unless the user asks about all/inactive jobs.
+8. If the user refers to a candidate, job, or record that is NOT in the context (by name,
+   number, or position — e.g. "candidate 2" when only one candidate exists), say plainly
+   that no such record was found and list what IS available. Never fabricate a profile,
+   name, score, skill, or history to fill the gap. Answering the generic part of the
+   question (e.g. interview questions for a role) is fine — inventing the person is not.
 
 FORMATTING:
 - ## for main heading, ### for subheading per job/candidate
@@ -417,14 +588,28 @@ FORMATTING:
             is_recruitment = _is_recruitment_data_question(question)
             is_general = _is_general_knowledge_question(question)
             
-            if is_general:
-                # General knowledge takes priority: tech interview questions, best-practices, stacks (no DB)
+            # A question naming a specific record ("candidate 2", "details of that
+            # candidate") must be answered from the DB. Routing it to the general
+            # path — which has no database access — is what made the LLM invent
+            # candidates that don't exist.
+            #
+            # Phrasing patterns catch the common shapes; the DB lookup below catches
+            # the rest, including a bare name in any language ("Ameer ki skill batao").
+            needs_record = (
+                _refers_to_specific_record(question)
+                or self._question_names_known_candidate(company_user, question)
+            )
+
+            if is_general and not needs_record:
+                # Pure general knowledge: tech interview questions, best-practices, stacks (no DB)
                 answer = self._generate_general_knowledge_answer(question)
                 return self._wrap_response(answer, [])
-            if is_recruitment:
-                # Recruitment data: jobs, candidates, CVs, settings (DB + LLM)
-                pass  # fall through to DB query below
-            else:
+            if needs_record:
+                # Naming a person is itself a data question, even without a keyword
+                # like "candidate" — e.g. "what are the skills of Ameer Hamza".
+                logger.info("Recruitment QA: question references a specific record, using DB path")
+                is_recruitment = True
+            if not is_recruitment:
                 return self._get_friendly_non_data_response()
             data = self._get_recruitment_data(company_user)
             direct = self._get_direct_answer(data, question)
@@ -433,6 +618,18 @@ FORMATTING:
             # Also skip LLM if direct answer is already comprehensive (contains ## headings)
             if direct and (_is_simple_count_question(question) or _is_comprehensive_answer(direct)):
                 return self._wrap_response(direct, insights)
+            if needs_record:
+                dossier = self._build_candidate_dossier(company_user, question)
+                if dossier:
+                    # Answer strictly from this candidate's record — passing the whole
+                    # jobs context alongside made the model pad the reply with unrelated
+                    # job descriptions.
+                    answer = self._generate_answer(question, dossier, direct)
+                    return self._wrap_response(answer, insights)
+                # Nothing matched. Say so directly instead of handing the LLM the full
+                # context, which it would otherwise dump as a substitute answer.
+                return self._wrap_response(self._no_candidate_answer(data), insights)
+
             context = self._build_context(data)
             answer = self._generate_answer(question, context, direct)
             return self._wrap_response(answer, insights)
@@ -490,6 +687,12 @@ FORMATTING:
 - Screening questions for freshers vs experienced developers
 - Recruitment best practices, what to assess, how to evaluate skills
 - Any recruitment or hiring-related knowledge
+
+CRITICAL — you have NO access to this company's database in this mode. You cannot see
+their candidates, CVs, jobs, or interviews. If the question refers to a specific record
+("candidate 2", "the applicant for X", "their score"), do NOT invent one: say you can't
+see their records here and point them to ask about the candidate by name, then answer
+whatever generic part you can (e.g. good questions for that kind of role).
 
 FORMAT YOUR ANSWER WITH CLEAR STRUCTURE (mandatory):
 1. Use ## for the main heading (e.g. "React Interview Questions").
@@ -556,6 +759,29 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                     "qualification_decision": cv.qualification_decision or "",
                     "qualification_confidence": cv.qualification_confidence,
                     "summary": (summary or "")[:500],
+                })
+
+            # People who applied but whose CV hasn't been AI-analysed yet. Without
+            # these the agent reported "no candidates" for a job that really had
+            # applicants — they only existed as CVRecords after processing.
+            pending_applicants = []
+            for app in (
+                JobApplication.objects
+                .filter(job=job, cv_records__isnull=True)
+                .order_by('-applied_at')[:50]
+            ):
+                full_name = f"{app.first_name or ''} {app.last_name or ''}".strip()
+                pending_applicants.append({
+                    "application_id": app.id,
+                    "name": full_name or (app.email or 'Unnamed applicant'),
+                    "email": app.email or "",
+                    "phone": app.phone or "",
+                    "status": app.status or "pending",
+                    "applied_at": app.applied_at.strftime('%Y-%m-%d') if app.applied_at else "",
+                    "education": (app.education or "")[:200],
+                    "previous_company": (app.previous_company or "")[:120],
+                    "salary_expectation": app.salary_expectation or "",
+                    "analysed": False,
                 })
 
             # Per-job qualification decision breakdown
@@ -649,14 +875,23 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             jobs_list.append({
                 "id": job.id,
                 "title": job.title,
-                "description": (job.description or "")[:800],
+                # Kept whole — a "give me the complete description" answer has to be
+                # able to show all of it. Trimming happens per-view instead, so the
+                # full text is still available when the user explicitly asks for it.
+                "description": job.description or "",
                 "is_active": job.is_active,
                 "location": job.location or "",
                 "department": job.department or "",
                 "type": job.type or "Full-time",
-                "requirements": (job.requirements or "")[:500],
+                "requirements": job.requirements or "",
                 "candidates": candidates,
-                "candidate_count": len(candidates),
+                # Everyone who applied — analysed or not. Counting only analysed CVs
+                # made the agent answer "0 candidates" for jobs that had applicants
+                # sitting unprocessed.
+                "candidate_count": len(candidates) + len(pending_applicants),
+                "analysed_count": len(candidates),
+                "pending_applicants": pending_applicants,
+                "pending_count": len(pending_applicants),
                 "interview_count": interview_count,
                 "qualification_counts": job_qual_counts,
                 "interview_status_counts": job_interview_status,
@@ -798,13 +1033,24 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             dept = j.get("department", "") or "N/A"
             jtype = j.get("type", "") or "N/A"
             jqc = j.get("qualification_counts", {})
-            desc = (j.get("description") or "")[:400]
-            req = (j.get("requirements") or "")[:300]
+            # With a single job there is room to pass its full text, which is what
+            # "complete description" questions need. Across many jobs the shared
+            # context budget forces a trim.
+            if len(jobs) == 1:
+                desc = j.get("description") or ""
+                req = j.get("requirements") or ""
+            else:
+                desc = _shorten(j.get("description") or "", 400)
+                req = _shorten(j.get("requirements") or "", 300)
             ss = j.get("score_stats", {})
 
             lines.append(f"\n=== JOB: {title} (ID:{aid}) ===")
             lines.append(f"Status: {active_str} | Type: {jtype} | Location: {loc} | Department: {dept}")
-            lines.append(f"Candidates: {cand} | Interviews: {interv} | Scores: avg={ss.get('avg',0)} max={ss.get('max',0)} min={ss.get('min',0)}")
+            lines.append(
+                f"Candidates: {cand} (analysed: {j.get('analysed_count', 0)}, "
+                f"awaiting AI analysis: {j.get('pending_count', 0)}) | "
+                f"Interviews: {interv} | Scores: avg={ss.get('avg',0)} max={ss.get('max',0)} min={ss.get('min',0)}"
+            )
             lines.append(f"Decisions: INTERVIEW={jqc.get('INTERVIEW',0)} HOLD={jqc.get('HOLD',0)} REJECT={jqc.get('REJECT',0)}")
             if desc:
                 lines.append(f"Description: {desc}")
@@ -819,6 +1065,19 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                     lines.append(
                         f"  - {c.get('name','?')} | Score:{c.get('role_fit_score','N/A')} | "
                         f"Decision:{c.get('qualification_decision','N/A')} | Email:{c.get('email','N/A')}"
+                    )
+
+            # Applicants whose CV has not been AI-analysed yet. They are real people
+            # who applied, so they must appear — flagged so the agent doesn't imply
+            # they have scores or decisions.
+            pending = j.get("pending_applicants", [])[:10]
+            if pending:
+                lines.append("Applicants awaiting AI analysis (no score/decision yet):")
+                for p in pending:
+                    lines.append(
+                        f"  - {p.get('name','?')} | Email:{p.get('email','N/A')} | "
+                        f"Applied:{p.get('applied_at','N/A')} | Status:{p.get('status','pending')} | "
+                        f"Education:{p.get('education') or 'N/A'}"
                     )
 
             # Interview details
@@ -838,6 +1097,174 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         if len(context_str) > MAX_CONTEXT_CHARS:
             context_str = context_str[:MAX_CONTEXT_CHARS] + "\n... [truncated]"
         return context_str
+
+    def _question_names_known_candidate(self, company_user: Any, question: str) -> bool:
+        """True when the question mentions a candidate who actually exists.
+
+        Grounded in the database rather than a keyword list, so a bare name in any
+        phrasing — "Ameer ki skill batao" — still routes to the data path.
+        """
+        try:
+            return bool(self._find_candidates_in_question(company_user, question))
+        except Exception:
+            logger.exception("Candidate name lookup failed; falling back to phrasing rules")
+            return False
+
+    def _no_candidate_answer(self, data: Dict[str, Any]) -> str:
+        """Reply for a candidate question we couldn't resolve.
+
+        Deliberately does NOT include job descriptions: the user asked about a
+        person, so padding the answer with unrelated job details is noise.
+        """
+        all_candidates = [
+            c for j in data.get('jobs', []) for c in (j.get('candidates') or [])
+        ]
+        all_pending = [
+            p for j in data.get('jobs', []) for p in (j.get('pending_applicants') or [])
+        ]
+
+        # Applicants exist but none analysed yet — say that rather than "no candidates",
+        # which wrongly implies nobody applied.
+        if not all_candidates and all_pending:
+            listed = '\n'.join(
+                f"- **{p.get('name')}** — {p.get('email') or 'no email'}"
+                f" (applied {p.get('applied_at') or 'recently'})"
+                for p in all_pending[:20]
+            )
+            return (
+                f"## {len(all_pending)} Applicant"
+                f"{'s' if len(all_pending) != 1 else ''} — Not Yet Analysed\n\n"
+                f"These people applied, but their CVs haven't been processed by AI yet, "
+                f"so they have no scores or decisions:\n\n{listed}\n\n"
+                "Run **Process with AI** on the job to analyse their CVs, then ask me again "
+                "for scores, skills and rankings."
+            )
+
+        if not all_candidates:
+            job_titles = [j.get('title') for j in data.get('jobs', []) if j.get('title')]
+            msg = "## No Candidates Yet\n\nNo one has applied to your jobs yet, so there are no candidate records to show."
+            if job_titles:
+                msg += (
+                    f"\n\nYou have **{len(job_titles)} job**"
+                    f"{'s' if len(job_titles) != 1 else ''} open: "
+                    + ', '.join(f"**{t}**" for t in job_titles[:10])
+                    + ".\n\nOnce candidates apply and their CVs are processed, ask me again."
+                )
+            return msg
+
+        listed = '\n'.join(
+            f"- **{c.get('name') or 'Unnamed'}** — Score: {c.get('role_fit_score', 'N/A')}"
+            f" | Decision: {c.get('qualification_decision') or 'N/A'}"
+            for c in all_candidates[:20]
+        )
+        return (
+            "## Candidate Not Found\n\n"
+            "I couldn't match that to anyone in your records. "
+            f"Here are the **{len(all_candidates)} candidate"
+            f"{'s' if len(all_candidates) != 1 else ''}** you do have:\n\n"
+            f"{listed}\n\n"
+            "Ask me by name (e.g. *\"skills of Ameer Hamza\"*) for a full profile."
+        )
+
+    def _build_candidate_dossier(self, company_user: Any, question: str) -> str:
+        """Full profile for a candidate the question names, appended to the context.
+
+        The per-job listing only carries name/score/decision/email for the top few
+        candidates, so "tell me everything about X" had nothing to answer from. This
+        pulls the whole record — skills, experience, education, insights, interview
+        history — for the specific person asked about. Read-only.
+        """
+        matches = self._find_candidates_in_question(company_user, question)
+        if not matches:
+            return ""
+
+        blocks: List[str] = ["", "=== CANDIDATE DOSSIER (full records for the person asked about) ==="]
+        for cv in matches[:3]:
+            parsed = json.loads(cv.parsed_json) if cv.parsed_json else {}
+            insights = json.loads(cv.insights_json) if cv.insights_json else {}
+            qual = json.loads(cv.qualification_json) if cv.qualification_json else {}
+            parsed = parsed if isinstance(parsed, dict) else {}
+            insights = insights if isinstance(insights, dict) else {}
+            qual = qual if isinstance(qual, dict) else {}
+
+            name = _get_parsed_name(parsed) or cv.file_name or f"CV #{cv.id}"
+            job = cv.job_description
+            blocks.append(f"\n--- {name} (CV ID:{cv.id}) ---")
+            blocks.append(f"Applied for: {job.title if job else 'N/A'}")
+            blocks.append(
+                f"Score: {cv.role_fit_score if cv.role_fit_score is not None else 'N/A'} | "
+                f"Decision: {cv.qualification_decision or 'N/A'} | "
+                f"Confidence: {cv.qualification_confidence if cv.qualification_confidence is not None else 'N/A'} | "
+                f"Rank: {cv.rank if cv.rank is not None else 'N/A'}"
+            )
+
+            for label, key in (
+                ('Email', 'email'), ('Phone', 'phone'), ('Location', 'location'),
+                ('Education', 'education'), ('Experience', 'experience'),
+                ('Skills', 'skills'), ('Certifications', 'certifications'),
+            ):
+                val = parsed.get(key) or parsed.get(key.title())
+                if not val:
+                    continue
+                if isinstance(val, list):
+                    val = ', '.join(str(v) for v in val if v)
+                blocks.append(f"{label}: {str(val)[:900]}")
+
+            for label, key in (
+                ('Summary', 'summary'), ('Strengths', 'strengths'),
+                ('Weaknesses', 'weaknesses'), ('Key highlights', 'key_highlights'),
+            ):
+                val = insights.get(key)
+                if not val:
+                    continue
+                if isinstance(val, list):
+                    val = ', '.join(str(v) for v in val if v)
+                blocks.append(f"{label}: {str(val)[:900]}")
+
+            reasoning = qual.get('reasoning') or qual.get('justification')
+            if reasoning:
+                blocks.append(f"Qualification reasoning: {str(reasoning)[:700]}")
+
+            for iv in Interview.objects.filter(cv_record=cv).order_by('-created_at')[:5]:
+                blocks.append(
+                    f"Interview: {iv.status} | Outcome: {iv.outcome or 'N/A'} | "
+                    f"Type: {iv.interview_type} | When: {iv.scheduled_datetime or 'not scheduled'}"
+                )
+
+        return "\n".join(blocks)
+
+    def _find_candidates_in_question(self, company_user: Any, question: str) -> List[Any]:
+        """Locate CVRecords the question refers to, by name or by 'candidate N' index."""
+        cv_qs = (
+            CVRecord.objects
+            .filter(job_description__company_user=company_user)
+            .select_related('job_description')
+        )
+
+        # "candidate 2" / "cv #3" → positional, matching the ranking the user sees.
+        index_match = re.search(r'\b(?:candidate|applicant|cv|resume)\s*#?\s*(\d+)\b', question, re.I)
+        if index_match:
+            idx = int(index_match.group(1))
+            ordered = list(cv_qs.order_by('rank', '-role_fit_score')[:max(idx, 1)])
+            return [ordered[idx - 1]] if 0 < idx <= len(ordered) else []
+
+        # Otherwise match a name mentioned in the question against parsed CV names.
+        words = {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", question)}
+        if not words:
+            return []
+        hits = []
+        for cv in cv_qs.order_by('rank', '-role_fit_score')[:200]:
+            try:
+                parsed = json.loads(cv.parsed_json) if cv.parsed_json else {}
+            except (ValueError, TypeError):
+                continue
+            name = _get_parsed_name(parsed if isinstance(parsed, dict) else {})
+            if not name:
+                continue
+            name_parts = {p.lower() for p in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", name)}
+            if name_parts & words:
+                hits.append(cv)
+        return hits
 
     def _get_direct_answer(self, data: Dict[str, Any], question: str) -> str:
         """Build a direct answer from DB for count/list/detail questions. Handles global AND per-job queries."""
@@ -872,6 +1299,28 @@ Be practical and specific. Give actionable lists of questions recruiters can use
         # Try to find a matching job for job-specific questions
         # ────────────────────────────────────────────────────────────
         matched_job = _find_matching_job(jobs, question)
+
+        # The user named a role the company has no job for (e.g. "Laravel jobs" when
+        # only a MERN job exists). Answer that directly — falling through would hand
+        # the LLM every unrelated job and it would present those instead.
+        if not matched_job:
+            missing = _unmatched_job_topics(jobs, question)
+            if missing:
+                label = ', '.join(f"**{m.title()}**" for m in missing)
+                if not jobs:
+                    return (
+                        f"No job matching {label} was found — there are no jobs "
+                        f"in your account yet."
+                    )
+                listed = '\n'.join(
+                    f"- **{j.get('title')}** — {j.get('candidate_count', 0)} candidate(s)"
+                    for j in jobs[:15]
+                )
+                return (
+                    f"There is no job matching {label} in your account, so no "
+                    f"candidates have applied for it.\n\n"
+                    f"**Your current jobs ({len(jobs)}):**\n{listed}"
+                )
 
         # ════════════════════════════════════════════════════════════
         # JOB-SPECIFIC: Time slots
@@ -937,7 +1386,21 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                 if jqc:
                     parts = [f"{k}: {v}" for k, v in jqc.items() if v > 0]
                 detail = f" ({', '.join(parts)})" if parts else ""
-                return f"**{title}** has **{len(cands)}** candidate(s){detail}."
+                # Count everyone who applied, not just the AI-analysed ones.
+                pending_n = matched_job.get("pending_count", 0)
+                total_n = len(cands) + pending_n
+                answer = f"**{title}** has **{total_n}** candidate(s){detail}."
+                if pending_n:
+                    answer += (
+                        f"\n\n**{pending_n}** of them {'is' if pending_n == 1 else 'are'} "
+                        f"still awaiting AI analysis, so {'it has' if pending_n == 1 else 'they have'} "
+                        f"no score or decision yet:\n"
+                        + '\n'.join(
+                            f"- **{p.get('name')}** — {p.get('email') or 'no email'}"
+                            for p in matched_job.get("pending_applicants", [])[:15]
+                        )
+                    )
+                return answer
 
             # "best/top candidate for X"
             if "best" in q or "top" in q or "highest" in q or "rank" in q:
@@ -953,26 +1416,42 @@ Be practical and specific. Give actionable lists of questions recruiters can use
 
             # "list/show candidates for X"
             if any(x in q for x in ("list", "show", "who", "which", "tell", "give", "all")):
-                if not cands:
+                pending_list = matched_job.get("pending_applicants", [])
+                if not cands and not pending_list:
                     return f"No candidates found for **{title}**."
-                answer = f"**Candidates for {title}** ({len(cands)} total):\n\n"
+                total_n = len(cands) + len(pending_list)
+                answer = f"**Candidates for {title}** ({total_n} total):\n\n"
                 for i, c in enumerate(cands[:15], 1):
                     score = c.get("role_fit_score", "N/A")
                     decision = c.get("qualification_decision", "N/A")
                     answer += f"{i}. **{c['name']}** — Score: {score}, Decision: {decision}\n"
                 if len(cands) > 15:
-                    answer += f"\n... and {len(cands) - 15} more candidates"
+                    answer += f"\n... and {len(cands) - 15} more analysed candidates\n"
+                if pending_list:
+                    answer += "\n**Awaiting AI analysis** (no score/decision yet):\n"
+                    for p in pending_list[:15]:
+                        answer += f"- **{p.get('name')}** — {p.get('email') or 'no email'}\n"
+                    if len(pending_list) > 15:
+                        answer += f"\n... and {len(pending_list) - 15} more\n"
                 return answer.strip()
 
             # General "candidates for X" — list them
-            if cands:
-                answer = f"**{title}** has **{len(cands)}** candidate(s):\n\n"
+            pending_list = matched_job.get("pending_applicants", [])
+            if cands or pending_list:
+                total_n = len(cands) + len(pending_list)
+                answer = f"**{title}** has **{total_n}** candidate(s):\n\n"
                 for i, c in enumerate(cands[:10], 1):
                     score = c.get("role_fit_score", "N/A")
                     decision = c.get("qualification_decision", "N/A")
                     answer += f"{i}. **{c['name']}** — Score: {score}, Decision: {decision}\n"
                 if len(cands) > 10:
-                    answer += f"\n... and {len(cands) - 10} more"
+                    answer += f"\n... and {len(cands) - 10} more analysed\n"
+                if pending_list:
+                    answer += "\n**Awaiting AI analysis** (no score/decision yet):\n"
+                    for p in pending_list[:10]:
+                        answer += f"- **{p.get('name')}** — {p.get('email') or 'no email'}\n"
+                    if len(pending_list) > 10:
+                        answer += f"\n... and {len(pending_list) - 10} more\n"
                 return answer.strip()
             return f"No candidates found for **{title}**."
 
@@ -1076,10 +1555,13 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             ss = j.get("score_stats", {})
             if ss.get("max"):
                 answer += f"**Score Stats:** Avg={ss['avg']}, Max={ss['max']}, Min={ss['min']}  \n"
+            # Reaching this branch means the user asked for the job's details, so
+            # show the description and requirements in full rather than cutting
+            # them mid-sentence.
             if j.get("description"):
-                answer += f"\n## Description\n{j['description'][:500]}\n"
+                answer += f"\n## Description\n{j['description']}\n"
             if j.get("requirements"):
-                answer += f"\n## Requirements & Skills\n{j['requirements'][:500]}\n"
+                answer += f"\n## Requirements & Skills\n{j['requirements']}\n"
             return answer.strip()
 
         # ════════════════════════════════════════════════════════════
@@ -1150,9 +1632,9 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                     jqc = j.get("qualification_counts", {})
                     answer += f"- **Decisions:** INTERVIEW={jqc.get('INTERVIEW',0)}, HOLD={jqc.get('HOLD',0)}, REJECT={jqc.get('REJECT',0)}\n"
                     if j.get("description"):
-                        answer += f"- **Description:** {j['description'][:600]}\n"
+                        answer += f"- **Description:** {_shorten(j['description'], 600)}\n"
                     if j.get("requirements"):
-                        answer += f"- **Requirements:** {j['requirements'][:400]}\n"
+                        answer += f"- **Requirements:** {_shorten(j['requirements'], 400)}\n"
                     answer += "\n"
                 return answer.strip()
             else:
