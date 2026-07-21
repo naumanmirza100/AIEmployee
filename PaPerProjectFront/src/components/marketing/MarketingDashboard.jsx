@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -60,9 +61,23 @@ import Campaigns from './Campaigns';
 import CampaignFilterBar from './CampaignFilterBar';
 import Documents from './Documents';
 import Notifications from './Notifications';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '@/components/frontline/FrontlineTutorial';
-import { MARKETING_TOUR_STEPS, MARKETING_TOUR_KEY } from './marketingTourSteps';
-import { GraduationCap } from 'lucide-react';
+import FrontlineTutorial, { hasSeenTutorial, resetTutorial, markTutorialSeen } from '@/components/frontline/FrontlineTutorial';
+import HowItWorksModal from '@/components/common/HowItWorksModal';
+import HoverTip from '@/components/common/HoverTip';
+import {
+  MARKETING_TOUR_STEPS, MARKETING_TOUR_KEY,
+  MARKETING_HOWITWORKS_STEPS, MARKETING_HOWITWORKS_KEY,
+} from './marketingTourSteps';
+// Mail/Megaphone/Sparkles/Send/FileText/Bell/TrendingUp all come from the main
+// lucide block above; only GraduationCap and Users aren't imported yet.
+import { GraduationCap, Users } from 'lucide-react';
+
+// Resolve the how-it-works step icon names (strings) to real components.
+const MKT_HOWITWORKS_ICONS = { Mail, Megaphone, Users, Send, TrendingUp, Sparkles, BarChart3, FileText, Bell };
+const MKT_HOWITWORKS_STEPS = MARKETING_HOWITWORKS_STEPS.map((s) => ({
+  ...s,
+  icon: MKT_HOWITWORKS_ICONS[s.icon],
+}));
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -147,6 +162,9 @@ const MarketingDashboard = () => {
   const tabFromUrl = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'dashboard');
   const [tourOpen, setTourOpen] = useState(false);
+  const [howItWorksOpen, setHowItWorksOpen] = useState(false);
+  // Tab hover tooltip: { text, top, left } anchored above the hovered tab, or null.
+  const [tabTip, setTabTip] = useState(null);
   const [loading, setLoading] = useState(true);
   const [campaignsLoading, setCampaignsLoading] = useState(true);   // full spinner: first load / page change
   const [campaignsFiltering, setCampaignsFiltering] = useState(false); // subtle: search / filter refetch
@@ -198,18 +216,38 @@ const MarketingDashboard = () => {
     fetchStats();
   }, []);
 
-  // Auto-launch the guided tour the first time this user lands on the dashboard.
+  // First visit: show the high-level "How it works" modal first, then the tour.
+  // The modal explains WHAT the agent does; the tour walks the UI. Showing both at
+  // once would collide, so the tour only auto-launches once the modal is gone.
   useEffect(() => {
-    if (!hasSeenTutorial(MARKETING_TOUR_KEY)) {
+    const seenHow = hasSeenTutorial(MARKETING_HOWITWORKS_KEY);
+    const seenTour = hasSeenTutorial(MARKETING_TOUR_KEY);
+    if (!seenHow) {
+      const t = setTimeout(() => setHowItWorksOpen(true), 500);
+      return () => clearTimeout(t);
+    }
+    if (!seenTour) {
       const t = setTimeout(() => setTourOpen(true), 600);
       return () => clearTimeout(t);
     }
   }, []);
 
+  // Closing the modal marks it seen, then hands off to the tour if not yet taken.
+  const handleCloseHowItWorks = () => {
+    setHowItWorksOpen(false);
+    markTutorialSeen(MARKETING_HOWITWORKS_KEY);
+    if (!hasSeenTutorial(MARKETING_TOUR_KEY)) {
+      setTimeout(() => setTourOpen(true), 300);
+    }
+  };
+
   const handleReplayTour = () => {
     resetTutorial(MARKETING_TOUR_KEY);
     setTourOpen(true);
   };
+
+  // Let users re-open the "How it works" summary from the header any time.
+  const handleShowHowItWorks = () => setHowItWorksOpen(true);
 
   // Deep-link support: /marketing/dashboard?tab=email jumps straight to that tab,
   // including when navigating here again while already mounted on this route.
@@ -846,16 +884,28 @@ const MarketingDashboard = () => {
           <Megaphone className="h-5 w-5 text-[#a259ff]" />
           <h2 className="text-lg font-semibold text-white">Marketing Agent</h2>
         </div>
-        <button
-          type="button"
-          onClick={handleReplayTour}
-          data-tour-mkt="replay"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition"
-          style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', boxShadow: '0 0 8px 0 #a259ff55' }}
-        >
-          <GraduationCap className="h-3.5 w-3.5" />
-          Take the Tour
-        </button>
+        <div className="flex items-center gap-2">
+          {/* How it works — re-open the onboarding summary any time */}
+          <button
+            type="button"
+            onClick={handleShowHowItWorks}
+            title="How this agent works"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-white/15 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            How it works
+          </button>
+          <button
+            type="button"
+            onClick={handleReplayTour}
+            data-tour-mkt="replay"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition"
+            style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', boxShadow: '0 0 8px 0 #a259ff55' }}
+          >
+            <GraduationCap className="h-3.5 w-3.5" />
+            Take the Tour
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -936,19 +986,27 @@ const MarketingDashboard = () => {
             style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
           >
             {[
-              { value: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-              { value: 'campaigns', label: 'Campaigns', icon: Megaphone },
-              { value: 'email', label: 'Email', icon: Mail },
-              { value: 'qa', label: 'Q&A', icon: MessageSquare },
-              { value: 'research', label: 'Research', icon: Sparkles },
-              { value: 'documents', label: 'Documents', icon: FileText },
-              { value: 'notifications', label: 'Notifications', icon: Bell, badge: notificationUnreadCount },
-              { value: 'saved-graphs', label: 'Saved Graphs', icon: Sparkles },
+              { value: 'dashboard', label: 'Dashboard', icon: BarChart3, tip: 'Your overview — stats and your list of campaigns.' },
+              { value: 'campaigns', label: 'Campaigns', icon: Megaphone, tip: 'Create campaigns with AI and manage your whole list.' },
+              { value: 'email', label: 'Email', icon: Mail, tip: 'Connect and manage the accounts your campaigns send from.' },
+              { value: 'qa', label: 'Q&A', icon: MessageSquare, tip: 'Ask AI about your campaign results, or generate a chart.' },
+              { value: 'research', label: 'Research', icon: Sparkles, tip: 'Run AI market research to shape your next campaign.' },
+              { value: 'documents', label: 'Documents', icon: FileText, tip: 'Generate and store marketing documents with AI.' },
+              { value: 'notifications', label: 'Notifications', icon: Bell, badge: notificationUnreadCount, tip: 'Alerts and AI health checks for your campaigns.' },
+              { value: 'saved-graphs', label: 'Saved Graphs', icon: Sparkles, tip: 'Charts you saved from Q&A — reuse or pin them here.' },
             ].map((item) => (
               <TabsTrigger
                 key={item.value}
                 value={item.value}
                 data-tour-mkt={`tab-${item.value}`}
+                // Hover hint: anchor a themed tooltip above this tab. Handlers live
+                // on the trigger itself (not a wrapper) so Radix's tab keyboard
+                // nav and the grid layout stay intact.
+                onMouseEnter={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setTabTip({ text: item.tip, top: r.top - 8, left: r.left + r.width / 2 });
+                }}
+                onMouseLeave={() => setTabTip(null)}
                 className="w-full min-w-0 px-2 sm:px-3 py-2 text-sm font-medium rounded-md border transition-all duration-150 relative flex items-center justify-center gap-2"
                 style={activeTab === item.value
                   ? {
@@ -978,6 +1036,24 @@ const MarketingDashboard = () => {
               </TabsTrigger>
             ))}
           </TabsList>
+
+          {/* Tab hover tooltip — portalled, fixed above the hovered tab */}
+          {tabTip && createPortal(
+            <div
+              role="tooltip"
+              className="fixed z-[10000] pointer-events-none -translate-x-1/2 -translate-y-full"
+              style={{ top: tabTip.top, left: tabTip.left }}
+            >
+              <div className="relative max-w-[220px] rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl">
+                {tabTip.text}
+                <span
+                  className="absolute left-1/2 top-full -translate-x-1/2 h-2 w-2 rotate-45 border-b border-r border-[#3a295a] bg-[#161630]"
+                  style={{ marginTop: '-4px' }}
+                />
+              </div>
+            </div>,
+            document.body,
+          )}
         </div>
 
         <TabsContent value="dashboard" data-tour-mkt="page-dashboard" className="space-y-4">
@@ -993,23 +1069,27 @@ const MarketingDashboard = () => {
                     <CardTitle className="text-white">Marketing Overview</CardTitle>
                     {/* Main action buttons */}
                     <div className="flex flex-wrap gap-3">
-                      <Button
-                        size="sm"
-                        className="gap-2"
-                        onClick={() => setActiveTab('campaigns')}
-                      >
-                        <Plus className="h-5 w-5" />
-                        Create campaign
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                        onClick={() => setActiveTab('email')}
-                      >
-                        <Mail className="h-5 w-5" />
-                        Email accounts
-                      </Button>
+                      <HoverTip tip="Jump to the Campaigns tab to build a new campaign">
+                        <Button
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => setActiveTab('campaigns')}
+                        >
+                          <Plus className="h-5 w-5" />
+                          Create campaign
+                        </Button>
+                      </HoverTip>
+                      <HoverTip tip="Open the Email tab to manage your sending accounts">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => setActiveTab('email')}
+                        >
+                          <Mail className="h-5 w-5" />
+                          Email accounts
+                        </Button>
+                      </HoverTip>
                     </div>
                   </div>
                   <CardDescription className="text-white/60">
@@ -1979,6 +2059,16 @@ const MarketingDashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* First-visit "how it works" summary — auto-shown before the tour */}
+      <HowItWorksModal
+        open={howItWorksOpen}
+        onClose={handleCloseHowItWorks}
+        title="How the Marketing Agent works"
+        subtitle="What it does for you, automatically"
+        steps={MKT_HOWITWORKS_STEPS}
+        primaryLabel="Got it"
+      />
 
       {/* Guided tour — reuses the shared FrontlineTutorial overlay. */}
       <FrontlineTutorial
