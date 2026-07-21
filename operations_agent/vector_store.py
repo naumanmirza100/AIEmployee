@@ -64,7 +64,10 @@ _CACHE_LOCK = threading.Lock()
 
 
 def _index_dir() -> Path:
-    base = Path(getattr(settings, 'MEDIA_ROOT', '.')) / 'operations_vector_indexes'
+    # Pin under LOCAL_STORAGE_ROOT — MEDIA_ROOT is '' when S3 is on, which would
+    # otherwise drop the index files into the project root.
+    root = getattr(settings, 'LOCAL_STORAGE_ROOT', None) or getattr(settings, 'MEDIA_ROOT', '.') or '.'
+    base = Path(root) / 'operations_vector_indexes'
     base.mkdir(parents=True, exist_ok=True)
     return base
 

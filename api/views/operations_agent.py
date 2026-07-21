@@ -58,7 +58,7 @@ def upload_document(request):
             return Response({'status': 'error', 'message': 'File too large. Maximum 50 MB.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Save to disk
-        upload_dir = Path(settings.MEDIA_ROOT) / 'operations' / 'documents' / str(company.id)
+        upload_dir = Path(settings.LOCAL_STORAGE_ROOT) / 'operations' / 'documents' / str(company.id)
         upload_dir.mkdir(parents=True, exist_ok=True)
 
         # Hash for duplicate detection
@@ -360,7 +360,7 @@ def upload_and_summarize(request):
             return Response({'status': 'error', 'message': 'File too large. Maximum 50 MB.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Save to temp location
-        upload_dir = Path(settings.MEDIA_ROOT) / 'operations' / 'summaries_tmp'
+        upload_dir = Path(settings.LOCAL_STORAGE_ROOT) / 'operations' / 'summaries_tmp'
         upload_dir.mkdir(parents=True, exist_ok=True)
 
         file_hash = hashlib.sha256(uploaded_file.read()).hexdigest()[:16]

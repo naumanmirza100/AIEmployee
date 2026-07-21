@@ -194,15 +194,26 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             doc, extracted_text, page_count, resolved_doc_type,
         )
 
-        # 8. Stamp final RAG state + invalidate FAISS / answer cache
+        # 8. Drop the source file — everything we need (parsed_text, chunks,
+        #    summary, insights) is already in the DB, and reindex works from
+        #    parsed_text. Keeping the binary just wastes disk.
+        try:
+            src = Path(file_path)
+            if src.exists():
+                src.unlink()
+        except OSError:
+            logger.warning("Operations: could not delete source file %s", file_path)
+
+        # 9. Stamp final RAG state + invalidate FAISS / answer cache
         doc.chunks_total = chunk_count
         doc.chunks_processed = chunk_count
         doc.is_indexed = embedded
         doc.embedding_model = embed_model or ''
         doc.processing_status = 'ready'
+        doc.file = ''  # file removed above — don't advertise a dead path
         doc.save(update_fields=[
             'chunks_total', 'chunks_processed', 'is_indexed',
-            'embedding_model', 'processing_status', 'updated_at',
+            'embedding_model', 'processing_status', 'file', 'updated_at',
         ])
         _invalidate_operations_indexes(doc.company_id, embedded)
 
