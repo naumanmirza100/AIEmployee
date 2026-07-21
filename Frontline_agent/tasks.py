@@ -146,6 +146,15 @@ def process_document(self, document_id):
                 mark_index_dirty(document.company_id)
         except Exception:
             logger.exception("process_document: failed to mark vector index dirty")
+
+        # Drop the answer cache for this company — cached answers may now be
+        # stale (the new doc might have better content on some topics).
+        try:
+            if document.company_id:
+                from core.Frontline_agent.frontline_agent import invalidate_answer_cache_for_company
+                invalidate_answer_cache_for_company(document.company_id)
+        except Exception:
+            logger.exception("process_document: failed to invalidate answer cache")
         logger.info("process_document: doc %s ready (%d chunks)", document_id, document.chunks_total)
         return {'status': 'ready', 'document_id': document_id, 'chunks': document.chunks_total}
 

@@ -152,6 +152,12 @@ class KnowledgeService:
         self.db_service = PayPerProjectDatabaseService()
         self.company_id = company_id
         self.embedding_service = EmbeddingService()
+        # Sub-phase timing for the most recent search — bubbled up so the
+        # frontend / logs can pinpoint whether retrieval time is going into
+        # FAISS, the JSON-scan fallback, keyword SQL, or the LLM re-rank.
+        # Keys: pgsql_faqs, faiss, semantic_fallback, keyword, rerank, ...
+        self.last_retrieval_timing: dict = {}
+        self.last_retrieval_path: str = ''
         logger.info(f"KnowledgeService initialized (company_id: {company_id}, embeddings: {self.embedding_service.is_available()})")
     
     def search_knowledge(
@@ -278,6 +284,14 @@ class KnowledgeService:
             from django.utils import timezone
             from datetime import timedelta
             import json
+            import time as _time
+
+            # Reset per-call sub-phase timings — bubbled up to answer_question
+            # so we can pinpoint what's slow (FAISS build / JSON-scan / keyword
+            # SQL / re-rank / etc.).
+            _t0 = _time.time()
+            self.last_retrieval_timing = {}
+            self.last_retrieval_path = ''
 
             # Base document filter
             all_documents = Document.objects.filter(
@@ -305,10 +319,12 @@ class KnowledgeService:
                 cutoff = timezone.now() - timedelta(days=int(max_age_days))
                 all_documents = all_documents.filter(updated_at__gte=cutoff)
                 
+            _t = _time.time()
             doc_ids = list(all_documents.values_list('id', flat=True))
+            self.last_retrieval_timing['doc_filter'] = int((_time.time() - _t) * 1000)
             if not doc_ids:
                 return []
-                
+
             all_chunks = DocumentChunk.objects.filter(document_id__in=doc_ids).select_related('document')
 
             # 1. Semantic Search
@@ -318,19 +334,31 @@ class KnowledgeService:
             semantic_results = []
             if self.embedding_service.is_available():
                 try:
+                    _t = _time.time()
                     logger.info("Generating query embedding for hybrid search")
-                    query_embedding = self.embedding_service.generate_embedding(query)
-                    if query_embedding:
+                    # Use the module-level query-embedding cache so repeat
+                    # questions on the same doc scope skip the embedding API.
+                    query_embedding = _fl_cache_get_query_vec(query, self.embedding_service)
+                    self.last_retrieval_timing['query_embed'] = int((_time.time() - _t) * 1000)
+                    if query_embedding is not None:
+                        _t = _time.time()
+                        # `_fl_cache_get_query_vec` returns a numpy array when
+                        # numpy is available; FAISS + fallback both accept
+                        # array-likes so pass through unchanged.
                         semantic_results = self._semantic_search(
                             query_embedding=query_embedding,
                             company_id=company_id,
                             allowed_doc_ids=doc_ids,
                             all_chunks=all_chunks,
                         )
+                        self.last_retrieval_timing['semantic'] = int((_time.time() - _t) * 1000)
                 except Exception as e:
                     logger.warning(f"Semantic search failed: {e}")
-            
+            else:
+                self.last_retrieval_path += 'no_embeddings|'
+
             # 2. Keyword Search
+            _t = _time.time()
             keyword_results = []
             matching_chunks = all_chunks.filter(chunk_text__icontains=query)[:50]
             for chunk in matching_chunks:
@@ -349,7 +377,8 @@ class KnowledgeService:
                     'document_type': chunk.document.document_type,
                     'page_number': chunk.page_number,
                 })
-                
+            self.last_retrieval_timing['keyword'] = int((_time.time() - _t) * 1000)
+
             # 3. Reciprocal Rank Fusion (RRF)
             # RRF Score = sum(1 / (k + rank)) — good for ordering, but the magnitude
             # is tiny (top hit ≈ 0.016) and MUST NOT be compared against the
@@ -410,10 +439,43 @@ class KnowledgeService:
                         'search_method': 'keyword_fallback'
                     })
 
-            # 5. LLM Re-Ranking
-            if results and self.embedding_service.is_available():
-                results = self._llm_rerank(query, results, top_k=max_results)
-                
+            # 5. LLM Re-Ranking (conditional).
+            # Skip re-rank when the top semantic hit is already strongly matched
+            # (score >= 0.55) — the extra LLM round-trip is the single biggest
+            # latency source in the Q&A pipeline (often 3-8s on its own), and
+            # for confident matches it doesn't change the top result. Also skip
+            # if we only have a handful of candidates: there's nothing to rank.
+            RERANK_SKIP_SCORE = float(getattr(
+                __import__('django.conf', fromlist=['settings']).settings,
+                'FRONTLINE_RERANK_SKIP_SCORE', 0.55,
+            ))
+            top_semantic = max(
+                (r.get('semantic_score') or 0.0) for r in results
+            ) if results else 0.0
+            should_rerank = (
+                results
+                and self.embedding_service.is_available()
+                and len(results) > 3
+                and top_semantic < RERANK_SKIP_SCORE
+            )
+            if should_rerank:
+                _t = _time.time()
+                # Cap candidates going into re-rank so the prompt stays small.
+                results = self._llm_rerank(query, results[:8], top_k=max_results)
+                self.last_retrieval_timing['rerank'] = int((_time.time() - _t) * 1000)
+            else:
+                self.last_retrieval_timing['rerank'] = 0
+                if results:
+                    logger.info(
+                        "Skipping LLM re-rank (top_semantic=%.3f, candidates=%d)",
+                        top_semantic, len(results),
+                    )
+
+            self.last_retrieval_timing['search_docs_total'] = int((_time.time() - _t0) * 1000)
+            logger.info(
+                "Retrieval breakdown (ms): %s path=%s",
+                self.last_retrieval_timing, self.last_retrieval_path or 'ok',
+            )
             return results[:max_results]
         except Exception as e:
             logger.error(f"Document search failed: {e}", exc_info=True)
@@ -425,21 +487,49 @@ class KnowledgeService:
         else the legacy JSON-scan path. Returns a list of chunk dicts shaped
         for RRF (chunk_id, document_id, score, content, title, ...)."""
         import json as _json
+        import time as _time
         from Frontline_agent import vector_store as _vs
 
         # ---- FAISS path ---------------------------------------------------
         if _vs.FAISS_AVAILABLE:
+            _t_faiss = _time.time()
             store = _vs.get_store(company_id)
+            store_ready_ms = int((_time.time() - _t_faiss) * 1000)
             if store is not None:
+                self.last_retrieval_path += f'faiss(store_ready={store_ready_ms}ms)|'
                 # Candidate set = chunks whose parent document survived our filters.
+                _t = _time.time()
                 candidate_chunk_ids = set(all_chunks.values_list('id', flat=True))
+                self.last_retrieval_timing['faiss_candidates'] = int((_time.time() - _t) * 1000)
+                _t = _time.time()
                 hits = store.search(query_embedding, k=50,
                                     candidate_chunk_ids=candidate_chunk_ids)
+                self.last_retrieval_timing['faiss_search'] = int((_time.time() - _t) * 1000)
                 if hits:
+                    self.last_retrieval_path += f'hits={len(hits)}|'
                     hit_ids = [cid for cid, _ in hits]
-                    # Single DB fetch for metadata on the small top-k set.
-                    chunk_map = {c.id: c for c in all_chunks.filter(id__in=hit_ids)}
+
+                    # DB fetch for chunk metadata. Explicitly `.only()` the
+                    # columns we need so we don't drag chunk_text * 4KB for
+                    # dozens of hits into the ORM's row cache. Also refetch
+                    # the queryset instead of chaining off `all_chunks`
+                    # (chained querysets with select_related on some MSSQL
+                    # drivers have had pathological plan-cache issues).
+                    _t = _time.time()
+                    from Frontline_agent.models import DocumentChunk as _DC
+                    chunk_qs = (_DC.objects
+                                .filter(id__in=hit_ids)
+                                .select_related('document')
+                                .only('id', 'document_id', 'chunk_text',
+                                      'chunk_index', 'page_number',
+                                      'document__title', 'document__file_format',
+                                      'document__document_type'))
+                    chunk_map = {c.id: c for c in chunk_qs}
+                    self.last_retrieval_timing['faiss_chunk_fetch'] = int((_time.time() - _t) * 1000)
+
+                    _t = _time.time()
                     out = []
+                    dropped_junk = 0
                     for cid, score in hits:
                         c = chunk_map.get(cid)
                         if c is None:
@@ -448,6 +538,7 @@ class KnowledgeService:
                         # existed can still have junk vectors in FAISS. Drop
                         # them from the output rather than rebuilding indices.
                         if _fl_is_junk_chunk(c.id, c.chunk_text):
+                            dropped_junk += 1
                             continue
                         page_label = f" p.{c.page_number}" if c.page_number else ""
                         out.append({
@@ -460,6 +551,8 @@ class KnowledgeService:
                             'document_type': c.document.document_type,
                             'page_number': c.page_number,
                         })
+                    self.last_retrieval_timing['faiss_output_build'] = int((_time.time() - _t) * 1000)
+                    self.last_retrieval_path += f'kept={len(out)},junk={dropped_junk}|'
                     return out
 
         # ---- Legacy JSON-scan fallback -----------------------------------
@@ -468,6 +561,16 @@ class KnowledgeService:
         # Optimised path: numpy cosine, in-process parsed-embedding cache, and
         # skip TOC/junk chunks. Query embedding is cached at the caller site
         # (see `_search_documents`) so passing it through here doesn't re-embed.
+        if not _vs.FAISS_AVAILABLE:
+            self.last_retrieval_path += 'json_scan(FAISS_NOT_INSTALLED)|'
+        else:
+            # FAISS was available but returned no hits — this happens on cold
+            # start (index not built yet) or dim mismatch.
+            self.last_retrieval_path += 'json_scan(faiss_empty)|'
+        _t_scan = _time.time()
+        scanned = 0
+        skipped_junk = 0
+        skipped_no_vec = 0
         semantic_results = []
         # Cache the query vector in a numpy form once for the whole loop.
         if _HAS_NUMPY:
@@ -486,10 +589,13 @@ class KnowledgeService:
                   'document__file_format', 'document__document_type')
         )
         for chunk in chunks_with_embeddings.iterator(chunk_size=500):
+            scanned += 1
             if _fl_is_junk_chunk(chunk.id, chunk.chunk_text):
+                skipped_junk += 1
                 continue
             cvec = _fl_cache_get_chunk_vec(chunk.id, chunk.embedding)
             if cvec is None:
+                skipped_no_vec += 1
                 continue
             similarity = _fl_cosine(qvec, cvec)
             if similarity is None:
@@ -511,6 +617,14 @@ class KnowledgeService:
                 'page_number': chunk.page_number,
             })
         semantic_results.sort(key=lambda x: x['score'], reverse=True)
+        scan_ms = int((_time.time() - _t_scan) * 1000)
+        self.last_retrieval_timing['json_scan'] = scan_ms
+        self.last_retrieval_timing['json_scan_chunks'] = scanned
+        logger.info(
+            "JSON-scan fallback: scanned=%d matched=%d skipped_junk=%d "
+            "skipped_no_vec=%d elapsed=%dms",
+            scanned, len(semantic_results), skipped_junk, skipped_no_vec, scan_ms,
+        )
         return semantic_results[:50]
 
     def _llm_rerank(self, query: str, candidates: List[Dict], top_k: int) -> List[Dict]:
@@ -524,9 +638,11 @@ class KnowledgeService:
             if not candidates:
                 return candidates
 
+            # Keep the re-rank prompt tight. 400 chars per candidate is plenty
+            # for the model to judge relevance and keeps time-to-first-token low.
             chunks_text = ""
             for i, cand in enumerate(candidates):
-                chunks_text += f"\n--- Chunk {i} ---\n{cand['content'][:1000]}\n"
+                chunks_text += f"\n--- Chunk {i} ---\n{(cand.get('content') or '')[:400]}\n"
 
             prompt = f"""Given the user query, evaluate the following document chunks.
 For each chunk, score it from 0 to 10 on how well it directly answers or contains information highly relevant to the query.
@@ -578,13 +694,16 @@ Chunks:
                 llm_client = _openai.OpenAI(api_key=api_key)
                 rerank_model = rerank_model_openai
 
+            # Output is just a JSON list of ~8 integers — cap max_tokens hard
+            # so the model can't ramble and inflate latency.
             response = llm_client.chat.completions.create(
                 model=rerank_model,
                 messages=[
                     {"role": "system", "content": "You are a precise document retrieval evaluator. Output ONLY a valid JSON list of integers."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.0
+                temperature=0.0,
+                max_tokens=80,
             )
 
             # Decrement company quota for this rerank call
