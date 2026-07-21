@@ -21,6 +21,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import * as operationsService from '@/services/operationsAgentService';
+import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager';
 
 // ─── Helpers ────────────────────────────────
 const FILE_TYPE_CONFIG = {
@@ -90,6 +91,7 @@ const StatCard = ({ icon: Icon, label, value, color, sub }) => (
 // ═════════════════════════════════════════════
 const DocumentProcessing = () => {
   const { toast } = useToast();
+  const { startUpload: startBackgroundUpload } = useBackgroundUpload();
   const navigate = useNavigate();
 
   const [documents, setDocuments] = useState([]);
@@ -156,36 +158,37 @@ const DocumentProcessing = () => {
 
   useEffect(() => { fetchDocuments(); }, [fetchDocuments]);
 
-  // ─── Upload ───────────────────────────────
-  const handleUpload = async () => {
+  // ─── Upload (non-blocking, via the shared BackgroundUploadManager) ────
+  const handleUpload = () => {
     if (!uploadFile) {
       toast({ title: 'Error', description: 'Please select a file', variant: 'destructive' });
       return;
     }
-    try {
-      setUploading(true);
-      const res = await operationsService.uploadDocument(uploadFile, uploadTitle, uploadTags);
-      toast({ title: 'Document Processed', description: `"${res.document?.title || uploadFile.name}" uploaded and analyzed successfully` });
-      setShowUpload(false);
-      setUploadFile(null);
-      setUploadTitle('');
-      setUploadTags('');
-      // Point the user at the new document's details.
-      if (res.document?.id != null) setHighlightDocId(res.document.id);
-      setPage(1);
-      fetchDocuments();
-    } catch (e) {
-      const isHardBlock = e?.status === 402 || e?.status === 403 || e?.data?.hard_block;
-      toast({
-        title: isHardBlock ? 'Upload blocked' : 'Upload Failed',
-        description: isHardBlock
-          ? (e?.message || 'API key or token quota issue. Check your API Keys settings.')
-          : (e?.message || 'Something went wrong'),
-        variant: 'destructive',
-      });
-    } finally {
-      setUploading(false);
-    }
+    const file = uploadFile;
+    const title = uploadTitle || file.name;
+    const tags = uploadTags;
+
+    startBackgroundUpload({
+      title,
+      agent: 'operations',
+      // Reshape the operations response into the manager's { data: {...} } shape.
+      upload: (onProgress) =>
+        operationsService.uploadDocument(file, title, tags, { onProgress })
+          .then((res) => ({ data: res.document || {} })),
+      poll: (documentId) => operationsService.getDocumentStatus(documentId),
+      onDone: (statusRes) => {
+        const did = statusRes?.data?.id;
+        if (did != null) setHighlightDocId(did);
+        setPage(1);
+        fetchDocuments();
+      },
+    });
+
+    // The pill takes over from here — close the dialog immediately.
+    setShowUpload(false);
+    setUploadFile(null);
+    setUploadTitle('');
+    setUploadTags('');
   };
 
   // ─── Delete ───────────────────────────────

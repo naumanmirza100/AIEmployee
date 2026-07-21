@@ -51,6 +51,25 @@ class OperationsDocument(models.Model):
     is_processed = models.BooleanField(default=False)
     processing_error = models.TextField(blank=True)
     processed_at = models.DateTimeField(null=True, blank=True)
+
+    # ── RAG / async indexing state (mirrors HRDocument) ──
+    # `is_processed` stays for backwards compatibility; `processing_status`
+    # drives the async pipeline + the frontend status poll.
+    PROCESSING_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('ready', 'Ready'),
+        ('failed', 'Failed'),
+    ]
+    processing_status = models.CharField(
+        max_length=20, choices=PROCESSING_STATUS_CHOICES,
+        default='pending', db_index=True,
+    )
+    chunks_processed = models.IntegerField(default=0)
+    chunks_total = models.IntegerField(default=0)
+    is_indexed = models.BooleanField(default=False)
+    embedding_model = models.CharField(max_length=100, blank=True, default='')
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -64,6 +83,7 @@ class OperationsDocument(models.Model):
                 fields=['company', 'is_processed', '-created_at'],
                 name='ops_doc_company_proc_created',
             ),
+            models.Index(fields=['processing_status'], name='ops_doc_proc_status'),
         ]
 
     def __str__(self):
@@ -77,6 +97,7 @@ class OperationsDocumentChunk(models.Model):
     )
     chunk_index = models.PositiveIntegerField()
     content = models.TextField()
+    section_heading = models.CharField(max_length=300, blank=True, default='')
     page_number = models.PositiveIntegerField(null=True, blank=True)
     embedding = models.JSONField(null=True, blank=True)
     token_count = models.PositiveIntegerField(default=0)

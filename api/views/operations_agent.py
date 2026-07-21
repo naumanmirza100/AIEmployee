@@ -89,37 +89,101 @@ def upload_document(request):
                 'document_id': existing.id,
             }, status=status.HTTP_409_CONFLICT)
 
-        # Process with agent
+        # Fail fast on a bad/missing API key BEFORE we background the work, so
+        # the client gets a real error instead of a doc stuck in 'processing'.
+        from core.api_key_service import resolve_for_call
+        resolve_for_call(company, 'operations_agent')
+
+        # Create a pending placeholder so the client can poll status immediately.
+        placeholder = OperationsDocument.objects.create(
+            company=company,
+            uploaded_by=company_user,
+            title=title or Path(uploaded_file.name).stem,
+            original_filename=uploaded_file.name,
+            file=str(file_path),
+            file_type='other',
+            file_size=uploaded_file.size,
+            tags=tags,
+            is_processed=False,
+            processing_status='pending',
+        )
+
+        # Process in the background (thread — not Celery — because the pipeline
+        # needs the per-company key resolved from this request context).
         from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
+        from operations_agent.tasks import process_document_in_background
         agent = DocumentProcessingAgent()
         agent.company_id = company.id
         agent.agent_key_name = 'operations_agent'
-        result = agent.process(
-            action='process_file',
+        process_document_in_background(
+            agent=agent,
             file_path=str(file_path),
             original_filename=uploaded_file.name,
             company_id=company.id,
             uploaded_by_id=company_user.id,
+            existing_doc_id=placeholder.id,
             title=title,
             tags=tags,
         )
 
-        if not result.get('success'):
-            # Clean up on failure
-            if file_path.exists():
-                os.remove(file_path)
-            return Response({'status': 'error', 'message': result.get('error', 'Processing failed')}, status=status.HTTP_400_BAD_REQUEST)
-
         return Response({
-            'status': 'success',
-            'message': 'Document uploaded and processed successfully',
-            'document': result['document'],
-        }, status=status.HTTP_201_CREATED)
+            'status': 'accepted',
+            'message': 'Document uploaded — processing in the background.',
+            'document': {
+                'id': placeholder.id,
+                'title': placeholder.title,
+                'processing_status': placeholder.processing_status,
+            },
+        }, status=status.HTTP_202_ACCEPTED)
 
     except KeyServiceError:
         raise
     except Exception as e:
         logger.error(f'Upload document error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_document_status(request, document_id):
+    """Lightweight processing-status poll for a document.
+
+    Deliberately minimal — the frontend polls this every ~1.5s during indexing,
+    so it does no heavy work and writes nothing (no access log).
+    """
+    try:
+        company = request.user.company
+        doc = OperationsDocument.objects.filter(
+            company=company, id=document_id,
+        ).only(
+            'id', 'processing_status', 'chunks_processed', 'chunks_total',
+            'processing_error', 'is_indexed', 'is_processed', 'updated_at',
+        ).first()
+        if not doc:
+            return Response({'status': 'error', 'message': 'Document not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        total = doc.chunks_total or 0
+        done = doc.chunks_processed or 0
+        percent = 100 if doc.processing_status == 'ready' else (
+            int((done / total) * 100) if total else (0 if doc.processing_status != 'failed' else 0)
+        )
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': doc.id,
+                'processing_status': doc.processing_status,
+                'chunks_processed': done,
+                'chunks_total': total,
+                'percent': percent,
+                'processing_error': doc.processing_error or '',
+                'is_indexed': doc.is_indexed,
+                'updated_at': doc.updated_at.isoformat() if doc.updated_at else None,
+            },
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f'Document status error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -795,7 +859,12 @@ def ask_qa_question(request):
                 role='assistant',
                 content=answer_text,
                 sources=sources,
-                response_data={'success': bool(result.get('success'))},
+                # Nest timing inside response_data so it survives chat re-fetch.
+                response_data={
+                    'success': bool(result.get('success')),
+                    'timing_ms': result.get('timing_ms') or {},
+                    'cache_hit': bool(result.get('cache_hit')),
+                },
             )
 
             # Title the chat from its first exchange only.
@@ -813,9 +882,12 @@ def ask_qa_question(request):
                 'content': answer_text,
                 'sources': sources,
                 'created_at': assistant_msg.created_at.isoformat(),
+                'responseData': assistant_msg.response_data,
             },
             'success': bool(result.get('success')),
             'error': result.get('error'),
+            'timing_ms': result.get('timing_ms') or {},
+            'cache_hit': bool(result.get('cache_hit')),
         })
 
     except KeyServiceError:

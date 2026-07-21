@@ -350,7 +350,9 @@ function UploadRow({ u, onDismiss }) {
           <span className={`text-[9px] px-1.5 py-[1px] rounded uppercase tracking-wider font-semibold ${
             u.agent === 'hr'
               ? 'bg-blue-500/15 text-blue-200 border border-blue-400/25'
-              : 'bg-violet-500/15 text-violet-200 border border-violet-400/25'
+              : u.agent === 'operations'
+                ? 'bg-amber-500/15 text-amber-200 border border-amber-400/25'
+                : 'bg-violet-500/15 text-violet-200 border border-violet-400/25'
           }`}>
             {u.agent}
           </span>

@@ -21,6 +21,25 @@ CHUNK_SIZE = 1000       # ~1000 chars per chunk
 CHUNK_OVERLAP = 150     # overlap between chunks
 
 
+def _invalidate_operations_indexes(company_id, has_embeddings: bool) -> None:
+    """After a doc goes live, rebuild the FAISS index and clear the answer cache
+    for its company. Both are best-effort — a cache miss must never break an
+    otherwise successful upload."""
+    if not company_id:
+        return
+    if has_embeddings:
+        try:
+            from operations_agent.vector_store import mark_index_dirty
+            mark_index_dirty(company_id)
+        except Exception:
+            logger.exception("Operations: failed to mark FAISS index dirty")
+    try:
+        from operations_agent.agents.knowledge_qa_agent import invalidate_answer_cache_for_company
+        invalidate_answer_cache_for_company(company_id)
+    except Exception:
+        logger.exception("Operations: failed to invalidate answer cache")
+
+
 class DocumentProcessingAgent(MarketingBaseAgent):
     """
     Processes uploaded documents: extracts text, metadata, entities,
@@ -69,28 +88,52 @@ class DocumentProcessingAgent(MarketingBaseAgent):
     # ------------------------------------------------------------------
     def _process_file(self, file_path: str, original_filename: str,
                       company_id: int, uploaded_by_id: int,
-                      title: str = '', tags: str = '') -> Dict:
-        """Full pipeline: validate → extract → classify → entities → chunk → save."""
+                      title: str = '', tags: str = '',
+                      existing_doc_id: int = None) -> Dict:
+        """Full pipeline: validate → extract → classify → entities → chunk → save.
+
+        When ``existing_doc_id`` is given (async upload flow), that placeholder
+        row is stamped ``processing`` and updated in place instead of creating a
+        new one; failures stamp it ``failed`` so the status poll can report them.
+        """
         from operations_agent.models import OperationsDocument, OperationsDocumentChunk
         from core.models import Company, CompanyUser
+
+        def _fail(doc_row, message):
+            """Stamp a placeholder row failed (async flow) and return an error."""
+            if doc_row is not None:
+                try:
+                    doc_row.processing_status = 'failed'
+                    doc_row.processing_error = str(message)[:2000]
+                    doc_row.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
+                except Exception:
+                    logger.exception("Operations: failed to stamp doc %s as failed", getattr(doc_row, 'id', '?'))
+            return {'success': False, 'error': message}
+
+        placeholder = None
+        if existing_doc_id:
+            placeholder = OperationsDocument.objects.filter(id=existing_doc_id).first()
+            if placeholder:
+                placeholder.processing_status = 'processing'
+                placeholder.save(update_fields=['processing_status', 'updated_at'])
 
         # 1. Validate
         ext = Path(original_filename).suffix.lower()
         file_type = self.SUPPORTED_EXTENSIONS.get(ext)
         if not file_type:
-            return {'success': False, 'error': f'Unsupported file type: {ext}. Supported: {", ".join(self.SUPPORTED_EXTENSIONS.keys())}'}
+            return _fail(placeholder, f'Unsupported file type: {ext}. Supported: {", ".join(self.SUPPORTED_EXTENSIONS.keys())}')
 
         file_size = os.path.getsize(file_path)
         if file_size > self.MAX_FILE_SIZE:
-            return {'success': False, 'error': f'File too large ({file_size / 1024 / 1024:.1f} MB). Max: 50 MB'}
+            return _fail(placeholder, f'File too large ({file_size / 1024 / 1024:.1f} MB). Max: 50 MB')
 
         # 2. Extract text
         success, extracted_text, page_count, error = self._extract_text(file_path, file_type)
         if not success:
-            return {'success': False, 'error': error}
+            return _fail(placeholder, error)
 
         if not extracted_text or not extracted_text.strip():
-            return {'success': False, 'error': 'No text could be extracted from this document'}
+            return _fail(placeholder, 'No text could be extracted from this document')
 
         # 3. Auto-classify document type via LLM
         doc_type = self._classify_document(text=extracted_text[:3000])
@@ -116,14 +159,15 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         company = Company.objects.get(pk=company_id)
         uploaded_by = CompanyUser.objects.get(pk=uploaded_by_id) if uploaded_by_id else None
 
-        doc = OperationsDocument.objects.create(
+        resolved_doc_type = doc_type.get('document_type', 'other') if isinstance(doc_type, dict) else 'other'
+        doc_fields = dict(
             company=company,
             uploaded_by=uploaded_by,
             title=title or Path(original_filename).stem,
             original_filename=original_filename,
             file=file_path,
             file_type=file_type,
-            document_type=doc_type.get('document_type', 'other') if isinstance(doc_type, dict) else 'other',
+            document_type=resolved_doc_type,
             file_size=file_size,
             page_count=page_count,
             parsed_text=extracted_text,
@@ -134,26 +178,39 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             tags=tags,
             is_processed=True,
             processed_at=timezone.now(),
+            processing_status='processing',
+        )
+        if placeholder is not None:
+            # Async flow: fill in the pre-created placeholder row.
+            for k, v in doc_fields.items():
+                setattr(placeholder, k, v)
+            placeholder.save()
+            doc = placeholder
+        else:
+            doc = OperationsDocument.objects.create(**doc_fields)
+
+        # 7. Chunk text (section-aware, TOC/junk filtered) + embed + save
+        chunk_count, embedded, embed_model = self._chunk_embed_and_store(
+            doc, extracted_text, page_count, resolved_doc_type,
         )
 
-        # 7. Chunk text
-        chunks = self._chunk_text(extracted_text, page_count)
-        chunk_objs = []
-        for chunk_data in chunks:
-            chunk_objs.append(OperationsDocumentChunk(
-                document=doc,
-                chunk_index=chunk_data['index'],
-                content=chunk_data['content'],
-                page_number=chunk_data.get('page'),
-                token_count=len(chunk_data['content'].split()),
-            ))
-        if chunk_objs:
-            OperationsDocumentChunk.objects.bulk_create(chunk_objs)
+        # 8. Stamp final RAG state + invalidate FAISS / answer cache
+        doc.chunks_total = chunk_count
+        doc.chunks_processed = chunk_count
+        doc.is_indexed = embedded
+        doc.embedding_model = embed_model or ''
+        doc.processing_status = 'ready'
+        doc.save(update_fields=[
+            'chunks_total', 'chunks_processed', 'is_indexed',
+            'embedding_model', 'processing_status', 'updated_at',
+        ])
+        _invalidate_operations_indexes(doc.company_id, embedded)
 
         self.log_action('process_file', {
             'document_id': doc.id,
             'filename': original_filename,
-            'chunks': len(chunk_objs),
+            'chunks': chunk_count,
+            'embedded': embedded,
         })
 
         return {
@@ -165,7 +222,7 @@ class DocumentProcessingAgent(MarketingBaseAgent):
                 'document_type': doc.document_type,
                 'page_count': page_count,
                 'word_count': metadata['word_count'],
-                'chunks_created': len(chunk_objs),
+                'chunks_created': chunk_count,
                 'entities': doc.entities,
                 'summary': summary,
                 'key_insights': key_insights,
@@ -287,26 +344,105 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             return False, '', 0, f'Text extraction failed: {e}'
 
     # ------------------------------------------------------------------
-    # Chunking
+    # Chunking + embedding (RAG)
     # ------------------------------------------------------------------
-    def _chunk_text(self, text: str, page_count: int) -> List[Dict]:
-        """Split text into overlapping chunks."""
-        chunks = []
-        idx = 0
-        start = 0
-        while start < len(text):
-            end = start + CHUNK_SIZE
-            chunk_content = text[start:end]
-            # Estimate page number
-            page = min(page_count, max(1, int((start / max(1, len(text))) * page_count) + 1))
-            chunks.append({
-                'index': idx,
-                'content': chunk_content,
-                'page': page,
-            })
-            idx += 1
-            start = end - CHUNK_OVERLAP
-        return chunks
+    def _chunk_embed_and_store(self, doc, text: str, page_count: int,
+                               document_type: str):
+        """Chunk (section-aware, TOC filtered), embed in batches, and persist.
+
+        Returns ``(chunk_count, embedded_bool, embedding_model)``. Falls back to
+        no-embedding storage when the embedding provider is unavailable, so the
+        keyword retrieval path still works. Mirrors the HR/Frontline pipeline.
+        """
+        from operations_agent.models import OperationsDocumentChunk
+
+        chunk_pairs = self._chunk_pairs(text, page_count, document_type)
+        if not chunk_pairs:
+            return 0, False, ''
+
+        # Embedding is optional — the retriever falls back to keyword search
+        # when a chunk has no vector. Provider is env-keyed and shared across
+        # HR / Frontline / Operations.
+        embedding_service = None
+        has_embeddings = False
+        embed_model = ''
+        try:
+            from core.Frontline_agent.embedding_service import EmbeddingService
+            embedding_service = EmbeddingService()
+            has_embeddings = embedding_service.is_available()
+            embed_model = getattr(embedding_service, 'embedding_model', '') or ''
+        except Exception:
+            logger.warning("Operations: embedding service unavailable; storing chunks without vectors")
+
+        texts = [c for c, _h, _p in chunk_pairs]
+        embeddings = [None] * len(texts)
+        if has_embeddings:
+            batch_size = 20
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
+                try:
+                    batch_vecs = embedding_service.generate_embeddings_batch(batch)
+                except Exception as exc:
+                    logger.warning("Operations embedding batch failed: %s", exc)
+                    batch_vecs = [None] * len(batch)
+                for j, v in enumerate(batch_vecs or []):
+                    embeddings[i + j] = v
+
+        rows = []
+        any_vector = False
+        for i, (content, heading, page) in enumerate(chunk_pairs):
+            emb = embeddings[i]
+            if emb:
+                any_vector = True
+            rows.append(OperationsDocumentChunk(
+                document=doc,
+                chunk_index=i,
+                content=content,
+                section_heading=(heading or '')[:300],
+                page_number=page,
+                token_count=len(content.split()),
+                embedding=emb,
+            ))
+        OperationsDocumentChunk.objects.bulk_create(rows)
+        return len(rows), any_vector, (embed_model if any_vector else '')
+
+    def _chunk_pairs(self, text: str, page_count: int, document_type: str):
+        """Return a list of ``(content, heading, page_number)`` tuples.
+
+        Section-aware doc types use the heading-aware chunker (which also drops
+        TOC/index junk); everything else uses a fixed-window chunker that still
+        skips junk chunks. Page numbers are estimated proportionally.
+        """
+        from operations_agent.chunking import (
+            chunk_with_headings, looks_like_toc_or_index, SECTION_AWARE_TYPES,
+        )
+
+        total = max(1, len(text))
+
+        def _page_for(offset: int) -> int:
+            return min(max(page_count, 1), max(1, int((offset / total) * max(page_count, 1)) + 1))
+
+        pairs = []
+        if document_type in SECTION_AWARE_TYPES:
+            for content, heading in chunk_with_headings(
+                text, max_chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP,
+            ):
+                # Recover an approximate page from where the chunk starts.
+                off = text.find(content[:60]) if content else -1
+                page = _page_for(off if off >= 0 else 0)
+                pairs.append((content, heading, page))
+            if pairs:
+                return pairs
+
+        # Fixed-window fallback (also used when section chunking yielded nothing)
+        idx_start = 0
+        step = max(1, CHUNK_SIZE - CHUNK_OVERLAP)
+        while idx_start < len(text):
+            content = text[idx_start:idx_start + CHUNK_SIZE].strip()
+            if content and not looks_like_toc_or_index(content):
+                pairs.append((content, '', _page_for(idx_start)))
+            idx_start += step
+        return pairs
 
     # ------------------------------------------------------------------
     # LLM-based classification
