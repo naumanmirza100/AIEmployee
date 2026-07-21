@@ -80,6 +80,8 @@ import FrontlineAIGraphs from './FrontlineAIGraphs';
 import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from './FrontlineTutorial';
 import { TAB_TOURS, HINTS } from './frontlineTutorialSteps';
 import InfoHint, { HintsProvider, useHints } from './InfoHint';
+import { ElapsedTimer } from './chatShellUtils';
+import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager';
 import FrontlineFloatingChat from './FrontlineFloatingChat';
 import { trackRecentlyViewed } from './frontlineLocalStore';
 import {
@@ -2561,6 +2563,7 @@ function FrontlineAnalyticsTab() {
 
 const FrontlineDashboard = () => {
   const { toast } = useToast();
+  const { startUpload: startBackgroundUpload } = useBackgroundUpload();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [documents, setDocuments] = useState([]);
@@ -2653,23 +2656,21 @@ const FrontlineDashboard = () => {
     );
   };
   
-  // Document upload
+  // Document upload — progress state lives in the global BackgroundUpload
+  // manager now, so this component only holds the dialog inputs.
   const [showUploadDialog, setShowUploadDialog] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadDescription, setUploadDescription] = useState('');
-  // Two-stage progress: bytes-uploaded % followed by chunk-embed indexing %.
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [indexProgress, setIndexProgress] = useState({
-    status: 'idle', percent: 0, done: 0, total: 0, error: '',
-  });
   
   // Knowledge Q&A (chat-based)
   const [chats, setChats] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [question, setQuestion] = useState('');
   const [answering, setAnswering] = useState(false);
+  // Timestamp when the current Q&A request started, so the loading indicator
+  // can render a live elapsed-time clock. Null when idle.
+  const [answeringStartedAt, setAnsweringStartedAt] = useState(null);
   const [loadingChats, setLoadingChats] = useState(false);
 
   const INPUT_MODE_OPTIONS = [
@@ -2961,7 +2962,10 @@ const FrontlineDashboard = () => {
     }
   };
 
-  const handleFileUpload = async () => {
+  // Enqueue the upload with the global BackgroundUploadManager. The dialog
+  // closes immediately; the bottom-right floating pill shows progress and
+  // the user can navigate away or upload more files without blocking.
+  const handleFileUpload = () => {
     if (!uploadFile) {
       toast({
         title: 'Error',
@@ -2970,120 +2974,24 @@ const FrontlineDashboard = () => {
       });
       return;
     }
+    const file = uploadFile;
+    const title = uploadTitle || file.name;
+    const description = uploadDescription;
 
-    setUploading(true);
-    setUploadProgress(0);
-    setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '' });
-
-    try {
-      const response = await frontlineAgentService.uploadDocument(
-        uploadFile,
-        uploadTitle || uploadFile.name,
-        uploadDescription,
-        'knowledge_base',
-        { onProgress: ({ percent }) => setUploadProgress(percent) },
-      );
-      setUploadProgress(100);
-
-      if (!(response.status === 'success' || response.status === 'accepted')) {
-        throw new Error(response.message || 'Upload failed');
-      }
-      const documentId = response?.data?.id;
-      const initialStatus = response?.data?.processing_status;
-      const mode = response?.data?.dispatch_mode;
-
-      if (initialStatus === 'ready') {
-        setIndexProgress({ status: 'ready', percent: 100, done: 0, total: 0, error: '' });
-        toast({
-          title: 'Success!',
-          description: mode === 'inline' ? 'Document uploaded and indexed.' : 'Ready.',
-        });
-        finishFrontlineUploadFlow();
-        return;
-      }
-
-      setIndexProgress({ status: 'processing', percent: 0, done: 0, total: 0, error: '' });
-      if (documentId) {
-        await pollFrontlineIndexingProgress(documentId);
-      } else {
-        toast({
-          title: 'Success!',
-          description: 'Document uploaded — processing in the background.',
-        });
-        finishFrontlineUploadFlow();
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to upload document',
-        variant: 'destructive',
-      });
-      setUploading(false);
-      setUploadProgress(0);
-    }
-  };
-
-  const finishFrontlineUploadFlow = () => {
-    setUploading(false);
-    // Small delay so the user sees the 100% state before the dialog resets.
-    setTimeout(() => {
-      setShowUploadDialog(false);
-      setUploadFile(null);
-      setUploadTitle('');
-      setUploadDescription('');
-      setUploadProgress(0);
-      setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '' });
-      fetchDashboard();
-    }, 700);
-  };
-
-  const pollFrontlineIndexingProgress = async (documentId) => {
-    const startedAt = Date.now();
-    const MAX_MS = 5 * 60 * 1000;
-    const INTERVAL_MS = 1500;
-
-    while (Date.now() - startedAt < MAX_MS) {
-      try {
-        const res = await frontlineAgentService.getDocumentStatus(documentId);
-        const s = res?.data || {};
-        // Frontline endpoint returns `progress_percent`; HR returns `percent`.
-        // Prefer whichever is defined so this handler works with either shape.
-        const percent = Number(
-          s.percent != null ? s.percent : (s.progress_percent != null ? s.progress_percent : 0)
-        );
-        setIndexProgress({
-          status: s.processing_status || 'processing',
-          percent: Math.round(percent),
-          done: Number(s.chunks_processed || 0),
-          total: Number(s.chunks_total || 0),
-          error: s.processing_error || '',
-        });
-        if (s.processing_status === 'ready') {
-          toast({ title: 'Indexing complete', description: `${s.chunks_total || 0} chunk(s) embedded.` });
-          finishFrontlineUploadFlow();
-          return;
-        }
-        if (s.processing_status === 'failed') {
-          toast({
-            title: 'Indexing failed',
-            description: s.processing_error || 'The document could not be indexed.',
-            variant: 'destructive',
-          });
-          setUploading(false);
-          return;
-        }
-      } catch (err) {
-        console.warn('Frontline indexing status poll error:', err);
-      }
-      await new Promise((r) => setTimeout(r, INTERVAL_MS));
-    }
-    toast({
-      title: 'Still indexing',
-      description: 'Taking longer than expected. Progress will continue in the background — refresh the list to check.',
+    startBackgroundUpload({
+      title,
+      agent: 'frontline',
+      upload: (onProgress) => frontlineAgentService.uploadDocument(
+        file, title, description, 'knowledge_base', { onProgress },
+      ),
+      poll: (documentId) => frontlineAgentService.getDocumentStatus(documentId),
+      onDone: () => fetchDashboard(),
     });
-    setUploading(false);
+
     setShowUploadDialog(false);
-    fetchDashboard();
+    setUploadFile(null);
+    setUploadTitle('');
+    setUploadDescription('');
   };
 
   const handleDeleteDocument = async (documentId) => {
@@ -3445,6 +3353,12 @@ const FrontlineDashboard = () => {
     if (qaScopeMode === 'documents' && qaScopeDocumentIds.length > 0) scopeOptions.scope_document_ids = qaScopeDocumentIds;
     try {
       setAnswering(true);
+      // Measure round-trip latency so the UI can render "answered in X.Xs".
+      // Uses performance.now() for millisecond precision. We also mirror the
+      // start into React state so the live thinking-clock can tick against it.
+      const startedAt = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      setAnsweringStartedAt(startedAt);
       const userMsg = { role: 'user', content: q };
       let assistantMsg;
 
@@ -3480,11 +3394,29 @@ const FrontlineDashboard = () => {
               source: data.source || 'Knowledge Base',
               type: data.type || 'general',
               document_id: data.document_id ?? null,
+              cache_hit: !!data.cache_hit,
+              // Server-side per-phase timing (retrieval / llm / total in ms).
+              // Persisted through the backend's JSON responseData field.
+              timing_ms: data.timing_ms || null,
             },
           };
         } else {
           throw new Error(response.message || 'Failed to get response');
         }
+      }
+
+      // Stamp the assistant message with how long the round-trip took.
+      // We store it INSIDE responseData (a JSON blob that the backend
+      // persists) so the badge survives round-tripping through the server
+      // when the chat is re-fetched — otherwise the timing would only show
+      // on the exact request-response cycle and disappear after re-render.
+      const endedAt = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      if (assistantMsg) {
+        assistantMsg.responseData = {
+          ...(assistantMsg.responseData || {}),
+          responseTimeMs: Math.round(endedAt - startedAt),
+        };
       }
 
       const title = q.slice(0, 40);
@@ -3521,6 +3453,7 @@ const FrontlineDashboard = () => {
       toast({ title: 'Error', description: apiErrorMessage(error, 'Failed to get answer'), variant: 'destructive' });
     } finally {
       setAnswering(false);
+      setAnsweringStartedAt(null);
     }
   };
 
@@ -4422,6 +4355,54 @@ const FrontlineDashboard = () => {
                                     Low-confidence match{typeof msg.responseData?.best_score === 'number' ? ` (score ${msg.responseData.best_score})` : ''}. Consider escalating to a human agent.
                                   </div>
                                 )}
+                                {(() => {
+                                  const t = msg.responseData?.responseTimeMs ?? msg.responseTimeMs;
+                                  if (typeof t !== 'number') return null;
+                                  const tm = msg.responseData?.timing_ms;
+                                  const parts = [];
+                                  if (tm && !tm.cache) {
+                                    if (typeof tm.retrieval === 'number') parts.push(`retrieval ${(tm.retrieval / 1000).toFixed(1)}s`);
+                                    if (typeof tm.llm === 'number') parts.push(`llm ${(tm.llm / 1000).toFixed(1)}s`);
+                                    if (typeof tm.contextualise === 'number') parts.push(`ctx ${(tm.contextualise / 1000).toFixed(1)}s`);
+                                  }
+                                  // Retrieval sub-phase breakdown — shown when retrieval > 1s so we
+                                  // can pinpoint WHICH phase (faiss build / json-scan / keyword / rerank).
+                                  const rb = tm?.retrieval_breakdown;
+                                  const rp = tm?.retrieval_path;
+                                  const rbParts = [];
+                                  if (rb && (tm?.retrieval || 0) > 1000) {
+                                    const keys = ['query_embed', 'faiss_search', 'faiss_candidates', 'faiss_chunk_fetch', 'faiss_output_build', 'semantic', 'json_scan', 'keyword', 'rerank'];
+                                    for (const k of keys) {
+                                      if (typeof rb[k] === 'number' && rb[k] > 50) {
+                                        rbParts.push(`${k}=${(rb[k] / 1000).toFixed(1)}s`);
+                                      }
+                                    }
+                                    if (typeof rb.json_scan_chunks === 'number' && rb.json_scan_chunks > 0) {
+                                      rbParts.push(`scanned=${rb.json_scan_chunks}`);
+                                    }
+                                  }
+                                  return (
+                                    <div className="mt-2 text-[10px] text-muted-foreground/70 space-y-0.5">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span>⏱ Answered in {(t / 1000).toFixed(2)}s</span>
+                                        {parts.length > 0 && (
+                                          <span className="text-muted-foreground/50">({parts.join(' · ')})</span>
+                                        )}
+                                        {msg.responseData?.cache_hit && (
+                                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-medium">
+                                            cached
+                                          </span>
+                                        )}
+                                      </div>
+                                      {(rbParts.length > 0 || rp) && (
+                                        <div className="text-[9px] text-muted-foreground/50 font-mono">
+                                          {rp && <span>path: {rp} </span>}
+                                          {rbParts.join(' · ')}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                                 {msg.responseData?.rewritten_query && (
                                   <div className="mt-2 text-xs text-muted-foreground italic">
                                     Interpreted as: "{msg.responseData.rewritten_query}"
@@ -4521,7 +4502,10 @@ const FrontlineDashboard = () => {
                     <div className="flex justify-start">
                       <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <span className="text-sm">Searching knowledge base...</span>
+                        <span className="text-sm">Searching knowledge base…</span>
+                        <span className="text-xs text-muted-foreground tabular-nums font-mono">
+                          <ElapsedTimer since={answeringStartedAt} />
+                        </span>
                       </div>
                     </div>
                   )}
@@ -5459,76 +5443,14 @@ const FrontlineDashboard = () => {
                 onChange={(e) => setUploadDescription(e.target.value)}
               />
             </div>
-            {uploading && (
-              <div className="space-y-3 rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
-                <div>
-                  <div className="flex items-center justify-between text-xs text-white/70 mb-1.5">
-                    <span className="flex items-center gap-1.5">
-                      <Upload className="h-3.5 w-3.5 text-violet-300" />
-                      {uploadProgress < 100 ? 'Uploading file…' : 'Upload complete'}
-                    </span>
-                    <span className="font-mono text-white/60">{uploadProgress}%</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-200 ease-out"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                </div>
-                {(uploadProgress >= 100 || indexProgress.status !== 'idle') && (
-                  <div>
-                    <div className="flex items-center justify-between text-xs text-white/70 mb-1.5">
-                      <span className="flex items-center gap-1.5">
-                        <Loader2 className={`h-3.5 w-3.5 text-amber-300 ${indexProgress.status === 'processing' ? 'animate-spin' : ''}`} />
-                        {indexProgress.status === 'ready'
-                          ? 'Indexing complete'
-                          : indexProgress.status === 'failed'
-                            ? 'Indexing failed'
-                            : indexProgress.total > 0
-                              ? `Indexing chunks ${indexProgress.done}/${indexProgress.total}`
-                              : 'Preparing document for search…'}
-                      </span>
-                      <span className="font-mono text-white/60">{indexProgress.percent}%</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-200 ease-out ${
-                          indexProgress.status === 'failed'
-                            ? 'bg-red-500/70'
-                            : indexProgress.status === 'ready'
-                              ? 'bg-emerald-500/80'
-                              : 'bg-gradient-to-r from-amber-500 to-orange-500'
-                        }`}
-                        style={{ width: `${indexProgress.percent}%` }}
-                      />
-                    </div>
-                    {indexProgress.status === 'failed' && indexProgress.error && (
-                      <div className="mt-1.5 text-[11px] text-red-300/90">
-                        {indexProgress.error}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowUploadDialog(false)} disabled={uploading}>
+            <Button variant="outline" onClick={() => setShowUploadDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={handleFileUpload} disabled={uploading || !uploadFile}>
-              {uploading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Uploading...
-                </>
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Upload
-                </>
-              )}
+            <Button onClick={handleFileUpload} disabled={!uploadFile}>
+              <Upload className="mr-2 h-4 w-4" />
+              Upload
             </Button>
           </DialogFooter>
         </DialogContent>

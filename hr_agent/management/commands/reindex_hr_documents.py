@@ -64,6 +64,18 @@ class Command(BaseCommand):
                 self.stderr.write(f'  ERROR: {doc.id} — {doc.title}: {exc}')
                 fail += 1
 
+        # Mark FAISS dirty for all affected companies so retrieval rebuilds
+        # the index from the freshly-processed chunks on next query.
+        try:
+            from hr_agent.vector_store import mark_index_dirty as _hr_mark_dirty
+            company_ids = set(qs.values_list('company_id', flat=True))
+            for cid in company_ids:
+                if cid:
+                    _hr_mark_dirty(cid)
+            self.stdout.write(f'Marked HR FAISS dirty for {len(company_ids)} company(ies).')
+        except Exception as exc:
+            self.stderr.write(f'FAISS dirty-mark failed: {exc}')
+
         self.stdout.write(self.style.SUCCESS(
             f'Done. success={ok} failed={fail} total={total}'
         ))

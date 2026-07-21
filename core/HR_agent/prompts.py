@@ -50,10 +50,15 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
     """
     safe_question = sanitize_user_input(question or '')
     parts = [
-        "Answer the user's question using the verified knowledge-base excerpts below. ",
-        "Read the excerpts in full — they may contain the answer even if some entries look like headings or table-of-contents. ",
-        "Synthesise a direct, concrete answer from any substantive content the excerpts contain. ",
-        "Only reply with 'I don't have verified information on this' when the excerpts genuinely lack coverage of the topic — do NOT refuse merely because the excerpts are hard to read.\n\n",
+        "Answer the user's question using the verified knowledge-base excerpts below.\n\n",
+        "RULES:\n",
+        "1. Use ONLY the excerpts below. No outside knowledge.\n",
+        "2. Answer the specific question — do NOT list unrelated topics from the excerpts.\n",
+        "3. If the excerpts don't cover the topic, say exactly: \"I don't have verified information on this in our HR knowledge base. I'll route this to the HR team to follow up.\"\n",
+        "4. NO preamble. NO meta-commentary like \"Based on the provided excerpts…\" or \"According to the document content…\" — just answer directly.\n",
+        "5. NO verbatim block-quotes of excerpt content — paraphrase concisely. Quoting a short phrase (< 15 words) is fine when precision matters.\n",
+        "6. Keep it short: 1-4 sentences, or a tight 3-6 bullet list. Structure only when the answer is genuinely a list.\n",
+        "7. Do NOT refuse just because excerpts look like headings, table-of-contents, or dot-leaders — synthesise from whatever substantive content exists.\n\n",
     ]
     if employee_context:
         ctx_lines = []

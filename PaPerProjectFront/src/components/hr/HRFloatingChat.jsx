@@ -15,7 +15,7 @@ import {
 } from './hrLocalStore';
 import hrAgentService from '@/services/hrAgentService';
 import { useToast } from '@/components/ui/use-toast';
-import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle } from '../frontline/chatShellUtils';
+import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle, ElapsedTimer } from '../frontline/chatShellUtils';
 
 const SAMPLE_PROMPTS = [
   "What's our parental leave policy?",
@@ -53,6 +53,9 @@ const HRFloatingChat = () => {
   const [indexProgress, setIndexProgress] = useState({
     status: 'idle', percent: 0, done: 0, total: 0, error: '', fileName: '',
   });
+  // Start time of the current Q&A request — powers the live elapsed clock
+  // inside the "Searching HR knowledge base…" indicator. Null when idle.
+  const [sendingStartedAt, setSendingStartedAt] = useState(null);
 
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
@@ -240,17 +243,26 @@ const HRFloatingChat = () => {
     setArgResults(null);
     setSending(true);
 
+    const startedAt = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    setSendingStartedAt(startedAt);
     try {
       // Pass short history (max last 6 messages) for multi-turn context
       const history = messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
       const res = await hrAgentService.askHRKnowledge(q, history);
       if (res && res.status === 'success' && res.data) {
         const data = res.data;
+        const endedAt = (typeof performance !== 'undefined' && performance.now)
+          ? performance.now() : Date.now();
         pushMessage({
           role: 'assistant',
           content: data.answer || data.response || 'No answer available.',
           source: data.source || null,
           citations: data.citations || data.sources || [],
+          responseTimeMs: Math.round(endedAt - startedAt),
+          cache_hit: !!data.cache_hit,
+          // Server-side per-phase timing breakdown for the badge to render.
+          timing_ms: data.timing_ms || null,
         });
       } else {
         throw new Error((res && res.message) || 'Failed to get an answer');
@@ -259,6 +271,7 @@ const HRFloatingChat = () => {
       pushMessage({ role: 'assistant', content: `Error: ${e.message || 'Something went wrong.'}`, error: true });
     } finally {
       setSending(false);
+      setSendingStartedAt(null);
     }
   };
 
@@ -616,6 +629,47 @@ const HRFloatingChat = () => {
                           : <div className="text-[11px] text-white/60 truncate">• {m.source}</div>}
                       </div>
                     )}
+                    {typeof m.responseTimeMs === 'number' && m.role === 'assistant' && !m.error && (() => {
+                      const tm = m.timing_ms;
+                      const parts = [];
+                      if (tm && !tm.cache) {
+                        if (typeof tm.retrieval === 'number') parts.push(`retrieval ${(tm.retrieval / 1000).toFixed(1)}s`);
+                        if (typeof tm.llm === 'number') parts.push(`llm ${(tm.llm / 1000).toFixed(1)}s`);
+                      }
+                      const rb = tm?.retrieval_breakdown;
+                      const rbParts = [];
+                      if (rb && (tm?.retrieval || 0) > 1000) {
+                        const keys = ['query_embed', 'json_scan', 'keyword', 'chunk_fetch', 'output_build'];
+                        for (const k of keys) {
+                          if (typeof rb[k] === 'number' && rb[k] > 50) {
+                            rbParts.push(`${k}=${(rb[k] / 1000).toFixed(1)}s`);
+                          }
+                        }
+                        if (typeof rb.json_scan_chunks === 'number' && rb.json_scan_chunks > 0) {
+                          rbParts.push(`scanned=${rb.json_scan_chunks}`);
+                        }
+                      }
+                      return (
+                        <div className="mt-1.5 text-[10px] text-white/40 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span>⏱ {(m.responseTimeMs / 1000).toFixed(2)}s</span>
+                            {parts.length > 0 && (
+                              <span className="text-white/30">({parts.join(' · ')})</span>
+                            )}
+                            {m.cache_hit && (
+                              <span className="px-1 py-[1px] rounded bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 text-[9px] font-medium">
+                                cached
+                              </span>
+                            )}
+                          </div>
+                          {rbParts.length > 0 && (
+                            <div className="text-[9px] text-white/30 font-mono">
+                              {rbParts.join(' · ')}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}
@@ -624,6 +678,9 @@ const HRFloatingChat = () => {
                   <div className="bg-white/[0.06] border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-white/60" />
                     <span className="text-xs text-white/60">Searching HR knowledge base…</span>
+                    <span className="text-[11px] text-white/40 tabular-nums font-mono">
+                      <ElapsedTimer since={sendingStartedAt} />
+                    </span>
                   </div>
                 </div>
               )}
