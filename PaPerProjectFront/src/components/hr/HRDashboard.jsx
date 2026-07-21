@@ -21,6 +21,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
+import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -87,6 +88,7 @@ const STAT_PALETTE = {
 
 const HRDashboard = () => {
   const { toast } = useToast();
+  const { startUpload: startBackgroundUpload } = useBackgroundUpload();
   const [activeTab, setActiveTab] = useState('overview');
 
   // ---- Onboarding tutorial + per-tab tours ----
@@ -200,14 +202,10 @@ const HRDashboard = () => {
   const [uploadDescription, setUploadDescription] = useState('');
   const [uploadDocType, setUploadDocType] = useState('policy');
   const [uploadConfidentiality, setUploadConfidentiality] = useState('employee');
-  const [uploading, setUploading] = useState(false);
-  // Upload & indexing progress. `uploadProgress` is bytes-uploaded percent
-  // (0-100); `indexProgress` tracks chunk embedding after the server accepts
-  // the file. `indexProgress.status` = idle | processing | ready | failed.
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [indexProgress, setIndexProgress] = useState({
-    status: 'idle', percent: 0, done: 0, total: 0, error: '',
-  });
+  // NOTE: `uploading`/`uploadProgress`/`indexProgress` state used to live
+  // here — moved to the global BackgroundUploadManager. The upload dialog
+  // now closes immediately on submit and progress is tracked in the
+  // bottom-right floating pill.
 
   // Employee detail drawer
   const [employeeDrawer, setEmployeeDrawer] = useState({ open: false, id: null });
@@ -446,117 +444,39 @@ const HRDashboard = () => {
   }, [empDeptFilter]);
 
   // ---------- Handlers ----------
-  const handleUpload = async () => {
+  // Enqueue the upload with the global BackgroundUploadManager. The dialog
+  // closes immediately; the file continues uploading + indexing in the
+  // background, tracked by the bottom-right floating pill. User can navigate
+  // away, open other tabs, etc. without cancelling anything.
+  const handleUpload = () => {
     if (!uploadFile) {
       toast({ title: 'Pick a file first', variant: 'destructive' });
       return;
     }
-    setUploading(true);
-    setUploadProgress(0);
-    setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '' });
-    try {
-      const res = await hrAgentService.uploadHRDocument(uploadFile, uploadTitle, uploadDescription, {
-        document_type: uploadDocType,
-        confidentiality: uploadConfidentiality,
-        onProgress: ({ percent }) => setUploadProgress(percent),
-      });
-      setUploadProgress(100);
+    // Snapshot inputs so the async runner isn't racing our state resets.
+    const file = uploadFile;
+    const title = uploadTitle || file.name;
+    const description = uploadDescription;
+    const docType = uploadDocType;
+    const confidentiality = uploadConfidentiality;
 
-      const documentId = res?.data?.id;
-      const initialStatus = res?.data?.processing_status;
-      const mode = res?.data?.dispatch_mode;
-
-      // If the upload already came back 'ready' (small file, inline processing)
-      // we can close out immediately. Otherwise show the indexing bar and poll.
-      if (initialStatus === 'ready') {
-        setIndexProgress({ status: 'ready', percent: 100, done: 0, total: 0, error: '' });
-        toast({
-          title: 'Document uploaded',
-          description: mode === 'inline' ? 'Processed inline.' : 'Ready.',
-        });
-        finishUploadFlow();
-        return;
-      }
-
-      // Kick off polling for chunks_processed / chunks_total.
-      setIndexProgress({ status: 'processing', percent: 0, done: 0, total: 0, error: '' });
-      if (documentId) {
-        await pollIndexingProgress(documentId);
-      } else {
-        // Fall back gracefully — server didn't hand back an id.
-        toast({
-          title: 'Document uploaded',
-          description: 'Processing in the background — refresh to see status.',
-        });
-        finishUploadFlow();
-      }
-    } catch (e) {
-      toast({ title: 'Upload failed', description: e.message, variant: 'destructive' });
-      setUploading(false);
-      setUploadProgress(0);
-    }
-  };
-
-  // Close the dialog + reset state after a successful upload+index flow.
-  const finishUploadFlow = () => {
-    setUploading(false);
-    // Delay reset slightly so the user sees the 100% bar before it closes.
-    setTimeout(() => {
-      setUploadOpen(false);
-      setUploadFile(null);
-      setUploadTitle('');
-      setUploadDescription('');
-      setUploadProgress(0);
-      setIndexProgress({ status: 'idle', percent: 0, done: 0, total: 0, error: '' });
-      loadDocuments();
-    }, 700);
-  };
-
-  // Poll `/hr/documents/<id>/status` until processing terminates (ready/failed)
-  // or we hit the timeout. Cheap endpoint (no access-log write, no content).
-  const pollIndexingProgress = async (documentId) => {
-    const startedAt = Date.now();
-    const MAX_MS = 5 * 60 * 1000;  // 5 min upper bound for very large docs
-    const INTERVAL_MS = 1500;
-
-    while (Date.now() - startedAt < MAX_MS) {
-      try {
-        const res = await hrAgentService.getHRDocumentStatus(documentId);
-        const s = res?.data || {};
-        setIndexProgress({
-          status: s.processing_status || 'processing',
-          percent: Number(s.percent || 0),
-          done: Number(s.chunks_processed || 0),
-          total: Number(s.chunks_total || 0),
-          error: s.processing_error || '',
-        });
-        if (s.processing_status === 'ready') {
-          toast({ title: 'Indexing complete', description: `${s.chunks_total || 0} chunk(s) embedded.` });
-          finishUploadFlow();
-          return;
-        }
-        if (s.processing_status === 'failed') {
-          toast({
-            title: 'Indexing failed',
-            description: s.processing_error || 'The document could not be indexed.',
-            variant: 'destructive',
-          });
-          setUploading(false);
-          return;
-        }
-      } catch (err) {
-        // Transient error — keep polling; a permanent one will show as timeout.
-        console.warn('Indexing status poll error:', err);
-      }
-      await new Promise((r) => setTimeout(r, INTERVAL_MS));
-    }
-    toast({
-      title: 'Still indexing',
-      description: 'Taking longer than expected. Progress will continue in the background — refresh the list to check.',
+    startBackgroundUpload({
+      title,
+      agent: 'hr',
+      upload: (onProgress) => hrAgentService.uploadHRDocument(file, title, description, {
+        document_type: docType,
+        confidentiality,
+        onProgress,
+      }),
+      poll: (documentId) => hrAgentService.getHRDocumentStatus(documentId),
+      onDone: () => loadDocuments(),
     });
-    setUploading(false);
+
+    // Close the dialog + reset inputs immediately — the pill takes over.
     setUploadOpen(false);
-    loadDocuments();
+    setUploadFile(null);
+    setUploadTitle('');
+    setUploadDescription('');
   };
 
   // ---------- Document actions ----------
@@ -1673,67 +1593,11 @@ const HRDashboard = () => {
                           </Select>
                         </div>
                       </div>
-                      {/* Upload + indexing progress. Rendered while `uploading`
-                          is truthy so the user can watch bytes ship out and
-                          then watch the server chunk + embed the doc. */}
-                      {uploading && (
-                        <div className="space-y-3 rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
-                          <div>
-                            <div className="flex items-center justify-between text-xs text-white/70 mb-1.5">
-                              <span className="flex items-center gap-1.5">
-                                <Upload className="h-3.5 w-3.5 text-violet-300" />
-                                {uploadProgress < 100 ? 'Uploading file…' : 'Upload complete'}
-                              </span>
-                              <span className="font-mono text-white/60">{uploadProgress}%</span>
-                            </div>
-                            <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-                              <div
-                                className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-200 ease-out"
-                                style={{ width: `${uploadProgress}%` }}
-                              />
-                            </div>
-                          </div>
-                          {(uploadProgress >= 100 || indexProgress.status !== 'idle') && (
-                            <div>
-                              <div className="flex items-center justify-between text-xs text-white/70 mb-1.5">
-                                <span className="flex items-center gap-1.5">
-                                  <Loader2 className={`h-3.5 w-3.5 text-amber-300 ${indexProgress.status === 'processing' ? 'animate-spin' : ''}`} />
-                                  {indexProgress.status === 'ready'
-                                    ? 'Indexing complete'
-                                    : indexProgress.status === 'failed'
-                                      ? 'Indexing failed'
-                                      : indexProgress.total > 0
-                                        ? `Indexing chunks ${indexProgress.done}/${indexProgress.total}`
-                                        : 'Preparing document for search…'}
-                                </span>
-                                <span className="font-mono text-white/60">{indexProgress.percent}%</span>
-                              </div>
-                              <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-                                <div
-                                  className={`h-full transition-all duration-200 ease-out ${
-                                    indexProgress.status === 'failed'
-                                      ? 'bg-red-500/70'
-                                      : indexProgress.status === 'ready'
-                                        ? 'bg-emerald-500/80'
-                                        : 'bg-gradient-to-r from-amber-500 to-orange-500'
-                                  }`}
-                                  style={{ width: `${indexProgress.percent}%` }}
-                                />
-                              </div>
-                              {indexProgress.status === 'failed' && indexProgress.error && (
-                                <div className="mt-1.5 text-[11px] text-red-300/90">
-                                  {indexProgress.error}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => setUploadOpen(false)} disabled={uploading}>Cancel</Button>
-                      <Button onClick={handleUpload} disabled={uploading || !uploadFile}>
-                        {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
+                      <Button variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button>
+                      <Button onClick={handleUpload} disabled={!uploadFile}>
+                        <Upload className="h-4 w-4 mr-1" />
                         Upload
                       </Button>
                     </DialogFooter>

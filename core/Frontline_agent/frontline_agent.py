@@ -2,7 +2,11 @@
 Frontline Agent - Main Agent Implementation
 Enterprise-level AI agent that uses only verified database information
 """
+import hashlib
+import json as _json_top
 import logging
+import threading
+import time
 from typing import Dict, List, Optional
 from django.conf import settings
 
@@ -20,6 +24,69 @@ from .prompts import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# In-process answer cache.
+#
+# Q&A pipelines are dominated by LLM calls (re-rank + final answer). When a
+# user asks the same question twice within a few minutes, or a team hits the
+# same FAQ, replaying the cached answer skips both LLM round-trips entirely
+# — sub-second responses on repeat.
+#
+# Cache key = sha256(company_id | scope | normalized_question). TTL default
+# 5 minutes; tenants can override via `FRONTLINE_ANSWER_CACHE_TTL_SECONDS`.
+# Bounded to `_ANSWER_CACHE_MAX` entries to keep memory sane.
+# ---------------------------------------------------------------------------
+_ANSWER_CACHE_LOCK = threading.Lock()
+_ANSWER_CACHE: dict = {}                # key -> (timestamp, response_dict)
+_ANSWER_CACHE_MAX = 2000
+
+
+def _answer_cache_key(company_id, scope_document_ids, scope_document_type,
+                      question) -> str:
+    """Deterministic cache key. Normalises question (strip + lowercase) so
+    trivial whitespace / casing differences share a hit."""
+    payload = {
+        'c': int(company_id or 0),
+        'ids': sorted([int(x) for x in (scope_document_ids or [])]),
+        'types': sorted([str(x) for x in (scope_document_type or [])]),
+        'q': (question or '').strip().lower(),
+    }
+    return hashlib.sha256(_json_top.dumps(payload, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def _answer_cache_get(key: str, ttl_seconds: int):
+    with _ANSWER_CACHE_LOCK:
+        hit = _ANSWER_CACHE.get(key)
+        if hit is None:
+            return None
+        ts, resp = hit
+        if (time.time() - ts) > ttl_seconds:
+            _ANSWER_CACHE.pop(key, None)
+            return None
+        return resp
+
+
+def _answer_cache_put(key: str, resp: dict):
+    with _ANSWER_CACHE_LOCK:
+        if len(_ANSWER_CACHE) >= _ANSWER_CACHE_MAX:
+            # Cheapest eviction: drop half. Preserves recency approximately.
+            for k in list(_ANSWER_CACHE.keys())[: _ANSWER_CACHE_MAX // 2]:
+                _ANSWER_CACHE.pop(k, None)
+        _ANSWER_CACHE[key] = (time.time(), resp)
+
+
+def invalidate_answer_cache_for_company(company_id):
+    """Called after new docs are indexed so cached answers don't go stale."""
+    if not company_id:
+        return
+    prefix_marker = f'"c": {int(company_id)}'  # cheap contains-check via payload
+    # We only stored keys, not payloads — safest is to drop everything for a
+    # doc-change event since it's rare. A more granular cache would keep the
+    # payload alongside the key; for now, a global clear is acceptable.
+    with _ANSWER_CACHE_LOCK:
+        _ANSWER_CACHE.clear()
 
 
 class FrontlineAgent(BaseAgent):
@@ -49,7 +116,10 @@ class FrontlineAgent(BaseAgent):
         scope_document_ids: Optional[List[int]] = None,
         min_similarity: Optional[float] = None,
         max_age_days: Optional[int] = None,
-        max_results: int = 5,
+        # Dropped default from 5 → 3. Fewer chunks in the prompt = smaller
+        # payload = lower TTFT on the final LLM call. Callers who need more
+        # can override.
+        max_results: int = 3,
         enable_rewrite: bool = False,
         company_user_id: Optional[int] = None,
         history: Optional[List[Dict]] = None,
@@ -71,8 +141,31 @@ class FrontlineAgent(BaseAgent):
         """
         logger.info(f"Processing question: {question[:100]} (company_id: {company_id})")
 
+        # Per-phase timing so we can see WHERE the wall-clock time is going.
+        # Attached to the response as `timing_ms` for the frontend to render.
+        _t_overall = time.time()
+        timing_ms: dict = {}
+
         # Use provided company_id or instance company_id
         search_company_id = company_id or self.company_id
+
+        # Answer cache check — sub-second replay for repeat questions on the
+        # same doc scope. Only cache non-follow-up (no history) queries since
+        # history-contextualised answers are conversation-specific.
+        cache_ttl = int(getattr(settings, 'FRONTLINE_ANSWER_CACHE_TTL_SECONDS', 300))
+        cache_key = None
+        if cache_ttl > 0 and not history:
+            cache_key = _answer_cache_key(
+                search_company_id, scope_document_ids, scope_document_type, question,
+            )
+            cached = _answer_cache_get(cache_key, cache_ttl)
+            if cached is not None:
+                logger.info("Answer cache hit for company=%s q=%r",
+                            search_company_id, question[:60])
+                out = dict(cached)
+                out['cache_hit'] = True
+                out['timing_ms'] = {'total': int((time.time() - _t_overall) * 1000), 'cache': True}
+                return out
 
         # Contextualise follow-up turns against the conversation before retrieval.
         # Without this, "what about international ones?" embeds with no notion of
@@ -81,13 +174,16 @@ class FrontlineAgent(BaseAgent):
         retrieval_question = question
         contextualised = None
         if history:
+            _t_ctx = time.time()
             contextualised = self._contextualise_with_history(question, history)
+            timing_ms['contextualise'] = int((time.time() - _t_ctx) * 1000)
             if contextualised and contextualised.strip().lower() != question.strip().lower():
                 logger.info("Contextualised follow-up via history: %r → %r",
                             question[:80], contextualised[:80])
                 retrieval_question = contextualised
 
         # Search knowledge base (with optional scope + filters)
+        _t_retr = time.time()
         knowledge_result = self.knowledge_service.get_answer(
             retrieval_question,
             company_id=search_company_id,
@@ -98,6 +194,17 @@ class FrontlineAgent(BaseAgent):
             max_results=max_results,
             company_user_id=company_user_id,
         )
+        timing_ms['retrieval'] = int((time.time() - _t_retr) * 1000)
+        # Sub-phase breakdown from the retrieval layer so the UI + logs can
+        # pinpoint WHICH retrieval step (FAISS build, JSON-scan, keyword SQL,
+        # rerank, …) is slow. `last_retrieval_timing` is reset per-call.
+        try:
+            timing_ms['retrieval_breakdown'] = dict(
+                getattr(self.knowledge_service, 'last_retrieval_timing', {}) or {}
+            )
+            timing_ms['retrieval_path'] = getattr(self.knowledge_service, 'last_retrieval_path', '') or ''
+        except Exception:
+            pass
 
         # Optional query-rewrite retry: only if primary retrieval was weak
         if enable_rewrite and not knowledge_result.get('has_verified_info', False):
@@ -169,16 +276,25 @@ class FrontlineAgent(BaseAgent):
             else:
                 logger.warning(f"Prompt does NOT contain keywords: {keywords}")
             
+            _t_llm = time.time()
             formatted_answer = self._call_llm(
                 prompt=prompt,
                 system_prompt=self.system_prompt,
                 temperature=0.3,  # Low temperature for factual responses
-                max_tokens=400,   # Shorter answers = faster streaming / less TTFT
+                # 250 is enough for a concise, factual answer. Larger answers
+                # correlate strongly with slower TTFT + more streaming time.
+                # Overridable via `FRONTLINE_QA_MAX_TOKENS` setting.
+                max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 250)),
             )
-            
-            logger.info("Answer generated from verified knowledge base")
+            timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
+            timing_ms['total'] = int((time.time() - _t_overall) * 1000)
 
-            return {
+            logger.info(
+                "Answer generated. Timing (ms): %s | prompt_chars=%d",
+                timing_ms, len(prompt),
+            )
+
+            response = {
                 'success': True,
                 'answer': formatted_answer,
                 'has_verified_info': True,
@@ -191,7 +307,11 @@ class FrontlineAgent(BaseAgent):
                 'document_title': knowledge_result.get('document_title'),
                 'document_id': knowledge_result.get('document_id'),
                 'citations': knowledge_result.get('citations', []),
+                'timing_ms': timing_ms,
             }
+            if cache_key:
+                _answer_cache_put(cache_key, response)
+            return response
         except Exception as e:
             from core.api_key_service import KeyServiceError
             if isinstance(e, KeyServiceError):

@@ -19,7 +19,7 @@ import {
   Loader2, LayoutDashboard, CalendarClock, ListChecks, CalendarDays,
   FileText, Bell, Plus, Menu, Clock, AlertTriangle,
   RefreshCw, Trash2, MoreHorizontal, ChevronRight,
-  Download, Sparkles, Pencil, GraduationCap,
+  Download, Sparkles, Pencil, GraduationCap, Users, Mail,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -39,8 +39,21 @@ import { TasksPanel } from './panels/TasksPanel';
 import { CalendarPanel } from './panels/CalendarPanel';
 import { DocumentsPanel } from './panels/DocumentsPanel';
 import { MeetingsPanel } from './panels/MeetingsPanel';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '@/components/frontline/FrontlineTutorial';
-import { EXEC_MEETING_TOUR_STEPS, EXEC_MEETING_TOUR_KEY } from './execMeetingTourSteps';
+import FrontlineTutorial, { hasSeenTutorial, resetTutorial, markTutorialSeen } from '@/components/frontline/FrontlineTutorial';
+import HowItWorksModal from '@/components/common/HowItWorksModal';
+import {
+  EXEC_MEETING_TOUR_STEPS, EXEC_MEETING_TOUR_KEY,
+  EXEC_MEETING_HOWITWORKS_STEPS, EXEC_MEETING_HOWITWORKS_KEY,
+} from './execMeetingTourSteps';
+
+// Resolve the string icon names from the how-it-works steps to real components.
+const HOWITWORKS_ICONS = {
+  Users, CalendarClock, Sparkles, ListChecks, Mail, FileText, CalendarDays, Bell,
+};
+const HOWITWORKS_STEPS = EXEC_MEETING_HOWITWORKS_STEPS.map((s) => ({
+  ...s,
+  icon: HOWITWORKS_ICONS[s.icon],
+}));
 
 const TAB_ITEMS = [
   { value: 'overview',      label: 'Overview',      icon: LayoutDashboard },
@@ -147,23 +160,45 @@ const ExecMeetingDashboard = () => {
   // itself is intentionally left untouched).
   const [convertedActionItemIds, setConvertedActionItemIds] = useState(() => new Set());
 
-  // Guided tour
+  // Guided tour + "How it works" onboarding modal
   const [tourOpen, setTourOpen] = useState(false);
+  const [howItWorksOpen, setHowItWorksOpen] = useState(false);
 
   useEffect(() => { loadStats(); }, []);
 
-  // Auto-launch the tour the first time this user lands on the dashboard.
+  // First visit: show the high-level "How it works" modal first, then the tour.
+  // The modal explains WHAT the agent does; the tour walks the UI. Showing both
+  // at once would collide, so the tour only auto-launches once the modal is gone.
   useEffect(() => {
-    if (!hasSeenTutorial(EXEC_MEETING_TOUR_KEY)) {
+    const seenHow = hasSeenTutorial(EXEC_MEETING_HOWITWORKS_KEY);
+    const seenTour = hasSeenTutorial(EXEC_MEETING_TOUR_KEY);
+    if (!seenHow) {
+      const t = setTimeout(() => setHowItWorksOpen(true), 500);
+      return () => clearTimeout(t);
+    }
+    // Returning-but-hasn't-toured user (or reset): keep the old tour auto-launch.
+    if (!seenTour) {
       const t = setTimeout(() => setTourOpen(true), 600);
       return () => clearTimeout(t);
     }
   }, []);
 
+  // Closing the modal marks it seen, then hands off to the tour if not yet taken.
+  const handleCloseHowItWorks = () => {
+    setHowItWorksOpen(false);
+    markTutorialSeen(EXEC_MEETING_HOWITWORKS_KEY);
+    if (!hasSeenTutorial(EXEC_MEETING_TOUR_KEY)) {
+      setTimeout(() => setTourOpen(true), 300);
+    }
+  };
+
   const handleReplayTour = () => {
     resetTutorial(EXEC_MEETING_TOUR_KEY);
     setTourOpen(true);
   };
+
+  // Let users re-open the "How it works" summary from the header any time.
+  const handleShowHowItWorks = () => setHowItWorksOpen(true);
 
   useEffect(() => {
     if (activeTab === 'meetings') { if (meetings.length === 0) loadMeetings(); if (meetingFilterUsers.length === 0) loadMeetingFilterUsers(); }
@@ -1064,6 +1099,16 @@ const ExecMeetingDashboard = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* How it works — re-open the onboarding summary any time */}
+            <button
+              type="button"
+              onClick={handleShowHowItWorks}
+              title="How this agent works"
+              className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-white/15 bg-white/5 text-white/70 text-sm font-semibold hover:bg-white/10 hover:text-white transition"
+            >
+              <Sparkles className="h-4 w-4" />
+              How it works
+            </button>
             {/* Take the Tour */}
             <button
               type="button"
@@ -1138,6 +1183,16 @@ const ExecMeetingDashboard = () => {
           ))}
         </Tabs>
       </div>
+
+      {/* First-visit "how it works" summary — auto-shown before the tour */}
+      <HowItWorksModal
+        open={howItWorksOpen}
+        onClose={handleCloseHowItWorks}
+        title="How the Meeting Assistant works"
+        subtitle="What it does for you, automatically"
+        steps={HOWITWORKS_STEPS}
+        primaryLabel="Got it"
+      />
 
       {/* Guided tour overlay (reuses the generic tutorial component) */}
       <FrontlineTutorial

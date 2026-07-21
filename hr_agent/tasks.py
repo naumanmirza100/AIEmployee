@@ -223,6 +223,24 @@ def process_hr_document(self, document_id):
                                      'embedding_model', 'updated_at'])
         logger.info("process_hr_document: doc %s ready (%d chunks)", document_id, document.chunks_total)
 
+        # Mark the company's HR FAISS index as stale so it rebuilds on next
+        # query. Cheap — just touches a sidecar file.
+        try:
+            if has_embeddings and document.company_id:
+                from hr_agent.vector_store import mark_index_dirty as _hr_mark_dirty
+                _hr_mark_dirty(document.company_id)
+        except Exception:
+            logger.exception("process_hr_document: failed to mark HR FAISS index dirty")
+
+        # Drop the answer cache for this company — a new doc may have better
+        # content on some topics than what was previously cached.
+        try:
+            if document.company_id:
+                from core.HR_agent.hr_agent import invalidate_answer_cache_for_company
+                invalidate_answer_cache_for_company(document.company_id)
+        except Exception:
+            logger.exception("process_hr_document: failed to invalidate answer cache")
+
         # Auto-extract for structured doc types — populates `extracted_fields`
         # so the document-expiry walker, the employee detail drawer, and the
         # offer-letter cards have data without a manual "Extract" click.

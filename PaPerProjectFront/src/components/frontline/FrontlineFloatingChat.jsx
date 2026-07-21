@@ -27,7 +27,7 @@ import {
 } from './frontlineLocalStore';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { useToast } from '@/components/ui/use-toast';
-import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle } from './chatShellUtils';
+import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle, ElapsedTimer } from './chatShellUtils';
 
 const SAMPLE_PROMPTS = [
   "How do I reset a customer's password?",
@@ -96,6 +96,9 @@ const FrontlineFloatingChat = () => {
   const [indexProgress, setIndexProgress] = useState({
     status: 'idle', percent: 0, done: 0, total: 0, error: '', fileName: '',
   });
+  // When a Q&A request is in flight, this holds the request start timestamp
+  // so the "thinking" spinner can render a live elapsed clock. Null when idle.
+  const [sendingStartedAt, setSendingStartedAt] = useState(null);
 
   // Slash-menu state
   const [slashOpen, setSlashOpen] = useState(false);
@@ -312,16 +315,23 @@ const FrontlineFloatingChat = () => {
     setInput('');
     setSlashOpen(false);
     setSending(true);
+    const startedAt = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    setSendingStartedAt(startedAt);
     try {
       const res = await frontlineAgentService.knowledgeQA(q, {});
       if (res && res.status === 'success' && res.data) {
         const data = res.data;
+        const endedAt = (typeof performance !== 'undefined' && performance.now)
+          ? performance.now() : Date.now();
         pushMessage({
           role: 'assistant',
           content: data.answer || 'No answer available.',
           source: data.source || null,
           has_verified_info: !!data.has_verified_info,
           citations: data.citations || [],
+          responseTimeMs: Math.round(endedAt - startedAt),
+          cache_hit: !!data.cache_hit,
         });
       } else {
         throw new Error((res && res.message) || 'Failed to get an answer');
@@ -330,6 +340,7 @@ const FrontlineFloatingChat = () => {
       pushMessage({ role: 'assistant', content: `Error: ${e.message || 'Something went wrong.'}`, error: true });
     } finally {
       setSending(false);
+      setSendingStartedAt(null);
     }
   };
 
@@ -712,6 +723,16 @@ const FrontlineFloatingChat = () => {
                             : <div className="text-[11px] text-white/60 truncate">• {m.source}</div>}
                         </div>
                       )}
+                      {typeof m.responseTimeMs === 'number' && m.role === 'assistant' && !m.error && (
+                        <div className="mt-1.5 text-[10px] text-white/40 flex items-center gap-1.5">
+                          <span>⏱ {(m.responseTimeMs / 1000).toFixed(2)}s</span>
+                          {m.cache_hit && (
+                            <span className="px-1 py-[1px] rounded bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 text-[9px] font-medium">
+                              cached
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
@@ -721,6 +742,9 @@ const FrontlineFloatingChat = () => {
                   <div className="bg-white/[0.06] border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-white/60" />
                     <span className="text-xs text-white/60">Searching knowledge base…</span>
+                    <span className="text-[11px] text-white/40 tabular-nums font-mono">
+                      <ElapsedTimer since={sendingStartedAt} />
+                    </span>
                   </div>
                 </div>
               )}
