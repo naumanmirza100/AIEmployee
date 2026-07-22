@@ -376,6 +376,7 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
                 analysis = f'AI analysis failed: {str(e)}'
         
         # Create Reply record
+        reply_record = None
         try:
             reply_record = Reply.objects.create(
                 contact=contact,
@@ -426,35 +427,48 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
             if sub_sequences.exists():
                 sub_sequence = sub_sequences.first()
                 logger.info(f"Found sub-sequence '{sub_sequence.name}' for contact {lead.email}")
+
+                # Per-reply run: create an independent sub-sequence run tied to THIS
+                # reply, so a lead's different replies each get their own sub-sequence
+                # in parallel (instead of the latest reply overwriting the contact's
+                # single sub_sequence slot). The sender drives off these run rows.
+                if reply_record is not None:
+                    try:
+                        from marketing_agent.models import ReplySubSequenceRun
+                        ReplySubSequenceRun.objects.get_or_create(
+                            reply=reply_record,
+                            defaults={
+                                'contact': contact,
+                                'campaign': campaign,
+                                'lead': lead,
+                                'sub_sequence': sub_sequence,
+                                'interest_level': target_interest,
+                            },
+                        )
+                        logger.info(f"Created ReplySubSequenceRun for reply #{reply_record.id} -> '{sub_sequence.name}'")
+                    except Exception as e:
+                        logger.warning(f"Could not create ReplySubSequenceRun: {e}")
         # Design rule: replies to sub-sequence emails do nothing — no switch, no restart.
         # The tick cleanup in send_sequence_emails clears the sub-sequence so no further
         # emails go out. The lead resumes only if they reply to a main-sequence email.
 
-        # Mark as replied
-        was_already_in_sub_sequence = bool(contact.sub_sequence)
-        existing_sub_sequence_id = contact.sub_sequence.id if contact.sub_sequence else None
-
+        # Mark as replied (stops the main sequence). Sub-seq enrolment already
+        # happened above as a per-reply ReplySubSequenceRun.
         contact.mark_replied(
             reply_subject=reply_subject,
             reply_content=reply_content,
             reply_at=reply_date,  # Pass the reply date so delay calculations use correct time
             interest_level=interest_level,
             analysis=analysis,
-            sub_sequence=sub_sequence
         )
 
         # Build message
         if is_sub_sequence_reply:
             message = f'Reply received from {lead.email} for sub-sequence email. Reply recorded.'
-            if sub_sequence:
-                message += f' Switched to sub-sequence "{sub_sequence.name}" (new interest: {target_interest}).'
         else:
             message = f'Contact {lead.email} marked as replied. Main sequence stopped.'
             if sub_sequence:
-                if was_already_in_sub_sequence and existing_sub_sequence_id == sub_sequence.id:
-                    message += f' Sub-sequence "{sub_sequence.name}" restarted.'
-                else:
-                    message += f' Sub-sequence "{sub_sequence.name}" started.'
+                message += f' Sub-sequence "{sub_sequence.name}" started for this reply.'
         
         return {
             'success': True,

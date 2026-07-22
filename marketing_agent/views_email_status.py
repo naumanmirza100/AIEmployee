@@ -285,7 +285,12 @@ def email_sending_status(request, campaign_id):
 
     # Handle sub-sequences for pending and upcoming emails
     if campaign.status == 'active':
-        # First, get contacts with sub-sequences (existing logic for current sub-sequence progress)
+        # NOTE (per-reply sub-sequences): this upcoming-emails PREVIEW still reads
+        # the legacy per-contact sub_sequence* fields. Actual sending is now driven
+        # by ReplySubSequenceRun (see send_sequence_emails._process_reply_run), so
+        # this preview can under-count when a lead has multiple parallel sub-seq
+        # runs. It's display-only and does not affect what actually sends. TODO:
+        # rebuild this section off ReplySubSequenceRun to match real sends.
         sub_sequence_contacts = (
             CampaignContact.objects
             .filter(

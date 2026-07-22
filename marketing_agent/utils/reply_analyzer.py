@@ -10,6 +10,36 @@ from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
 
 logger = logging.getLogger(__name__)
 
+# Markers where the quoted original email begins in a reply body (Gmail, Outlook,
+# Apple Mail, etc.). Everything from the first marker onward is the OLD thread, not
+# what the lead just wrote.
+_QUOTE_MARKERS = [
+    r'\bon\s.+\bwrote:',                 # "On Mon, 20 Jul 2026 at 21:54, <x> wrote:"
+    r'-{2,}\s*original message\s*-{2,}',  # "----- Original Message -----"
+    r'^_{5,}',                            # "________" separator line
+    r'^from:\s',                          # Outlook "From: ..." header block
+    r'^sent:\s',
+]
+_QUOTE_RE = re.compile('|'.join(_QUOTE_MARKERS), re.IGNORECASE | re.MULTILINE)
+
+
+def strip_quoted_thread(text: str) -> str:
+    """Return only the NEW reply text — everything before the quoted original.
+
+    Rule-based classification (e.g. "dont send again" = unsubscribe) must look at
+    what the lead actually wrote, NOT the quoted history. Without this, one reply's
+    phrase leaks into another reply on the same thread (e.g. a "Sure lets discuss"
+    reply was misread as Unsubscribe because the quoted thread contained an earlier
+    "dont send again"). Also drops leading '>' quote markers per line.
+    """
+    if not text:
+        return ''
+    m = _QUOTE_RE.search(text)
+    head = text[:m.start()] if m else text
+    # Drop any residual quoted lines (lines starting with '>').
+    lines = [ln for ln in head.splitlines() if not ln.lstrip().startswith('>')]
+    return '\n'.join(lines).strip()
+
 
 class ReplyAnalyzer(MarketingBaseAgent):
     """AI agent for analyzing email reply sentiment and interest level"""
@@ -55,9 +85,12 @@ Return your analysis in a structured format."""
                 'confidence': 0
             }
 
-        combined_lower = f"{reply_subject or ''} {reply_content or ''}".lower()
+        # Use only the NEW reply text (strip the quoted original thread) for all
+        # keyword/rule matching, so one reply's phrases don't leak into another.
+        new_reply_only = strip_quoted_thread(reply_content or '')
+        combined_lower = f"{reply_subject or ''} {new_reply_only}".lower()
         # First line / content before quoted "On ... wrote" (so "no" + quote still counts as "no")
-        content_only = (reply_content or '').strip().lower()
+        content_only = new_reply_only.strip().lower()
         first_line = content_only.split('\n')[0].strip() if content_only else ''
         before_quote = content_only.split('on ')[0].strip() if ' on ' in content_only or content_only.startswith('on ') else content_only
         short_content = (first_line or before_quote or content_only).strip()
@@ -219,7 +252,7 @@ CAMPAIGN: {campaign_name or 'Marketing Campaign'}
 REPLY SUBJECT: {reply_subject or '(No subject)'}
 
 REPLY CONTENT:
-{reply_content or '(No content)'}
+{new_reply_only or reply_content or '(No content)'}
 
 TASK:
 Determine if this reply indicates the lead is INTERESTED (positive) or NOT INTERESTED (negative).
@@ -321,7 +354,10 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
                     interest_level = 'neutral'
             
             # Post-process: override AI when reply clearly matches our rules (AI sometimes returns neutral for these)
-            combined = f"{reply_subject or ''} {reply_content or ''}".lower()
+            # Strip the quoted original email first — rule overrides must fire on
+            # what the lead just wrote, not on quoted history from the thread.
+            new_reply_text = strip_quoted_thread(reply_content or '')
+            combined = f"{reply_subject or ''} {new_reply_text}".lower()
             overridden = self._apply_rule_overrides(combined, interest_level)
             if overridden is not None:
                 interest_level = overridden

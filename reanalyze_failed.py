@@ -1,22 +1,23 @@
+"""Re-run the analyzer on any reply stuck at 'not_analyzed' (failed under old code).
+RUN THIS *AFTER* restarting the backend, so the fixed code is loaded.
+    python reanalyze_failed.py
 """
-Re-run the AI analyzer on replies stuck at 'not_analyzed' (they failed earlier due
-to the json-scope bug in reply_analyzer.py, now fixed).
-Run:  python manage.py shell < reanalyze_not_analyzed.py
-"""
+import os, django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project_manager_ai.settings')
+django.setup()
+
 from marketing_agent.models import Reply
 from marketing_agent.utils.reply_analyzer import ReplyAnalyzer
 from marketing_agent.services.reply_processor import _company_id_for_campaign
 
 VALID = ['positive', 'negative', 'neutral', 'requested_info', 'objection', 'unsubscribe']
-analyzer = ReplyAnalyzer()
+az = ReplyAnalyzer()
 
-# Re-run ALL replies here (not just not_analyzed) so we can see the AI path work.
-stuck = list(Reply.objects.select_related('contact', 'campaign', 'lead').order_by('-created_at')[:10])
-lines = [f"Re-analyzing {len(stuck)} recent reply/replies (AI path)."]
-
+stuck = list(Reply.objects.filter(interest_level='not_analyzed').select_related('campaign', 'lead', 'contact'))
+print(f"Found {len(stuck)} reply/replies stuck at 'not_analyzed'.")
 for r in stuck:
     try:
-        res = analyzer.analyze_reply(
+        res = az.analyze_reply(
             reply_subject=r.reply_subject or '',
             reply_content=r.reply_content or '',
             campaign_name=r.campaign.name if r.campaign else '',
@@ -30,10 +31,8 @@ for r in stuck:
             if r.contact:
                 r.contact.reply_interest_level = lvl
                 r.contact.save(update_fields=['reply_interest_level'])
-            lines.append(f"  Reply #{r.id} {r.lead.email}: not_analyzed -> {lvl}")
+            print(f"  reply#{r.id} {r.lead.email}: not_analyzed -> {lvl}")
         else:
-            lines.append(f"  Reply #{r.id} {r.lead.email}: got invalid level {lvl!r}, left as-is")
+            print(f"  reply#{r.id}: invalid level {lvl!r}, skipped")
     except Exception as e:
-        lines.append(f"  Reply #{r.id} {r.lead.email}: FAILED AGAIN -> {e!r}")
-
-print("REANALYZE_RESULT || " + " || ".join(lines))
+        print(f"  reply#{r.id}: FAILED AGAIN -> {e!r}  (did you restart the backend?)")

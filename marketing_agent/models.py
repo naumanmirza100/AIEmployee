@@ -862,15 +862,14 @@ class CampaignContact(models.Model):
     
     def mark_replied(self, reply_subject='', reply_content='', reply_at=None, interest_level='not_analyzed', analysis='', sub_sequence=None):
         """
-        Mark this contact as having replied - stops main sequence automation and starts sub-sequence if available
-        
-        Args:
-            reply_subject: Subject of the reply
-            reply_content: Content of the reply
-            reply_at: When the reply was received
-            interest_level: AI-determined interest level
-            analysis: AI analysis of the reply
-            sub_sequence: Optional EmailSequence to use as sub-sequence (if None, looks for sub-sequences of main sequence)
+        Mark this contact as having replied — stops the main sequence.
+
+        NOTE: sub-sequence enrolment is NO LONGER done here. It moved to per-reply
+        `ReplySubSequenceRun` rows (created in reply_processor), so a lead's
+        different replies each trigger their own sub-sequence in parallel instead
+        of the latest reply overwriting a single per-contact slot. The
+        `sub_sequence` argument is kept only for backward compatibility and is
+        ignored. The legacy `contact.sub_sequence*` fields are left untouched.
         """
         self.replied = True
         self.replied_at = reply_at or timezone.now()
@@ -882,83 +881,6 @@ class CampaignContact(models.Model):
             self.reply_interest_level = interest_level
         if analysis:
             self.reply_analysis = analysis
-        
-        # Start sub-sequence ONLY if:
-        # 1. We're NOT already in a sub-sequence (don't replace existing sub-sequence)
-        # 2. sub_sequence parameter is provided (explicitly passed from views.py)
-        # 3. This is a reply to MAIN sequence email (not sub-sequence email)
-        
-        # If already in sub-sequence AND this is a reply to MAIN sequence (not sub-sequence),
-        # RESTART the sub-sequence to send emails again for this new reply
-        if self.sub_sequence and sub_sequence is not None:
-            # This is a new reply to main sequence - restart sub-sequence to send emails again
-            self.sub_sequence = sub_sequence
-            self.sub_sequence_step = 0  # Reset to start from beginning
-            self.sub_sequence_last_sent_at = None  # Reset timing
-            self.sub_sequence_completed = False  # Reset completion status
-            logger.info(f"Contact {self.lead.email} replied again to main sequence. Restarting sub-sequence '{sub_sequence.name}' to send emails for this new reply.")
-        elif self.sub_sequence:
-            # This is a reply to sub-sequence email - just record, don't restart
-            logger.info(f"Contact {self.lead.email} already in sub-sequence '{self.sub_sequence.name}'. Reply recorded, sub-sequence continues.")
-        elif sub_sequence is not None and self.sequence:
-            # sub_sequence was explicitly passed from views.py (only happens for main sequence replies)
-            self.sub_sequence = sub_sequence
-            self.sub_sequence_step = 0  # Start from step 0 (will be incremented to 1 when first email is sent)
-            self.sub_sequence_last_sent_at = None
-            self.sub_sequence_completed = False
-            logger.info(f"Started sub-sequence '{sub_sequence.name}' for contact {self.lead.email} after main sequence reply")
-        elif sub_sequence is None and not self.sub_sequence and self.sequence:
-            # No sub_sequence passed, but we should try to find one (fallback for backward compatibility)
-            # This should rarely happen now since views.py handles sub-sequence finding
-            detected_interest = interest_level if interest_level and interest_level != 'not_analyzed' else 'neutral'
-            
-            # Map AI interest levels to sub-sequence interest levels
-            # Include ALL possible interest levels from INTEREST_LEVEL_CHOICES
-            interest_mapping = {
-                'positive': 'positive',
-                'negative': 'negative',
-                'neutral': 'neutral',
-                'requested_info': 'requested_info',
-                'objection': 'objection',
-                'unsubscribe': 'unsubscribe',
-                'not_analyzed': 'any'
-            }
-            # Use the mapping, but if not found, use the original interest_level directly
-            target_interest = interest_mapping.get(detected_interest, detected_interest if detected_interest in ['positive', 'negative', 'neutral', 'requested_info', 'objection', 'unsubscribe'] else 'any')
-            
-            # Look for sub-sequences matching the interest level
-            sub_sequences = EmailSequence.objects.filter(
-                parent_sequence=self.sequence,
-                is_sub_sequence=True,
-                is_active=True,
-                interest_level=target_interest
-            )
-            
-            # If no exact match, try 'any' (but only if target_interest is not 'any')
-            if not sub_sequences.exists() and target_interest != 'any':
-                sub_sequences = EmailSequence.objects.filter(
-                    parent_sequence=self.sequence,
-                    is_sub_sequence=True,
-                    is_active=True,
-                    interest_level='any'
-                )
-                logger.info(f"No exact match for interest '{target_interest}'. Trying 'any' sub-sequence...")
-            
-            # DON'T fall back to any random sub-sequence - this causes wrong sub-sequence assignment
-            # Only use exact match or 'any' - if neither exists, don't assign a sub-sequence
-            if sub_sequences.exists():
-                found_sub_sequence = sub_sequences.first()
-                self.sub_sequence = found_sub_sequence
-                self.sub_sequence_step = 0
-                self.sub_sequence_last_sent_at = None
-                self.sub_sequence_completed = False
-                logger.info(
-                    f"Found sub-sequence '{found_sub_sequence.name}' (interest: {found_sub_sequence.interest_level}) "
-                    f"for contact {self.lead.email} (detected interest: {detected_interest}, mapped to: {target_interest})"
-                )
-            else:
-                logger.warning(f"No matching sub-sequence found for contact {self.lead.email} with interest level '{target_interest}' (original: '{interest_level}'). No sub-sequence will be assigned.")
-        
         self.save()
     
     def mark_completed(self):
@@ -1030,6 +952,57 @@ class Reply(models.Model):
     
     def __str__(self):
         return f"Reply from {self.lead.email} on {self.replied_at.strftime('%Y-%m-%d %H:%M')} ({self.get_interest_level_display()})"
+
+
+class ReplySubSequenceRun(models.Model):
+    """One triggered sub-sequence 'run' per reply — the per-reply replacement for
+    the single-slot sub-sequence fields on CampaignContact.
+
+    Why this exists: a lead can reply to DIFFERENT main-sequence emails with
+    DIFFERENT interest levels (e.g. 'requested_info' to one email, 'positive' to
+    another). The old design stored one sub_sequence/step/interest on the contact
+    row, so each new reply OVERWROTE the previous one and only the latest reply's
+    sub-sequence ever ran. Here each reply gets its OWN run row, so multiple
+    sub-sequences run in parallel — one per reply.
+
+    The sender (send_sequence_emails) drives off these rows: `step`/`last_sent_at`
+    give the timing anchor, `completed`/`cancelled` end it.
+    """
+    reply = models.OneToOneField(
+        Reply, on_delete=models.CASCADE, related_name='sub_sequence_run',
+        help_text='The reply that triggered this sub-sequence run.',
+    )
+    contact = models.ForeignKey(CampaignContact, on_delete=models.CASCADE, related_name='sub_sequence_runs')
+    campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name='sub_sequence_runs')
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='sub_sequence_runs')
+
+    sub_sequence = models.ForeignKey(
+        'EmailSequence', on_delete=models.CASCADE, related_name='sub_sequence_runs',
+        help_text='The sub-sequence being sent for this reply.',
+    )
+    # The interest level this run was selected for (snapshot of the reply's level
+    # at creation, so re-analysis of other replies never disturbs this run).
+    interest_level = models.CharField(max_length=20, default='any')
+
+    step = models.IntegerField(default=0, help_text='Current step (0 = not started).')
+    last_sent_at = models.DateTimeField(null=True, blank=True, help_text='When the last step went out (delay anchor).')
+    completed = models.BooleanField(default=False, help_text='All steps sent.')
+    cancelled = models.BooleanField(default=False, help_text='Run stopped early (e.g. lead replied to the sub-seq itself).')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'ppp_marketingagent_reply_subseq_run'
+        ordering = ['created_at']
+        indexes = [
+            # The sender's hot query: pending runs for a campaign.
+            models.Index(fields=['campaign', 'completed', 'cancelled']),
+            models.Index(fields=['lead', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"Run: {self.lead.email} / {self.sub_sequence.name} (step {self.step}{'✓' if self.completed else ''})"
 
 
 @receiver(post_save, sender=Reply)
