@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import HoverTip from '@/components/common/HoverTip';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import {
@@ -206,6 +209,8 @@ const CampaignDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  // Tab hover tooltip: { text, top, left } above the hovered tab, or null.
+  const [tabTip, setTabTip] = useState(null);
   const [campaign, setCampaign] = useState(null);
   const [emailStats, setEmailStats] = useState(null);
   const [analytics, setAnalytics] = useState(null);
@@ -237,6 +242,10 @@ const CampaignDetail = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const [deleteLeadConfirm, setDeleteLeadConfirm] = useState(null);
+  // Bulk lead selection + delete
+  const [selectedLeads, setSelectedLeads] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
   const [noEmailAccountDialogOpen, setNoEmailAccountDialogOpen] = useState(false);
   const [addEmailAccountOpen, setAddEmailAccountOpen] = useState(false);
 
@@ -501,6 +510,51 @@ const CampaignDetail = () => {
     }
   };
 
+  // Drop any selected IDs that no longer exist after leads refresh (upload/delete).
+  useEffect(() => {
+    setSelectedLeads((prev) => {
+      if (prev.size === 0) return prev;
+      const ids = new Set(leads.map((l) => l.id));
+      const next = new Set([...prev].filter((x) => ids.has(x)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [leads]);
+
+  const toggleLead = (leadId) => {
+    setSelectedLeads((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  };
+
+  const allLeadsChecked = leads.length > 0 && leads.every((l) => selectedLeads.has(l.id));
+
+  const toggleSelectAllLeads = () => {
+    setSelectedLeads(allLeadsChecked ? new Set() : new Set(leads.map((l) => l.id)));
+  };
+
+  const handleBulkDeleteLeads = async () => {
+    setBulkDeleteConfirmOpen(false);
+    setBulkDeleting(true);
+    let ok = 0;
+    let fail = 0;
+    for (const leadId of selectedLeads) {
+      try {
+        await marketingAgentService.deleteCampaignLead(id, leadId);
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setBulkDeleting(false);
+    setSelectedLeads(new Set());
+    if (ok > 0) toast({ title: 'Deleted', description: `${ok} lead${ok !== 1 ? 's' : ''} removed` });
+    if (fail > 0) toast({ title: 'Error', description: `${fail} lead${fail !== 1 ? 's' : ''} failed to delete`, variant: 'destructive' });
+    fetchDetail(true);
+  };
+
   const handleExportLeads = () => {
     const url = marketingAgentService.getExportLeadsUrl(id);
     const token = localStorage.getItem('company_auth_token');
@@ -599,6 +653,7 @@ const CampaignDetail = () => {
         <div className="flex flex-wrap gap-2">
           
           {(isDraftOrPaused || isScheduled) && (
+            <HoverTip tip="Launch this campaign now to start sending emails">
             <Button
               size="sm"
               onClick={() => {
@@ -626,8 +681,10 @@ const CampaignDetail = () => {
               <Rocket className="mr-2 h-4 w-4" />
               Launch
             </Button>
+            </HoverTip>
           )}
           {(isDraftOrPaused || isScheduled) && (
+            <HoverTip tip="Set start and end dates to send it later">
             <Button
               size="sm"
               variant="outline"
@@ -641,78 +698,110 @@ const CampaignDetail = () => {
               <CalendarIcon className="mr-2 h-4 w-4" />
               Schedule
             </Button>
+            </HoverTip>
           )}
           {isActive && (
-            <Button size="sm" variant="outline" onClick={() => setStopConfirmOpen(true)} disabled={!!actionLoading}>
-              <Pause className="mr-2 h-4 w-4" />
-              Stop
-            </Button>
+            <HoverTip tip="Pause sending for this campaign">
+              <Button size="sm" variant="outline" onClick={() => setStopConfirmOpen(true)} disabled={!!actionLoading}>
+                <Pause className="mr-2 h-4 w-4" />
+                Stop
+              </Button>
+            </HoverTip>
           )}
-          <Button
-            size="sm"
-            variant={campaign.email_account_email ? 'outline' : 'default'}
-            onClick={openAccountModal}
-            disabled={!!actionLoading}
-            title={campaign.email_account_email ? `Sending from ${campaign.email_account_email}` : 'No sending account set'}
-          >
-            <Mail className="mr-2 h-4 w-4" />
-            {campaign.email_account_email ? `From: ${campaign.email_account_email}` : 'Set sending account'}
-          </Button>
-          <Button size="sm" variant="outline" onClick={openEdit} disabled={!!actionLoading}>
-            <Pencil className="mr-2 h-4 w-4" />
-            Edit
-          </Button>
-          <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)} disabled={!!actionLoading}>
-            <Trash2 className="mr-2 h-4 w-4" />
-            Delete
-          </Button>
+          <HoverTip tip={campaign.email_account_email ? `Sending  emails from ${campaign.email_account_email}, click to change` : 'Choose which email account this campaign sends from'}>
+            <Button
+              size="sm"
+              variant={campaign.email_account_email ? 'outline' : 'default'}
+              onClick={openAccountModal}
+              disabled={!!actionLoading}
+            >
+              <Mail className="mr-2 h-4 w-4" />
+              {campaign.email_account_email ? `From: ${campaign.email_account_email}` : 'Set sending account'}
+            </Button>
+          </HoverTip>
+          <HoverTip tip="Edit this campaign's name and details">
+            <Button size="sm" variant="outline" onClick={openEdit} disabled={!!actionLoading}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
+          </HoverTip>
+          <HoverTip tip="Delete this campaign permanently">
+            <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)} disabled={!!actionLoading}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          </HoverTip>
         </div>
       </div>
 
       {/* Tabs: Overview, Analytics, Email sequences, Email sending activity, Campaign leads */}
       <Tabs defaultValue="overview" className="space-y-4 flex flex-col">
         <TabsList className="flex flex-wrap gap-1 w-full h-auto justify-evenly">
-          <TabsTrigger value="overview" className="flex items-center gap-2">
-            <Target className="h-4 w-4" />
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="analytics" className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Analytics & dashboard
-          </TabsTrigger>
-          <TabsTrigger value="sequences" className="flex items-center gap-2">
-            <ListOrdered className="h-4 w-4" />
-            Email sequences
-          </TabsTrigger>
-          <TabsTrigger value="email-activity" className="flex items-center gap-2">
-            <FileText className="h-4 w-4" />
-            Email sending activity
-          </TabsTrigger>
-          <TabsTrigger value="leads" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Campaign leads
-          </TabsTrigger>
+          {[
+            { value: 'overview', label: 'Overview', icon: Target, tip: 'Summary of this campaign at a glance.' },
+            { value: 'analytics', label: 'Analytics & dashboard', icon: BarChart3, tip: 'This tab show charts and performance metrics for this campaign.' },
+            { value: 'sequences', label: 'Email sequences', icon: ListOrdered, tip: 'This tab shows the email sequence steps and follow-ups in this campaign.' },
+            { value: 'email-activity', label: 'Email sending activity', icon: FileText, tip: 'This tab show every email sent, with delivery and open status.' },
+            { value: 'leads', label: 'Campaign leads', icon: Users, tip: 'This tab shows the leads targeted by this campaign.' },
+          ].map((t) => (
+            <TabsTrigger
+              key={t.value}
+              value={t.value}
+              className="flex items-center gap-2"
+              // Handlers on the trigger itself — wrapping a Radix TabsTrigger in
+              // HoverTip breaks the tab layout / keyboard nav.
+              onMouseEnter={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setTabTip({ text: t.tip, top: r.top - 8, left: r.left + r.width / 2 });
+              }}
+              onMouseLeave={() => setTabTip(null)}
+            >
+              <t.icon className="h-4 w-4" />
+              {t.label}
+            </TabsTrigger>
+          ))}
         </TabsList>
+
+        {/* Tab hover tooltip — portalled, fixed above the hovered tab */}
+        {tabTip && createPortal(
+          <div
+            role="tooltip"
+            className="fixed z-[10000] pointer-events-none -translate-x-1/2 -translate-y-full"
+            style={{ top: tabTip.top, left: tabTip.left }}
+          >
+            <div className="relative w-max max-w-[240px] rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl">
+              {tabTip.text}
+              <span
+                className="absolute left-1/2 top-full -translate-x-1/2 h-2 w-2 rotate-45 border-b border-r border-[#3a295a] bg-[#161630]"
+                style={{ marginTop: '-4px' }}
+              />
+            </div>
+          </div>,
+          document.body,
+        )}
 
         <TabsContent value="overview" className="space-y-4">
           <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              size="sm"
-              variant={campaign.email_account_email ? 'outline' : 'default'}
-              onClick={openAccountModal}
-              title={campaign.email_account_email ? `Sending from ${campaign.email_account_email}` : 'No sending account set'}
-            >
-              <Mail className="mr-2 h-4 w-4" />
-              {campaign.email_account_email ? `Email: ${campaign.email_account_email}` : 'Add email account'}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => { setUploadLeadsOpen(true); setUploadMessage(''); setUploadFile(null); }}
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Add campaign leads
-            </Button>
+            <HoverTip tip={campaign.email_account_email ? `Sending emails from ${campaign.email_account_email}, click to change` : 'Set the email account for this campaign'}>
+              <Button
+                size="sm"
+                variant={campaign.email_account_email ? 'outline' : 'default'}
+                onClick={openAccountModal}
+              >
+                <Mail className="mr-2 h-4 w-4" />
+                {campaign.email_account_email ? `Email: ${campaign.email_account_email}` : 'Add email account'}
+              </Button>
+            </HoverTip>
+            <HoverTip tip="Upload a file of leads for this campaign">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { setUploadLeadsOpen(true); setUploadMessage(''); setUploadFile(null); }}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Add campaign leads
+              </Button>
+            </HoverTip>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
@@ -975,15 +1064,27 @@ const CampaignDetail = () => {
                   <CardDescription>Upload CSV/Excel or manage leads</CardDescription>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => { setUploadLeadsOpen(true); setUploadMessage(''); setUploadFile(null); }}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    Upload leads
-                  </Button>
-                  {leads.length > 0 && (
-                    <Button size="sm" variant="outline" onClick={handleExportLeads}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Export CSV
+                  {selectedLeads.size > 0 && (
+                    <HoverTip tip="Delete the selected leads from this campaign">
+                      <Button size="sm" variant="destructive" disabled={bulkDeleting} onClick={() => setBulkDeleteConfirmOpen(true)}>
+                        {bulkDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                        Delete ({selectedLeads.size})
+                      </Button>
+                    </HoverTip>
+                  )}
+                  <HoverTip tip="Upload a CSV/Excel file of leads">
+                    <Button size="sm" onClick={() => { setUploadLeadsOpen(true); setUploadMessage(''); setUploadFile(null); }}>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Upload leads
                     </Button>
+                  </HoverTip>
+                  {leads.length > 0 && (
+                    <HoverTip tip="Download all leads as a CSV file">
+                      <Button size="sm" variant="outline" onClick={handleExportLeads}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Export CSV
+                      </Button>
+                    </HoverTip>
                   )}
                 </div>
               </div>
@@ -1011,6 +1112,13 @@ const CampaignDetail = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/50">
+                        <th className="p-2 w-10">
+                          <Checkbox
+                            checked={allLeadsChecked}
+                            onCheckedChange={toggleSelectAllLeads}
+                            aria-label="Select all leads"
+                          />
+                        </th>
                         <th className="text-left p-2 font-medium">Email</th>
                         <th className="text-left p-2 font-medium">Name</th>
                         <th className="text-left p-2 font-medium">Company</th>
@@ -1020,7 +1128,14 @@ const CampaignDetail = () => {
                     </thead>
                     <tbody>
                       {leads.map((lead) => (
-                        <tr key={lead.id} className="border-b last:border-0">
+                        <tr key={lead.id} className={`border-b last:border-0 ${selectedLeads.has(lead.id) ? 'bg-primary/5' : ''}`}>
+                          <td className="p-2">
+                            <Checkbox
+                              checked={selectedLeads.has(lead.id)}
+                              onCheckedChange={() => toggleLead(lead.id)}
+                              aria-label={`Select ${lead.email}`}
+                            />
+                          </td>
                           <td className="p-2">{lead.email}</td>
                           <td className="p-2">{[lead.first_name, lead.last_name].filter(Boolean).join(' ') || '—'}</td>
                           <td className="p-2">{lead.company || '—'}</td>
@@ -1498,6 +1613,27 @@ const CampaignDetail = () => {
             <Button variant="destructive" onClick={handleDeleteLead}>
               <Trash2 className="mr-2 h-4 w-4" />
               Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Leads Confirmation Dialog */}
+      <Dialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete {selectedLeads.size} Lead{selectedLeads.size !== 1 ? 's' : ''}</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove the selected lead{selectedLeads.size !== 1 ? 's' : ''} from this campaign? This can&apos;t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setBulkDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDeleteLeads}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>
