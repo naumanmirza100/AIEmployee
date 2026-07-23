@@ -20,33 +20,77 @@ export const getDashboardStats = async () => {
 };
 
 /**
- * Upload document for processing
+ * Upload a document for processing.
+ *
+ * XHR-based (not fetch) so `options.onProgress({ loaded, total, percent })`
+ * reports real upload-byte progress. Returns immediately with a 202 + a
+ * `document.id` you can poll via `getDocumentStatus`. `options.signal`
+ * (AbortSignal) cancels the upload. Mirrors HR's `uploadHRDocument`.
  */
-export const uploadDocument = async (file, title = '', tags = '') => {
-  try {
-    const token = localStorage.getItem('company_auth_token');
+export const uploadDocument = async (file, title = '', tags = '', options = {}) => {
+  const token = localStorage.getItem('company_auth_token');
+  const fd = new FormData();
+  fd.append('file', file);
+  if (title) fd.append('title', title);
+  if (tags) fd.append('tags', tags);
 
-    const formData = new FormData();
-    formData.append('file', file);
-    if (title) formData.append('title', title);
-    if (tags) formData.append('tags', tags);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}/operations/documents/upload/`, true);
+    if (token) xhr.setRequestHeader('Authorization', `Token ${token}`);
 
-    const response = await fetch(`${API_BASE_URL}/operations/documents/upload/`, {
-      method: 'POST',
-      headers: token ? { 'Authorization': `Token ${token}` } : {},
-      body: formData,
-    });
-
-    const data = await response.json();
-    if (!response.ok || data.status === 'error') {
-      const err = new Error(data.message || data.error || `HTTP ${response.status}`);
-      err.status = response.status;
-      err.data = data;
-      throw err;
+    if (typeof options.onProgress === 'function' && xhr.upload) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          options.onProgress({
+            loaded: e.loaded,
+            total: e.total,
+            percent: Math.round((e.loaded / e.total) * 100),
+          });
+        }
+      };
     }
-    return data;
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch { data = {}; }
+      const ok = (xhr.status >= 200 && xhr.status < 300) || xhr.status === 202;
+      if (!ok) {
+        const err = new Error(data.message || data.error || `HTTP ${xhr.status}`);
+        err.status = xhr.status;
+        err.data = data;
+        return reject(err);
+      }
+      if (data.status === 'error') {
+        const err = new Error(data.message || 'Upload failed');
+        err.status = xhr.status;
+        err.data = data;
+        return reject(err);
+      }
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.onabort = () => reject(Object.assign(new Error('Upload aborted'), { aborted: true }));
+
+    if (options.signal) {
+      if (options.signal.aborted) { xhr.abort(); return; }
+      options.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+
+    xhr.send(fd);
+  });
+};
+
+/**
+ * Poll processing/indexing progress for a single document. Returns
+ * { processing_status, chunks_processed, chunks_total, percent, is_indexed }.
+ */
+export const getDocumentStatus = async (documentId) => {
+  try {
+    const response = await companyApi.get(`/operations/documents/${documentId}/status`);
+    return response;
   } catch (error) {
-    console.error('Upload document error:', error);
+    console.error('Get document status error:', error);
     throw error;
   }
 };
@@ -455,6 +499,7 @@ export const fetchGeneratedDocumentPdf = async (docId) => {
 export default {
   getDashboardStats,
   uploadDocument,
+  getDocumentStatus,
   listDocuments,
   getDocument,
   deleteDocument,

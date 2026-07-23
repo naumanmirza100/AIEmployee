@@ -11,6 +11,7 @@ import {
   HelpCircle, Upload, Sparkles, MessageSquareText, Quote, Lightbulb,
 } from 'lucide-react';
 import operationsService from '@/services/operationsAgentService';
+import { ElapsedTimer } from '@/components/frontline/chatShellUtils';
 
 const ACCENT = '#f59e0b'; // amber / operations accent
 const ACCENT_SOFT = 'rgba(245,158,11,0.12)';
@@ -175,6 +176,7 @@ const KnowledgeQA = () => {
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendStartedAt, setSendStartedAt] = useState(null);
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -276,12 +278,22 @@ const KnowledgeQA = () => {
     setMessages((prev) => [...prev, userMsg]);
     setQuestion('');
     setSending(true);
+    setSendStartedAt(performance.now());
     setTimeout(scrollToBottom, 10);
 
     try {
       const res = await operationsService.askQaQuestion(q, selectedChatId || null);
       if (res?.status === 'success' && res.message) {
-        const assistantMsg = res.message;
+        // Keep timing on the message so the badge renders (nested in responseData
+        // so it also survives a chat re-fetch).
+        const assistantMsg = {
+          ...res.message,
+          responseData: {
+            ...(res.message.responseData || {}),
+            timing_ms: res.timing_ms || res.message.responseData?.timing_ms || {},
+            cache_hit: res.cache_hit ?? res.message.responseData?.cache_hit ?? false,
+          },
+        };
         setMessages((prev) => [...prev, assistantMsg]);
 
         // If this was a new chat, pick up the new id + title and refresh sidebar list
@@ -325,6 +337,7 @@ const KnowledgeQA = () => {
       });
     } finally {
       setSending(false);
+      setSendStartedAt(null);
       setTimeout(scrollToBottom, 50);
     }
   };
@@ -641,7 +654,10 @@ const KnowledgeQA = () => {
                     <div className="rounded-2xl px-4 py-3 bg-white/[0.04] border border-white/10">
                       <div className="flex items-center gap-2 text-white/65 text-sm">
                         <Loader2 className="h-4 w-4 animate-spin" style={{ color: ACCENT }} />
-                        Searching your documents...
+                        Searching your documents…
+                        {sendStartedAt != null && (
+                          <ElapsedTimer since={sendStartedAt} className="text-xs font-mono text-white/40" />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -821,6 +837,10 @@ const Message = ({ message }) => {
 
   // assistant
   const sources = Array.isArray(message.sources) ? message.sources : [];
+  // Timing lives inside responseData so it survives a chat re-fetch.
+  const timing = message.responseData?.timing_ms || message.timing_ms || null;
+  const cacheHit = message.responseData?.cache_hit ?? message.cache_hit ?? false;
+  const totalMs = timing?.total;
   return (
     <div className="flex items-start gap-3">
       <div
@@ -854,6 +874,21 @@ const Message = ({ message }) => {
                 </span>
               ))}
             </div>
+          </div>
+        )}
+        {totalMs != null && (
+          <div className="mt-2 flex items-center gap-2 text-[10px] text-white/35 font-mono">
+            <span>⏱ Answered in {(totalMs / 1000).toFixed(2)}s</span>
+            {!cacheHit && timing?.retrieval != null && timing?.llm != null && totalMs > 1000 && (
+              <span className="text-white/25">
+                (retrieval {(timing.retrieval / 1000).toFixed(1)}s · llm {(timing.llm / 1000).toFixed(1)}s)
+              </span>
+            )}
+            {cacheHit && (
+              <span className="px-1.5 py-[1px] rounded bg-emerald-500/15 text-emerald-300 border border-emerald-400/25">
+                cached
+              </span>
+            )}
           </div>
         )}
       </div>

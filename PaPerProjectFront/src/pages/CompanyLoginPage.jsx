@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,11 +8,30 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { companyAuthService } from '@/services';
-import { Building2, Loader2, LogIn, Eye, EyeOff, KeyRound, ArrowLeft, MailCheck, Check } from 'lucide-react';
+import { Building2, Loader2, LogIn, Eye, EyeOff, KeyRound, ArrowLeft, MailCheck, Check, AlertCircle } from 'lucide-react';
+
+const SESSION_NOTICES = {
+  expired: 'You were signed out because this account was logged out somewhere else. Please log in again.',
+  inactive: 'This account is no longer active. Contact your administrator for access.',
+};
 
 const CompanyLoginPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Set when an expired session bounced us here (?session=expired|inactive).
+  const [sessionNotice, setSessionNotice] = useState(
+    () => SESSION_NOTICES[searchParams.get('session')] || '',
+  );
+
+  // Drop the query param so a refresh doesn't keep replaying the notice.
+  useEffect(() => {
+    if (!searchParams.get('session')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('session');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // 'login' or 'forgot'. Within 'forgot', step is 'email' | 'otp' | 'reset'.
   const [mode, setMode] = useState('login');
@@ -159,6 +178,12 @@ const CompanyLoginPage = () => {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {sessionNotice && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <p className="text-sm text-amber-200">{sessionNotice}</p>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email Address</Label>

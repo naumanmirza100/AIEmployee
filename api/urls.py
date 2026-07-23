@@ -575,6 +575,7 @@ urlpatterns = [
     # Operations Agent endpoints
     re_path(r'^operations/dashboard/?$', operations_agent.dashboard_stats, name='operations_dashboard_stats'),  # GET
     re_path(r'^operations/documents/upload/?$', operations_agent.upload_document, name='operations_upload_document'),  # POST
+    re_path(r'^operations/documents/(?P<document_id>\d+)/status/?$', operations_agent.get_document_status, name='operations_document_status'),  # GET
     re_path(r'^operations/documents/?$', operations_agent.list_documents, name='operations_list_documents'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/?$', operations_agent.get_document, name='operations_get_document'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/delete/?$', operations_agent.delete_document, name='operations_delete_document'),  # DELETE
