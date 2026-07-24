@@ -41,6 +41,7 @@ import {
 } from '@/services/marketingAgentService';
 import AddEmailAccountModal from './AddEmailAccountModal';
 import LeadsUploadFields from './LeadsUploadFields';
+import HoverTip from '../common/HoverTip';
 
 const MIN_STEP_GAP_MINUTES = 5;
 const DEFAULT_SEQUENCE_EMAIL_COUNT = 3;
@@ -1140,6 +1141,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
         </div>
         {!noData && (
           <div className="flex gap-2">
+            <HoverTip tip="Email templates are used in sequence steps. Create one here separately, or generate with AI while creating sequences.">
             <Button
               variant="secondary"
               onClick={() => {
@@ -1151,11 +1153,12 @@ const SequenceManagementPage = ({ embedded = false }) => {
                 setCreateTemplateOpen(true);
               }}
               disabled={email_accounts.length === 0}
-              title={email_accounts.length === 0 ? 'Add an email account before creating a template.' : ''}
             >
               <Mail className="mr-2 h-4 w-4" />
               Create email template
             </Button>
+            </HoverTip>
+            <HoverTip tip="Build the main email sequence, email Templates and their steps and delays. One per campaign.">
             <Button
               variant="default"
               onClick={() => {
@@ -1194,6 +1197,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
               <Plus className="mr-2 h-4 w-4" />
               Create sequence
             </Button>
+            </HoverTip>
           </div>
         )}
       </div>
@@ -1231,6 +1235,26 @@ const SequenceManagementPage = ({ embedded = false }) => {
         </Card>
       ) : (
         <>
+          {/* No sending account yet — shown after the user dismisses the dialog
+              with "Not now", so the requirement stays visible on the tab. */}
+          {email_accounts.length === 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-white">First add an email account to continue</p>
+                  <p className="text-xs text-white/60 mt-0.5">
+                    Templates and sequences need a sending account before they can go out.
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" onClick={() => setAddEmailAccountOpen(true)} className="shrink-0">
+                <Mail className="mr-2 h-4 w-4" />
+                Add email account
+              </Button>
+            </div>
+          )}
+
           {/* Email templates */}
           <Card>
             <CardHeader>
@@ -1283,39 +1307,31 @@ const SequenceManagementPage = ({ embedded = false }) => {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="View template"
-                            onClick={() => openViewTemplate(t)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="Edit template"
-                            onClick={() => openEditTemplate(t)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="Send test email"
-                            onClick={() => openTestTemplate(t)}
-                          >
-                            <Send className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            title="Delete template"
-                            onClick={() => setDeleteConfirm({ type: 'template', id: t.id, name: t.name })}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <HoverTip tip="View this template">
+                            <Button variant="ghost" size="sm" onClick={() => openViewTemplate(t)}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </HoverTip>
+                          <HoverTip tip="Edit this template">
+                            <Button variant="ghost" size="sm" onClick={() => openEditTemplate(t)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </HoverTip>
+                          <HoverTip tip="Send yourself a test email">
+                            <Button variant="ghost" size="sm" onClick={() => openTestTemplate(t)}>
+                              <Send className="h-4 w-4" />
+                            </Button>
+                          </HoverTip>
+                          <HoverTip tip="Delete this template">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => setDeleteConfirm({ type: 'template', id: t.id, name: t.name })}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </HoverTip>
                         </div>
                       </li>
                     ))}
@@ -1399,14 +1415,18 @@ const SequenceManagementPage = ({ embedded = false }) => {
                           </div>
                         </div>
                         <div className="flex gap-2 flex-wrap">
-                          <Button variant="outline" size="sm" onClick={() => openDetails(seq)}>
-                            <BarChart3 className="h-4 w-4 mr-1" />
-                            Details
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => openEditSequence(seq.id)}>
-                            <Pencil className="h-4 w-4 mr-1" />
-                            Edit
-                          </Button>
+                          <HoverTip tip="View this sequence's stats and steps">
+                            <Button variant="outline" size="sm" onClick={() => openDetails(seq)}>
+                              <BarChart3 className="h-4 w-4 mr-1" />
+                              Details
+                            </Button>
+                          </HoverTip>
+                          <HoverTip tip="Edit this sequence — its steps, templates and delays">
+                            <Button variant="outline" size="sm" onClick={() => openEditSequence(seq.id)}>
+                              <Pencil className="h-4 w-4 mr-1" />
+                              Edit
+                            </Button>
+                          </HoverTip>
                           {/* <Button
                             variant="secondary"
                             size="sm"
@@ -1427,15 +1447,17 @@ const SequenceManagementPage = ({ embedded = false }) => {
                             <Plus className="h-4 w-4 mr-1" />
                             Sub-Sequence
                           </Button> */}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => setDeleteConfirm({ type: 'sequence', id: seq.id, name: seq.name })}
-                          >
-                            <Trash2 className="h-4 w-4 mr-1" />
-                            Delete
-                          </Button>
+                          <HoverTip tip="Delete this sequence and all its steps">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => setDeleteConfirm({ type: 'sequence', id: seq.id, name: seq.name })}
+                            >
+                              <Trash2 className="h-4 w-4 mr-1" />
+                              Delete
+                            </Button>
+                          </HoverTip>
                         </div>
                       </div>
                       <div className="mt-4">
@@ -1491,20 +1513,26 @@ const SequenceManagementPage = ({ embedded = false }) => {
                                     </div>
                                   </div>
                                   <div className="flex gap-1">
-                                    <Button variant="ghost" size="sm" onClick={() => openDetails(sub)}>
-                                      <BarChart3 className="h-3 w-3 mr-1" /> Details
-                                    </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => openEditSequence(sub.id)}>
-                                      <Pencil className="h-3 w-3 mr-1" /> Edit
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="text-destructive hover:text-destructive"
-                                      onClick={() => setDeleteConfirm({ type: 'sequence', id: sub.id, name: sub.name })}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
+                                    <HoverTip tip="View this sub-sequence's stats and steps">
+                                      <Button variant="ghost" size="sm" onClick={() => openDetails(sub)}>
+                                        <BarChart3 className="h-3 w-3 mr-1" /> Details
+                                      </Button>
+                                    </HoverTip>
+                                    <HoverTip tip="Edit this reply sub-sequence">
+                                      <Button variant="ghost" size="sm" onClick={() => openEditSequence(sub.id)}>
+                                        <Pencil className="h-3 w-3 mr-1" /> Edit
+                                      </Button>
+                                    </HoverTip>
+                                    <HoverTip tip="Delete this sub-sequence">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-destructive hover:text-destructive"
+                                        onClick={() => setDeleteConfirm({ type: 'sequence', id: sub.id, name: sub.name })}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </HoverTip>
                                   </div>
                                 </div>
                                 <ul className="mt-2 space-y-1">
@@ -1526,10 +1554,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
                       )}
                       {seq.id && !seq.is_sub_sequence && (
                         <div className="mt-3">
+                          <HoverTip tip="Add a reply sub-sequence — sent to leads based on how they reply">
                           <Button
                             variant="outline"
                             size="sm"
-                            className="border-violet-500 text-violet-700 hover:bg-violet-50 text-xs"
+                            className="border-violet-500/50 text-violet-300 hover:bg-violet-500/15 hover:text-violet-200 text-xs"
                             onClick={() => {
                               const defaults = INTEREST_LEVEL_DEFAULTS.any;
                               setSequenceForm({
@@ -1555,6 +1584,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
                             <Plus className="h-3 w-3 mr-1" />
                             Add Sub-Sequence
                           </Button>
+                          </HoverTip>
                         </div>
                       )}
                     </div>
@@ -2538,17 +2568,13 @@ const SequenceManagementPage = ({ embedded = false }) => {
         </DialogContent>
       </Dialog>
 
-      {/* No email accounts at all — block templates/sequences until one is added */}
+      {/* No email accounts — prompt to add one. Dismissable ("Not now"): the tab
+          itself then shows a persistent banner (see below) so the user isn't stuck. */}
       <Dialog
         open={noEmailAccountDialogOpen}
-        onOpenChange={(open) => {
-          // Not dismissable by clicking away while there's truly no account —
-          // otherwise the user can bypass the block via outside-click/Esc.
-          if (!open && email_accounts.length === 0) return;
-          setNoEmailAccountDialogOpen(open);
-        }}
+        onOpenChange={setNoEmailAccountDialogOpen}
       >
-        <DialogContent className="sm:max-w-md" onEscapeKeyDown={(e) => email_accounts.length === 0 && e.preventDefault()}>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertCircle className="h-5 w-5 text-amber-500" />
@@ -2559,7 +2585,10 @@ const SequenceManagementPage = ({ embedded = false }) => {
               templates or sequences — sends need an account to go out from.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setNoEmailAccountDialogOpen(false)}>
+              Not now
+            </Button>
             <Button onClick={() => setAddEmailAccountOpen(true)}>
               <Mail className="mr-2 h-4 w-4" />
               Add email account

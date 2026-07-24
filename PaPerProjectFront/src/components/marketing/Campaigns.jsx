@@ -191,12 +191,10 @@ const Campaigns = ({ onRefresh }) => {
               </Button>
             </HoverTip>
           )}
-          <HoverTip tip="Reload the campaigns list">
             <Button onClick={() => fetchCampaigns(page)} variant="outline" size="sm" disabled={loading}>
               <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
-          </HoverTip>
         </div>
       </div>
 

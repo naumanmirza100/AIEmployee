@@ -1203,6 +1203,7 @@ const MarketingDashboard = () => {
                                   <td className="p-3 text-muted-foreground">{campaign.start_date ? formatDate(campaign.start_date) : '—'}</td>
                                   <td className="p-3 text-muted-foreground">{campaign.end_date ? formatDate(campaign.end_date) : '—'}</td>
                                   <td className="p-3">
+                                    <HoverTip tip="click to open the full campaign management page">
                                     <Button
                                       variant="default"
                                       size="sm"
@@ -1210,6 +1211,7 @@ const MarketingDashboard = () => {
                                     >
                                       <Link to={`/marketing/dashboard/campaign/${campaign.id}`}>Manage</Link>
                                     </Button>
+                                    </HoverTip>
                                   </td>
                                 </tr>
                                 );
@@ -1302,10 +1304,12 @@ const MarketingDashboard = () => {
                     Accounts used to send campaign emails. Click an account to see details in the sidebar.
                   </CardDescription>
                 </div>
+              <HoverTip tip="Add a new email account to send campaign emails from.">
                 <Button variant="default" size="sm" onClick={openAddEmailAccount} data-tour-mkt="email-add">
                   <Plus className="h-4 w-4 mr-2" />
                   Add email account
                 </Button>
+                </HoverTip>
               </CardHeader>
               <CardContent>
                 {emailAccountsLoading ? (
@@ -1317,10 +1321,12 @@ const MarketingDashboard = () => {
                     <Mail className="h-12 w-12 mx-auto mb-3 opacity-50" />
                     <p className="font-medium">No email accounts</p>
                     <p className="text-sm mt-1">Add an account to send campaign emails from sequences.</p>
+                    <HoverTip tip="Add a new email account to send campaign emails from.">
                     <Button className="mt-4" onClick={openAddEmailAccount}>
                       <Plus className="mr-2 h-4 w-4" />
                       Add email account
                     </Button>
+                    </HoverTip>
                   </div>
                 ) : (
                   <div className="rounded-lg border overflow-x-auto">

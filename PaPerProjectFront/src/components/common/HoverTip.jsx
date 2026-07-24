@@ -1,6 +1,10 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
+// Tooltip bubble width. Fixed (not max-width) so edge-clamping math is exact and
+// the text never gets squeezed into a thin column near a screen edge.
+const TOOLTIP_W = 240;
+
 /**
  * HoverTip — a small, themed tooltip shown on hover / keyboard focus.
  *
@@ -36,9 +40,20 @@ const HoverTip = ({ tip, children, placement = 'top', delay = 120, className = '
       const el = wrapRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
-      const left = r.left + r.width / 2;
+      const anchorX = r.left + r.width / 2;       // trigger's true centre
       const top = placement === 'bottom' ? r.bottom + 8 : r.top - 8;
-      setPos({ top, left, placement });
+
+      // Clamp the tooltip's centre so its full width (TOOLTIP_W) stays inside the
+      // viewport with an 8px margin. Without this, a trigger near the right/left
+      // edge pushed the bubble off-screen and the browser squeezed it into a thin,
+      // tall column (one word per line). `arrowShift` re-aligns the arrow to the
+      // trigger even after the bubble has been nudged inward.
+      const vw = window.innerWidth;
+      const half = TOOLTIP_W / 2;
+      const clampedX = Math.max(half + 8, Math.min(anchorX, vw - half - 8));
+      const arrowShift = anchorX - clampedX;      // px to move the arrow off-centre
+
+      setPos({ top, left: clampedX, arrowShift, placement });
     }, delay);
   }, [delay, placement]);
 
@@ -67,16 +82,23 @@ const HoverTip = ({ tip, children, placement = 'top', delay = 120, className = '
           }`}
           style={{ top: pos.top, left: pos.left }}
         >
-          <div className="relative max-w-[240px] rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl">
+          <div
+            className="relative w-max rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl"
+            style={{ maxWidth: TOOLTIP_W }}
+          >
             {tip}
-            {/* Arrow pointing at the trigger */}
+            {/* Arrow points at the trigger. When the bubble was nudged inward to
+                stay on-screen, arrowShift moves the arrow back over the trigger. */}
             <span
-              className={`absolute left-1/2 -translate-x-1/2 h-2 w-2 rotate-45 bg-[#161630] border-[#3a295a] ${
+              className={`absolute left-1/2 h-2 w-2 rotate-45 bg-[#161630] border-[#3a295a] ${
                 pos.placement === 'bottom'
                   ? 'bottom-full border-t border-l'
                   : 'top-full border-b border-r'
               }`}
-              style={pos.placement === 'bottom' ? { marginBottom: '-4px' } : { marginTop: '-4px' }}
+              style={{
+                transform: `translateX(calc(-50% + ${pos.arrowShift || 0}px)) rotate(45deg)`,
+                ...(pos.placement === 'bottom' ? { marginBottom: '-4px' } : { marginTop: '-4px' }),
+              }}
             />
           </div>
         </div>,
