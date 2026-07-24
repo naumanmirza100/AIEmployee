@@ -22,6 +22,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import * as operationsService from '@/services/operationsAgentService';
 import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 
 // ─── Helpers ────────────────────────────────
 const FILE_TYPE_CONFIG = {
@@ -191,12 +192,19 @@ const DocumentProcessing = () => {
     setUploadTags('');
   };
 
-  // ─── Delete ───────────────────────────────
-  const handleDelete = async (docId) => {
+  // ─── Delete (confirm first — deleting a doc also drops its chunks) ─────
+  const [pendingDelete, setPendingDelete] = useState(null);
+
+  const handleDelete = (doc) => setPendingDelete(doc);
+
+  const confirmDelete = async () => {
+    const doc = pendingDelete;
+    if (!doc) return;
     try {
-      setDeletingId(docId);
-      await operationsService.deleteDocument(docId);
+      setDeletingId(doc.id);
+      await operationsService.deleteDocument(doc.id);
       toast({ title: 'Deleted', description: 'Document deleted successfully' });
+      setPendingDelete(null);
       fetchDocuments();
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to delete', variant: 'destructive' });
@@ -389,7 +397,7 @@ const DocumentProcessing = () => {
                             <Eye className="h-3.5 w-3.5" />View
                           </Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10"
-                            onClick={() => handleDelete(doc.id)} disabled={deletingId === doc.id}>
+                            onClick={() => handleDelete(doc)} disabled={deletingId === doc.id}>
                             {deletingId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                           </Button>
                         </div>
@@ -468,7 +476,7 @@ const DocumentProcessing = () => {
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/40 hover:text-red-400 hover:bg-red-500/10"
-                                onClick={() => handleDelete(doc.id)} disabled={deletingId === doc.id}>
+                                onClick={() => handleDelete(doc)} disabled={deletingId === doc.id}>
                                 {deletingId === doc.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                               </Button>
                             </div>
@@ -631,6 +639,26 @@ const DocumentProcessing = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+        title="Delete this document?"
+        description={
+          <>
+            <span className="text-white/80 font-medium">
+              {pendingDelete?.title || pendingDelete?.original_filename}
+            </span>
+            {' '}will be permanently deleted, along with its extracted text and
+            all indexed chunks. Knowledge Q&amp;A will no longer be able to answer
+            from it. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete document"
+        variant="danger"
+        loading={deletingId === pendingDelete?.id}
+        onConfirm={confirmDelete}
+      />
 
     </motion.div>
   );

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import operationsService from '@/services/operationsAgentService';
 import { ElapsedTimer } from '@/components/frontline/chatShellUtils';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 
 const ACCENT = '#f59e0b'; // amber / operations accent
 const ACCENT_SOFT = 'rgba(245,158,11,0.12)';
@@ -177,6 +178,8 @@ const KnowledgeQA = () => {
   const [question, setQuestion] = useState('');
   const [sending, setSending] = useState(false);
   const [sendStartedAt, setSendStartedAt] = useState(null);
+  const [pendingDeleteChat, setPendingDeleteChat] = useState(null);
+  const [deletingChat, setDeletingChat] = useState(false);
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -342,17 +345,25 @@ const KnowledgeQA = () => {
     }
   };
 
-  const handleDeleteChat = async (e, chatId) => {
+  // Delete chat — opens the styled confirm modal (was window.confirm)
+  const handleDeleteChat = (e, chat) => {
     e.stopPropagation();
-    if (!window.confirm('Delete this chat? This cannot be undone.')) return;
+    setPendingDeleteChat(chat);
+  };
+
+  const confirmDeleteChat = async () => {
+    const chat = pendingDeleteChat;
+    if (!chat) return;
     try {
-      const res = await operationsService.deleteQaChat(chatId);
+      setDeletingChat(true);
+      const res = await operationsService.deleteQaChat(chat.id);
       if (res?.status === 'success') {
-        setChats((prev) => prev.filter((c) => c.id !== chatId));
-        if (selectedChatId === chatId) {
+        setChats((prev) => prev.filter((c) => c.id !== chat.id));
+        if (selectedChatId === chat.id) {
           setSelectedChatId(null);
           setMessages([]);
         }
+        setPendingDeleteChat(null);
         toast({ title: 'Chat deleted' });
       } else {
         throw new Error(res?.message || 'Delete failed');
@@ -363,6 +374,8 @@ const KnowledgeQA = () => {
         description: err?.message || 'Could not delete chat',
         variant: 'destructive',
       });
+    } finally {
+      setDeletingChat(false);
     }
   };
 
@@ -570,7 +583,7 @@ const KnowledgeQA = () => {
                                 <Pencil className="h-3 w-3 text-white/60 hover:text-amber-300" />
                               </button>
                               <button
-                                onClick={(e) => handleDeleteChat(e, chat.id)}
+                                onClick={(e) => handleDeleteChat(e, chat)}
                                 title="Delete"
                                 className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-500/20"
                               >
@@ -781,6 +794,25 @@ const KnowledgeQA = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!pendingDeleteChat}
+        onOpenChange={(open) => { if (!open) setPendingDeleteChat(null); }}
+        title="Delete this chat?"
+        description={
+          <>
+            <span className="text-white/80 font-medium">
+              {pendingDeleteChat?.title || 'This chat'}
+            </span>
+            {' '}and all of its messages will be permanently deleted. Your
+            documents are not affected. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete chat"
+        variant="danger"
+        loading={deletingChat}
+        onConfirm={confirmDeleteChat}
+      />
     </div>
   );
 };

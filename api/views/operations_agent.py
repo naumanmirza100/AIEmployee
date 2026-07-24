@@ -25,6 +25,7 @@ from operations_agent.models import (
 )
 
 from core.api_key_service import KeyServiceError
+from operations_agent.agents.document_processing_agent import _invalidate_operations_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +326,12 @@ def delete_document(request, document_id):
             except OSError:
                 pass
 
-        doc.delete()
+        was_indexed = doc.is_indexed
+        doc.delete()  # cascades to its chunks
+
+        # Drop the document's vectors from the FAISS index and clear cached
+        # answers that may have cited it.
+        _invalidate_operations_indexes(company.id, was_indexed)
 
         return Response({
             'status': 'success',
@@ -589,7 +595,12 @@ def delete_summary(request, summary_id):
             return Response({'status': 'error', 'message': 'Summary not found'}, status=status.HTTP_404_NOT_FOUND)
 
         filename = s.original_filename
-        s.delete()
+        was_indexed = s.is_indexed
+        s.delete()  # cascades to its chunks
+
+        # Drop the summary's vectors from the FAISS index and clear cached answers
+        # that may have cited it.
+        _invalidate_operations_indexes(company.id, was_indexed)
 
         return Response({
             'status': 'success',
