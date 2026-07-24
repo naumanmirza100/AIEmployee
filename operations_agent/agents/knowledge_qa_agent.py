@@ -651,11 +651,16 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         if not tokens:
             return '', [], False
 
-        chunk_qs = OperationsDocumentChunk.objects.filter(
-            document__company_id=company_id,
-            document__is_processed=True,
+        # Chunks come from EITHER a processed document (Documents tab) OR a
+        # summarised file (Summarization tab). Both are searched together so QA
+        # answers from the whole document in either case.
+        owner_q = (
+            Q(document__company_id=company_id, document__is_processed=True)
+            | Q(summary__company_id=company_id)
         )
+        chunk_qs = OperationsDocumentChunk.objects.filter(owner_q)
         if document_ids:
+            # Explicit document filter only narrows the document-owned chunks.
             chunk_qs = chunk_qs.filter(document_id__in=document_ids)
 
         # ---- 1. Semantic retrieval (FAISS → cached cosine fallback) --------
@@ -669,16 +674,20 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         keyword_q = reduce(operator.or_, (Q(content__icontains=tok) for tok in set(tokens)))
         candidate_rows = list(
             chunk_qs.filter(keyword_q)
-            .order_by('-document__created_at', 'chunk_index')
+            .order_by('chunk_index')
             .values(
-                'id', 'content', 'page_number', 'document_id',
+                'id', 'content', 'page_number', 'document_id', 'summary_id',
                 'document__title', 'document__original_filename',
+                'summary__original_filename',
             )[:200]
         )
         keyword_scores: Dict[int, float] = {}
         row_by_id: Dict[int, Dict] = {}
         for row in candidate_rows:
             cid = row.get('id')
+            # Normalise so the render loop finds a title regardless of owner.
+            if not row.get('document__title') and row.get('summary__original_filename'):
+                row['document__title'] = f"{row['summary__original_filename']} (summary)"
             row_by_id[cid] = row
             s = _score_chunk(row.get('content') or '', tokens)
             if s > 0:
@@ -695,17 +704,25 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         if missing_ids:
             _t_fetch = time.time()
             fetched = OperationsDocumentChunk.objects.filter(id__in=missing_ids).only(
-                'id', 'content', 'page_number', 'document_id',
+                'id', 'content', 'page_number', 'document_id', 'summary_id',
                 'document__title', 'document__original_filename',
-            ).select_related('document')
+                'summary__original_filename',
+            ).select_related('document', 'summary')
             for c in fetched:
+                if c.document_id:
+                    title = c.document.title
+                    orig = c.document.original_filename
+                else:
+                    title = f"{c.summary.original_filename} (summary)"
+                    orig = c.summary.original_filename
                 row_by_id[c.id] = {
                     'id': c.id,
                     'content': c.content,
                     'page_number': c.page_number,
                     'document_id': c.document_id,
-                    'document__title': c.document.title,
-                    'document__original_filename': c.document.original_filename,
+                    'summary_id': c.summary_id,
+                    'document__title': title,
+                    'document__original_filename': orig,
                 }
             self.last_retrieval_timing['chunk_fetch'] = int((time.time() - _t_fetch) * 1000)
 
@@ -718,9 +735,9 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
                 continue
             scored.append((score, row))
 
-        # Summaries live in their own table with no chunks. Search them too, unless
-        # the user pinned the question to specific documents (those ids address
-        # OperationsDocument rows, which summaries are not part of).
+        # Legacy summaries created before summary-chunking still have no chunks —
+        # fall back to scoring their rich_summary text so they remain searchable.
+        # New summaries are chunked above and skipped here to avoid double-counting.
         if not document_ids:
             for s, srow in self._score_summaries(company_id, tokens):
                 scored.append((float(s), srow))
@@ -856,10 +873,12 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         return sorted(rrf.items(), key=lambda kv: kv[1], reverse=True)
 
     def _score_summaries(self, company_id: int, tokens: List[str]) -> List[Tuple[int, Dict]]:
-        """Keyword-score standalone summaries from the Summarization tab.
+        """Keyword-score LEGACY summaries that have no chunks yet.
 
-        Rows are shaped like chunk rows so the caller's ranking and rendering
-        treat both sources identically.
+        Summaries created after summary-chunking are retrieved via their chunks
+        (full-text, semantic + keyword) in the main path, so here we only cover
+        the older ones that were summary-text only. Rows are shaped like chunk
+        rows so ranking / rendering treat both sources identically.
         """
         keyword_q = reduce(
             operator.or_,
@@ -869,6 +888,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         rows = (
             OperationsDocumentSummary.objects
             .filter(company_id=company_id)
+            .filter(chunks__isnull=True)   # legacy only — chunked summaries handled above
             .filter(keyword_q)
             .order_by('-created_at')
             .values('id', 'original_filename', 'rich_summary', 'key_findings')[:50]

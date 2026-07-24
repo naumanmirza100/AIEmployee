@@ -358,8 +358,11 @@ class DocumentProcessingAgent(MarketingBaseAgent):
     # Chunking + embedding (RAG)
     # ------------------------------------------------------------------
     def _chunk_embed_and_store(self, doc, text: str, page_count: int,
-                               document_type: str):
+                               document_type: str, owner_kind: str = 'document'):
         """Chunk (section-aware, TOC filtered), embed in batches, and persist.
+
+        ``owner_kind`` is 'document' or 'summary' — the chunk rows link to the
+        matching FK so both surfaces share one retrieval pipeline.
 
         Returns ``(chunk_count, embedded_bool, embedding_model)``. Falls back to
         no-embedding storage when the embedding provider is unavailable, so the
@@ -406,7 +409,8 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             if emb:
                 any_vector = True
             rows.append(OperationsDocumentChunk(
-                document=doc,
+                document=doc if owner_kind == 'document' else None,
+                summary=doc if owner_kind == 'summary' else None,
                 chunk_index=i,
                 content=content,
                 section_heading=(heading or '')[:300],

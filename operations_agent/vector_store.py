@@ -195,10 +195,13 @@ class OperationsFaissVectorStore:
     def _build_from_db(self) -> bool:
         """Read the company's OperationsDocumentChunks and build the FAISS index
         from scratch. Returns False when nothing indexable exists."""
+        from django.db.models import Q
         from operations_agent.models import OperationsDocumentChunk
 
+        # Chunks belong to either a document or a summary — index both.
         qs = (OperationsDocumentChunk.objects
-              .filter(document__company_id=self.company_id)
+              .filter(Q(document__company_id=self.company_id)
+                      | Q(summary__company_id=self.company_id))
               .exclude(embedding__isnull=True)
               .values_list('id', 'embedding')
               .iterator(chunk_size=2000))

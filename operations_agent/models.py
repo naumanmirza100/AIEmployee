@@ -91,9 +91,19 @@ class OperationsDocument(models.Model):
 
 
 class OperationsDocumentChunk(models.Model):
-    """Chunked text from documents for RAG/embedding-based retrieval"""
+    """Chunked text for RAG/embedding-based retrieval.
+
+    A chunk belongs to EITHER an uploaded document (Documents tab) OR a
+    summarised file (Summarization tab). Exactly one of ``document`` /
+    ``summary`` is set, so both surfaces share the same retrieval pipeline.
+    """
     document = models.ForeignKey(
         OperationsDocument, on_delete=models.CASCADE, related_name='chunks',
+        null=True, blank=True,
+    )
+    summary = models.ForeignKey(
+        'OperationsDocumentSummary', on_delete=models.CASCADE, related_name='chunks',
+        null=True, blank=True,
     )
     chunk_index = models.PositiveIntegerField()
     content = models.TextField()
@@ -106,10 +116,13 @@ class OperationsDocumentChunk(models.Model):
     class Meta:
         app_label = 'operations_agent'
         ordering = ['document', 'chunk_index']
-        unique_together = ['document', 'chunk_index']
+        indexes = [
+            models.Index(fields=['summary', 'chunk_index'], name='ops_chunk_summary_idx'),
+        ]
 
     def __str__(self):
-        return f"Chunk {self.chunk_index} of {self.document.title}"
+        owner = self.document or self.summary
+        return f"Chunk {self.chunk_index} of {owner}"
 
 
 class OperationsDocumentSummary(models.Model):
@@ -128,6 +141,25 @@ class OperationsDocumentSummary(models.Model):
     page_count = models.PositiveIntegerField(default=0)
     word_count = models.PositiveIntegerField(default=0)
     rich_summary = models.TextField(help_text='Full markdown summary')
+    # Full extracted text of the summarised file. Stored so Knowledge-QA can
+    # answer from the WHOLE document (via chunks/embeddings), not just the
+    # summary. Chunks live in OperationsDocumentChunk (summary FK).
+    parsed_text = models.TextField(blank=True, default='')
+    is_indexed = models.BooleanField(default=False)
+    embedding_model = models.CharField(max_length=100, blank=True, default='')
+    # Async summarisation state — the upload endpoint returns a pending row and
+    # the client polls until 'ready'/'failed' (mirrors OperationsDocument).
+    PROCESSING_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('ready', 'Ready'),
+        ('failed', 'Failed'),
+    ]
+    processing_status = models.CharField(
+        max_length=20, choices=PROCESSING_STATUS_CHOICES,
+        default='ready', db_index=True,
+    )
+    processing_error = models.TextField(blank=True, default='')
     key_findings = models.JSONField(default=list, blank=True)
     action_items = models.JSONField(default=list, blank=True)
     # ── Proper Insights Fields ──
