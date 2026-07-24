@@ -4,6 +4,9 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
   Loader2, CalendarDays, CalendarClock, Clock, CheckCircle2, Download, RefreshCw, ChevronRight,
 } from 'lucide-react';
 import { CARD_STYLE } from '../shared';
@@ -17,7 +20,8 @@ const WORKLOAD_COLORS = {
 
 export const CalendarPanel = ({
   weekPlan, weekPlanLoading, includePastTasks,
-  setWeekPlanLoading, setWeekPlan, setIncludePastTasks, setShowPastTasksConfirm, toast,
+  setWeekPlanLoading, setWeekPlan, setIncludePastTasks, setShowPastTasksConfirm,
+  workStartHour, setWorkStartHour, workEndHour, setWorkEndHour, toast,
 }) => (
     <div className="space-y-5">
       {/* Generate button + settings */}
@@ -38,7 +42,7 @@ export const CalendarPanel = ({
                 try {
                   const today = new Date();
                   const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-                  const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart });
+                  const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart, work_start_hour: workStartHour, work_end_hour: workEndHour });
                   setWeekPlan(res.plan || res);
                   toast({ title: 'Plan refreshed!' });
                 } catch (err) {
@@ -53,7 +57,7 @@ export const CalendarPanel = ({
               try {
                 const today = new Date();
                 const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-                const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart });
+                const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart, work_start_hour: workStartHour, work_end_hour: workEndHour });
                 console.log('[WeekPlan] response:', res);
                 const plan = res.plan || res;
                 setWeekPlan(plan);
@@ -72,6 +76,43 @@ export const CalendarPanel = ({
               {weekPlanLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarDays className="h-4 w-4 mr-2" />}
               {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
             </Button>
+          </div>
+        </div>
+
+        {/* Work-hours row — the window tasks get scheduled within */}
+        <div className="flex items-center justify-between rounded-xl px-4 py-3 bg-white/5 border border-white/10">
+          <div>
+            <p className="text-white/80 text-sm font-medium">Working hours</p>
+            <p className="text-white/40 text-xs mt-0.5">Tasks are scheduled into hourly slots within this window (12 PM lunch skipped).</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Select value={String(workStartHour)} onValueChange={v => setWorkStartHour(Number(v))}>
+              <SelectTrigger className="h-8 w-[84px] bg-violet-500/10 border-violet-400/30 text-violet-100 text-xs hover:bg-violet-500/20 focus:ring-violet-500">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-[#1a1030] border-violet-400/30 text-violet-100 max-h-56 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                {Array.from({ length: 24 }, (_, h) => (
+                  <SelectItem key={h} value={String(h)} disabled={h >= workEndHour}
+                    className="text-xs text-violet-100 focus:bg-violet-500/30 focus:text-white">
+                    {String(h).padStart(2, '0')}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-white/30 text-xs">to</span>
+            <Select value={String(workEndHour)} onValueChange={v => setWorkEndHour(Number(v))}>
+              <SelectTrigger className="h-8 w-[84px] bg-violet-500/10 border-violet-400/30 text-violet-100 text-xs hover:bg-violet-500/20 focus:ring-violet-500">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-[#1a1030] border-violet-400/30 text-violet-100 max-h-56 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                {Array.from({ length: 25 }, (_, h) => (
+                  <SelectItem key={h} value={String(h)} disabled={h <= workStartHour}
+                    className="text-xs text-violet-100 focus:bg-violet-500/30 focus:text-white">
+                    {String(h).padStart(2, '0')}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -136,6 +177,17 @@ export const CalendarPanel = ({
                     return y;
                   };
 
+                  // jsPDF's core fonts only cover Latin-1 — Unicode punctuation
+                  // (arrows, em-dashes, smart quotes) renders as garbage with
+                  // broken letter-spacing. Map them to plain ASCII before drawing.
+                  const pdfSafe = (t) => String(t ?? '')
+                    .replace(/\s*→\s*/g, ' > ')
+                    .replace(/[–—]/g, '-')
+                    .replace(/[‘’]/g, "'")
+                    .replace(/[“”]/g, '"')
+                    .replace(/…/g, '...')
+                    .replace(/[•·]/g, '-');
+
                   // Purple header bar
                   pdf.setFillColor(109, 40, 217);
                   pdf.rect(0, 0, pageW, 12, 'F');
@@ -144,7 +196,7 @@ export const CalendarPanel = ({
                   pdf.setFont('helvetica', 'bold');
                   pdf.setFontSize(18);
                   pdf.setTextColor(30, 10, 60);
-                  const titleText = `AI Weekly Plan${weekLabel ? ' — ' + weekLabel : ''}`;
+                  const titleText = pdfSafe(`AI Weekly Plan${weekLabel ? ' — ' + weekLabel : ''}`);
                   const titleLines = pdf.splitTextToSize(titleText, contentW);
                   pdf.text(titleLines, margin, 24);
                   let y = 24 + titleLines.length * 7;
@@ -173,7 +225,7 @@ export const CalendarPanel = ({
                     pdf.setFont('helvetica', 'normal');
                     pdf.setFontSize(10);
                     pdf.setTextColor(40, 30, 60);
-                    const sumLines = pdf.splitTextToSize(weekPlan.weekly_summary, contentW);
+                    const sumLines = pdf.splitTextToSize(pdfSafe(weekPlan.weekly_summary), contentW);
                     sumLines.forEach(l => { y = checkPage(y); pdf.text(l, margin, y); y += 5.5; });
                     y += 3;
                   }
@@ -191,7 +243,7 @@ export const CalendarPanel = ({
                     pdf.setTextColor(40, 30, 60);
                     weekPlan.conflicts_detected.forEach(c => {
                       y = checkPage(y);
-                      const wrapped = pdf.splitTextToSize(`• ${c}`, contentW - 4);
+                      const wrapped = pdf.splitTextToSize(`- ${pdfSafe(c)}`, contentW - 4);
                       pdf.text(wrapped, margin + 3, y); y += wrapped.length * 5.5 + 1;
                     });
                     y += 3;
@@ -210,7 +262,7 @@ export const CalendarPanel = ({
                     pdf.setTextColor(40, 30, 60);
                     weekPlan.recommendations.forEach(r => {
                       y = checkPage(y);
-                      const wrapped = pdf.splitTextToSize(`› ${r}`, contentW - 4);
+                      const wrapped = pdf.splitTextToSize(`> ${pdfSafe(r)}`, contentW - 4);
                       pdf.text(wrapped, margin + 3, y); y += wrapped.length * 5.5 + 1;
                     });
                     y += 4;
@@ -247,10 +299,10 @@ export const CalendarPanel = ({
                       pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(40, 30, 60);
                       day.scheduled_meetings.forEach(m => {
                         y = checkPage(y);
-                        const title = typeof m === 'string' ? m : m.title;
+                        const title = pdfSafe(typeof m === 'string' ? m : m.title);
                         const timePart = m.time ? `  ${m.time}` : '';
                         const durPart = m.duration_minutes ? `  (${m.duration_minutes}min)` : '';
-                        const wrapped = pdf.splitTextToSize(`• ${title}${timePart}${durPart}`, contentW - 6);
+                        const wrapped = pdf.splitTextToSize(`- ${title}${timePart}${durPart}`, contentW - 6);
                         pdf.text(wrapped, margin + 4, y); y += wrapped.length * 5.5 + 1;
                       });
                       y += 2;
@@ -263,13 +315,22 @@ export const CalendarPanel = ({
                       pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(40, 30, 60);
                       day.suggested_task_slots.forEach(s => {
                         y = checkPage(y);
+                        const taskLabel = pdfSafe(s.task);
                         const durPart = s.duration_minutes ? `  (${s.duration_minutes}min)` : '';
-                        const wrapped = pdf.splitTextToSize(`${s.time}  ${s.task}${durPart}`, contentW - 6);
+                        const wrapped = pdf.splitTextToSize(`${s.time}  ${taskLabel}${durPart}`, contentW - 6);
                         pdf.setTextColor(109, 40, 217);
                         pdf.text(s.time, margin + 4, y);
                         pdf.setTextColor(40, 30, 60);
-                        const taskW = pdf.splitTextToSize(`${s.task}${durPart}`, contentW - 6 - 14);
+                        const taskW = pdf.splitTextToSize(`${taskLabel}${durPart}`, contentW - 6 - 14);
                         pdf.text(taskW, margin + 18, y); y += Math.max(wrapped.length, taskW.length) * 5.5 + 1;
+                        if (s.adjusted) {
+                          y = checkPage(y);
+                          pdf.setFont('helvetica', 'italic'); pdf.setFontSize(8); pdf.setTextColor(180, 120, 20);
+                          const note = `slot adjusted due to capacity${s.due_date ? ` (was due ${s.due_date})` : ''}`;
+                          const noteW = pdf.splitTextToSize(note, contentW - 6 - 14);
+                          pdf.text(noteW, margin + 18, y); y += noteW.length * 4.5 + 1;
+                          pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.setTextColor(40, 30, 60);
+                        }
                       });
                       y += 2;
                     }
@@ -282,9 +343,9 @@ export const CalendarPanel = ({
                       day.focus_blocks.forEach(b => {
                         y = checkPage(y);
                         pdf.setTextColor(109, 40, 217);
-                        pdf.text(`${b.start}–${b.end}`, margin + 4, y);
+                        pdf.text(`${b.start}-${b.end}`, margin + 4, y);
                         pdf.setTextColor(40, 30, 60);
-                        pdf.text(b.label || 'Deep Work', margin + 28, y);
+                        pdf.text(pdfSafe(b.label || 'Deep Work'), margin + 28, y);
                         y += 6;
                       });
                       y += 2;
@@ -314,10 +375,20 @@ export const CalendarPanel = ({
           </div>
 
           {/* Summary + recommendations */}
-          {(weekPlan.weekly_summary || weekPlan.recommendations?.length > 0) && (
+          {(weekPlan.weekly_summary || weekPlan.recommendations?.length > 0 || weekPlan.unscheduled_tasks?.length > 0) && (
             <div className="rounded-2xl p-5 space-y-3" style={CARD_STYLE}>
               {weekPlan.weekly_summary && (
                 <p className="text-white/80 text-sm">{weekPlan.weekly_summary}</p>
+              )}
+              {Array.isArray(weekPlan.unscheduled_tasks) && weekPlan.unscheduled_tasks.length > 0 && (
+                <div className="rounded-xl p-3 bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-amber-400 text-xs font-semibold mb-1">
+                    Couldn't fit this week ({weekPlan.unscheduled_tasks.length}) — the week is full
+                  </p>
+                  {weekPlan.unscheduled_tasks.map((t, i) => (
+                    <p key={i} className="text-amber-300/80 text-xs">• {t}</p>
+                  ))}
+                </div>
               )}
               {Array.isArray(weekPlan.conflicts_detected) && weekPlan.conflicts_detected.length > 0 && (
                 <div className="rounded-xl p-3 bg-red-500/10 border border-red-500/20">
@@ -388,11 +459,16 @@ export const CalendarPanel = ({
                     <p className="text-white/40 text-xs uppercase tracking-wide mb-2">Suggested Task Slots</p>
                     <div className="space-y-1">
                       {day.suggested_task_slots.map((slot, j) => (
-                        <div key={j} className="flex items-center gap-2 text-sm">
+                        <div key={j} className="flex items-center gap-2 text-sm flex-wrap">
                           <Clock className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
                           <span className="text-violet-300 font-mono text-xs">{slot.time}</span>
                           <span className="text-white/80">{slot.task}</span>
                           {slot.duration_minutes && <span className="text-white/30 text-xs ml-auto">{slot.duration_minutes}min</span>}
+                          {slot.adjusted && (
+                            <span className="basis-full pl-6 text-[10px] text-amber-400/80">
+                              ⚠ slot adjusted due to capacity{slot.due_date ? ` (was due ${slot.due_date})` : ''}
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>

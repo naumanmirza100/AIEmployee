@@ -24,7 +24,11 @@ export const getMarketingDashboard = async () => {
  */
 export const listCampaigns = async (params = {}) => {
   try {
-    const response = await companyApi.get('/marketing/campaigns', params);
+    // Drop empty / null params so the URL stays clean (e.g. no "?search=").
+    const clean = Object.fromEntries(
+      Object.entries(params).filter(([, v]) => v !== '' && v !== null && v !== undefined)
+    );
+    const response = await companyApi.get('/marketing/campaigns', clean);
     return response;
   } catch (error) {
     console.error('List campaigns error:', error);

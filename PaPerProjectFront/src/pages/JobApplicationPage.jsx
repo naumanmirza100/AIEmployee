@@ -71,15 +71,21 @@ const JobApplicationPage = () => {
 
     if (!data.education.trim()) e.education = 'Required';
     if (!data.salary_expectation.trim()) e.salary_expectation = 'Required';
+    else if (!/^\d+$/.test(data.salary_expectation.trim())) e.salary_expectation = 'Numbers only';
     if (!data.previous_company.trim()) e.previous_company = 'Required';
     if (!data.previous_salary.trim()) e.previous_salary = 'Required';
+    else if (!/^\d+$/.test(data.previous_salary.trim())) e.previous_salary = 'Numbers only';
     if (!cvFile) e.cv_file = 'Please upload your CV';
     return e;
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((p) => ({ ...p, [name]: value }));
+    // Salary fields accept digits only
+    const nextValue = (name === 'salary_expectation' || name === 'previous_salary')
+      ? value.replace(/\D/g, '')
+      : value;
+    setForm((p) => ({ ...p, [name]: nextValue }));
     if (errors[name]) setErrors((p) => { const n = { ...p }; delete n[name]; return n; });
   };
 
@@ -109,6 +115,9 @@ const JobApplicationPage = () => {
       const el = domForm.elements[field];
       if (el) syncedForm[field] = el.value;
     });
+    // Salary fields: strip non-digits (covers autofill)
+    syncedForm.salary_expectation = (syncedForm.salary_expectation || '').replace(/\D/g, '');
+    syncedForm.previous_salary = (syncedForm.previous_salary || '').replace(/\D/g, '');
     setForm(syncedForm);
 
     const errs = validate(syncedForm);
@@ -351,7 +360,7 @@ const JobApplicationPage = () => {
               </div>
               <div>
                 <label className="block text-xs font-medium text-white/60 mb-1.5">Salary Expectation <span className="text-red-400">*</span></label>
-                <input name="salary_expectation" value={form.salary_expectation} onChange={handleChange} placeholder="e.g. $2,000/month" className={inputCls('salary_expectation')} />
+                <input name="salary_expectation" value={form.salary_expectation} onChange={handleChange} inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 2000" className={inputCls('salary_expectation')} />
                 {errors.salary_expectation && <p className="mt-1 text-xs text-red-400">{errors.salary_expectation}</p>}
               </div>
             </div>
@@ -379,7 +388,7 @@ const JobApplicationPage = () => {
               </div>
               <div>
                 <label className="block text-xs font-medium text-white/60 mb-1.5">Previous Salary <span className="text-red-400">*</span></label>
-                <input name="previous_salary" value={form.previous_salary} onChange={handleChange} placeholder="e.g. $3,000/month" className={inputCls('previous_salary')} />
+                <input name="previous_salary" value={form.previous_salary} onChange={handleChange} inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3000" className={inputCls('previous_salary')} />
                 {errors.previous_salary && <p className="mt-1 text-xs text-red-400">{errors.previous_salary}</p>}
               </div>
             </div>

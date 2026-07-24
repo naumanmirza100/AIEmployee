@@ -32,7 +32,7 @@ import {
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2
+  Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2, Lock
 } from 'lucide-react';
 import { createCheckoutSession } from '@/services/modulePurchaseService';
 
@@ -84,6 +84,8 @@ const CompanyDashboardPage = () => {
   const [expandedTasks, setExpandedTasks] = useState(new Set());
   const { purchasedModules, allPurchases, modulesLoaded, refetch: refetchModules } = usePurchasedModules();
   const [agentsRefreshing, setAgentsRefreshing] = useState(false);
+  // Only companies with an active Recruitment Agent may run AI processing on applicants.
+  const hasRecruitmentAgent = purchasedModules.includes('recruitment_agent');
 
   // Auto-reload AI Agents every 30 seconds
   useEffect(() => {
@@ -377,18 +379,38 @@ const CompanyDashboardPage = () => {
 
   const handleProcessApplicants = async () => {
     if (!selectedJob) return;
+    if (!hasRecruitmentAgent) {
+      toast({
+        title: 'Recruitment Agent required',
+        description: 'AI processing needs an active Recruitment Agent. Purchase it from the AI Agents tab to enable this.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setProcessingApplicants(true);
     try {
       const response = await companyJobsService.processJobApplicants(selectedJob.id);
       if (response.status === 'success') {
         const processed = response.processed || 0;
         const total = response.total || 0;
+        const skipped = response.skipped || 0;
+        const skipReasons = response.skip_reasons || [];
         if (total === 0) {
           toast({ title: 'No new applications', description: 'All applicants for this job have already been analysed.' });
+        } else if (processed === 0) {
+          // Nothing processed — surface the real reason so it isn't a silent "done"
+          toast({
+            title: 'AI could not process applications',
+            description: skipReasons.length
+              ? `${skipped} skipped. ${skipReasons.slice(0, 2).join(' • ')}`
+              : `${skipped} of ${total} application(s) skipped. Check that CV files exist and your AI key/quota is available.`,
+            variant: 'destructive',
+          });
+          handleViewApplications(selectedJob.id);
         } else {
           toast({
             title: `AI Analysis Complete`,
-            description: `Processed ${processed} of ${total} application(s). ${processed} candidate(s) analysed.`,
+            description: `Processed ${processed} of ${total} application(s).${skipped ? ` ${skipped} skipped.` : ''}`,
           });
           handleViewApplications(selectedJob.id);
         }
@@ -1494,18 +1516,29 @@ const CompanyDashboardPage = () => {
                 <div>
                   <div className="flex justify-between items-center mb-4 gap-3 flex-wrap">
                     <h2 className="text-2xl font-bold text-white">Applications for {selectedJob.title}</h2>
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={handleProcessApplicants}
-                        disabled={processingApplicants}
-                        className="bg-violet-600 hover:bg-violet-700 text-white"
-                      >
-                        {processingApplicants ? (
-                          <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Analysing...</>
-                        ) : (
-                          <><BrainCircuit className="h-4 w-4 mr-2" />Process with AI</>
-                        )}
-                      </Button>
+                    <div className="flex gap-2 items-center">
+                      {modulesLoaded && !hasRecruitmentAgent ? (
+                        <Button
+                          onClick={() => navigate('/company/dashboard/ai-agents')}
+                          variant="outline"
+                          className="border-violet-500/40 text-violet-300 hover:bg-violet-500/10"
+                          title="AI processing requires an active Recruitment Agent"
+                        >
+                          <Lock className="h-4 w-4 mr-2" />Get Recruitment Agent to process
+                        </Button>
+                      ) : (
+                        <Button
+                          onClick={handleProcessApplicants}
+                          disabled={processingApplicants || !modulesLoaded}
+                          className="bg-violet-600 hover:bg-violet-700 text-white"
+                        >
+                          {processingApplicants ? (
+                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Analysing...</>
+                          ) : (
+                            <><BrainCircuit className="h-4 w-4 mr-2" />Process with AI</>
+                          )}
+                        </Button>
+                      )}
                       <Button variant="outline" onClick={() => setSelectedJob(null)} className="border-white/20 text-white/70 hover:text-white hover:bg-white/10">
                         Back to Jobs
                       </Button>

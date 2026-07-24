@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -57,8 +58,26 @@ import marketingAgentService, {
 import MarketingQA from './MarketingQA';
 import MarketResearch from './MarketResearch';
 import Campaigns from './Campaigns';
+import CampaignFilterBar from './CampaignFilterBar';
 import Documents from './Documents';
 import Notifications from './Notifications';
+import FrontlineTutorial, { hasSeenTutorial, resetTutorial, markTutorialSeen } from '@/components/frontline/FrontlineTutorial';
+import HowItWorksModal from '@/components/common/HowItWorksModal';
+import HoverTip from '@/components/common/HoverTip';
+import {
+  MARKETING_TOUR_STEPS, MARKETING_TOUR_KEY,
+  MARKETING_HOWITWORKS_STEPS, MARKETING_HOWITWORKS_KEY,
+} from './marketingTourSteps';
+// Mail/Megaphone/Sparkles/Send/FileText/Bell/TrendingUp all come from the main
+// lucide block above; only GraduationCap and Users aren't imported yet.
+import { GraduationCap, Users } from 'lucide-react';
+
+// Resolve the how-it-works step icon names (strings) to real components.
+const MKT_HOWITWORKS_ICONS = { Mail, Megaphone, Users, Send, TrendingUp, Sparkles, BarChart3, FileText, Bell };
+const MKT_HOWITWORKS_STEPS = MARKETING_HOWITWORKS_STEPS.map((s) => ({
+  ...s,
+  icon: MKT_HOWITWORKS_ICONS[s.icon],
+}));
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -142,8 +161,13 @@ const MarketingDashboard = () => {
   const [searchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'dashboard');
+  const [tourOpen, setTourOpen] = useState(false);
+  const [howItWorksOpen, setHowItWorksOpen] = useState(false);
+  // Tab hover tooltip: { text, top, left } anchored above the hovered tab, or null.
+  const [tabTip, setTabTip] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [campaignsLoading, setCampaignsLoading] = useState(true);
+  const [campaignsLoading, setCampaignsLoading] = useState(true);   // full spinner: first load / page change
+  const [campaignsFiltering, setCampaignsFiltering] = useState(false); // subtle: search / filter refetch
   const [emailAccountsLoading, setEmailAccountsLoading] = useState(false);
   const [emailAccounts, setEmailAccounts] = useState([]);
   const [stats, setStats] = useState({
@@ -153,6 +177,7 @@ const MarketingDashboard = () => {
   const [campaigns, setCampaigns] = useState([]);
   const [campaignsPage, setCampaignsPage] = useState(1);
   const [campaignsTotal, setCampaignsTotal] = useState(0);
+  const [campaignFilters, setCampaignFilters] = useState({ search: '', status: '', date: '' });
   const [selectedCampaigns, setSelectedCampaigns] = useState(new Set());
   const [dashboardDeleting, setDashboardDeleting] = useState(false);
   const [dashboardDeleteConfirmOpen, setDashboardDeleteConfirmOpen] = useState(false);
@@ -190,6 +215,39 @@ const MarketingDashboard = () => {
   useEffect(() => {
     fetchStats();
   }, []);
+
+  // First visit: show the high-level "How it works" modal first, then the tour.
+  // The modal explains WHAT the agent does; the tour walks the UI. Showing both at
+  // once would collide, so the tour only auto-launches once the modal is gone.
+  useEffect(() => {
+    const seenHow = hasSeenTutorial(MARKETING_HOWITWORKS_KEY);
+    const seenTour = hasSeenTutorial(MARKETING_TOUR_KEY);
+    if (!seenHow) {
+      const t = setTimeout(() => setHowItWorksOpen(true), 500);
+      return () => clearTimeout(t);
+    }
+    if (!seenTour) {
+      const t = setTimeout(() => setTourOpen(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  // Closing the modal marks it seen, then hands off to the tour if not yet taken.
+  const handleCloseHowItWorks = () => {
+    setHowItWorksOpen(false);
+    markTutorialSeen(MARKETING_HOWITWORKS_KEY);
+    if (!hasSeenTutorial(MARKETING_TOUR_KEY)) {
+      setTimeout(() => setTourOpen(true), 300);
+    }
+  };
+
+  const handleReplayTour = () => {
+    resetTutorial(MARKETING_TOUR_KEY);
+    setTourOpen(true);
+  };
+
+  // Let users re-open the "How it works" summary from the header any time.
+  const handleShowHowItWorks = () => setHowItWorksOpen(true);
 
   // Deep-link support: /marketing/dashboard?tab=email jumps straight to that tab,
   // including when navigating here again while already mounted on this route.
@@ -278,12 +336,16 @@ const MarketingDashboard = () => {
     }
   };
 
-  const fetchCampaigns = async (page = 1) => {
+  const fetchCampaigns = async (page = 1, activeFilters = campaignFilters, quiet = false) => {
     try {
-      setCampaignsLoading(true);
+      if (quiet) setCampaignsFiltering(true);
+      else setCampaignsLoading(true);
       const response = await marketingAgentService.listCampaigns({
         page,
         limit: DASHBOARD_CAMPAIGNS_PAGE_SIZE,
+        search: activeFilters.search,
+        status: activeFilters.status,
+        date: activeFilters.date,
       });
       if (response?.status === 'success' && response?.data) {
         setCampaigns(response.data.campaigns || []);
@@ -294,8 +356,22 @@ const MarketingDashboard = () => {
       setCampaignsTotal(0);
     } finally {
       setCampaignsLoading(false);
+      setCampaignsFiltering(false);
     }
   };
+
+  // Filter change → back to page 1 and re-fetch (search debounced 300ms).
+  // `quiet` keeps the table on screen with a small spinner instead of a flash.
+  // Only active on the dashboard tab to avoid background fetches.
+  useEffect(() => {
+    if (activeTab !== 'dashboard') return;
+    const t = setTimeout(() => {
+      setCampaignsPage(1);
+      fetchCampaigns(1, campaignFilters, true);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignFilters.search, campaignFilters.status, campaignFilters.date]);
 
   // Clear campaign selection when campaigns list changes
   useEffect(() => {
@@ -799,10 +875,41 @@ const MarketingDashboard = () => {
       {(() => {
         // Make renderChart globally available
         const renderChart = window.renderChart;
-        return null; 
+        return null;
       })()}
+
+      {/* Header row — Marketing title + replay-tour button */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Megaphone className="h-5 w-5 text-[#a259ff]" />
+          <h2 className="text-lg font-semibold text-white">Marketing Agent</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* How it works — re-open the onboarding summary any time */}
+          <button
+            type="button"
+            onClick={handleShowHowItWorks}
+            title="How this agent works"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-white/15 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            How it works
+          </button>
+          <button
+            type="button"
+            onClick={handleReplayTour}
+            data-tour-mkt="replay"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition"
+            style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', boxShadow: '0 0 8px 0 #a259ff55' }}
+          >
+            <GraduationCap className="h-3.5 w-3.5" />
+            Take the Tour
+          </button>
+        </div>
+      </div>
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8 w-full">
+      <div data-tour-mkt="stats" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8 w-full">
         {[
           {
             label: 'Total Campaigns',
@@ -874,22 +981,32 @@ const MarketingDashboard = () => {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="pb-1">
           <TabsList
+            data-tour-mkt="tabs"
             className="grid w-full grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
             style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
           >
             {[
-              { value: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-              { value: 'campaigns', label: 'Campaigns', icon: Megaphone },
-              { value: 'email', label: 'Email', icon: Mail },
-              { value: 'qa', label: 'Q&A', icon: MessageSquare },
-              { value: 'research', label: 'Research', icon: Sparkles },
-              { value: 'documents', label: 'Documents', icon: FileText },
-              { value: 'notifications', label: 'Notifications', icon: Bell, badge: notificationUnreadCount },
-              { value: 'saved-graphs', label: 'Saved Graphs', icon: Sparkles },
+              { value: 'dashboard', label: 'Dashboard', icon: BarChart3, tip: 'Your overview — stats and your list of campaigns.' },
+              { value: 'campaigns', label: 'Campaigns', icon: Megaphone, tip: 'Create campaigns with AI and manage your whole list.' },
+              { value: 'email', label: 'Email', icon: Mail, tip: 'Connect and manage the accounts your campaigns send from.' },
+              { value: 'qa', label: 'Q&A', icon: MessageSquare, tip: 'Ask AI about your campaign results, or generate a chart.' },
+              { value: 'research', label: 'Research', icon: Sparkles, tip: 'Run AI market research to shape your next campaign.' },
+              { value: 'documents', label: 'Documents', icon: FileText, tip: 'Generate and store marketing documents with AI.' },
+              { value: 'notifications', label: 'Notifications', icon: Bell, badge: notificationUnreadCount, tip: 'Alerts and AI health checks for your campaigns.' },
+              { value: 'saved-graphs', label: 'Saved Graphs', icon: Sparkles, tip: 'Charts you saved from Q&A — reuse or pin them here.' },
             ].map((item) => (
               <TabsTrigger
                 key={item.value}
                 value={item.value}
+                data-tour-mkt={`tab-${item.value}`}
+                // Hover hint: anchor a themed tooltip above this tab. Handlers live
+                // on the trigger itself (not a wrapper) so Radix's tab keyboard
+                // nav and the grid layout stay intact.
+                onMouseEnter={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setTabTip({ text: item.tip, top: r.top - 8, left: r.left + r.width / 2 });
+                }}
+                onMouseLeave={() => setTabTip(null)}
                 className="w-full min-w-0 px-2 sm:px-3 py-2 text-sm font-medium rounded-md border transition-all duration-150 relative flex items-center justify-center gap-2"
                 style={activeTab === item.value
                   ? {
@@ -919,9 +1036,27 @@ const MarketingDashboard = () => {
               </TabsTrigger>
             ))}
           </TabsList>
+
+          {/* Tab hover tooltip — portalled, fixed above the hovered tab */}
+          {tabTip && createPortal(
+            <div
+              role="tooltip"
+              className="fixed z-[10000] pointer-events-none -translate-x-1/2 -translate-y-full"
+              style={{ top: tabTip.top, left: tabTip.left }}
+            >
+              <div className="relative max-w-[220px] rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl">
+                {tabTip.text}
+                <span
+                  className="absolute left-1/2 top-full -translate-x-1/2 h-2 w-2 rotate-45 border-b border-r border-[#3a295a] bg-[#161630]"
+                  style={{ marginTop: '-4px' }}
+                />
+              </div>
+            </div>,
+            document.body,
+          )}
         </div>
 
-        <TabsContent value="dashboard" className="space-y-4">
+        <TabsContent value="dashboard" data-tour-mkt="page-dashboard" className="space-y-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -934,23 +1069,27 @@ const MarketingDashboard = () => {
                     <CardTitle className="text-white">Marketing Overview</CardTitle>
                     {/* Main action buttons */}
                     <div className="flex flex-wrap gap-3">
-                      <Button
-                        size="sm"
-                        className="gap-2"
-                        onClick={() => setActiveTab('campaigns')}
-                      >
-                        <Plus className="h-5 w-5" />
-                        Create campaign
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                        onClick={() => setActiveTab('email')}
-                      >
-                        <Mail className="h-5 w-5" />
-                        Email accounts
-                      </Button>
+                      <HoverTip tip="Jump to the Campaigns tab to build a new campaign">
+                        <Button
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => setActiveTab('campaigns')}
+                        >
+                          <Plus className="h-5 w-5" />
+                          Create campaign
+                        </Button>
+                      </HoverTip>
+                      <HoverTip tip="Open the Email tab to manage your sending accounts">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => setActiveTab('email')}
+                        >
+                          <Mail className="h-5 w-5" />
+                          Email accounts
+                        </Button>
+                      </HoverTip>
                     </div>
                   </div>
                   <CardDescription className="text-white/60">
@@ -965,7 +1104,7 @@ const MarketingDashboard = () => {
 
 
                   {/* Campaigns list (like backend campaigns_list.html) */}
-                  <div>
+                  <div data-tour-mkt="dash-campaigns">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Campaigns</h3>
                       {selectedCampaigns.size > 0 && (
@@ -980,6 +1119,20 @@ const MarketingDashboard = () => {
                         </Button>
                       )}
                     </div>
+
+                    <CampaignFilterBar
+                      className="mb-3"
+                      dataTour="dash-filters"
+                      search={campaignFilters.search}
+                      onSearchChange={(v) => setCampaignFilters((f) => ({ ...f, search: v }))}
+                      status={campaignFilters.status}
+                      onStatusChange={(v) => setCampaignFilters((f) => ({ ...f, status: v }))}
+                      date={campaignFilters.date}
+                      onDateChange={(v) => setCampaignFilters((f) => ({ ...f, date: v }))}
+                      onClear={() => setCampaignFilters({ search: '', status: '', date: '' })}
+                      loading={campaignsFiltering}
+                    />
+
                     {campaignsLoading ? (
                       <div className="flex justify-center py-6">
                         <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -987,7 +1140,11 @@ const MarketingDashboard = () => {
                     ) : campaigns.length === 0 ? (
                       <div className="border-muted-foreground/30 bg-muted/20 p-8 text-center">
                         <Megaphone className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-                        <p className="text-sm text-muted-foreground mb-4">No campaigns yet.</p>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          {(campaignFilters.search || campaignFilters.status || campaignFilters.date)
+                            ? 'No campaigns match these filters.'
+                            : 'No campaigns yet.'}
+                        </p>
                         <Button size="lg" className="gap-2" onClick={() => setActiveTab('campaigns')}>
                           <Plus className="h-5 w-5" />
                           Create campaign
@@ -995,7 +1152,7 @@ const MarketingDashboard = () => {
                       </div>
                     ) : (
                       <>
-                        <div className=" overflow-hidden">
+                        <div className={`overflow-hidden transition-opacity duration-200 ${campaignsFiltering ? 'opacity-50' : 'opacity-100'}`}>
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="bg-muted/50 border-b">
@@ -1046,6 +1203,7 @@ const MarketingDashboard = () => {
                                   <td className="p-3 text-muted-foreground">{campaign.start_date ? formatDate(campaign.start_date) : '—'}</td>
                                   <td className="p-3 text-muted-foreground">{campaign.end_date ? formatDate(campaign.end_date) : '—'}</td>
                                   <td className="p-3">
+                                    <HoverTip tip="click to open the full campaign management page">
                                     <Button
                                       variant="default"
                                       size="sm"
@@ -1053,6 +1211,7 @@ const MarketingDashboard = () => {
                                     >
                                       <Link to={`/marketing/dashboard/campaign/${campaign.id}`}>Manage</Link>
                                     </Button>
+                                    </HoverTip>
                                   </td>
                                 </tr>
                                 );
@@ -1060,33 +1219,43 @@ const MarketingDashboard = () => {
                             </tbody>
                           </table>
                         </div>
-                        {campaignsTotal > DASHBOARD_CAMPAIGNS_PAGE_SIZE && (
-                          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 mt-4 border-t">
-                            <p className="text-sm text-muted-foreground">
-                              Showing page {campaignsPage} of {Math.max(1, Math.ceil(campaignsTotal / DASHBOARD_CAMPAIGNS_PAGE_SIZE))} ({campaignsTotal} total campaigns)
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={campaignsPage <= 1 || campaignsLoading}
-                                onClick={() => setCampaignsPage((p) => Math.max(1, p - 1))}
-                              >
-                                <ChevronLeft className="h-4 w-4" />
-                                Previous
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={campaignsPage >= Math.ceil(campaignsTotal / DASHBOARD_CAMPAIGNS_PAGE_SIZE) || campaignsLoading}
-                                onClick={() => setCampaignsPage((p) => p + 1)}
-                              >
-                                Next
-                                <ChevronRight className="h-4 w-4" />
-                              </Button>
+                        {campaignsTotal > 0 && (() => {
+                          const totalPages = Math.max(1, Math.ceil(campaignsTotal / DASHBOARD_CAMPAIGNS_PAGE_SIZE));
+                          const multiPage = totalPages > 1;
+                          const rangeStart = (campaignsPage - 1) * DASHBOARD_CAMPAIGNS_PAGE_SIZE + 1;
+                          const rangeEnd = Math.min(campaignsPage * DASHBOARD_CAMPAIGNS_PAGE_SIZE, campaignsTotal);
+                          return (
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 mt-4 border-t">
+                              <p className="text-sm text-muted-foreground">
+                                {multiPage
+                                  ? `Showing ${rangeStart}–${rangeEnd} of ${campaignsTotal} campaigns · page ${campaignsPage} of ${totalPages}`
+                                  : `${campaignsTotal} campaign${campaignsTotal === 1 ? '' : 's'}`}
+                              </p>
+                              {multiPage && (
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={campaignsPage <= 1 || campaignsLoading}
+                                    onClick={() => setCampaignsPage((p) => Math.max(1, p - 1))}
+                                  >
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Previous
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={campaignsPage >= totalPages || campaignsLoading}
+                                    onClick={() => setCampaignsPage((p) => p + 1)}
+                                  >
+                                    Next
+                                    <ChevronRight className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </>
                     )}
                   </div>
@@ -1125,7 +1294,7 @@ const MarketingDashboard = () => {
           )}
         </TabsContent>
 
-        <TabsContent value="email" className="space-y-4">
+        <TabsContent value="email" data-tour-mkt="page-email" className="space-y-4">
           <div className="relative flex gap-4">
             <Card className={`border-white/10 bg-black/20 backdrop-blur-sm ${selectedAccount ? 'flex-1 min-w-0' : 'w-full'}`}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -1135,10 +1304,12 @@ const MarketingDashboard = () => {
                     Accounts used to send campaign emails. Click an account to see details in the sidebar.
                   </CardDescription>
                 </div>
-                <Button variant="default" size="sm" onClick={openAddEmailAccount}>
+              <HoverTip tip="Add a new email account to send campaign emails from.">
+                <Button variant="default" size="sm" onClick={openAddEmailAccount} data-tour-mkt="email-add">
                   <Plus className="h-4 w-4 mr-2" />
                   Add email account
                 </Button>
+                </HoverTip>
               </CardHeader>
               <CardContent>
                 {emailAccountsLoading ? (
@@ -1150,10 +1321,12 @@ const MarketingDashboard = () => {
                     <Mail className="h-12 w-12 mx-auto mb-3 opacity-50" />
                     <p className="font-medium">No email accounts</p>
                     <p className="text-sm mt-1">Add an account to send campaign emails from sequences.</p>
+                    <HoverTip tip="Add a new email account to send campaign emails from.">
                     <Button className="mt-4" onClick={openAddEmailAccount}>
                       <Plus className="mr-2 h-4 w-4" />
                       Add email account
                     </Button>
+                    </HoverTip>
                   </div>
                 ) : (
                   <div className="rounded-lg border overflow-x-auto">
@@ -1593,28 +1766,28 @@ const MarketingDashboard = () => {
           </Dialog>
         </TabsContent>
 
-        <TabsContent value="campaigns" className="!mt-2 min-h-[400px]">
+        <TabsContent value="campaigns" data-tour-mkt="page-campaigns" className="!mt-2 min-h-[400px]">
           <Campaigns onRefresh={fetchStats} />
         </TabsContent>
 
-        <TabsContent value="qa" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
+        <TabsContent value="qa" data-tour-mkt="page-qa" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
           <MarketingQA />
         </TabsContent>
 
-        <TabsContent value="research" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
+        <TabsContent value="research" data-tour-mkt="page-research" className="!mt-2 h-[500px] overflow-y-auto min-h-[630px] scrollbar-black">
           <MarketResearch />
         </TabsContent>
 
-        <TabsContent value="documents">
+        <TabsContent value="documents" data-tour-mkt="page-documents">
           <Documents />
         </TabsContent>
 
-        <TabsContent value="notifications">
+        <TabsContent value="notifications" data-tour-mkt="page-notifications">
           <Notifications onUnreadCountChange={fetchNotificationUnreadCount} />
         </TabsContent>
 
-        <TabsContent value="saved-graphs" className="!mt-2">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <TabsContent value="saved-graphs" data-tour-mkt="page-saved-graphs" className="!mt-2">
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm" data-tour-mkt="graphs-card">
             <CardHeader>
               <CardTitle className="text-white flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-amber-500" />
@@ -1892,6 +2065,25 @@ const MarketingDashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* First-visit "how it works" summary — auto-shown before the tour */}
+      <HowItWorksModal
+        open={howItWorksOpen}
+        onClose={handleCloseHowItWorks}
+        title="How the Marketing Agent works"
+        subtitle="What it does for you, automatically"
+        steps={MKT_HOWITWORKS_STEPS}
+        primaryLabel="Got it"
+      />
+
+      {/* Guided tour — reuses the shared FrontlineTutorial overlay. */}
+      <FrontlineTutorial
+        open={tourOpen}
+        onClose={() => setTourOpen(false)}
+        setActiveTab={setActiveTab}
+        steps={MARKETING_TOUR_STEPS}
+        storageKey={MARKETING_TOUR_KEY}
+      />
     </div>
   );
 };

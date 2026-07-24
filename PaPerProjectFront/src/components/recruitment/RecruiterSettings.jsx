@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
-import { Loader2, Mail, Calendar, Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Lock, Target, ChevronsUpDown, Check, Search } from 'lucide-react';
+import { Loader2, Mail, Calendar, Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Lock, Target, ChevronsUpDown, Check, Search, CalendarCheck, ArrowRight } from 'lucide-react';
 import {
   getEmailSettings,
   updateEmailSettings,
@@ -19,6 +19,7 @@ import {
   updateQualificationSettings,
   getJobDescriptions
 } from '@/services/recruitmentAgentService';
+import { companyAuthService } from '@/services';
 
 const SETTINGS_SUB_PATHS = ['email', 'interview', 'qualification'];
 
@@ -29,6 +30,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
   const pathParts = location.pathname.split('/').filter(Boolean);
   const settingsSub = pathParts[pathParts.length - 1];
   const activeSettingsTab = SETTINGS_SUB_PATHS.includes(settingsSub) ? settingsSub : 'email';
+  // Google Calendar connection — needed so online interviews get a Meet link.
+  const [gcal, setGcal] = useState(null); // { connected, googleEmail, configured }
   const [emailSettings, setEmailSettings] = useState({
     followup_delay_hours: 48,
     min_hours_between_followups: 24,
@@ -91,6 +94,11 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
       await fetchEmailAndQualificationSettings();
     };
     loadInitialData();
+
+    // Google Calendar connection status (for the online-interview hint).
+    companyAuthService.getGoogleCalendarStatus()
+      .then((res) => { if (res.status === 'success') setGcal(res.data); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -798,6 +806,40 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Google Calendar connection hint — Meet links need a connected calendar */}
+              {gcal && (
+                gcal.connected ? (
+                  <div className="flex items-center gap-2 rounded-lg px-4 py-2.5"
+                       style={{ background: 'rgba(16,185,129,0.10)', border: '1px solid rgba(16,185,129,0.30)' }}>
+                    <CalendarCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <p className="text-sm text-emerald-200/90">
+                      Google Calendar is connected{gcal.googleEmail ? ` (${gcal.googleEmail})` : ''}. Online interviews will include a Google Meet link automatically.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg px-4 py-3"
+                       style={{ background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.30)' }}>
+                    <div className="flex items-start gap-2.5">
+                      <CalendarCheck className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-amber-100">Connect Google Calendar for Meet links</p>
+                        <p className="text-xs text-amber-200/70 mt-0.5">
+                          Online interviews won't include a Google Meet link until you connect your calendar. Go to your profile, open Integrations, and connect Google Calendar.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => navigate('/company/profile/integrations')}
+                      className="shrink-0 border-0 text-white"
+                      style={{ background: 'linear-gradient(90deg,#f59e0b,#d97706)' }}
+                    >
+                      Connect Google Calendar <ArrowRight className="h-4 w-4 ml-1.5" />
+                    </Button>
+                  </div>
+                )
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="job-select">Select Job</Label>
                 {jobs.length === 0 && !loadingJobs ? (

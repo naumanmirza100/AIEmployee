@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select';
 import { Loader2, Sparkles } from 'lucide-react';
 import execMeetingService from '@/services/execMeetingService';
-import { DateTimePicker, DateOnlyPicker, validateMeetingLink } from './shared';
+import { DateTimePicker, DateOnlyPicker, validateMeetingLink, isWeekend } from './shared';
 
 // ── Schedule meeting dialog ─────────────────────────────────────────────────
 export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
@@ -190,7 +190,6 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
                 </SelectContent>
               </Select>
             </div>
-
           </div>
 
           {/* RIGHT column — participants */}
@@ -216,8 +215,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
                 onChange={e => searchUsers(e.target.value)}
                 placeholder="Type name or email to add…"
                 autoComplete="off"
-                className="bg-white/5 border-white/10 text-white text-sm"
-              />
+                className="bg-white/5 border-white/10 text-white text-sm" />
               {searchLoading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
               {searchResults.length > 0 && (
                 <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
@@ -242,8 +240,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
 
             {/* Placeholder when no participants yet */}
             {participants.length === 0 && (
-              <p className="text-white/20 text-xs mt-2">Search above to add team members.</p>
-            )}
+              <p className="text-white/20 text-xs mt-2">Search above to add team members.</p>)}
            <div className="space-y-1">
               <Label>Video Call Link <span className="text-white/30 text-xs">(leave blank to auto-generate)</span></Label>
               <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
@@ -253,9 +250,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
               <p className="text-white/25 text-[10px]">Supported: Google Meet, Zoom, Teams, Jitsi, Webex</p>
             </div>
           </div>
-
         </div>
-
         {/* Agenda — full width below both columns so generating it doesn't
             stretch the left column and misalign the fields. */}
         {agenda.length > 0 && (
@@ -271,6 +266,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
           </div>
         )}
 
+
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
           <Button onClick={handleSubmit} disabled={loading}>
@@ -280,12 +276,12 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
         </DialogFooter>
       </DialogContent>
 
+
       <MeetingConflictDialog
         conflicts={conflicts}
         onCancel={() => setConflicts(null)}
         onConfirm={doCreate}
-        loading={loading}
-      />
+        loading={loading}/>
     </Dialog>
   );
 };
@@ -648,6 +644,10 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
 
   const handleSubmit = async () => {
     if (!form.title) { toast({ title: 'Title is required', variant: 'destructive' }); return; }
+    if (isWeekend(form.due_date)) {
+      toast({ title: 'Weekend deadline', description: 'Task deadlines can\'t fall on a weekend. Pick a weekday.', variant: 'destructive' });
+      return;
+    }
     // A subtask can't be due after its parent task.
     if (parentTask?.due_date && form.due_date && form.due_date > parentTask.due_date) {
       toast({ title: 'Due date too late', description: `Subtask can't be due after the parent task (${parentTask.due_date}).`, variant: 'destructive' });
@@ -663,7 +663,12 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
       toast({ title: parentTask ? 'Subtask created!' : 'Task created!' });
       onCreated(); onClose(); reset();
     } catch (err) {
-      toast({ title: 'Failed to create task', description: err.message, variant: 'destructive' });
+      const dup = err?.status === 409 || /already exists/i.test(err?.message || '');
+      toast({
+        title: dup ? 'Duplicate title' : 'Failed to create task',
+        description: err.message,
+        variant: 'destructive',
+      });
     } finally { setLoading(false); }
   };
 
@@ -699,13 +704,13 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
               <Select value={form.priority} onValueChange={v => set('priority', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {['low','medium','high','critical'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  {['low','medium','high'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1">
               <Label>Due Date</Label>
-              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
+              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} disableWeekends />
               {parentTask?.due_date && (
                 <p className="text-white/30 text-[10px]">Must be on or before parent's due date: {parentTask.due_date}</p>
               )}
@@ -770,6 +775,10 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   };
 
   const handleSave = async () => {
+    if (isWeekend(form.due_date)) {
+      toast({ title: 'Weekend deadline', description: 'Task deadlines can\'t fall on a weekend. Pick a weekday.', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
       await execMeetingService.updateTask(task.id, {
@@ -827,13 +836,13 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
               <Select value={form.priority} onValueChange={v => set('priority', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {['low','medium','high','critical'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  {['low','medium','high'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1">
               <Label>Due Date</Label>
-              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} />
+              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} disableWeekends />
             </div>
           </div>
           <div className="space-y-1">

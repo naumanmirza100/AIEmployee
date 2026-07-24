@@ -5,129 +5,99 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interview Follow-Up Reminder</title>
 </head>
-<body style="margin:0;padding:0;background-color:#f0f0f5;font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+<body style="margin:0;padding:0;background:#f4f4f6;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;-webkit-font-smoothing:antialiased;">
 
-    <!-- Wrapper -->
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f0f5;padding:40px 16px;">
+    <!-- Preheader -->
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">A quick reminder to pick a time for your {{ job_title }} interview.</div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f6;padding:32px 16px;">
         <tr>
             <td align="center">
-                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 
-                    <!-- Header -->
+                    <!-- Accent bar (indigo = an action is needed) -->
+                    <tr><td style="height:4px;background:#4f46e5;font-size:0;line-height:0;">&nbsp;</td></tr>
+
+                    <!-- Masthead -->
                     <tr>
-                        <td style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:40px 40px 32px;text-align:center;">
-                            <div style="width:64px;height:64px;background:rgba(255,255,255,0.2);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;">
-                                <img src="https://img.icons8.com/fluency/48/alarm-clock.png" alt="" width="36" height="36" style="display:block;" />
-                            </div>
-                            <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.3px;">Friendly Reminder</h1>
-                            <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">Your interview is waiting to be confirmed</p>
+                        <td style="padding:28px 40px 0;">
+                            <p style="margin:0;font-size:13px;font-weight:700;letter-spacing:0.4px;color:#111827;">Pay Per Project</p>
+                        </td>
+                    </tr>
+
+                    <!-- Title -->
+                    <tr>
+                        <td style="padding:24px 40px 0;">
+                            <p style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#6b7280;">Friendly reminder</p>
+                            <h1 style="margin:0;font-size:23px;font-weight:600;line-height:1.3;color:#111827;">Still keen to schedule your interview?</h1>
                         </td>
                     </tr>
 
                     <!-- Body -->
                     <tr>
-                        <td style="padding:36px 40px 20px;">
-                            <p style="margin:0 0 20px;font-size:16px;color:#1a1a2e;line-height:1.6;">Dear <strong>{{ candidate_name }}</strong>,</p>
-                            <p style="margin:0 0 24px;font-size:15px;color:#444;line-height:1.7;">We wanted to follow up regarding your interview invitation for the <strong style="color:#4f46e5;">{{ job_title }}</strong> position. We haven't received your confirmation yet.</p>
-                        </td>
-                    </tr>
-
-                    <!-- Urgency Banner -->
-                    <tr>
-                        <td style="padding:0 40px 24px;">
+                        <td style="padding:20px 40px 4px;">
+                            <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#374151;">Dear {{ candidate_name }},</p>
                             {% if followup_number > 1 %}
-                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef3c7;border-radius:12px;border:1px solid #fde68a;">
-                                <tr>
-                                    <td style="padding:16px 24px;">
-                                        <table role="presentation" cellpadding="0" cellspacing="0">
-                                            <tr>
-                                                <td style="vertical-align:middle;padding-right:14px;">
-                                                    <div style="width:40px;height:40px;background:#f59e0b;border-radius:50%;text-align:center;line-height:40px;color:#fff;font-weight:700;font-size:16px;">{{ followup_number }}</div>
-                                                </td>
-                                                <td style="vertical-align:middle;">
-                                                    <p style="margin:0;font-size:14px;font-weight:700;color:#92400e;">This is follow-up reminder #{{ followup_number }}</p>
-                                                    <p style="margin:4px 0 0;font-size:13px;color:#a16207;">Please take a moment to confirm your preferred interview time.</p>
-                                                </td>
-                                            </tr>
-                                        </table>
-                                    </td>
-                                </tr>
-                            </table>
+                            <p style="margin:0 0 8px;font-size:15px;line-height:1.65;color:#374151;">We've reached out a few times about scheduling your interview for the <strong>{{ job_title }}</strong> position and haven't heard back yet. We'd genuinely like to move forward with you, so if you're still interested, please pick a time that works. If your plans have changed, a quick note is appreciated too.</p>
                             {% else %}
-                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef3c7;border-radius:12px;border:1px solid #fde68a;">
-                                <tr>
-                                    <td style="padding:16px 24px;">
-                                        <p style="margin:0;font-size:14px;font-weight:600;color:#92400e;line-height:1.5;">We haven't received your confirmation yet. Please confirm your interview slot to proceed with the next steps in the hiring process.</p>
-                                    </td>
-                                </tr>
-                            </table>
+                            <p style="margin:0 0 8px;font-size:15px;line-height:1.65;color:#374151;">Just a gentle nudge about your interview for the <strong>{{ job_title }}</strong> position — we haven't received your preferred time yet. Whenever you're ready, choosing a slot only takes a moment.</p>
                             {% endif %}
                         </td>
                     </tr>
 
-                    <!-- Details Card -->
+                    <!-- Details -->
                     <tr>
-                        <td style="padding:0 40px 24px;">
-                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8f7ff;border-radius:12px;border:1px solid #e8e5ff;">
+                        <td style="padding:16px 40px 8px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;">
                                 <tr>
-                                    <td style="padding:20px 24px 8px;">
-                                        <p style="margin:0;font-size:13px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:0.8px;">Interview Details</p>
+                                    <td style="padding:14px 20px;border-bottom:1px solid #f1f1f4;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Position</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ job_title }}</span>
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td style="padding:12px 24px;">
-                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                                            <tr>
-                                                <td style="padding:8px 0;border-bottom:1px solid #ede9fe;">
-                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Position</span>
-                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ job_title }}</span>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:8px 0;">
-                                                    <span style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;">Interview Type</span>
-                                                    <span style="font-size:15px;color:#1a1a2e;font-weight:600;display:block;margin-top:2px;">{{ interview_type }}</span>
-                                                </td>
-                                            </tr>
-                                        </table>
+                                    <td style="padding:14px 20px;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Interview type</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ interview_type }}</span>
                                     </td>
                                 </tr>
                             </table>
                         </td>
                     </tr>
 
-                    <!-- CTA Button -->
+                    <!-- CTA -->
                     <tr>
-                        <td style="padding:8px 40px 12px;text-align:center;">
-                            <p style="margin:0 0 16px;font-size:14px;color:#555;font-weight:600;">Select your preferred date and time:</p>
+                        <td style="padding:16px 40px 8px;">
                             {% if slot_selection_url %}
-                            <a href="{{ slot_selection_url }}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;padding:16px 48px;border-radius:12px;letter-spacing:0.3px;">
-                                Confirm Your Interview
+                            <a href="{{ slot_selection_url }}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#4f46e5;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:13px 30px;border-radius:8px;">
+                                Choose your interview time
                             </a>
-                            {% else %}
-                            <p style="color:#dc2626;font-size:14px;">Scheduling link is not configured. Please contact the recruiter.</p>
+                            <p style="margin:14px 0 0;font-size:12px;color:#9ca3af;line-height:1.6;">Or paste this link into your browser:<br><a href="{{ slot_selection_url }}" target="_blank" style="color:#4f46e5;text-decoration:none;word-break:break-all;">{{ slot_selection_url }}</a></p>
                             {% endif %}
                         </td>
                     </tr>
 
+                    <!-- Note -->
                     <tr>
-                        <td style="padding:16px 40px 28px;text-align:center;">
-                            <p style="margin:0;font-size:13px;color:#999;">This will help us proceed with your application promptly.</p>
+                        <td style="padding:16px 40px 4px;">
+                            <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.6;padding-left:14px;border-left:2px solid #e5e7eb;">
+                                Confirming your time helps us keep your application moving without delay.
+                            </p>
                         </td>
                     </tr>
 
                     <!-- Sign-off -->
                     <tr>
-                        <td style="padding:0 40px 36px;">
-                            <p style="margin:0 0 4px;font-size:15px;color:#444;line-height:1.6;">We look forward to hearing from you soon!</p>
-                            <p style="margin:16px 0 0;font-size:15px;color:#444;">Best regards,<br><strong style="color:#1a1a2e;">Recruitment Team</strong></p>
+                        <td style="padding:22px 40px 32px;">
+                            <p style="margin:0 0 2px;font-size:15px;color:#374151;line-height:1.6;">We hope to hear from you soon.</p>
+                            <p style="margin:14px 0 0;font-size:15px;color:#374151;">Best regards,<br><strong style="color:#111827;">Recruitment Team</strong></p>
                         </td>
                     </tr>
 
                     <!-- Footer -->
                     <tr>
-                        <td style="background:#fafafa;padding:20px 40px;text-align:center;border-top:1px solid #f0f0f0;">
-                            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">This is an automated reminder. If you have questions, please contact us directly.</p>
+                        <td style="padding:18px 40px;border-top:1px solid #f1f1f4;">
+                            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">Sent by Pay Per Project · This is an automated message, please don't reply directly.</p>
                         </td>
                     </tr>
 

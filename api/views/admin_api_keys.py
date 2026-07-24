@@ -29,7 +29,9 @@ from core.models import (
 
 logger = logging.getLogger(__name__)
 
-VALID_AGENTS = {name for name, _ in AGENT_CHOICES}
+# Resolved live from the Agent table — see core.api_key_service._ValidAgents.
+from core.api_key_service import VALID_AGENTS  # noqa: E402
+
 VALID_PROVIDERS = {name for name, _ in PROVIDER_CHOICES}
 
 

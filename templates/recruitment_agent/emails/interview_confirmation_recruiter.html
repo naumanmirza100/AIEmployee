@@ -3,107 +3,120 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interview Scheduled - Recruiter Notification</title>
+    <title>New Interview Booked</title>
 </head>
-<body style="margin:0;padding:0;background-color:#f0f0f5;font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+<body style="margin:0;padding:0;background:#f4f4f6;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;-webkit-font-smoothing:antialiased;">
 
-    <!-- Wrapper -->
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f0f0f5;padding:40px 16px;">
+    <!-- Preheader -->
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">{{ candidate_name }} booked an interview for {{ job_title }}.</div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f6;padding:32px 16px;">
         <tr>
             <td align="center">
-                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 
-                    <!-- Header -->
+                    <!-- Accent bar (green = confirmed) -->
+                    <tr><td style="height:4px;background:#059669;font-size:0;line-height:0;">&nbsp;</td></tr>
+
+                    <!-- Masthead -->
                     <tr>
-                        <td style="background:linear-gradient(135deg,#1e293b,#0f172a);padding:36px 40px 28px;text-align:center;">
-                            <div style="width:56px;height:56px;background:rgba(99,102,241,0.2);border-radius:14px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;">
-                                <img src="https://img.icons8.com/fluency/48/conference-call.png" alt="" width="32" height="32" style="display:block;" />
-                            </div>
-                            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.3px;">New Interview Scheduled</h1>
-                            <p style="margin:6px 0 0;color:rgba(255,255,255,0.6);font-size:13px;">A candidate has confirmed their interview slot</p>
+                        <td style="padding:28px 40px 0;">
+                            <p style="margin:0;font-size:13px;font-weight:700;letter-spacing:0.4px;color:#111827;">Pay Per Project</p>
+                        </td>
+                    </tr>
+
+                    <!-- Title -->
+                    <tr>
+                        <td style="padding:24px 40px 0;">
+                            <p style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#6b7280;">New interview booked</p>
+                            <h1 style="margin:0;font-size:23px;font-weight:600;line-height:1.3;color:#111827;">A candidate scheduled an interview</h1>
                         </td>
                     </tr>
 
                     <!-- Body -->
                     <tr>
-                        <td style="padding:32px 40px 20px;">
-                            <p style="margin:0 0 20px;font-size:15px;color:#1a1a2e;line-height:1.6;">Hello <strong>{{ recruiter_name }}</strong>,</p>
-                            <p style="margin:0 0 24px;font-size:14px;color:#555;line-height:1.7;">An interview has been confirmed. Here are the details:</p>
+                        <td style="padding:20px 40px 4px;">
+                            <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#374151;">Hello {{ recruiter_name }},</p>
+                            <p style="margin:0 0 8px;font-size:15px;line-height:1.65;color:#374151;">A candidate has confirmed a time for the <strong>{{ job_title }}</strong> role. The full details are below.</p>
                         </td>
                     </tr>
 
-                    <!-- Details Card -->
+                    <!-- Details -->
                     <tr>
-                        <td style="padding:0 40px 24px;">
-                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0;">
+                        <td style="padding:16px 40px 8px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;">
                                 <tr>
-                                    <td style="padding:20px 24px;">
-                                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                                            <tr>
-                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
-                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Candidate</span>
-                                                    <span style="font-size:15px;color:#1e293b;font-weight:600;display:block;margin-top:3px;">{{ candidate_name }}</span>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
-                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Email</span>
-                                                    <span style="font-size:14px;color:#6366f1;font-weight:500;display:block;margin-top:3px;">{{ candidate_email }}</span>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
-                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Position</span>
-                                                    <span style="font-size:15px;color:#1e293b;font-weight:600;display:block;margin-top:3px;">{{ job_title }}</span>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
-                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Interview Type</span>
-                                                    <span style="font-size:15px;color:#1e293b;font-weight:600;display:block;margin-top:3px;">{{ interview_type }}</span>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
-                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Scheduled Date & Time</span>
-                                                    <span style="font-size:16px;color:#059669;font-weight:700;display:block;margin-top:3px;">{{ scheduled_datetime|date:"F d, Y" }} at {{ scheduled_datetime|time:"g:i A" }}</span>
-                                                </td>
-                                            </tr>
-                                            {% if meeting_link %}
-                                            <tr>
-                                                <td style="padding:10px 0;">
-                                                    <span style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;display:block;">Meeting Link</span>
-                                                    <a href="{{ meeting_link }}" style="font-size:14px;color:#6366f1;font-weight:500;display:block;margin-top:3px;word-break:break-all;">{{ meeting_link }}</a>
-                                                </td>
-                                            </tr>
-                                            {% endif %}
-                                        </table>
+                                    <td style="padding:14px 20px;border-bottom:1px solid #f1f1f4;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Candidate</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ candidate_name }}</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:14px 20px;border-bottom:1px solid #f1f1f4;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Candidate email</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ candidate_email }}</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:14px 20px;border-bottom:1px solid #f1f1f4;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Position</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ job_title }}</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:14px 20px;border-bottom:1px solid #f1f1f4;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Interview type</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ interview_type }}</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:14px 20px;border-bottom:1px solid #f1f1f4;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Date</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ scheduled_datetime|date:"F d, Y" }}</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:14px 20px;">
+                                        <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Time</span><br>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ scheduled_datetime|time:"g:i A" }}</span>
                                     </td>
                                 </tr>
                             </table>
                         </td>
                     </tr>
 
+                    {% if meeting_link %}
+                    <!-- CTA -->
+                    <tr>
+                        <td style="padding:16px 40px 8px;">
+                            <a href="{{ meeting_link }}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#059669;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:13px 30px;border-radius:8px;">
+                                Open meeting link
+                            </a>
+                            <p style="margin:14px 0 0;font-size:12px;color:#9ca3af;line-height:1.6;">Or paste this link into your browser:<br><a href="{{ meeting_link }}" target="_blank" style="color:#059669;text-decoration:none;word-break:break-all;">{{ meeting_link }}</a></p>
+                        </td>
+                    </tr>
+                    {% endif %}
+
                     <!-- Note -->
                     <tr>
-                        <td style="padding:0 40px 24px;">
-                            <p style="margin:0;font-size:13px;color:#888;line-height:1.6;background:#fafafa;padding:14px 18px;border-radius:10px;border-left:3px solid #6366f1;">
-                                Please ensure you are available at this time. The candidate has been sent a confirmation email with interview preparation instructions.
+                        <td style="padding:16px 40px 4px;">
+                            <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.6;padding-left:14px;border-left:2px solid #e5e7eb;">
+                                Please confirm your availability for this time. The candidate has already received a confirmation with preparation details.
                             </p>
                         </td>
                     </tr>
 
                     <!-- Sign-off -->
                     <tr>
-                        <td style="padding:0 40px 32px;">
-                            <p style="margin:0;font-size:14px;color:#444;">Best regards,<br><strong style="color:#1a1a2e;">Interview Scheduling System</strong></p>
+                        <td style="padding:22px 40px 32px;">
+                            <p style="margin:0;font-size:15px;color:#374151;">Best regards,<br><strong style="color:#111827;">Interview Scheduling System</strong></p>
                         </td>
                     </tr>
 
                     <!-- Footer -->
                     <tr>
-                        <td style="background:#fafafa;padding:18px 40px;text-align:center;border-top:1px solid #f0f0f0;">
-                            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">This is an automated notification email.</p>
+                        <td style="padding:18px 40px;border-top:1px solid #f1f1f4;">
+                            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">Sent by Pay Per Project · This is an automated internal notification.</p>
                         </td>
                     </tr>
 

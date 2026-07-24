@@ -1,0 +1,17 @@
+Application Update
+
+Dear {{ candidate_name }},
+
+Thank you for your interest in the {{ job_title }} position and for the time you invested in your application.
+
+After careful consideration, we've decided not to move forward with your application at this time. This decision reflects our current needs and is not a judgement of your abilities or potential.
+
+We'll keep your details on file and encourage you to apply for future roles that match your experience.
+
+We wish you all the best in your search and future endeavours.
+
+Best regards,
+Recruitment Team
+
+—
+Sent by Pay Per Project · This is an automated message, please don't reply directly.

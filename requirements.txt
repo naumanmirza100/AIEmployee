@@ -62,3 +62,6 @@ PyNaCl==1.5.0
 # company so top-k retrieval is O(log N) even at 100k+ chunks. Missing faiss
 # falls back to the JSON scan path.
 faiss-cpu==1.13.1
+google-api-python-client==2.198.0
+google-auth==2.55.2
+google-auth-httplib2==0.4.0

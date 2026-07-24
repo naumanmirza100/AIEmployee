@@ -261,13 +261,17 @@ class CVRecord(models.Model):
     # Link to job description (optional)
     job_description = models.ForeignKey(JobDescription, on_delete=models.SET_NULL, null=True, blank=True, related_name='cv_records', db_index=True)
 
-    # Link to the public JobApplication this CV came from (null for manually uploaded CVs)
-    job_application = models.OneToOneField(
+    # Link to the public JobApplication this CV came from (null for manually uploaded CVs).
+    # NOTE: ForeignKey (not OneToOneField) because SQL Server's plain UNIQUE constraint
+    # treats multiple NULLs as duplicates, which blocked every manually-uploaded CV
+    # (job_application=NULL) after the first. Uniqueness for non-NULL links is enforced
+    # by the filtered UniqueConstraint in Meta instead.
+    job_application = models.ForeignKey(
         'JobApplication',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='cv_record',
+        related_name='cv_records',
     )
 
     created_at = models.DateTimeField(default=timezone.now)
@@ -280,6 +284,16 @@ class CVRecord(models.Model):
         indexes = [
             models.Index(fields=['qualification_decision', '-created_at']),
             models.Index(fields=['job_description', '-created_at']),
+        ]
+        constraints = [
+            # One CVRecord per JobApplication, but only when the link is set.
+            # Filtered so the many manually-uploaded CVs (job_application=NULL)
+            # don't collide on SQL Server (which treats multiple NULLs as equal).
+            models.UniqueConstraint(
+                fields=['job_application'],
+                condition=models.Q(job_application__isnull=False),
+                name='uq_cvrecord_job_application_notnull',
+            ),
         ]
     
     def __str__(self):

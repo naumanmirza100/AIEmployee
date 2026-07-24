@@ -43,6 +43,7 @@ import {
 import marketingAgentService from '@/services/marketingAgentService';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import HoverTip from '@/components/common/HoverTip';
 
 /** Backend may send /marketing/campaigns/{id}/ (old) or /marketing/dashboard/campaign/{id} (new). Normalize to in-app path. */
 const normalizeCampaignActionUrl = (actionUrl) => {
@@ -808,7 +809,7 @@ const Notifications = ({ onUnreadCountChange }) => {
       </motion.div>
 
       {/* Monitor section with enhanced design */}
-      <motion.div variants={itemVariants}>
+      <motion.div variants={itemVariants} data-tour-mkt="notif-monitor">
         <Card className="relative overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
           <div className="absolute inset-0 bg-grid-white/5 [mask-image:radial-gradient(ellipse_at_center,white,transparent)]" />
           <CardHeader className="relative pb-3">
@@ -852,6 +853,7 @@ const Notifications = ({ onUnreadCountChange }) => {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
+                <HoverTip tip="Run a health check on the selected campaign">
                 <Button 
                   onClick={runMonitor} 
                   disabled={monitoring} 
@@ -870,6 +872,7 @@ const Notifications = ({ onUnreadCountChange }) => {
                     </>
                   )}
                 </Button>
+                </HoverTip>
               </motion.div>
             </div>
             
@@ -916,7 +919,7 @@ const Notifications = ({ onUnreadCountChange }) => {
       </motion.div>
 
       {/* Unread notifications with filters */}
-      <motion.div variants={itemVariants}>
+      <motion.div variants={itemVariants} data-tour-mkt="notif-inbox">
         <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
           <CardHeader className="pb-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -946,28 +949,32 @@ const Notifications = ({ onUnreadCountChange }) => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowFilters(!showFilters)}
-                  className={cn(
-                    'gap-2 transition-all',
-                    showFilters && 'bg-primary/10 border-primary'
-                  )}
-                >
-                  <Filter className="h-4 w-4" />
-                  Filter
-                </Button>
-                {unreadCount > 0 && (
+                <HoverTip tip="Add Filter to notifications by issues or opportunities">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleMarkAllRead}
-                    className="gap-2"
+                    onClick={() => setShowFilters(!showFilters)}
+                    className={cn(
+                      'gap-2 transition-all',
+                      showFilters && 'bg-primary/10 border-primary'
+                    )}
                   >
-                    <CheckCheck className="h-4 w-4" />
-                    Mark all read
+                    <Filter className="h-4 w-4" />
+                    Filter
                   </Button>
+                </HoverTip>
+                {unreadCount > 0 && (
+                  <HoverTip tip="click to Mark all notifications as read">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleMarkAllRead}
+                      className="gap-2"
+                    >
+                      <CheckCheck className="h-4 w-4" />
+                      Mark all read
+                    </Button>
+                  </HoverTip>
                 )}
                 <Button
                   variant="outline"

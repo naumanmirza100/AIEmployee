@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
+import HoverTip from '@/components/common/HoverTip';
 
 const EMAIL_ACCOUNT_TYPES = [
   { value: 'gmail', label: 'Gmail' },

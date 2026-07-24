@@ -1,0 +1,15 @@
+Interview Cancelled
+
+Dear {{ candidate_name }},
+
+We're writing to let you know that your scheduled interview for the {{ job_title }} position has been cancelled.
+{% if scheduled_display %}
+Cancelled time slot: {{ scheduled_display }}
+{% endif %}
+We appreciate the time and interest you've shown, and we're sorry for any inconvenience. If this was unexpected, please reach out to us.
+
+Best regards,
+Recruitment Team
+
+—
+This is an automated notification.

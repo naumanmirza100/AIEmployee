@@ -158,8 +158,9 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   }, [search, statusFilter, typeFilter, page]);
 
   // Shared field validation for create & update. Returns true if valid,
-  // otherwise shows a toast and returns false.
-  const validateJobForm = () => {
+  // otherwise shows a toast and returns false. On create, the open date may
+  // not be in the past; on edit we allow an already-set past open date.
+  const validateJobForm = ({ isCreate = false } = {}) => {
     if (!formData.title || !formData.description) {
       toast({ title: 'Validation Error', description: 'Title and description are required', variant: 'destructive' });
       return false;
@@ -167,6 +168,13 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
     if (!formData.application_open_date || !formData.application_close_date) {
       toast({ title: 'Validation Error', description: 'Applications open date and close date are required', variant: 'destructive' });
       return false;
+    }
+    if (isCreate) {
+      const today = toLocaleDateStr(new Date());
+      if (formData.application_open_date < today) {
+        toast({ title: 'Validation Error', description: 'Applications open date cannot be in the past', variant: 'destructive' });
+        return false;
+      }
     }
     // Close date must be strictly after the open date.
     if (formData.application_close_date <= formData.application_open_date) {
@@ -177,7 +185,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
   };
 
   const handleCreate = async () => {
-    if (!validateJobForm()) return;
+    if (!validateJobForm({ isCreate: true })) return;
 
     try {
       setSubmitting(true);
@@ -1412,6 +1420,8 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
               application_open_date: date ? toLocaleDateStr(date) : '',
             })}
             placeholder="Select open date"
+            // Open date can't be in the past.
+            fromDate={new Date(new Date().setHours(0, 0, 0, 0))}
           />
         </div>
         <div className="space-y-2">

@@ -14,9 +14,16 @@ import {
 import {
   Loader2, FileText, RefreshCw, Trash2, MoreHorizontal,
 } from 'lucide-react';
-import { CARD_STYLE, ROW_STYLE, EmptyState, fmtUtc, BulkSelectBar, SelectCheckbox } from '../shared';
+import { CARD_STYLE, ROW_STYLE, EmptyState, fmtUtc, BulkSelectBar, SelectCheckbox, FilterBar, Pagination } from '../shared';
 
 const DOC_TYPE_LABELS = { agenda: 'Agenda', minutes: 'Minutes', briefing: 'Briefing', report: 'Report', other: 'Other' };
+const DOC_TYPE_FILTER_OPTIONS = [
+  { value: 'agenda', label: 'Agenda' },
+  { value: 'minutes', label: 'Minutes' },
+  { value: 'briefing', label: 'Briefing' },
+  { value: 'report', label: 'Report' },
+  { value: 'other', label: 'Other' },
+];
 const DOC_TYPE_COLORS = {
   agenda:   'bg-violet-500/20 text-violet-300 border-violet-500/30',
   minutes:  'bg-sky-500/20 text-sky-300 border-sky-500/30',
@@ -30,9 +37,13 @@ export const DocumentsPanel = ({
   aiDocContext, aiDocAudience, aiDocPeriod, aiDocLoading, docsLoading, savedDocs,
   setAiDocType, setAiDocTopics, setAiDocSummary, setAiDocContext, setAiDocAudience,
   setAiDocPeriod, setAiDocMeetingId, setAiDocInput,
-  generateAiDoc, loadDocuments, setViewDoc, downloadDocPdf, deleteDoc,
+  generateAiDoc, loadDocuments, applyMeetingNotesToDoc, setViewDoc, downloadDocPdf, deleteDoc,
   selectedDocIds, toggleSelected, setSelectedDocIds, bulkDeleteDocs, bulkDeleting,
-}) => (
+  filters = {}, setFilters = () => {},
+  pageMeta = null, onPageChange = () => {},
+}) => {
+  const filtersActive = !!(filters.search || filters.doc_type || filters.date);
+  return (
     <div className="space-y-6">
       {/* ── PART 1: Generator (inputs) ─────────────────────────────────── */}
       <div data-tour-em="docs-create">
@@ -50,7 +61,22 @@ export const DocumentsPanel = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1">
             <Label className="text-white/70 text-xs">Document Type</Label>
-            <Select value={aiDocType} onValueChange={v => { setAiDocType(v); setAiDocTopics(''); setAiDocSummary(''); setAiDocContext(''); setAiDocAudience(''); setAiDocPeriod(''); }}>
+            <Select value={aiDocType} onValueChange={v => {
+              setAiDocType(v); setAiDocTopics(''); setAiDocSummary(''); setAiDocContext(''); setAiDocAudience(''); setAiDocPeriod('');
+              // If a meeting is already linked, re-apply its data to the field
+              // that the newly-chosen doc type uses.
+              if (aiDocMeetingId) {
+                if (v === 'minutes') {
+                  applyMeetingNotesToDoc(aiDocMeetingId, 'minutes');
+                } else if (v === 'agenda') {
+                  const m = meetings.find(x => String(x.id) === String(aiDocMeetingId));
+                  if (m) {
+                    if (Array.isArray(m.agenda) && m.agenda.length > 0) setAiDocTopics(m.agenda.join(', '));
+                    else if (m.description) setAiDocTopics(m.description);
+                  }
+                }
+              }
+            }}>
               <SelectTrigger className="bg-white/5 border-white/10 text-white">
                 <SelectValue />
               </SelectTrigger>
@@ -78,6 +104,11 @@ export const DocumentsPanel = ({
                   } else if (m.description) {
                     setAiDocTopics(m.description);
                   }
+                }
+                // For a Minutes doc, pull the meeting's AI Notes (summary,
+                // decisions, action items) into the discussion-summary box.
+                if (aiDocType === 'minutes') {
+                  applyMeetingNotesToDoc(val, 'minutes');
                 }
               }
             }}>
@@ -212,15 +243,35 @@ export const DocumentsPanel = ({
               <FileText className="h-3.5 w-3.5 text-violet-400" />
               Saved Documents
             </h3>
-            <Button size="sm" variant="ghost" onClick={loadDocuments} disabled={docsLoading} className="text-white/40 hover:text-white">
+            <Button size="sm" variant="ghost" onClick={() => loadDocuments()} disabled={docsLoading} className="text-white/40 hover:text-white">
               <RefreshCw className={`h-3.5 w-3.5 ${docsLoading ? 'animate-spin' : ''}`} />
             </Button>
+          </div>
+
+          <div className="px-4 pt-3">
+            <FilterBar
+              search={filters.search || ''}
+              onSearchChange={v => setFilters(f => ({ ...f, search: v }))}
+              searchPlaceholder="Search documents…"
+              selects={[
+                {
+                  value: filters.doc_type,
+                  onChange: v => setFilters(f => ({ ...f, doc_type: v })),
+                  placeholder: 'All types', allLabel: 'All types',
+                  options: DOC_TYPE_FILTER_OPTIONS,
+                },
+              ]}
+              date={filters.date}
+              onDateChange={v => setFilters(f => ({ ...f, date: v }))}
+              active={filtersActive}
+              onClear={() => setFilters({ search: '', doc_type: '', date: '' })}
+            />
           </div>
 
         {docsLoading ? (
           <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-violet-400" /></div>
         ) : !Array.isArray(savedDocs) || savedDocs.length === 0 ? (
-          <EmptyState icon={FileText} label="No documents yet — generate one above" />
+          <EmptyState icon={FileText} label={filtersActive ? 'No documents match these filters' : 'No documents yet — generate one above'} />
         ) : (
           <>
           <div className="px-4 pt-2">
@@ -275,6 +326,8 @@ export const DocumentsPanel = ({
           </>
         )}
         </div>
+        <Pagination meta={pageMeta} onChange={onPageChange} itemLabel="document" />
       </div>
     </div>
-);
+  );
+};

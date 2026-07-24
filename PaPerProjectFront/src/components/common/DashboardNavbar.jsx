@@ -207,7 +207,14 @@ const DashboardNavbar = ({
                             onClick={() => {
                               if (!n.is_read) markAsRead(n.id);
                               setShowNotifPanel(false);
-                              if (onNotificationClick) onNotificationClick(n);
+                              // Pages that pass their own handler (User / PM dashboards)
+                              // keep their tab-switching behaviour; everywhere else we
+                              // open the full-detail page, since the dropdown truncates.
+                              if (onNotificationClick) {
+                                onNotificationClick(n);
+                              } else {
+                                navigate('/notifications');
+                              }
                             }}
                             className={`w-full text-left px-4 py-3 hover:bg-white/5 transition-colors ${!n.is_read ? 'bg-violet-500/5' : ''}`}
                           >
@@ -223,6 +230,20 @@ const DashboardNavbar = ({
                         ))}
                       </div>
                     )}
+
+                    {/* Escape hatch to the full-detail page — the rows above are
+                        truncated, and pages with their own click handler never
+                        navigate here otherwise. */}
+                    <button
+                      onClick={() => {
+                        setShowNotifPanel(false);
+                        navigate('/notifications');
+                      }}
+                      className="w-full px-4 py-2.5 text-center text-[11px] font-medium text-violet-400 hover:text-violet-300 hover:bg-white/5 border-t border-white/10 transition-colors sticky bottom-0"
+                      style={{ background: 'linear-gradient(180deg, rgba(13,11,26,0.9) 0%, #1a0a2e 100%)' }}
+                    >
+                      View all notifications
+                    </button>
                   </div>
                 )}
               </div>

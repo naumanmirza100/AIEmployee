@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { contactService, careerService, companyService } from '@/services';
+import { useAgents } from '@/hooks/useAgents';
 import adminApiKeysService from '@/services/adminApiKeysService';
 import { aiPredictorService } from '@/services/aiPredictorService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
@@ -90,6 +91,10 @@ const AdminDashboardPage = () => {
 
   // API Keys pending badge
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+
+  // The agent catalogue (what agents exist) — from the DB, drives the module
+  // filter below. Distinct from `agents` state, which holds companies' purchases.
+  const { agents: agentCatalog } = useAgents({ includeInactive: true });
 
   // AI Agents State
   const [agents, setAgents] = useState([]);
@@ -1705,10 +1710,11 @@ const AdminDashboardPage = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Modules</SelectItem>
-                    <SelectItem value="recruitment_agent">Recruitment Agent</SelectItem>
-                    <SelectItem value="marketing_agent">Marketing Agent</SelectItem>
-                    <SelectItem value="project_manager_agent">Project Manager Agent</SelectItem>
-                    <SelectItem value="frontline_agent">Frontline Agent</SelectItem>
+                    {/* From the Agent table — see useAgents. Previously a
+                        hardcoded list of 4, so the other agents were unfilterable. */}
+                    {agentCatalog.map((a) => (
+                      <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Button variant="outline" onClick={fetchAgents} size="sm">

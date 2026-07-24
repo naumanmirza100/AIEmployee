@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useAgents } from '@/hooks/useAgents';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,17 +75,8 @@ const PROVIDER_OPTIONS = [
   { value: 'grok', label: 'xAI Grok' },
 ];
 
-const AGENT_OPTIONS = [
-  { value: 'recruitment_agent',     label: 'Recruitment Agent'     },
-  { value: 'marketing_agent',       label: 'Marketing Agent'       },
-  { value: 'project_manager_agent', label: 'Project Manager Agent' },
-  { value: 'frontline_agent',       label: 'Frontline Agent'       },
-  { value: 'operations_agent',      label: 'Operations Agent'      },
-  { value: 'reply_draft_agent',     label: 'Reply Draft Agent'     },
-  { value: 'hr_agent',              label: 'HR Support Agent'      },
-  { value: 'ai_sdr_agent',          label: 'AI SDR Agent'          },
-  { value: 'exec_meeting_agent',    label: 'AI Executive Meeting Assistant' },
-];
+// Agent lists now come from the DB via useAgents() — see the hook for why.
+// Nothing agent-specific should be hardcoded in this file.
 
 const formatTokens = (n) => {
   if (n == null) return '—';
@@ -200,18 +192,9 @@ const PlatformKeyRow = ({ row, onSave, onRevoke, saving, revoking }) => {
   );
 };
 
-// Which provider each agent uses by default (mirrors AGENT_DEFAULT_PROVIDER in backend)
-const AGENT_DEFAULT_PROVIDERS = [
-  { agent: 'Recruitment Agent',      key: 'recruitment_agent',       provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Marketing Agent',        key: 'marketing_agent',         provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Reply Draft Agent',      key: 'reply_draft_agent',       provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Project Manager Agent',  key: 'project_manager_agent',   provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Operations Agent',       key: 'operations_agent',        provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'Frontline Agent',        key: 'frontline_agent',         provider: 'openai', providerLabel: 'OpenAI'          },
-  { agent: 'HR Support Agent',       key: 'hr_agent',                provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'AI SDR Agent',           key: 'ai_sdr_agent',            provider: 'groq',   providerLabel: 'Groq (Llama)'    },
-  { agent: 'AI Executive Meeting Assistant', key: 'exec_meeting_agent', provider: 'groq', providerLabel: 'Groq (Llama)'   },
-];
+// Each agent's default provider now travels with the agent itself
+// (Agent.default_provider), so this no longer needs to mirror the backend by hand.
+const PROVIDER_LABELS = Object.fromEntries(PROVIDER_OPTIONS.map(p => [p.value, p.label]));
 
 const PROVIDER_ACCENT = {
   openai:  'text-green-300 bg-green-500/10 border-green-500/20',
@@ -221,27 +204,27 @@ const PROVIDER_ACCENT = {
   grok:    'text-red-300 bg-red-500/10 border-red-500/20',
 };
 
-const AgentProviderReferenceTable = () => (
+const AgentProviderReferenceTable = ({ agents = [] }) => (
   <div className="bg-[#0f0a20] border border-[#2d2342] rounded-lg overflow-hidden">
     <div className="px-4 py-2.5 border-b border-[#2d2342] flex items-center gap-2">
       <Key className="w-3.5 h-3.5 text-violet-300" />
       <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">Agent → Provider Mapping (Default / Free Tokens)</span>
     </div>
     <div className="divide-y divide-[#2d2342]">
-      {AGENT_DEFAULT_PROVIDERS.map(row => (
-        <div key={row.key} className="flex items-center justify-between px-4 py-2 hover:bg-white/2 transition-colors">
+      {agents.map(row => (
+        <div key={row.slug} className="flex items-center justify-between px-4 py-2 hover:bg-white/2 transition-colors">
           <div className="flex items-center gap-3">
             <div className="w-5 h-5 rounded flex items-center justify-center">
-              <ProviderLogo provider={row.provider} size={16} />
+              <ProviderLogo provider={row.default_provider} size={16} />
             </div>
             <div>
-              <p className="text-xs text-white font-medium">{row.agent}</p>
-              <p className="text-[10px] text-white/30 font-mono">{row.key}</p>
+              <p className="text-xs text-white font-medium">{row.name}</p>
+              <p className="text-[10px] text-white/30 font-mono">{row.slug}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] px-2 py-0.5 rounded border font-medium ${PROVIDER_ACCENT[row.provider] || 'text-white/40 bg-white/5 border-white/10'}`}>
-              {row.providerLabel}
+            <span className={`text-[10px] px-2 py-0.5 rounded border font-medium ${PROVIDER_ACCENT[row.default_provider] || 'text-white/40 bg-white/5 border-white/10'}`}>
+              {PROVIDER_LABELS[row.default_provider] || row.default_provider}
             </span>
             <span className="text-[10px] text-white/30">default</span>
           </div>
@@ -257,7 +240,7 @@ const AgentProviderReferenceTable = () => (
   </div>
 );
 
-const PlatformTab = ({ platformKeys, onSave, onRevoke, savingProvider, revokingProvider }) => (
+const PlatformTab = ({ platformKeys, onSave, onRevoke, savingProvider, revokingProvider, agentOptions = [] }) => (
   <div className="space-y-3">
     <div className="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-lg p-4 flex items-start gap-3">
       <Globe className="w-5 h-5 text-emerald-300 shrink-0 mt-0.5" />
@@ -270,7 +253,7 @@ const PlatformTab = ({ platformKeys, onSave, onRevoke, savingProvider, revokingP
         </p>
       </div>
     </div>
-    <AgentProviderReferenceTable />
+    <AgentProviderReferenceTable agents={agentOptions} />
     {platformKeys.map(row => (
       <PlatformKeyRow
         key={row.provider}
@@ -396,7 +379,7 @@ const OverviewTab = ({ stats }) => (
 );
 
 // -------------------- Keys Tab --------------------
-const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, onRefresh, loading }) => (
+const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, onRefresh, loading, agentOptions = [] }) => (
   <div className="space-y-4">
     <div className="flex items-center gap-2 flex-wrap">
       <Input
@@ -417,7 +400,7 @@ const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, o
         <SelectTrigger className="w-52 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All agents" /></SelectTrigger>
         <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
           <SelectItem value="all">All agents</SelectItem>
-          {AGENT_OPTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+          {agentOptions.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
         </SelectContent>
       </Select>
       <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
@@ -704,7 +687,7 @@ const PricingTab = ({ pricing, onSave, savingAgent }) => (
 );
 
 // -------------------- Quotas Tab --------------------
-const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading }) => (
+const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading, agentOptions = [] }) => (
   <div className="space-y-4">
     <div className="flex items-center gap-2 flex-wrap">
       <Input
@@ -717,7 +700,7 @@ const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading }) 
         <SelectTrigger className="w-52 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All agents" /></SelectTrigger>
         <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
           <SelectItem value="all">All agents</SelectItem>
-          {AGENT_OPTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+          {agentOptions.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
         </SelectContent>
       </Select>
       <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
@@ -1231,6 +1214,11 @@ const SuperAdminApiKeysPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  // The agent catalogue, from the DB. Fetched once here and threaded into the
+  // tabs as `agentOptions` so every dropdown on this page stays in sync with the
+  // Agent table — adding an agent needs no change to this file.
+  const { agents: agentOptions } = useAgents({ includeInactive: true });
+
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({});
@@ -1553,7 +1541,7 @@ const SuperAdminApiKeysPage = () => {
 
             <TabsContent value="platform">
               {loading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div>
-                : <PlatformTab platformKeys={platformKeys} onSave={savePlatformKey} onRevoke={handleRevokePlatformKey} savingProvider={savingProvider} revokingProvider={revokingProvider} />}
+                : <PlatformTab platformKeys={platformKeys} onSave={savePlatformKey} onRevoke={handleRevokePlatformKey} savingProvider={savingProvider} revokingProvider={revokingProvider} agentOptions={agentOptions} />}
             </TabsContent>
             <TabsContent value="overview">
               {loading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div> : <OverviewTab stats={stats} />}
@@ -1561,6 +1549,7 @@ const SuperAdminApiKeysPage = () => {
             <TabsContent value="keys">
               <KeysTab
                 keys={keys}
+                agentOptions={agentOptions}
                 onAssign={openAssign}
                 onRevoke={revokeOne}
                 onAdjustQuota={(q, key) => {
@@ -1584,7 +1573,7 @@ const SuperAdminApiKeysPage = () => {
               <PricingTab pricing={pricing} onSave={savePricing} savingAgent={savingAgent} />
             </TabsContent>
             <TabsContent value="quotas">
-              <QuotasTab quotas={quotas} onAdjust={openAdjust} filter={quotaFilter} setFilter={setQuotaFilter} onRefresh={reloadQuotas} loading={loading} />
+              <QuotasTab quotas={quotas} onAdjust={openAdjust} filter={quotaFilter} setFilter={setQuotaFilter} onRefresh={reloadQuotas} loading={loading} agentOptions={agentOptions} />
             </TabsContent>
             <TabsContent value="requests">
               <RequestsTab
@@ -1652,7 +1641,7 @@ const SuperAdminApiKeysPage = () => {
                   >
                     <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-                      {AGENT_OPTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                      {agentOptions.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

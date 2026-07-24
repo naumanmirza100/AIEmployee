@@ -54,6 +54,7 @@ import {
 import marketingAgentService from '@/services/marketingAgentService';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import HoverTip from '@/components/common/HoverTip';
 
 /**
  * Document Authoring sub-agent (PayPerProject).
@@ -426,9 +427,11 @@ const Documents = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <Button 
-              onClick={() => setCreateExpanded(!createExpanded)} 
-              size="lg" 
+            <HoverTip tip={createExpanded ? 'Close the document creation form' : 'Click button to open the document creation form'}>
+            <Button
+              onClick={() => setCreateExpanded(!createExpanded)}
+              size="lg"
+              data-tour-mkt="docs-create"
               className={cn(
                 "shrink-0 gap-2 transition-all",
                 createExpanded ? 'bg-secondary hover:bg-secondary/90' : 'bg-primary/50 hover:bg-primary/30',
@@ -443,11 +446,12 @@ const Documents = () => {
                 </>
               ) : (
                 <>
-                  <Plus className="h-4 w-4" />
+                    <Plus className="h-4 w-4" />
                   Create New Document
                 </>
               )}
             </Button>
+            </HoverTip>
           </motion.div>
         </div>
         <div className="absolute inset-0 bg-grid-white/5 [mask-image:radial-gradient(ellipse_at_center,white,transparent)]" />
@@ -623,7 +627,7 @@ const Documents = () => {
         <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3" data-tour-mkt="docs-search">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -643,6 +647,8 @@ const Documents = () => {
                     </Button>
                   )}
                 </div>
+                                  <HoverTip tip="Click to toggle filters for document type and campaign">
+
                 <Button
                   variant="outline"
                   size="icon"
@@ -651,6 +657,7 @@ const Documents = () => {
                 >
                   <Filter className={cn("h-4 w-4", showFilters && "text-primary")} />
                 </Button>
+                </HoverTip>
                 {(filterType || filterCampaignId || searchQuery) && (
                   <Button
                     variant="ghost"
@@ -750,10 +757,12 @@ const Documents = () => {
                     Clear Filters
                   </Button>
                 ) : (
+                  <HoverTip tip="Click button to create a new marketing document">
                   <Button onClick={() => setCreateExpanded(true)} className="gap-2">
                     <Plus className="h-4 w-4" />
                     Create Document
                   </Button>
+                  </HoverTip>
                 )}
               </motion.div>
             ) : (

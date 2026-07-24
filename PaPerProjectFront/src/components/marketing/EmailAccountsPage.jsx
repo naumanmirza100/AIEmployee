@@ -67,7 +67,7 @@ import {
 } from '@/services/marketingAgentService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-
+import HoverTip from '@/components/common/HoverTip';
 const ACCOUNT_TYPES = [
   { value: 'gmail', label: 'Gmail', icon: Mail, color: 'text-red-500', bgColor: 'bg-red-500/10' },
   { value: 'hostinger', label: 'Hostinger', icon: Server, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },

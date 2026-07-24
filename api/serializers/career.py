@@ -129,11 +129,12 @@ class JobApplicationSerializer(serializers.ModelSerializer):
         return url
 
     def get_ai_analysed(self, obj):
-        return hasattr(obj, 'cv_record') and obj.cv_record is not None
+        return obj.cv_records.exists()
 
     def get_cv_record_id(self, obj):
         try:
-            return obj.cv_record.id if obj.cv_record else None
+            rec = obj.cv_records.first()
+            return rec.id if rec else None
         except Exception:
             return None
 

@@ -39,28 +39,40 @@ class TaskPrioritizationAgent(BaseAgent):
     def prioritize_tasks(self, tasks: list, context: str = '') -> list:
         """Re-prioritize a list of tasks using AI reasoning."""
         self.log_action("prioritize_tasks", {"task_count": len(tasks)})
+        from django.utils import timezone
+        today = timezone.now().strftime('%Y-%m-%d')
         tasks_text = json.dumps(tasks[:30], indent=2)
-        prompt = f"""Prioritize these executive tasks. Consider deadlines, urgency, and business impact.
+        prompt = f"""You are prioritising a company user's tasks. Today is {today}.
+
+Weigh three things for each task and say how each one pushed the priority up or down:
+1. Deadline proximity — how soon the due_date is relative to today (overdue or due within ~2 days = urgent; due this week = moderate; further out or no date = lower).
+2. Business impact — how much the task's outcome matters (revenue, clients, compliance, blocking others).
+3. Effort / dependency — whether other work is blocked until this is done.
+
+Priority levels — use ONLY these three, never any other value:
+- "high"   : urgent AND/OR high business impact.
+- "medium" : moderate deadline or impact.
+- "low"    : no urgency and low impact.
 
 Context: {context or 'General executive task management'}
 
 Tasks:
 {tasks_text}
 
-Return ONLY a JSON array with the same tasks, each with updated fields:
+Return ONLY a JSON array, one object per task:
 [
   {{
-    "id": <original id or index>,
+    "id": <original id>,
     "title": "task title",
-    "priority": "low|medium|high|critical",
-    "ai_reasoning": "brief explanation for this priority",
-    "suggested_due_date": "YYYY-MM-DD or null",
+    "priority": "low|medium|high",
+    "ai_reasoning": "2-3 sentences. State the priority, then justify it by naming the specific deadline (e.g. 'due in 2 days'), the concrete business impact, and any dependency. Be specific to THIS task — no generic phrases.",
+    "suggested_due_date": "YYYY-MM-DD — must be a weekday on or AFTER {today}; never a past date or a Saturday/Sunday. Use null if you can't justify a date.",
     "delegate_suggestion": "name or null"
   }}
 ]
 
-Return ONLY the JSON array."""
-        raw = self._call_llm(prompt, self.system_prompt, temperature=0.2, max_tokens=1200)
+Rules: priority MUST be exactly one of low/medium/high (no 'critical', no other words). suggested_due_date must never be before {today} and never on a weekend. Return ONLY the JSON array."""
+        raw = self._call_llm(prompt, self.system_prompt, temperature=0.2, max_tokens=1400)
         return self._extract_json_array(raw)
 
     def detect_bottlenecks(self, tasks: list) -> list:

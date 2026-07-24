@@ -26,7 +26,7 @@ company = Company.objects.get(pk=COMPANY_ID)
 
 
 def show(tag):
-    print(f"\n--- {tag} ---")
+   
     for a in AGENTS:
         q = AgentTokenQuota.objects.filter(company=company, agent_name=a).first()
         k = CompanyAPIKey.objects.filter(company=company, agent_name=a).first()
@@ -36,7 +36,6 @@ def show(tag):
 
 
 # Step 1: insert a BYOK key for each agent (idempotent)
-print("Step 1: insert BYOK keys")
 created = []
 for a in AGENTS:
     k, was_new = CompanyAPIKey.objects.get_or_create(

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import HoverTip from '@/components/common/HoverTip';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -21,11 +22,9 @@ import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 import AddEmailAccountModal from './AddEmailAccountModal';
 
 const ACTIONS = [
-  { value: 'design', label: 'Design Campaign' },
   { value: 'create_multi_channel', label: 'Create Email Campaign' },
-  { value: 'launch', label: 'Launch Campaign' },
-  // { value: 'optimize', label: 'Optimize Campaign' },
-  { value: 'schedule', label: 'Schedule Campaign' },
+  // Design / Launch / Schedule / Optimize actions were removed from the UI —
+  // the form now only creates email campaigns.
 ];
 
 const DURATION_UNITS = [
@@ -318,7 +317,7 @@ function formatResult(result, action, options = {}) {
 
 const OutreachCampaign = ({ onCampaignCreated }) => {
   const { toast } = useToast();
-  const [action, setAction] = useState('design');
+  const [action, setAction] = useState('create_multi_channel');
   const [campaigns, setCampaigns] = useState([]);
   const [campaignId, setCampaignId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -803,29 +802,31 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
 
             {!fieldsRevealed && (
               <div className="flex justify-end pt-1">
-                <Button
-                  type="button"
-                  className="bg-violet-600 hover:bg-violet-700 text-white border-0"
-                  onClick={handleAutoFill}
-                  disabled={autoFilling || (campaignSelectRequired && !campaignId)}
-                >
-                  {autoFilling ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Generating...
-                    </>
-                  ) : showCampaignSelect && campaignId ? (
-                    <>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      Show details
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      Generate with AI
-                    </>
-                  )}
-                </Button>
+                <HoverTip tip="AI fills in the campaign details from what you entered above">
+                  <Button
+                    type="button"
+                    className="bg-violet-600 hover:bg-violet-700 text-white border-0"
+                    onClick={handleAutoFill}
+                    disabled={autoFilling || (campaignSelectRequired && !campaignId)}
+                  >
+                    {autoFilling ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Generating...
+                      </>
+                    ) : showCampaignSelect && campaignId ? (
+                      <>
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Show details
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Generate with AI
+                      </>
+                    )}
+                  </Button>
+                </HoverTip>
               </div>
             )}
           </div>
@@ -994,13 +995,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 <CheckCircle className="h-5 w-5 shrink-0" />
                 <span className="font-medium">Created.</span>
               </div>
-              <Button
-                type="button"
-                className="bg-violet-600 hover:bg-violet-700 text-white border-0"
-                onClick={goToLaunch}
-              >
-                Launch Campaign
-              </Button>
+              {/* Launch button removed — launching is no longer part of this form's flow. */}
             </div>
           ) : designReady ? (
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.08] p-4">
@@ -1011,6 +1006,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 </div>
                 <p className="text-sm text-white/60">Use the form below to create, launch, or schedule this campaign.</p>
               </div>
+              <HoverTip tip="click to create a new draft campaign record with the design suggestions pre-filled">
               <Button
                 type="button"
                 className="bg-violet-600 hover:bg-violet-700 text-white border-0"
@@ -1018,6 +1014,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
               >
                 Create Campaign
               </Button>
+              </HoverTip>
             </div>
           ) : fieldsRevealed ? (
             <div className="flex justify-end">
@@ -1030,13 +1027,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 ) : (
                   <>
                     <Send className="h-4 w-4 mr-2" />
-                    {action === 'create_multi_channel'
-                      ? 'Create Campaign'
-                      : action === 'launch' && !campaignId
-                        ? 'Create & Launch'
-                        : action === 'schedule' && !campaignId
-                          ? 'Create & Schedule'
-                          : 'Execute'}
+                    Create Campaign
                   </>
                 )}
               </Button>
@@ -1050,7 +1041,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
         {result && (
           <div className="rounded-lg border border-border bg-muted/30 p-4">
             <h3 className="text-lg font-bold mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">
-              {action === 'design' ? 'Campaign design' : action === 'create_multi_channel' ? 'Campaign created' : action === 'launch' ? 'Launch result' : action === 'schedule' ? 'Schedule result' : 'Result'}
+              Campaign created
             </h3>
             {action === 'design' && result.campaign_design?.raw_design && (
               <p className="text-xs text-muted-foreground mb-3">

@@ -42,7 +42,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Plus, CheckCircle2, Settings as SettingsIcon, BarChart3 } from 'lucide-react';
+import { Plus, CheckCircle2, Settings as SettingsIcon, BarChart3, Link2 } from 'lucide-react';
+// Sparkles, RefreshCw and Inbox are already imported in the main lucide block above.
+import HowItWorksModal from '@/components/common/HowItWorksModal';
+import { hasSeenTutorial, markTutorialSeen } from '@/components/frontline/FrontlineTutorial';
+import { REPLY_DRAFT_HOWITWORKS_STEPS, REPLY_DRAFT_HOWITWORKS_KEY } from './replyDraftHowItWorks';
+
+// Resolve the how-it-works step icon names (strings) to real components.
+const RD_HOWITWORKS_ICONS = { Link2, Inbox, Sparkles, RefreshCw, CheckCircle2, BarChart3 };
+const RD_HOWITWORKS_STEPS = REPLY_DRAFT_HOWITWORKS_STEPS.map((s) => ({
+  ...s,
+  icon: RD_HOWITWORKS_ICONS[s.icon],
+}));
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -336,6 +347,8 @@ const ReplyDraftAgentPage = () => {
   const { toast } = useToast();
   const [companyUser, setCompanyUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // "How it works" onboarding modal — auto-shown once on first visit.
+  const [howItWorksOpen, setHowItWorksOpen] = useState(false);
   const [hasAccess, setHasAccess] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [activeSection] = useState('reply-draft');
@@ -487,6 +500,20 @@ const ReplyDraftAgentPage = () => {
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [hasAccess, refreshInbox, refreshSent, refreshDrafts, refreshSyncAccounts]);
+
+  // First visit (once access is confirmed): auto-show the "How it works" modal.
+  useEffect(() => {
+    if (!hasAccess) return;
+    if (!hasSeenTutorial(REPLY_DRAFT_HOWITWORKS_KEY)) {
+      const t = setTimeout(() => setHowItWorksOpen(true), 500);
+      return () => clearTimeout(t);
+    }
+  }, [hasAccess]);
+
+  const handleCloseHowItWorks = () => {
+    setHowItWorksOpen(false);
+    markTutorialSeen(REPLY_DRAFT_HOWITWORKS_KEY);
+  };
 
   // While sync is actively running, poll the sync-accounts endpoint more
   // aggressively (every 5s) so the staged-progress banner advances
@@ -1038,6 +1065,16 @@ const ReplyDraftAgentPage = () => {
           navItems={getAgentNavItems(purchasedModules, 'reply-draft', navigate)}
         />
 
+        {/* First-visit "how it works" summary — same modal as Marketing / Exec Meeting */}
+        <HowItWorksModal
+          open={howItWorksOpen}
+          onClose={handleCloseHowItWorks}
+          title="How the Reply Draft Agent works"
+          subtitle="What it does for you, automatically"
+          steps={RD_HOWITWORKS_STEPS}
+          primaryLabel="Got it"
+        />
+
         <div className="container mx-auto px-4 sm:px-6 py-6 max-w-[1500px]">
           {/* Header: title + Refresh */}
           <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
@@ -1055,6 +1092,17 @@ const ReplyDraftAgentPage = () => {
               <span className="text-xs text-gray-400 hidden sm:inline">
                 {isSyncRunning ? 'Polling every 5s while syncing' : 'Auto-refreshes every 30s'}
               </span>
+
+              {/* How it works — re-open the onboarding summary any time */}
+              <Button
+                variant="outline"
+                className="bg-white/5 border-white/15 text-white/80 hover:bg-white/10 hover:text-white gap-2"
+                onClick={() => setHowItWorksOpen(true)}
+                title="How this agent works"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span className="hidden sm:inline text-xs font-medium">How it works</span>
+              </Button>
 
               <AttachedAccountButton
                 syncAccounts={syncAccounts}
