@@ -371,39 +371,88 @@ def upload_and_summarize(request):
             for chunk in uploaded_file.chunks():
                 f.write(chunk)
 
-        # Process with summarization agent
+        # Fail fast on a bad/missing API key BEFORE backgrounding the work, so
+        # the client gets a real error instead of a row stuck in 'processing'.
+        from core.api_key_service import resolve_for_call
+        resolve_for_call(company, 'operations_agent')
+
+        # Pending placeholder so the client can poll status immediately.
+        placeholder = OperationsDocumentSummary.objects.create(
+            company=company,
+            created_by=company_user,
+            original_filename=uploaded_file.name,
+            file_type=Path(uploaded_file.name).suffix.lower().lstrip('.') or 'other',
+            file_size=uploaded_file.size,
+            rich_summary='',
+            processing_status='pending',
+        )
+
+        # Summarising a large doc means several LLM calls — run it in the
+        # background so the request returns immediately (mirrors doc upload).
         from operations_agent.agents.summarization_agent import DocumentSummarizationAgent
+        from operations_agent.tasks import summarize_document_in_background
         agent = DocumentSummarizationAgent()
         agent.company_id = company.id
         agent.agent_key_name = 'operations_agent'
-        result = agent.process(
-            action='summarize_file',
+        summarize_document_in_background(
+            agent=agent,
             file_path=str(temp_path),
             original_filename=uploaded_file.name,
             company_id=company.id,
             uploaded_by_id=company_user.id,
+            existing_summary_id=placeholder.id,
         )
 
-        # Agent deletes the file, but clean up just in case
-        if temp_path.exists():
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-
-        if not result.get('success'):
-            return Response({'status': 'error', 'message': result.get('error', 'Summarization failed')}, status=status.HTTP_400_BAD_REQUEST)
-
         return Response({
-            'status': 'success',
-            'message': 'Document summarized successfully',
-            'summary': result['summary'],
-        }, status=status.HTTP_201_CREATED)
+            'status': 'accepted',
+            'message': 'Document uploaded — summarizing in the background.',
+            'summary': {
+                'id': placeholder.id,
+                'original_filename': placeholder.original_filename,
+                'processing_status': placeholder.processing_status,
+            },
+        }, status=status.HTTP_202_ACCEPTED)
 
     except KeyServiceError:
         raise
     except Exception as e:
         logger.error(f'Upload and summarize error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_summary_status(request, summary_id):
+    """Lightweight summarisation-status poll. Polled every ~1.5s by the client,
+    so it stays minimal and writes nothing."""
+    try:
+        company = request.user.company
+        s = OperationsDocumentSummary.objects.filter(
+            company=company, id=summary_id,
+        ).only(
+            'id', 'processing_status', 'processing_error', 'is_indexed',
+            'original_filename', 'created_at',
+        ).first()
+        if not s:
+            return Response({'status': 'error', 'message': 'Summary not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        st = s.processing_status
+        percent = 100 if st == 'ready' else (0 if st in ('pending', 'failed') else 50)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': s.id,
+                'processing_status': st,
+                'percent': percent,
+                'processing_error': s.processing_error or '',
+                'is_indexed': s.is_indexed,
+                'original_filename': s.original_filename,
+            },
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f'Summary status error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

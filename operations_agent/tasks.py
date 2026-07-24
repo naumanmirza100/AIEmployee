@@ -60,6 +60,44 @@ def process_document_in_background(agent, file_path, original_filename,
     return t
 
 
+def summarize_document_in_background(agent, file_path, original_filename,
+                                     company_id, uploaded_by_id, existing_summary_id):
+    """Run summarisation (extract → LLM summary → insights → chunk/embed) in a
+    daemon thread so the upload request returns immediately.
+
+    Same rationale as `process_document_in_background`: the pipeline needs the
+    per-company LLM key resolved from the request, which a Celery worker has no
+    context for.
+    """
+    def _run():
+        from django.db import close_old_connections
+        close_old_connections()
+        try:
+            agent.process(
+                action='summarize_file',
+                file_path=file_path,
+                original_filename=original_filename,
+                company_id=company_id,
+                uploaded_by_id=uploaded_by_id,
+                existing_summary_id=existing_summary_id,
+            )
+        except Exception as exc:
+            logger.exception("Operations background summarisation failed for %s", original_filename)
+            try:
+                from operations_agent.models import OperationsDocumentSummary
+                OperationsDocumentSummary.objects.filter(id=existing_summary_id).update(
+                    processing_status='failed', processing_error=str(exc)[:2000],
+                )
+            except Exception:
+                pass
+        finally:
+            close_old_connections()
+
+    t = threading.Thread(target=_run, name='ops-doc-summarize', daemon=True)
+    t.start()
+    return t
+
+
 try:
     from celery import shared_task
 except Exception:  # pragma: no cover - celery optional in some envs
