@@ -515,3 +515,81 @@ class PMNotificationTemplate(models.Model):
         except Exception:
             message = self.message_template
         return title, message
+
+
+class ProjectPilotJob(models.Model):
+    """Async job record for a Project Pilot document upload.
+
+    The upload endpoint saves the file to disk, creates one of these rows,
+    and enqueues a Celery task. The task loads this row, runs the full
+    LLM + action-execution pipeline, and stamps the results back onto the
+    row. The frontend polls a lightweight status endpoint to pick up the
+    result when it's ready.
+
+    Why: the LLM extraction takes 15-60s for large docs. Doing it in-request
+    blocks the user's browser, times out on many proxies, and loses the
+    result if the tab closes. Async is the only sensible pattern at that
+    latency.
+    """
+    STATUS_CHOICES = [
+        ('queued', 'Queued'),
+        ('processing', 'Processing'),
+        ('ready', 'Ready'),
+        ('failed', 'Failed'),
+    ]
+
+    company_user = models.ForeignKey(
+        'core.CompanyUser',
+        on_delete=models.CASCADE,
+        related_name='project_pilot_jobs',
+        help_text='Company user who submitted the upload.',
+    )
+    # Denormalised for cheap filtering by tenant without joining CompanyUser.
+    company_id = models.IntegerField(help_text='Denormalised company id')
+
+    # Chat routing — the response should land in the chat the user was on
+    # when they hit upload. Stored as string to match the PM chat id shape.
+    chat_id = models.CharField(max_length=64, blank=True, default='',
+                               help_text='PM Project Pilot chat id at enqueue time (if any)')
+    project_id = models.IntegerField(null=True, blank=True,
+                                     help_text='PM Project id scope (if any)')
+
+    # Inputs captured at enqueue time so the task doesn\'t depend on any
+    # in-flight request state.
+    user_prompt = models.TextField(blank=True, default='',
+                                   help_text="User's typed instruction alongside the file")
+    file_path = models.CharField(max_length=1024,
+                                 help_text='Path (relative to MEDIA_ROOT) of the saved upload')
+    file_name = models.CharField(max_length=512,
+                                 help_text='Original client-side filename')
+    chat_history = models.JSONField(default=list, blank=True,
+                                    help_text='Snapshot of the prior chat turns')
+
+    # Lifecycle
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES,
+                              default='queued')
+    error_message = models.TextField(blank=True, default='')
+
+    # Results (populated by the Celery task on success)
+    answer = models.TextField(blank=True, default='')
+    action_results = models.JSONField(default=list, blank=True)
+    cannot_do = models.TextField(blank=True, default='')
+    timing_ms = models.JSONField(default=dict, blank=True,
+                                 help_text='Per-phase timing: text_extract, llm, actions, total')
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = 'project_manager_agent'
+        ordering = ['-created_at']
+        verbose_name = 'Project Pilot Job'
+        verbose_name_plural = 'Project Pilot Jobs'
+        indexes = [
+            models.Index(fields=['company_user', '-created_at']),
+            models.Index(fields=['company_id', 'status']),
+        ]
+
+    def __str__(self):
+        return f"ProjectPilotJob #{self.id} [{self.status}] {self.file_name}"

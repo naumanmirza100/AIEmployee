@@ -118,16 +118,30 @@ export function BackgroundUploadProvider({ children }) {
     // toast + the widget's failed-state UI.
     (async () => {
       try {
+        // Two-phase progress: bytes upload first, then server-side work.
+        // For endpoints that block on server-side work (e.g. Project Pilot's
+        // single-LLM-call extraction), the XHR won't resolve until the LLM
+        // returns — but `xhr.upload.onprogress` stops firing at 100% much
+        // earlier. Flip the pill to "Processing…" as soon as bytes are done
+        // so the user doesn't stare at a stuck "100% upload" for 30-60s.
         const res = await upload(({ percent }) => {
           patch(id, { uploadPercent: percent });
+          if (percent >= 100) {
+            patch(id, { status: 'indexing', indexStatus: 'processing' });
+          }
         });
         patch(id, { uploadPercent: 100, status: 'indexing' });
 
         const documentId = res?.data?.id;
         const initialStatus = res?.data?.processing_status;
 
-        if (initialStatus === 'ready' || !documentId) {
-          // Fast path: inline processing or no id returned.
+        // Fast path — no polling needed. Fires when:
+        //   * Server did inline processing and returned 'ready'.
+        //   * Server didn't return a document id (or no `poll` fn was given
+        //     by the caller — the single-shot endpoint pattern).
+        //   * The XHR already resolved with the final result (Project Pilot
+        //     model — the LLM call happens inside the request).
+        if (initialStatus === 'ready' || !documentId || typeof poll !== 'function') {
           patch(id, {
             status: 'ready', indexStatus: 'ready', indexPercent: 100, done: true,
           });
@@ -152,18 +166,28 @@ export function BackgroundUploadProvider({ children }) {
               s.percent != null ? s.percent :
               s.progress_percent != null ? s.progress_percent : 0
             );
+            // Different agents use slightly different field names for the
+            // error message (HR/Frontline: `processing_error`, Project Pilot:
+            // `error`). Accept either.
+            const errMsg = s.processing_error || s.error || '';
             patch(id, {
               indexStatus: s.processing_status || 'processing',
               indexPercent: Math.round(pct),
               indexDone: Number(s.chunks_processed || 0),
               indexTotal: Number(s.chunks_total || 0),
-              error: s.processing_error || '',
+              error: errMsg,
             });
             if (s.processing_status === 'ready') {
               patch(id, { status: 'ready', done: true, indexPercent: 100 });
+              // Only mention chunk counts when the agent actually chunks
+              // (HR/Frontline). For single-LLM-call agents (Project Pilot)
+              // just say the upload is complete — the caller's onDone can
+              // fire a more descriptive toast if it wants to.
               toast({
-                title: 'Indexing complete',
-                description: `"${title}" — ${s.chunks_total || 0} chunk(s) embedded.`,
+                title: 'Upload complete',
+                description: s.chunks_total > 0
+                  ? `"${title}" — ${s.chunks_total} chunk(s) embedded.`
+                  : `"${title}" is ready.`,
               });
               try { onDone?.(statusRes); } catch (_) { /* swallow */ }
               _autoDismiss(id);
@@ -172,13 +196,16 @@ export function BackgroundUploadProvider({ children }) {
             if (s.processing_status === 'failed') {
               patch(id, {
                 status: 'failed', done: true,
-                error: s.processing_error || 'Indexing failed.',
+                error: errMsg || 'Processing failed.',
               });
               toast({
-                title: 'Indexing failed',
-                description: `"${title}": ${s.processing_error || 'The document could not be indexed.'}`,
+                title: 'Processing failed',
+                description: `"${title}": ${errMsg || 'The document could not be processed.'}`,
                 variant: 'destructive',
               });
+              // Fire onDone with the failed status so the caller can react
+              // (e.g. Project Pilot posts an error message into the chat).
+              try { onDone?.(statusRes); } catch (_) { /* swallow */ }
               return;
             }
           } catch (pollErr) {
@@ -329,7 +356,10 @@ function UploadRow({ u, onDismiss }) {
     : isReady
       ? 'Complete'
       : isIndexing
-        ? (u.indexTotal > 0 ? `Indexing ${u.indexDone}/${u.indexTotal}` : 'Indexing…')
+        // Chunk-embed pipelines (HR / Frontline) know how many chunks are
+        // done vs total. Single-LLM-call flows (Project Pilot) don't — show
+        // a generic "Processing…" so the wording matches the actual work.
+        ? (u.indexTotal > 0 ? `Indexing ${u.indexDone}/${u.indexTotal}` : 'Processing…')
         : `Uploading ${u.uploadPercent}%`;
   const barColor = isFailed
     ? 'bg-red-500/70'
