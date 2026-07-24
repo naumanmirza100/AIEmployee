@@ -269,7 +269,8 @@ Rules:
 - End the email with a sign-off closing as {sign_off} — sign with the company name, not a person's name, and never leave a "[Your Name]"-style placeholder.
 - Keep the body concise: a greeting, 2-4 short paragraphs or a short list, and a clear call to action.
 - Professional but warm tone unless the description says otherwise.
-- The SUBJECT line must be plain text (no HTML, no quotes around it)."""
+- The SUBJECT line must be plain text (no HTML, no quotes around it).
+- Write a DISTINCT subject line that fits THIS specific email — for a follow-up/reminder step, do NOT reuse the opening email's subject; make it fresh (e.g. a nudge, a question, or a new angle) so each email in the sequence feels different."""
 
         try:
             raw = self._call_llm_for_writing(

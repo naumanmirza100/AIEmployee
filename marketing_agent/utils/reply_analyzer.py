@@ -374,14 +374,45 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
             # Fallback: try to determine from keywords
             return self._fallback_analysis(reply_subject, reply_content)
         except Exception as e:
-            logger.error(f"Error analyzing reply: {str(e)}")
-            return self._fallback_analysis(reply_subject, reply_content)
+            # Note WHY the AI path was skipped so it shows in the reply's analysis
+            # (not a silent drop to keywords). Token/quota exhaustion is the common
+            # case — surface it plainly.
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable
+            if isinstance(e, QuotaExhausted):
+                note = 'AI tokens finished — analyzed with keyword rules instead. Top up the agent quota to re-enable AI analysis.'
+            elif isinstance(e, NoKeyAvailable):
+                note = 'No AI key available — analyzed with keyword rules instead. Assign an API key to enable AI analysis.'
+            else:
+                note = f'AI analysis unavailable ({e or "unknown error"}) — analyzed with keyword rules instead.'
+            logger.warning(f"Reply analyzer falling back to keywords: {note}")
+            result = self._fallback_analysis(reply_subject, reply_content)
+            # Don't clutter every reply's analysis text with the reason — expose it
+            # once via a flag + reason so the UI can show a single banner instead.
+            result['ai_fallback'] = True
+            result['ai_fallback_reason'] = note
+            return result
     
     def _apply_rule_overrides(self, combined_text_lower: str, ai_level: str):
         """
         Override AI result when reply clearly matches rules (avoids AI returning neutral for clear positives).
         Returns new interest_level or None if no override.
         """
+        # CHECK NEGATIVE/UNSUBSCRIBE FIRST — before any positive rule. A reply like
+        # "dont send it again i deny from it" contains no positive words, but the
+        # positive rules used to run first and a loose match could win. Opt-out
+        # intent must always take priority over agreement phrases.
+        # Match flexibly: "dont send again", "dont send it again", "do not send…" etc.
+        if (
+            re.search(r"\bdo(?:n['’]?t| not)\s+(?:send|email|contact|message)\b", combined_text_lower)
+            or any(p in combined_text_lower for p in [
+                "dont send", "don't send", "do not send", "stop sending", "stop sending me",
+                "stop emailing", "unsubscribe", "remove me", "opt out", "opt-out",
+                "remove from list", "dont email me", "don't email me", "dont contact me",
+                "don't contact me", "i deny", "i decline", "not interested", "leave me alone",
+            ])
+        ):
+            return 'unsubscribe'
+
         # Clear positive: thank-you + forward-looking
         has_thanks = 'thank you' in combined_text_lower or 'thanks' in combined_text_lower
         has_forward = any(
@@ -399,9 +430,6 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
         # Short agreement
         if any(p in combined_text_lower for p in ['yes okay', 'yes ok', 'sure', 'sounds good', 'lets have a meeting', "let's have a meeting"]):
             return 'positive'
-        # Clear unsubscribe: stop sending / don't send again (override AI if it returned "negative")
-        if any(p in combined_text_lower for p in ["don't send again", "dont send again", "do not send again", "stop sending", "stop sending me"]):
-            return 'unsubscribe'
         # Clear requested_info: asking for pricing, details, clarification, requirements (override AI if it returned neutral/positive)
         if any(p in combined_text_lower for p in [
             'how much', 'what is the price', 'what is the cost', 'can you send me', 'send me more', 'send me details',
@@ -429,13 +457,25 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
         return None
     
     def _fallback_analysis(self, reply_subject: str, reply_content: str) -> Dict:
-        """Fallback keyword-based analysis if AI fails"""
-        combined_text = f"{reply_subject} {reply_content}".lower()
-        
+        """Fallback keyword-based analysis if AI fails."""
+        # Strip the quoted original thread first — otherwise keyword counting runs
+        # over the old email history and misclassifies (e.g. a "dont send it again"
+        # reply was scored positive because quoted text contained positive words).
+        new_reply_only = strip_quoted_thread(reply_content or '')
+        combined_text = f"{reply_subject or ''} {new_reply_only}".lower()
+
+        # Run the shared rule overrides first — they already handle opt-out/deny
+        # intent flexibly ("dont send it again", "i deny", etc.). This keeps the
+        # fallback consistent with the AI path's post-processing.
+        forced = self._apply_rule_overrides(combined_text, 'neutral')
+        if forced:
+            return {'interest_level': forced, 'analysis': 'Matched a clear rule.', 'confidence': 85}
+
         # Check for unsubscribe first (highest priority)
         unsubscribe_keywords = [
             'unsubscribe', 'remove me', 'stop emailing', 'opt out', 'remove from list', "don't email",
-            "don't send again", 'dont send again', 'do not send again', 'stop sending', 'stop sending me'
+            "don't send again", 'dont send again', 'do not send again', 'stop sending', 'stop sending me',
+            'dont send it again', "don't send it again", 'i deny', 'i decline',
         ]
         if any(keyword in combined_text for keyword in unsubscribe_keywords):
             return {

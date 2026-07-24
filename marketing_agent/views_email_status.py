@@ -184,6 +184,9 @@ def email_sending_status(request, campaign_id):
                 campaign=campaign,
                 sequence__is_active=True,
                 sequence__isnull=False,
+                sequence__is_sub_sequence=False,  # MAIN sequence only — sub-seq
+                # emails are reply-triggered and must not appear as upcoming main
+                # sends before the lead has replied.
                 completed=False,
                 replied=False,
             )
@@ -276,6 +279,8 @@ def email_sending_status(request, campaign_id):
                     'lead': contact.lead,
                     'sequence': sequence,
                     'next_step': next_step,
+                    'subject': next_step.template.subject if next_step.template else '',
+                    'template_name': next_step.template.name if next_step.template else '',
                     'next_send_time': next_send_time,
                     'delay_days': next_step.delay_days,
                     'delay_hours': next_step.delay_hours,
@@ -1211,6 +1216,9 @@ def email_status_api(request, campaign_id):
                 campaign=campaign,
                 sequence__is_active=True,
                 sequence__isnull=False,
+                sequence__is_sub_sequence=False,  # MAIN sequence only — sub-seq
+                # emails are reply-triggered and must not appear as upcoming main
+                # sends before the lead has replied.
                 completed=False,
                 replied=False,
             )
