@@ -197,15 +197,18 @@ export const deleteDocument = async (documentId) => {
  * @param {string} question
  * @param {{ scope_document_type?: string[], scope_document_ids?: number[] }} options - Optional scope to restrict answers to document type(s) and/or specific document IDs
  */
-// Client-side timeout for Knowledge Q&A. Very large documents (200+ pages) can
-// push the semantic-search + LLM round-trip past 60s. Rather than let the UI
-// spin forever with no feedback, we abort after 90s and surface an actionable
-// error the user can act on ("try a smaller question, or wait for indexing").
-const KNOWLEDGE_QA_TIMEOUT_MS = 90_000;
+// Client-side timeout for Knowledge Q&A. Large documents (200+ pages) plus an
+// LLM re-rank + final answer round-trip can legitimately run 2-4 minutes on a
+// cold cache. We keep a generous ceiling (5 minutes) purely as a safety net
+// so a broken backend can't leave the UI spinning forever — normal answers
+// almost always complete well under a minute once caches are warm.
+// Override with `options.timeoutMs` when a caller knows a query is expensive.
+const KNOWLEDGE_QA_TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes
 
 export const knowledgeQA = async (question, options = {}) => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), KNOWLEDGE_QA_TIMEOUT_MS);
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : KNOWLEDGE_QA_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const body = { question };
     if (options.scope_document_type?.length) body.scope_document_type = options.scope_document_type;
@@ -213,12 +216,13 @@ export const knowledgeQA = async (question, options = {}) => {
     const response = await companyApi.post('/frontline/knowledge/qa', body, { signal: controller.signal });
     return response;
   } catch (error) {
-    // AbortError surfaces as DOMException with name='AbortError'. Rewrite it
-    // into a user-facing message the UI can render inline.
     if (error?.name === 'AbortError' || /aborted|timeout/i.test(String(error?.message))) {
+      const seconds = Math.round(timeoutMs / 1000);
       const friendly = new Error(
-        "The answer is taking longer than expected (over 90 seconds). This can happen with very large documents. " +
-        "Try a shorter or more specific question, narrow the scope to fewer documents, or wait a minute and try again — large uploads may still be indexing."
+        `The answer is still processing after ${seconds}s — the request was cancelled to avoid an infinite wait. ` +
+        `Large documents can take several minutes on the first query while the index warms up; ` +
+        `try again in a moment (the next query on the same document is usually much faster), ` +
+        `or narrow the scope to fewer documents.`
       );
       friendly.status = 408;
       friendly.timeout = true;

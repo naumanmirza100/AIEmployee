@@ -5,6 +5,9 @@
 //   * ContextIndicator      — a small "↑ N messages of context" chip.
 //   * useSlashAutocomplete  — attaches to the input; dynamically resolves
 //     slash-command arguments by calling a `resolver` fn.
+//   * ElapsedTimer          — self-updating "3.4s" clock, used inside the
+//     "Thinking…" spinner so users can see how long the current request has
+//     been running.
 //
 // Kept intentionally lightweight — no drag library, no CSS-in-JS beyond
 // inline styles. All three chats consume the same primitives so their UX
@@ -17,6 +20,41 @@ import { useIsMobile } from './tourUtils';
 // Re-export so chat files that already import from chatShellUtils can grab
 // the mobile flag without a second import.
 export { useIsMobile };
+
+
+// ---------- Live "elapsed time" clock for the thinking spinner ------------
+
+/**
+ * Self-updating elapsed-time counter. Renders "3.4s" and ticks every 100ms.
+ *
+ * Owns its own interval so consumers just drop it in — no state plumbing.
+ * Cleans up on unmount, and pauses safely if the browser tab is throttled
+ * (setInterval keeps working when hidden but the drift is fine for our use).
+ *
+ * Props:
+ *   since       — timestamp (ms via performance.now() or Date.now()) when
+ *                 the request started. If null/undefined, renders nothing.
+ *   className   — optional wrapper class.
+ *   precision   — decimal places to show (default 1). Bump to 2 for very
+ *                 short-running local operations.
+ */
+export function ElapsedTimer({ since, className = '', precision = 1 }) {
+  const [now, setNow] = useState(() => (
+    (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+  ));
+
+  useEffect(() => {
+    if (since == null) return undefined;
+    const id = setInterval(() => {
+      setNow((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
+    }, 100);
+    return () => clearInterval(id);
+  }, [since]);
+
+  if (since == null) return null;
+  const seconds = Math.max(0, (now - since) / 1000);
+  return <span className={className}>{seconds.toFixed(precision)}s</span>;
+}
 
 const MIN_WIDTH = 340;
 const MIN_HEIGHT = 380;

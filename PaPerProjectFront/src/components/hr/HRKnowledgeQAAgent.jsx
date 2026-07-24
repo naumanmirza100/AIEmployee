@@ -24,6 +24,7 @@ import {
 import hrAgentService from '@/services/hrAgentService';
 import InfoHint from '../frontline/InfoHint';
 import { HR_HINTS } from './hrTutorialSteps';
+import { ElapsedTimer } from '../frontline/chatShellUtils';
 
 // ---------- markdown → HTML (lifted from PM agent's helper) ----------
 function markdownToHtml(markdown) {
@@ -97,6 +98,9 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
+  // Timestamp when the current request started, so the "Thinking…" spinner
+  // can render a live elapsed clock. Null when idle.
+  const [loadingStartedAt, setLoadingStartedAt] = useState(null);
   const [loadingChats, setLoadingChats] = useState(false);
 
   // Sidebar state
@@ -185,24 +189,45 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
     }
 
     let assistantMsg = null;
+    const startedAt = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    // Mirror into state so the live thinking-clock has a reference point.
+    setLoadingStartedAt(startedAt);
     try {
       // Build chat_history payload from the prior turns (last 6) — keep it tight
       const history = baseMessages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
       const res = await hrAgentService.askHRKnowledge(q, history);
       const data = res?.data || {};
+      const endedAt = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
       assistantMsg = {
         role: 'assistant',
         content: data.answer || '(no answer)',
+        // Persist timing inside responseData so it survives the backend
+        // round-trip when the chat is re-fetched (top-level fields are
+        // dropped by _normalize_chat).
         responseData: {
           has_verified_info: data.has_verified_info,
           confidence: data.confidence,
           best_score: data.best_score,
           threshold: data.threshold,
           citations: data.citations || [],
+          cache_hit: !!data.cache_hit,
+          responseTimeMs: Math.round(endedAt - startedAt),
+          // Server-side per-phase timing breakdown (retrieval subphases + llm)
+          timing_ms: data.timing_ms || null,
         },
       };
     } catch (err) {
-      assistantMsg = { role: 'assistant', content: `Error: ${err.message || 'Failed to get answer'}` };
+      const endedAt = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      assistantMsg = {
+        role: 'assistant',
+        content: `Error: ${err.message || 'Failed to get answer'}`,
+        responseData: {
+          responseTimeMs: Math.round(endedAt - startedAt),
+        },
+      };
     }
 
     const finalMessages = [...optimisticMessages, assistantMsg];
@@ -236,6 +261,7 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
         ? { ...x, messages: finalMessages } : x)));
     } finally {
       setLoading(false);
+      setLoadingStartedAt(null);
     }
   };
 
@@ -521,6 +547,51 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
                               )}
                             </div>
                           )}
+                          {(() => {
+                            const t = msg.responseData?.responseTimeMs ?? msg.responseTimeMs;
+                            if (typeof t !== 'number') return null;
+                            const tm = msg.responseData?.timing_ms;
+                            const parts = [];
+                            if (tm && !tm.cache) {
+                              if (typeof tm.retrieval === 'number') parts.push(`retrieval ${(tm.retrieval / 1000).toFixed(1)}s`);
+                              if (typeof tm.llm === 'number') parts.push(`llm ${(tm.llm / 1000).toFixed(1)}s`);
+                            }
+                            const rb = tm?.retrieval_breakdown;
+                            const rp = tm?.retrieval_path;
+                            const rbParts = [];
+                            if (rb && (tm?.retrieval || 0) > 1000) {
+                              const keys = ['query_embed', 'json_scan', 'keyword', 'chunk_fetch', 'output_build'];
+                              for (const k of keys) {
+                                if (typeof rb[k] === 'number' && rb[k] > 50) {
+                                  rbParts.push(`${k}=${(rb[k] / 1000).toFixed(1)}s`);
+                                }
+                              }
+                              if (typeof rb.json_scan_chunks === 'number' && rb.json_scan_chunks > 0) {
+                                rbParts.push(`scanned=${rb.json_scan_chunks}`);
+                              }
+                            }
+                            return (
+                              <div className="mt-2 text-[10px] text-white/40 space-y-0.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>⏱ Answered in {(t / 1000).toFixed(2)}s</span>
+                                  {parts.length > 0 && (
+                                    <span className="text-white/30">({parts.join(' · ')})</span>
+                                  )}
+                                  {msg.responseData?.cache_hit && (
+                                    <span className="px-1.5 py-[1px] rounded bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 text-[9px] font-medium">
+                                      cached
+                                    </span>
+                                  )}
+                                </div>
+                                {(rbParts.length > 0 || rp) && (
+                                  <div className="text-[9px] text-white/30 font-mono">
+                                    {rp && <span>path: {rp} </span>}
+                                    {rbParts.join(' · ')}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </>
                       )}
                     </div>
@@ -532,7 +603,10 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
                 <div className="flex justify-start">
                   <div className="rounded-2xl px-4 py-2.5 bg-white/[0.04] border border-white/[0.08] text-white/70 text-sm flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400" />
-                    Thinking...
+                    Thinking…
+                    <span className="text-xs text-white/40 tabular-nums font-mono ml-1">
+                      <ElapsedTimer since={loadingStartedAt} />
+                    </span>
                   </div>
                 </div>
               )}
