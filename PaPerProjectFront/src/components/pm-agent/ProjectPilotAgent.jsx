@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
+import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager';
 import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle, ChevronsLeft, ChevronsRight, Bot } from 'lucide-react';
 import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
@@ -14,6 +15,7 @@ import { trackPMRecentlyViewed } from './pmLocalStore';
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   const { toast } = useToast();
+  const { startUpload: startBackgroundUpload } = useBackgroundUpload();
   const safeProjects = Array.isArray(projects) ? projects : [];
 
   const [showSidebarSearch, setShowSidebarSearch] = useState(false);
@@ -25,7 +27,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
-  const [fileLoading, setFileLoading] = useState(false);
+  // NOTE: `fileLoading` used to live here. File uploads are now handled by
+  // the global BackgroundUploadManager (see `handleFileUpload`), so the UI
+  // no longer needs to block on them.
   const [selectedFile, setSelectedFile] = useState(null);
   const [loadingChats, setLoadingChats] = useState(true);
   const fileInputRef = useRef(null);
@@ -171,69 +175,143 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     setSelectedFile(file);
   };
 
-  const handleFileUpload = async () => {
+  // Persist a (user, assistant) message pair to a SPECIFIC chat by ID.
+  // Same shape as `addMessagePairToChat` above but doesn't rely on the
+  // current `selectedChatId` — needed for background uploads where the
+  // user may have switched chats while the LLM was running.
+  const addMessagePairToChatById = async (chatIdSnapshot, userMsg, assistantMsg, titleSnippet) => {
+    const title = titleSnippet.slice(0, 40);
+    if (chatIdSnapshot) {
+      const existing = chats.find((c) => c.id === chatIdSnapshot);
+      if (existing) {
+        const updRes = await pmAgentService.updateProjectPilotChat(chatIdSnapshot, {
+          messages: [userMsg, assistantMsg],
+          title: existing.title || title,
+        });
+        if (updRes.status === 'success' && updRes.data) {
+          const updatedChat = normalizeChat(updRes.data);
+          setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== chatIdSnapshot)]);
+          return;
+        }
+      }
+    }
+    // Fall through: create a new chat (chat was deleted, or snapshot was null).
+    const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+    if (createRes.status === 'success' && createRes.data) {
+      const newChatData = normalizeChat(createRes.data);
+      setChats((prev) => [newChatData, ...prev]);
+      // Only auto-select the new chat if the user hasn't since navigated
+      // elsewhere — otherwise a background upload could yank them off the
+      // chat they're currently reading.
+      if (!selectedChatId) setSelectedChatId(newChatData.id);
+    }
+  };
+
+  // Background-upload flow. Enqueues the upload via BackgroundUploadManager
+  // so the chat input is instantly re-enabled and the user can navigate away
+  // or type another prompt while the LLM processes the file. The response
+  // (which arrives 15-60s later) is pushed into the chat via `onDone`.
+  const handleFileUpload = () => {
     if (!selectedFile) {
       toast({ title: 'Error', description: 'Please select a file', variant: 'destructive' });
       return;
     }
+
+    // Snapshot every input at enqueue time — user may change any of these
+    // while the background job is running.
+    const file = selectedFile;
     const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
     const projectTitle = getProjectTitle(projectId);
-    // Capture whatever the user typed in the chat box at upload time. Without
-    // this the agent only sees the file's raw text and has no idea what to
-    // do with it (the symptom was the chat replying "could you clarify what
-    // you'd like to convert into a project?"). We send it as a separate
-    // `prompt` field so the backend can prepend it as an instruction.
     const userPrompt = (question || '').trim();
+    const historySnapshot = currentMessages;
+    const chatIdSnapshot = selectedChatId;
 
-    try {
-      setFileLoading(true);
-      const response = await pmAgentService.projectPilotFromFile(
-        selectedFile,
-        projectId,
-        currentMessages,
-        userPrompt || null,
-      );
-      if (response.status === 'success') {
-        const data = response.data || response;
-        const answerText = data.answer || '';
-        const actionResults = data.action_results || [];
-        const cannotDo = data.cannot_do;
-        const userMsg = {
-          role: 'user',
-          content: userPrompt
-            ? `${userPrompt}\n\n📎 Attached: ${selectedFile.name}`
-            : `Uploaded file: ${selectedFile.name}`,
-          responseData: {
-            from_file: true,
-            file_name: selectedFile.name,
-            project_id: projectId,
-            project_title: projectTitle,
-            user_prompt: userPrompt || null,
-          },
-        };
-        const assistantMsg = {
-          role: 'assistant',
-          content: answerText || (cannotDo || 'Processed.'),
-          responseData: {
-            answer: answerText,
-            action_results: actionResults,
-            cannot_do: cannotDo,
-            project_id: projectId,
-            project_title: projectTitle,
-            from_file: true,
-            file_name: selectedFile.name,
-          },
-        };
-        await addMessagePairToChat(userMsg, assistantMsg, `File: ${selectedFile.name}`);
-        if (actionResults.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
-      } else {
-        throw new Error(response.message || 'Failed to process file');
-      }
-    } catch (error) {
-      toast({ title: 'Error', description: error.message || 'Failed to process file', variant: 'destructive' });
-    } finally {
-      setFileLoading(false);
-    }
+    // Free the picker + prompt input immediately.
+    setSelectedFile(null);
+    setQuestion('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    startBackgroundUpload({
+      title: file.name,
+      agent: 'project-pilot',
+      upload: (onProgress) => pmAgentService.projectPilotFromFile(
+        file, projectId, historySnapshot, userPrompt || null, { onProgress },
+      ),
+      // Tier 2: the endpoint returns 202 with a job_id and the Celery
+      // worker runs the pipeline. The manager polls this endpoint until
+      // the job flips to 'ready' or 'failed'. Response survives tab close.
+      poll: (jobId) => pmAgentService.getProjectPilotJobStatus(jobId),
+      onDone: async (response) => {
+        try {
+          // Both success and (ready-with-cannot_do) come through here; the
+          // status endpoint always returns status='success' with the payload
+          // in `data`. Manager passes `null` on timeout.
+          if (!response || response.status !== 'success') {
+            toast({
+              title: 'Processing failed',
+              description: response?.message || 'Unable to process the file.',
+              variant: 'destructive',
+            });
+            return;
+          }
+          const data = response.data || response;
+          // Server-side failure that the poll loop captured.
+          if (data.processing_status === 'failed') {
+            toast({
+              title: 'Processing failed',
+              description: data.error || 'The document could not be processed.',
+              variant: 'destructive',
+            });
+            return;
+          }
+          const answerText = data.answer || '';
+          const actionResults = data.action_results || [];
+          const cannotDo = data.cannot_do;
+          const userMsg = {
+            role: 'user',
+            content: userPrompt
+              ? `${userPrompt}\n\n📎 Attached: ${file.name}`
+              : `Uploaded file: ${file.name}`,
+            responseData: {
+              from_file: true,
+              file_name: file.name,
+              project_id: projectId,
+              project_title: projectTitle,
+              user_prompt: userPrompt || null,
+            },
+          };
+          const assistantMsg = {
+            role: 'assistant',
+            content: answerText || (cannotDo || 'Processed.'),
+            responseData: {
+              answer: answerText,
+              action_results: actionResults,
+              cannot_do: cannotDo,
+              project_id: projectId,
+              project_title: projectTitle,
+              from_file: true,
+              file_name: file.name,
+            },
+          };
+          await addMessagePairToChatById(chatIdSnapshot, userMsg, assistantMsg, `File: ${file.name}`);
+          if (actionResults.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
+          // Summary toast — clearer than the manager's generic "Upload complete".
+          const created = actionResults.filter((r) => r.success).length;
+          if (created > 0) {
+            toast({
+              title: 'Project Pilot done',
+              description: `${created} action${created === 1 ? '' : 's'} completed for "${file.name}".`,
+            });
+          }
+        } catch (err) {
+          toast({
+            title: 'Chat update failed',
+            description: err.message || 'The response arrived but couldn\'t be added to the chat.',
+            variant: 'destructive',
+          });
+        }
+      },
+    });
   };
 
   const newChat = () => {
@@ -686,11 +764,11 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                 </div>
               </div>
             ))}
-            {(loading || fileLoading) && (
+            {loading && (
               <div className="flex justify-start">
                 <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">{fileLoading ? 'Processing file...' : 'Processing...'}</span>
+                  <span className="text-sm">Processing...</span>
                 </div>
               </div>
             )}
@@ -765,10 +843,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                     type="button"
                     size="sm"
                     className="h-7 text-xs px-2"
-                    disabled={fileLoading}
                     onClick={handleFileUpload}
                   >
-                    {fileLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                    <Send className="h-3 w-3" />
                   </Button>
                   <Button
                     type="button"
@@ -798,10 +875,10 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                   }
                 }}
                 rows={1}
-                disabled={loading || fileLoading}
+                disabled={loading}
                 className="min-h-[40px] resize-none flex-1 text-sm"
               />
-              <Button data-tour-pm-pp="send" type="submit" disabled={loading || fileLoading} size="icon" className="h-[40px] w-10 shrink-0">
+              <Button data-tour-pm-pp="send" type="submit" disabled={loading} size="icon" className="h-[40px] w-10 shrink-0">
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
               <div className="pt-2"><InfoHint {...PM_HINTS.pmPpSend} /></div>

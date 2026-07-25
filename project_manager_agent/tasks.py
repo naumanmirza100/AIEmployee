@@ -376,3 +376,133 @@ def cleanup_old_notifications():
 
     logger.info(f"[NOTIFICATION CLEANUP] Deleted: {pm_deleted} PM, {user_deleted} User notifications (30d+). Capped: {pm_capped}")
     return {'pm_deleted': pm_deleted, 'user_deleted': user_deleted, 'pm_capped': pm_capped}
+
+
+# --------------------------------------------------------------------------
+# Project Pilot async pipeline
+# --------------------------------------------------------------------------
+
+@shared_task(name='project_manager_agent.run_project_pilot_job',
+             bind=True, max_retries=1, default_retry_delay=30)
+def run_project_pilot_job(self, job_id):
+    """Run a ProjectPilotJob end-to-end: extract text → LLM → create Project/
+    Task rows. Stamps results back onto the job row so the frontend polling
+    endpoint can pick them up.
+
+    The pipeline itself is unchanged — this task is just an async wrapper
+    around `run_project_pilot_pipeline`. The upload endpoint saves the file
+    to disk, creates the job row, and enqueues this task; the browser then
+    polls `/project-pilot/jobs/<id>/status` until `status='ready'`.
+    """
+    import os
+    import time
+    from pathlib import Path
+    from django.conf import settings
+
+    from project_manager_agent.models import ProjectPilotJob
+    from project_manager_agent.project_pilot_pipeline import run_project_pilot_pipeline
+
+    job = ProjectPilotJob.objects.filter(id=job_id).first()
+    if not job:
+        logger.warning("run_project_pilot_job: job %s not found", job_id)
+        return {'status': 'not_found', 'job_id': job_id}
+
+    if job.status not in ('queued', 'processing'):
+        # Someone already worked on this job (retry raced?). Skip.
+        logger.info("run_project_pilot_job: job %s already %s, skipping",
+                    job_id, job.status)
+        return {'status': job.status, 'job_id': job_id}
+
+    _t_overall = time.time()
+    timing_ms = {}
+    job.status = 'processing'
+    job.save(update_fields=['status', 'updated_at'])
+
+    try:
+        # 1. Load the file from disk and extract text.
+        # `file_path` is stored relative to MEDIA_ROOT.
+        from api.views.pm_agent import _extract_text_from_file
+        _t = time.time()
+        abs_path = Path(settings.MEDIA_ROOT) / job.file_path
+        if not abs_path.exists():
+            raise FileNotFoundError(f"Upload disappeared: {job.file_path}")
+
+        # `_extract_text_from_file` expects a file-like object with `.name`,
+        # `.size`, `.seek`, `.read`, and (for docx) `.chunks`. Wrap the
+        # on-disk file so we can pass it in.
+        with open(abs_path, 'rb') as fh:
+            _wrapper = _DiskFileWrapper(fh, job.file_name, abs_path.stat().st_size)
+            extracted_text = _extract_text_from_file(_wrapper)
+        timing_ms['text_extract_ms'] = int((time.time() - _t) * 1000)
+
+        # 2. Reload company_user (Celery worker doesn't share request state).
+        from core.models import CompanyUser
+        company_user = CompanyUser.objects.filter(id=job.company_user_id).first()
+        if not company_user:
+            raise ValueError(f"CompanyUser {job.company_user_id} not found")
+
+        # 3. Run the pipeline (LLM + action execution).
+        _t = time.time()
+        result = run_project_pilot_pipeline(
+            company_user=company_user,
+            extracted_text=extracted_text,
+            file_name=job.file_name,
+            user_prompt=job.user_prompt or '',
+            project_id=job.project_id,
+            chat_history=job.chat_history or [],
+        )
+        timing_ms['pipeline_ms'] = int((time.time() - _t) * 1000)
+        timing_ms['total_ms'] = int((time.time() - _t_overall) * 1000)
+
+        # 4. Stamp results onto the job.
+        job.answer = result.get('answer', '') or ''
+        job.action_results = result.get('action_results', []) or []
+        job.cannot_do = result.get('cannot_do', '') or ''
+        job.timing_ms = timing_ms
+        job.status = 'ready'
+        job.completed_at = timezone.now()
+        job.save()
+        logger.info("run_project_pilot_job: job %s done, %d action_results, timing_ms=%s",
+                    job_id, len(job.action_results), timing_ms)
+        return {'status': 'ready', 'job_id': job_id}
+
+    except Exception as exc:
+        logger.exception("run_project_pilot_job: job %s failed", job_id)
+        try:
+            job.status = 'failed'
+            job.error_message = f"{type(exc).__name__}: {exc}"[:2000]
+            job.timing_ms = {**timing_ms, 'total_ms': int((time.time() - _t_overall) * 1000)}
+            job.completed_at = timezone.now()
+            job.save(update_fields=['status', 'error_message', 'timing_ms',
+                                    'completed_at', 'updated_at'])
+        except Exception:
+            logger.exception("run_project_pilot_job: also failed to stamp 'failed' on job %s",
+                             job_id)
+        return {'status': 'failed', 'job_id': job_id}
+
+
+class _DiskFileWrapper:
+    """Adapter to expose an on-disk file with the interface Django's
+    `UploadedFile` uses — so `_extract_text_from_file` can be called from
+    the Celery task without changing its signature.
+
+    Only implements the methods the extraction function actually uses:
+    `.name`, `.size`, `.seek`, `.read`, `.chunks` (docx branch).
+    """
+    def __init__(self, fh, name, size):
+        self._fh = fh
+        self.name = name
+        self.size = size
+
+    def seek(self, pos):
+        return self._fh.seek(pos)
+
+    def read(self, n=-1):
+        return self._fh.read(n) if n != -1 else self._fh.read()
+
+    def chunks(self, chunk_size=64 * 1024):
+        while True:
+            data = self._fh.read(chunk_size)
+            if not data:
+                break
+            yield data

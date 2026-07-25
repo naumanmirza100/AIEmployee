@@ -3363,20 +3363,33 @@ def _extract_text_from_file(file):
 @permission_classes([IsCompanyUserOnly])
 def project_pilot_from_file(request):
     """
-    Project Pilot Agent API - Process file upload and extract text, then process through project pilot.
+    Project Pilot Agent - upload endpoint (async).
+
+    Saves the uploaded file to disk, creates a ProjectPilotJob row, enqueues
+    the Celery task, and returns 202 immediately with the job id. The
+    browser polls /project-pilot/jobs/<id>/status to pick up the result
+    when the LLM extraction + action execution finishes.
+
     Body (multipart/form-data):
-      - file: file (required) - txt, pdf, or docx file
-      - project_id: int (optional)
+      * file          - required; .txt, .pdf, or .docx (max 10 MB).
+      * project_id    - optional int; restricts the pipeline's project scope.
+      * prompt        - optional string; user's typed instruction.
+      * chat_history  - optional JSON string; prior chat turns.
+      * chat_id       - optional string; PM Project Pilot chat id to route
+                        the response back to.
     """
+    import uuid
+    from pathlib import Path
+    from django.conf import settings as _dj_settings
+
     company_user = request.user
-    
-    # Check if user can access project manager features
+
+    # Access check (unchanged from the previous sync endpoint).
     can_access = False
     if hasattr(company_user, 'can_access_project_manager_features'):
         can_access = company_user.can_access_project_manager_features()
     else:
         can_access = company_user.role in ['project_manager', 'company_user']
-    
     if not can_access:
         return Response(
             {"status": "error", "message": "Access denied. Project manager or company user role required."},
@@ -3384,549 +3397,140 @@ def project_pilot_from_file(request):
         )
 
     try:
-        # Get uploaded file
         if 'file' not in request.FILES:
             return Response(
                 {"status": "error", "message": "file is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
         uploaded_file = request.FILES['file']
-        
-        # Validate file type
+
         allowed_extensions = ['.txt', '.pdf', '.docx']
         file_extension = os.path.splitext(uploaded_file.name)[1].lower()
         if file_extension not in allowed_extensions:
             return Response(
-                {"status": "error", "message": f"Unsupported file type. Allowed types: {', '.join(allowed_extensions)}"},
+                {"status": "error",
+                 "message": f"Unsupported file type. Allowed types: {', '.join(allowed_extensions)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # Extract text from file
+        if hasattr(uploaded_file, 'size') and uploaded_file.size > MAX_FILE_SIZE:
+            return Response(
+                {"status": "error",
+                 "message": f"File too large ({uploaded_file.size // (1024*1024)}MB). Maximum is 10MB."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Persist the file under MEDIA_ROOT so the Celery worker (different
+        # process, possibly different machine) can read it back.
+        subdir = Path('project_pilot_uploads') / str(uuid.uuid4())
+        abs_dir = Path(_dj_settings.MEDIA_ROOT) / subdir
+        abs_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = os.path.basename(uploaded_file.name)
+        abs_path = abs_dir / safe_name
+        with open(abs_path, 'wb') as fh:
+            for chunk in uploaded_file.chunks():
+                fh.write(chunk)
+        rel_path = str(subdir / safe_name).replace(os.sep, '/')
+
+        # Parse optional inputs.
+        user_prompt = (request.POST.get('prompt') or '').strip()
+        chat_id = (request.POST.get('chat_id') or '').strip()
+        project_id_raw = request.POST.get('project_id')
         try:
-            extracted_text = _extract_text_from_file(uploaded_file)
-        except ValueError as e:
-            return Response(
-                {"status": "error", "message": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        
-        if not extracted_text:
-            return Response(
-                {"status": "error", "message": "No text could be extracted from the file"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            project_id_int = int(project_id_raw) if project_id_raw else None
+        except (TypeError, ValueError):
+            project_id_int = None
 
-        # Combine the user's typed instruction with the document text. Sending
-        # just the raw file contents as the question used to confuse the agent
-        # ("could you clarify what you'd like to convert?") because the agent
-        # had no signal of intent — only walls of PDF text. The frontend now
-        # sends a `prompt` field; we wrap the document content in a clear
-        # delimiter so the agent can tell instruction from attachment.
-        user_prompt = (request.POST.get("prompt") or "").strip()
-        if user_prompt:
-            question = (
-                f"{user_prompt}\n\n"
-                f"--- Attached document: {uploaded_file.name} ---\n"
-                f"{extracted_text}\n"
-                f"--- end of document ---"
-            )
-        else:
-            # No instruction provided — fall back to old behaviour but still
-            # tag the content so the agent treats it as an attachment.
-            question = (
-                f"The user attached a document named '{uploaded_file.name}' "
-                f"without an explicit instruction. Read its contents and ask what "
-                f"they'd like to do with it (e.g. convert to project, summarise, "
-                f"extract tasks).\n\n"
-                f"--- Attached document ---\n{extracted_text}\n--- end of document ---"
-            )
-        project_id = request.POST.get("project_id")
-        
-        # Reuse the same logic as project_pilot function
-        project = None
-        company = company_user.company
+        # chat_history comes in as JSON - reuse the existing helper.
+        try:
+            history = _get_chat_history(request) or []
+        except Exception:
+            history = []
+        # Cap size to keep the job row sane.
+        history = [
+            {'role': (m.get('role') or ''), 'content': (m.get('content') or '')[:6000]}
+            for m in history if isinstance(m, dict)
+        ][-20:]
 
-        # Filter projects created by this company user
-        all_projects = Project.objects.filter(created_by_company_user=company_user)
-        all_tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related("project")
-
-        if project_id:
-            try:
-                project_id = int(project_id)
-                project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
-            except (ValueError, Project.DoesNotExist):
-                project = None
-
-        if project:
-            tasks = Task.objects.filter(project=project).select_related("assignee")
-            context = {
-                "project": {
-                    "id": project.id,
-                    "name": project.name,
-                    "status": project.status,
-                    "priority": project.priority,
-                    "description": project.description,
-                    "deadline": project.deadline.isoformat() if project.deadline else None,
-                },
-                "tasks": [
-                    {
-                        "id": t.id,
-                        "title": t.title,
-                        "status": t.status,
-                        "priority": t.priority,
-                        "description": t.description,
-                        "due_date": t.due_date.isoformat() if t.due_date else None,
-                        "deadline": t.due_date.isoformat() if t.due_date else None,
-                    }
-                    for t in tasks
-                ],
-            }
-        else:
-            context = {
-                "all_projects": [
-                    {
-                        "id": p.id,
-                        "name": p.name,
-                        "status": p.status,
-                        "priority": p.priority,
-                        "tasks_count": p.tasks.count(),
-                        "description": p.description[:100] if p.description else "",
-                    }
-                    for p in all_projects
-                ],
-                "tasks": [
-                    {
-                        "id": t.id,
-                        "title": t.title,
-                        "status": t.status,
-                        "priority": t.priority,
-                        "description": t.description,
-                        "project_name": t.project.name,
-                    }
-                    for t in all_tasks[:10]
-                ],
-            }
-
-        available_users = _build_available_users(project_id=project_id, project=project, company_user=company_user)
-        context["user_assignments"] = _build_user_assignments(
-            available_users, project_id=project_id, all_tasks=all_tasks, owner=None
+        # Create the job + enqueue the task.
+        from project_manager_agent.models import ProjectPilotJob
+        job = ProjectPilotJob.objects.create(
+            company_user=company_user,
+            company_id=getattr(company_user, 'company_id', 0) or 0,
+            chat_id=chat_id,
+            project_id=project_id_int,
+            user_prompt=user_prompt,
+            file_path=rel_path,
+            file_name=safe_name,
+            chat_history=history,
+            status='queued',
         )
+        try:
+            from project_manager_agent.tasks import run_project_pilot_job
+            run_project_pilot_job.delay(job.id)
+            dispatch_mode = 'celery'
+        except Exception as exc:
+            # Broker down (dev without Celery) - fall back to eager execution
+            # so the upload still works locally. In prod the broker should be
+            # reachable; this just avoids a hard failure during dev.
+            logger.warning("Celery broker unreachable, running job %s eagerly: %s", job.id, exc)
+            dispatch_mode = 'inline'
+            try:
+                from project_manager_agent.tasks import run_project_pilot_job as _run
+                _run(job.id)
+            except Exception:
+                logger.exception("Eager Project Pilot run failed for job %s", job.id)
 
-        chat_history = _get_chat_history(request)
-        agent = AgentRegistry.get_agent("project_pilot")
-        # Route LLM call through the company key/quota resolver. Resolver will
-        # raise QuotaExhausted (402) or NoKeyAvailable (403) on hard-block —
-        # core/drf_exceptions converts those to clean JSON responses.
-        agent.company_id = getattr(company_user, 'company_id', None)
-        agent.agent_key_name = 'project_manager_agent'
-        result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
-        if result.get("cannot_do"):
-            return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
-
-        actions = result.get("actions") or []
-        if result.get("action"):
-            actions = [result["action"]]
-        
-        # If no actions found, try parsing from answer field (reuse same logic from project_pilot)
-        if len(actions) == 0 and result.get("answer"):
-            answer_str = result.get("answer", "").strip()
-            if answer_str and "[" in answer_str:
-                try:
-                    import re
-                    cleaned_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', answer_str)
-                    
-                    # CRITICAL FIX: Fix reversed brackets at the end IMMEDIATELY before any processing
-                    # The AI sometimes generates: ... ]} instead of ... }]
-                    # We need to fix this FIRST, before bracket matching
-                    cleaned_str_stripped = cleaned_str.rstrip()
-                    if cleaned_str_stripped.endswith(']}'):
-                        # Replace ]} with }] at the end - preserve any trailing whitespace/newlines
-                        trailing_whitespace = cleaned_str[len(cleaned_str_stripped):]
-                        cleaned_str = cleaned_str_stripped[:-2] + '}]' + trailing_whitespace
-                        logger.warning("Fixed reversed closing brackets at end: ]} -> }]")
-                    # Also check for ] followed by } on separate lines
-                    elif cleaned_str_stripped.endswith(']\n}') or cleaned_str_stripped.endswith(']\r\n}'):
-                        cleaned_str = cleaned_str_stripped.replace(']\n}', '}]\n').replace(']\r\n}', '}]\r\n')
-                        logger.warning("Fixed reversed closing brackets with newline: ]\\n} -> }]\\n")
-                    elif cleaned_str_stripped.endswith(']\n}') or cleaned_str_stripped.endswith(']\r\n}'):
-                        # Handle case where ] and } are on separate lines
-                        cleaned_str = cleaned_str_stripped.replace(']\n}', '}]\n').replace(']\r\n}', '}]\r\n')
-                        logger.warning("Fixed reversed closing brackets with newline: ]\\n} -> }]\\n")
-                    
-                    first_bracket = cleaned_str.find('[')
-                    if first_bracket < 0:
-                        first_bracket = 0
-                    
-                    bracket_count = 0
-                    brace_count = 0
-                    end_pos = -1
-                    for i in range(first_bracket, len(cleaned_str)):
-                        char = cleaned_str[i]
-                        if char == '[':
-                            bracket_count += 1
-                        elif char == ']':
-                            bracket_count -= 1
-                        elif char == '{':
-                            brace_count += 1
-                        elif char == '}':
-                            brace_count -= 1
-                        
-                        if bracket_count == 0 and brace_count == 0 and char == ']':
-                            end_pos = i + 1
-                            break
-                    
-                    # If we couldn't find matching bracket, try to fix common issues
-                    if end_pos <= first_bracket:
-                        # Check if it ends with ]} (reversed brackets) or incomplete
-                        if cleaned_str.rstrip().endswith(']}'):
-                            # Fix reversed brackets
-                            cleaned_str = cleaned_str.rstrip()[:-2] + '}]'
-                            end_pos = len(cleaned_str)
-                        elif cleaned_str.rstrip().endswith(']'):
-                            # Might be missing closing brace
-                            # Count open vs close braces
-                            open_braces = cleaned_str[first_bracket:].count('{')
-                            close_braces = cleaned_str[first_bracket:].count('}')
-                            if open_braces > close_braces:
-                                # Add missing closing braces
-                                cleaned_str = cleaned_str.rstrip()[:-1] + '}' * (open_braces - close_braces) + ']'
-                                end_pos = len(cleaned_str)
-                    
-                    # If we couldn't find matching bracket, try to fix common issues
-                    if end_pos <= first_bracket:
-                        # Check if it ends with ]} (reversed brackets) or incomplete
-                        if cleaned_str.rstrip().endswith(']}'):
-                            # Fix reversed brackets - always fix ]} to }]
-                            cleaned_str = cleaned_str.rstrip()[:-2] + '}]'
-                            end_pos = len(cleaned_str)
-                            logger.warning("Fixed reversed closing brackets in JSON (]})")
-                        elif cleaned_str.rstrip().endswith(']'):
-                            # Might be missing closing brace
-                            # Count open vs close braces
-                            open_braces = cleaned_str[first_bracket:].count('{')
-                            close_braces = cleaned_str[first_bracket:].count('}')
-                            if open_braces > close_braces:
-                                # Add missing closing braces
-                                cleaned_str = cleaned_str.rstrip()[:-1] + '}' * (open_braces - close_braces) + ']'
-                                end_pos = len(cleaned_str)
-                    
-                    if end_pos > first_bracket:
-                        json_str = cleaned_str[first_bracket:end_pos]
-                        
-                        # Fix reversed brackets if present - ALWAYS fix if ends with ]}
-                        # This is a common AI error where brackets are reversed
-                        if json_str.rstrip().endswith(']}'):
-                            json_str = json_str.rstrip()[:-2] + '}]'
-                            logger.warning("Fixed reversed closing brackets in JSON: ]} -> }]")
-                        
-                        # Try to parse the extracted JSON
-                        try:
-                            parsed_actions = json.loads(json_str)
-                            if isinstance(parsed_actions, list):
-                                actions = parsed_actions
-                                logger.info(f"Parsed {len(actions)} actions from answer field")
-                        except json.JSONDecodeError as parse_err:
-                            logger.warning(f"Failed to parse extracted JSON: {parse_err}")
-                            # Fallback: Try to extract individual JSON objects if the array is malformed
-                            try:
-                                import re
-                                json_objects = []
-                                # More robust pattern to find JSON objects
-                                pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-                                for match in re.finditer(pattern, cleaned_str):
-                                    try:
-                                        obj = json.loads(match.group(0))
-                                        json_objects.append(obj)
-                                    except json.JSONDecodeError:
-                                        continue
-                                if json_objects:
-                                    actions = json_objects
-                                    logger.info(f"Parsed {len(actions)} actions by extracting individual JSON objects")
-                            except Exception as e2:
-                                logger.warning(f"Fallback JSON object extraction also failed: {e2}")
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f"Failed to parse answer as JSON: {e}")
-
-        # Only run round-robin when user asked for "assign to ALL" and did NOT say "only N users"
-        if not isinstance(actions, list):
-            actions = []
-        import re as _re_file
-        _q_lower_file = question.lower()
-        _only_n_users_file = _re_file.search(r"only\s+\d+\s+users?", _q_lower_file)
-        _assign_to_all_phrases_file = [
-            "assign to all", "assign to all available", "assign to all users",
-            "distribute to all", "assign tasks to all", "all available users",
-            "all developers", "all users", "assign the tasks to all",
-        ]
-        _wants_assign_to_all_file = any(p in _q_lower_file for p in _assign_to_all_phrases_file)
-        if _wants_assign_to_all_file and not _only_n_users_file and available_users:
-            _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
-            _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
-            if _unassigned:
-                _user_ids = [u["id"] for u in available_users]
-                for i, action_data in enumerate(_unassigned):
-                    action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
-                logger.info(f"Backend fallback (from_file): assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
-        
-        _allowed_ids_file = _get_allowed_user_ids_for_only_n_users(question, available_users)
-        if _allowed_ids_file is not None:
-            _create_tasks_f = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
-            for i, action_data in enumerate(_create_tasks_f):
-                action_data["assignee_id"] = _allowed_ids_file[i % len(_allowed_ids_file)]
-            logger.info(f"Backend enforcement (from_file): restricted to only {len(_allowed_ids_file)} users")
-
-        # Process actions (reuse same logic from project_pilot)
-        action_results = []
-        created_projects = {}  # Map to track created projects for task assignment
-        
-        # First pass: Create all projects
-        for action in actions:
-            if action.get("action") == "create_project":
-                try:
-                    # Get default owner (required field)
-                    from django.contrib.auth.models import User
-                    default_owner = _get_project_owner(company_user)
-                    if not default_owner:
-                        action_results.append({
-                            "action": "create_project",
-                            "success": False,
-                            "error": "No default owner available. Please ensure at least one user exists in the system.",
-                        })
-                        continue
-                    
-                    # Handle industry field - it's a ForeignKey, so we need to handle it properly
-                    industry_value = action.get("industry", "")
-                    industry_instance = None
-                    if industry_value:
-                        # Try to find industry by name or slug
-                        from core.models import Industry
-                        try:
-                            # First try by name (case-insensitive)
-                            industry_instance = Industry.objects.filter(name__iexact=industry_value).first()
-                            # If not found, try by slug
-                            if not industry_instance:
-                                industry_instance = Industry.objects.filter(slug__iexact=industry_value.lower().replace(' ', '-')).first()
-                        except Exception as e:
-                            logger.warning(f"Could not find industry '{industry_value}': {e}")
-                            industry_instance = None
-                    
-                    # Parse dates. end_date is the legacy alias for deadline —
-                    # accept either, mirror to both columns below.
-                    start_date = action.get("start_date")
-                    deadline = action.get("deadline") or action.get("end_date")
-
-                    if start_date and isinstance(start_date, str):
-                        try:
-                            from datetime import datetime
-                            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-                        except (ValueError, TypeError):
-                            logger.debug(f"Failed to parse start_date: {start_date}")
-                            start_date = None
-
-                    if deadline and isinstance(deadline, str):
-                        try:
-                            from datetime import datetime
-                            deadline = datetime.strptime(deadline, '%Y-%m-%d').date()
-                        except (ValueError, TypeError):
-                            logger.debug(f"Failed to parse deadline: {deadline}")
-                            deadline = None
-                    
-                    # Handle budget - Project model uses budget_min and budget_max, not budget
-                    budget = action.get("budget")
-                    budget_min = None
-                    budget_max = None
-                    if budget:
-                        try:
-                            budget_value = float(budget)
-                            budget_min = budget_value
-                            budget_max = budget_value
-                        except (ValueError, TypeError):
-                            pass
-                    
-                    project = Project.objects.create(
-                        name=action.get("project_name", "New Project"),
-                        description=action.get("project_description", ""),
-                        status=action.get("project_status", "planning"),
-                        priority=action.get("project_priority", "medium"),
-                        project_type=action.get("project_type", "general"),
-                        industry=industry_instance,  # Use None if not found
-                        budget_min=budget_min,
-                        budget_max=budget_max,
-                        start_date=start_date,
-                        end_date=deadline,  # mirror — legacy column
-                        deadline=deadline,
-                        created_by_company_user=company_user,
-                        owner=default_owner,
-                    )
-                    
-                    created_projects[action.get("project_name")] = project.id
-                    action_results.append({
-                        "action": "create_project",
-                        "success": True,
-                        "project_id": project.id,
-                        "project_name": project.name,
-                    })
-                except Exception as e:
-                    logger.exception(f"Error creating project: {action.get('project_name')}")
-                    action_results.append({
-                        "action": "create_project",
-                        "success": False,
-                        "error": str(e),
-                    })
-
-        # Second pass: Create tasks (can now reference created projects)
-        # If we created a project in the first pass, use it for tasks without project_id
-        default_project_id = None
-        if created_projects:
-            # Use the first created project as default
-            default_project_id = list(created_projects.values())[0]
-        
-        for action in actions:
-            if action.get("action") == "create_task":
-                try:
-                    project_id_for_task = action.get("project_id")
-                    project_name = action.get("project_name")
-                    
-                    # If project_id is null but project_name is provided, look it up
-                    if not project_id_for_task and project_name:
-                        if project_name in created_projects:
-                            project_id_for_task = created_projects[project_name]
-                        else:
-                            # Try to find existing project
-                            try:
-                                existing_project = Project.objects.get(
-                                    name=project_name,
-                                    created_by_company_user=company_user
-                                )
-                                project_id_for_task = existing_project.id
-                            except Project.DoesNotExist:
-                                pass
-                    
-                    # If still no project_id, use the default (first created project)
-                    if not project_id_for_task and default_project_id:
-                        project_id_for_task = default_project_id
-                        logger.info(f"Using default project {project_id_for_task} for task '{action.get('task_title')}'")
-                    
-                    if not project_id_for_task:
-                        action_results.append({
-                            "action": "create_task",
-                            "success": False,
-                            "error": f"Could not determine project for task '{action.get('task_title')}'. No project was created or specified.",
-                        })
-                        continue
-                    
-                    # Parse due date
-                    due_date = None
-                    due_date_str = action.get("due_date")
-                    if due_date_str:
-                        try:
-                            from django.utils import timezone
-                            from datetime import datetime as dt_time
-                            if isinstance(due_date_str, str):
-                                # Try parsing different formats
-                                for fmt in ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%SZ']:
-                                    try:
-                                        due_date = datetime.strptime(due_date_str, fmt)
-                                        if timezone.is_naive(due_date):
-                                            due_date = timezone.make_aware(due_date)
-                                        break
-                                    except ValueError:
-                                        continue
-                                # If still None, try date only
-                                if due_date is None:
-                                    date_only = datetime.strptime(due_date_str.split('T')[0], '%Y-%m-%d').date()
-                                    if date_only:
-                                        due_date = datetime.combine(date_only, dt_time(23, 59, 59))
-                                        if timezone.is_naive(due_date):
-                                            due_date = timezone.make_aware(due_date)
-                        except Exception:
-                            due_date = None
-                    
-                    # Default due_date when missing
-                    if due_date is None and project_id_for_task:
-                        try:
-                            from django.utils import timezone
-                            from datetime import datetime as dt_time
-                            task_project = Project.objects.filter(id=project_id_for_task, created_by_company_user=company_user).first()
-                            if task_project and getattr(task_project, "deadline", None):
-                                d = task_project.deadline
-                                if hasattr(d, "year"):
-                                    due_date = datetime.combine(d, dt_time(23, 59, 59))
-                                    if timezone.is_naive(due_date):
-                                        due_date = timezone.make_aware(due_date)
-                            if due_date is None and task_project and getattr(task_project, "end_date", None):
-                                d = task_project.end_date
-                                if hasattr(d, "year"):
-                                    due_date = datetime.combine(d, dt_time(23, 59, 59))
-                                    if timezone.is_naive(due_date):
-                                        due_date = timezone.make_aware(due_date)
-                            if due_date is None:
-                                due_date = timezone.now() + timedelta(days=14)
-                        except Exception:
-                            pass
-                    
-                    # Parse estimated_hours
-                    estimated_hours = action.get("estimated_hours")
-                    if estimated_hours:
-                        try:
-                            estimated_hours = float(estimated_hours)
-                        except (ValueError, TypeError):
-                            estimated_hours = None
-                    
-                    task = Task.objects.create(
-                        project_id=project_id_for_task,
-                        title=action.get("task_title", "New Task"),
-                        description=action.get("task_description", ""),
-                        status=action.get("status", "todo"),
-                        priority=action.get("priority", "medium"),
-                        due_date=due_date,
-                        estimated_hours=estimated_hours,
-                        assignee_id=action.get("assignee_id") if action.get("assignee_id") else None,
-                        ai_reasoning=action.get("reasoning", ""),
-                    )
-                    
-                    action_results.append({
-                        "action": "create_task",
-                        "success": True,
-                        "task_id": task.id,
-                        "task_title": task.title,
-                        "project_id": project_id_for_task,
-                        "project_name": task.project.name if task.project else None,
-                        "message": f'Task "{task.title}" created successfully!',
-                        "priority": getattr(task, "priority", None) or "medium",
-                        "assignee_username": task.assignee.username if task.assignee else None,
-                        "assignee_name": _assignee_display(task.assignee),
-                        "due_date": task.due_date.isoformat() if task.due_date else None,
-                        "deadline": task.due_date.isoformat() if task.due_date else None,
-                        "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
-                    })
-                except Exception as e:
-                    logger.exception(f"Error creating task: {action.get('task_title')}")
-                    action_results.append({
-                        "action": "create_task",
-                        "success": False,
-                        "error": str(e),
-                    })
-
-        logger.info(f"Returning project_pilot_from_file response with {len(action_results)} action results")
         return Response({
-            "status": "success",
+            "status": "accepted",
             "data": {
-                "answer": result.get("answer", ""),
-                "action_results": action_results,
-                "extracted_text_preview": extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text,
-            }
-        }, status=status.HTTP_200_OK)
-        
+                "id": job.id,
+                "processing_status": job.status,
+                "file_name": job.file_name,
+                "dispatch_mode": dispatch_mode,
+            },
+        }, status=status.HTTP_202_ACCEPTED)
+
     except KeyServiceError:
         raise
     except Exception as e:
-        logger.exception("project_pilot_from_file failed")
+        logger.exception("project_pilot_from_file (enqueue) failed")
         return Response(
-            {"status": "error", "message": "Failed to process file", "error": str(e)},
+            {"status": "error", "message": "Failed to enqueue upload", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def project_pilot_job_status(request, job_id):
+    """Lightweight polling endpoint for a ProjectPilotJob. Returns the same
+    shape the (old sync) endpoint used to return when the job is ready,
+    plus lifecycle fields (processing_status, error, timing_ms)."""
+    from project_manager_agent.models import ProjectPilotJob
+    job = ProjectPilotJob.objects.filter(id=job_id, company_user=request.user).first()
+    if not job:
+        return Response(
+            {"status": "error", "message": "Job not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return Response({
+        "status": "success",
+        "data": {
+            "id": job.id,
+            "processing_status": job.status,
+            "file_name": job.file_name,
+            "answer": job.answer or "",
+            "action_results": job.action_results or [],
+            "cannot_do": job.cannot_do or "",
+            "error": job.error_message or "",
+            "timing_ms": job.timing_ms or {},
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        },
+    }, status=status.HTTP_200_OK)
+
+
 
 
 # ==================== DAILY STANDUP ENDPOINT ====================

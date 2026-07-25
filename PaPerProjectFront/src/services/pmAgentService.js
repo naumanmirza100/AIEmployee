@@ -195,37 +195,85 @@ export const generateSubtasks = async (projectId) => {
  * @param {string|null} prompt - Optional instruction (e.g. "convert this to a project"). Without it the
  *                               agent only sees the file's raw content and won't know what to do with it.
  */
-export const projectPilotFromFile = async (file, projectId = null, chatHistory = null, prompt = null) => {
+/**
+ * Upload a document to Project Pilot.
+ *
+ * Pass `options.onProgress({ loaded, total, percent })` to receive live
+ * byte-level upload progress — used by the BackgroundUploadManager to
+ * render a floating pill instead of blocking the UI while the server-side
+ * LLM extraction runs.
+ *
+ * Uses XHR under the hood because `fetch` still can't report upload-side
+ * progress in a portable way. `options.signal` (AbortSignal) cancels an
+ * in-flight upload.
+ */
+export const projectPilotFromFile = (file, projectId = null, chatHistory = null, prompt = null, options = {}) => {
+  const token = localStorage.getItem('company_auth_token');
+
+  const formData = new FormData();
+  formData.append('file', file);
+  if (projectId) {
+    formData.append('project_id', projectId);
+  }
+  if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+    formData.append('chat_history', JSON.stringify(chatHistory.map((m) => ({ role: m.role, content: m.content || '' }))));
+  }
+  if (prompt && String(prompt).trim()) {
+    formData.append('prompt', String(prompt).trim());
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}/project-manager/ai/project-pilot/upload-file`, true);
+    if (token) xhr.setRequestHeader('Authorization', `Token ${token}`);
+
+    if (typeof options.onProgress === 'function' && xhr.upload) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          options.onProgress({
+            loaded: e.loaded,
+            total: e.total,
+            percent: Math.round((e.loaded / e.total) * 100),
+          });
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch { data = {}; }
+      const ok = xhr.status >= 200 && xhr.status < 300;
+      if (!ok) {
+        const err = new Error(data.message || `HTTP error! status: ${xhr.status}`);
+        err.status = xhr.status;
+        return reject(err);
+      }
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.onabort = () => reject(Object.assign(new Error('Upload aborted'), { aborted: true }));
+
+    if (options.signal) {
+      if (options.signal.aborted) { xhr.abort(); return; }
+      options.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+
+    xhr.send(formData);
+  });
+};
+
+/**
+ * Poll a Project Pilot async job. Returns
+ *   { status, data: { processing_status, answer, action_results, cannot_do,
+ *                     error, timing_ms, file_name, ... } }
+ * `processing_status` is one of: 'queued' | 'processing' | 'ready' | 'failed'.
+ */
+export const getProjectPilotJobStatus = async (jobId) => {
   try {
-    const token = localStorage.getItem('company_auth_token');
-
-    const formData = new FormData();
-    formData.append('file', file);
-    if (projectId) {
-      formData.append('project_id', projectId);
-    }
-    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
-      formData.append('chat_history', JSON.stringify(chatHistory.map((m) => ({ role: m.role, content: m.content || '' }))));
-    }
-    if (prompt && String(prompt).trim()) {
-      formData.append('prompt', String(prompt).trim());
-    }
-
-    const response = await fetch(`${API_BASE_URL}/project-manager/ai/project-pilot/upload-file`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Token ${token}`,
-      },
-      body: formData,
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.message || `HTTP error! status: ${response.status}`);
-    }
-    return data;
+    const response = await companyApi.get(`/project-manager/ai/project-pilot/jobs/${jobId}/status`);
+    return response;
   } catch (error) {
-    console.error('Project Pilot from File error:', error);
+    console.error('Project Pilot job status error:', error);
     throw error;
   }
 };
@@ -546,6 +594,7 @@ export const deleteNotificationTemplate = async (templateId) => {
 export default {
   projectPilot,
   projectPilotFromFile,
+  getProjectPilotJobStatus,
   taskPrioritization,
   knowledgeQA,
   generateGraph,
