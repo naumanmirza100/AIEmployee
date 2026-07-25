@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ArrowLeft, FileText, RefreshCw, ChevronDown, ChevronRight, Inbox, WifiOff, MessageSquare } from 'lucide-react';
+import { Loader2, ArrowLeft, FileText, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Inbox, WifiOff, MessageSquare } from 'lucide-react';
 import { getEmailStatusFull } from '@/services/marketingAgentService';
 
 const STATUS_LABELS = {
@@ -233,6 +233,8 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
   const [errorKind, setErrorKind] = useState(null); // 'network' | 'other'
   const [refreshing, setRefreshing] = useState(false);
   const [expandedEmailId, setExpandedEmailId] = useState(null);
+  const [repliesPage, setRepliesPage] = useState(1);   // "Replied contacts" pagination
+  const REPLIES_PER_PAGE = 5;
 
   const fetchData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -344,7 +346,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
     );
   }
 
-  const { campaign, stats, currently_sending, emails_by_sequence, total_emails_shown, pending_emails = [], upcoming_emails = [], replies_by_sequence = {} } = data || {};
+  const { campaign, stats, currently_sending, emails_by_sequence, total_emails_shown, pending_emails = [], upcoming_emails = [], replies_by_sequence = {}, ai_quota_exhausted = false } = data || {};
   const upcomingMain = (upcoming_emails || []).filter((u) => !u.is_sub_sequence);
   const upcomingSub = (upcoming_emails || []).filter((u) => u.is_sub_sequence);
 
@@ -474,14 +476,39 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {emails.map((e) => {
+                      {(() => {
+                        // Nest sub-sequence emails directly under the main email whose
+                        // reply triggered them (parent_email_id). Parents newest-first;
+                        // each parent's children (also newest-first) follow it. Sub-seq
+                        // rows with no known parent fall back to the flat list.
+                        const byId = new Map(emails.map((e) => [e.id, e]));
+                        const childrenOf = {};
+                        const roots = [];
+                        for (const e of emails) {
+                          if (e.type === 'sub_sequence' && e.parent_email_id && byId.has(e.parent_email_id)) {
+                            (childrenOf[e.parent_email_id] ||= []).push(e);
+                          } else {
+                            roots.push(e);
+                          }
+                        }
+                        const byDateDesc = (a, b) => new Date(b.sent_at || 0) - new Date(a.sent_at || 0);
+                        roots.sort(byDateDesc);
+                        const ordered = [];
+                        for (const root of roots) {
+                          ordered.push({ ...root, _isChild: false });
+                          (childrenOf[root.id] || []).sort(byDateDesc).forEach((c) =>
+                            ordered.push({ ...c, _isChild: true })
+                          );
+                        }
+                        return ordered;
+                      })().map((e) => {
                         const isExpanded = expandedEmailId === e.id;
                         const isClickable = !!e.is_replied;
                         const rowReplies = isExpanded ? getRepliesForEmail(e) : [];
                         return (
                           <React.Fragment key={e.id}>
                             <tr
-                              className={`border-b last:border-0 ${isClickable ? 'cursor-pointer hover:bg-muted/40' : ''} ${isExpanded ? 'bg-muted/30' : ''}`}
+                              className={`border-b last:border-0 ${isClickable ? 'cursor-pointer hover:bg-muted/40' : ''} ${isExpanded ? 'bg-muted/30' : ''} ${e._isChild ? 'bg-violet-500/[0.04]' : ''}`}
                               onClick={() => toggleRow(e)}
                               aria-expanded={isClickable ? isExpanded : undefined}
                             >
@@ -490,7 +517,10 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                                   isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />
                                 ) : null}
                               </td>
-                              <td className="p-2 text-foreground">{e.recipient_email}</td>
+                              <td className={`p-2 text-foreground ${e._isChild ? 'pl-6' : ''}`}>
+                                {e._isChild && <span className="text-violet-400/70 mr-1">↳</span>}
+                                {e.recipient_email}
+                              </td>
                               <td className="p-2 max-w-[200px] truncate text-foreground" title={e.subject}>{e.subject}</td>
                               <td className="p-2 max-w-[160px] truncate text-muted-foreground" title={e.template_name || ''}>
                                 {e.template_name || <span className="text-muted-foreground/60">—</span>}
@@ -621,7 +651,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                     <div>
                       <p className="font-medium text-foreground">{u.lead_email}</p>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Next: Step {u.step_order} – {(u.template_name || '').replace(/neutal/i, 'neutral')}
+                        Next: Step {u.step_order} – {(u.subject || u.template_name || '').replace(/neutal/i, 'neutral')}
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Delay: {formatDelay(u.delay_days, u.delay_hours, u.delay_minutes)}
@@ -657,7 +687,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                         <span className="inline-block rounded bg-violet-100/90 dark:bg-violet-900/35 text-violet-800 dark:text-violet-300 text-xs px-1.5 py-0.5 mr-1.5 border border-violet-200/50 dark:border-violet-700/40">
                           Sub: {u.sub_sequence_name || u.sequence_name}
                         </span>
-                        <span>Next: Step {u.step_order} – {(u.template_name || '').replace(/neutal/i, 'neutral')}</span>
+                        <span>Next: Step {u.step_order} – {(u.subject || u.template_name || '').replace(/neutal/i, 'neutral')}</span>
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Delay: {formatDelay(u.delay_days, u.delay_hours, u.delay_minutes)}
@@ -684,33 +714,72 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
               Replied contacts
             </CardTitle>
             <CardDescription>Reply content, the email it responded to, and AI-detected interest.</CardDescription>
+            {ai_quota_exhausted && (
+              <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                <span className="text-amber-500 mt-0.5">⚠️</span>
+                <span>
+                  AI tokens finished — replies are being classified with keyword rules
+                  for now. Top up this agent's token quota to re-enable full AI analysis.
+                </span>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
-            {Object.keys(replies_by_sequence).length > 0 ? (
-              <div className="space-y-6">
-                {Object.entries(replies_by_sequence).map(([seqKey, { sequence_name, replies: seqReplies }]) => (
-                  <div key={seqKey} className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-0.5 text-xs font-semibold border border-sky-200/50 dark:border-sky-700/40">
-                        {sequence_name}
-                      </span>
-                      <span className="text-xs text-muted-foreground">{seqReplies.length} reply(ies)</span>
+            {(() => {
+              // Flatten grouped-or-flat replies into one list, newest first, so we
+              // can paginate the whole section (6 per page).
+              const allReplies = Object.keys(replies_by_sequence).length > 0
+                ? Object.values(replies_by_sequence).flatMap((g) => g.replies || [])
+                : replies;
+              const sorted = [...allReplies].sort(
+                (a, b) => new Date(b.replied_at || b.created_at || 0) - new Date(a.replied_at || a.created_at || 0)
+              );
+              const totalReplyPages = Math.max(1, Math.ceil(sorted.length / REPLIES_PER_PAGE));
+              const page = Math.min(repliesPage, totalReplyPages);
+              const start = (page - 1) * REPLIES_PER_PAGE;
+              const pageReplies = sorted.slice(start, start + REPLIES_PER_PAGE);
+
+              return (
+                <>
+                  <ul className="space-y-3">
+                    {pageReplies.map((r) => (
+                      <ReplyCard key={r.id} reply={r} />
+                    ))}
+                  </ul>
+
+                  {sorted.length > REPLIES_PER_PAGE && (
+                    <div className="flex items-center justify-between gap-3 border-t pt-3 mt-4">
+                      <p className="text-xs text-muted-foreground">
+                        Showing {start + 1}–{Math.min(start + REPLIES_PER_PAGE, sorted.length)} of {sorted.length} replies
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={page <= 1}
+                          onClick={() => setRepliesPage((p) => Math.max(1, p - 1))}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                          Previous
+                        </Button>
+                        <span className="text-xs text-muted-foreground min-w-[70px] text-center">
+                          Page {page} of {totalReplyPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={page >= totalReplyPages}
+                          onClick={() => setRepliesPage((p) => p + 1)}
+                        >
+                          Next
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                    <ul className="space-y-3">
-                      {seqReplies.map((r) => (
-                        <ReplyCard key={r.id} reply={r} />
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <ul className="space-y-3">
-                {replies.map((r) => (
-                  <ReplyCard key={r.id} reply={r} />
-                ))}
-              </ul>
-            )}
+                  )}
+                </>
+              );
+            })()}
           </CardContent>
         </Card>
       )}

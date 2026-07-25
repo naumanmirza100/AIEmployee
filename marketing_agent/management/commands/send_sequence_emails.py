@@ -18,7 +18,7 @@ from django.db.models import Q, F
 from datetime import timedelta, datetime
 from marketing_agent.models import (
     Campaign, EmailSequence, EmailSequenceStep, EmailSendHistory,
-    Lead, CampaignContact, Reply
+    Lead, CampaignContact, Reply, ReplySubSequenceRun
 )
 from marketing_agent.services.email_service import email_service
 import logging
@@ -158,20 +158,13 @@ class Command(BaseCommand):
                 completed=False, replied=False
             ).select_related('lead', 'sequence').prefetch_related('sequence__steps')
 
-            # Handle replied contacts - try to assign sub-sequences
-            replied_without_sub = CampaignContact.objects.filter(
-                campaign=campaign, replied=True, sub_sequence__isnull=True
-            ).select_related('lead', 'sequence', 'sub_sequence')
-
-            for contact in replied_without_sub:
-                self._try_assign_sub_sequence(contact)
-
-            # Get sub-sequence contacts
-            sub_sequence_contacts = CampaignContact.objects.filter(
-                campaign=campaign, replied=True,
-                sub_sequence__is_active=True, sub_sequence__isnull=False,
-                sub_sequence_completed=False
-            ).select_related('lead', 'sub_sequence').prefetch_related('sub_sequence__steps')
+            # Per-reply sub-sequence runs (the new model). Each reply that matched
+            # a sub-sequence has its own run row, so a lead's different replies run
+            # their sub-sequences in parallel. Assignment already happened in
+            # reply_processor when the reply came in — the sender just advances runs.
+            reply_runs = ReplySubSequenceRun.objects.filter(
+                campaign=campaign, completed=False, cancelled=False,
+            ).select_related('lead', 'sub_sequence', 'reply', 'contact').prefetch_related('sub_sequence__steps')
 
             # Process main sequence contacts
             for contact in main_contacts:
@@ -184,11 +177,10 @@ class Command(BaseCommand):
                 elif result == 'stopped':
                     total_stopped += 1
 
-            # Process sub-sequence contacts
-            for contact in sub_sequence_contacts:
+            # Process per-reply sub-sequence runs
+            for run in reply_runs:
                 total_checked += 1
-                contact.refresh_from_db()
-                result = self._process_sub_sequence_contact(contact, campaign, dry_run)
+                result = self._process_reply_run(run, campaign, dry_run)
                 if result == 'sent':
                     total_sent += 1
                 elif result == 'skipped':
@@ -202,40 +194,84 @@ class Command(BaseCommand):
                 f'[Email Sequences] Sent: {total_sent} | Completed: {total_stopped} | Checked: {total_checked}'
             ))
 
-    def _try_assign_sub_sequence(self, contact):
-        """Try to assign a sub-sequence to a replied contact."""
-        if not contact.sequence or not contact.reply_interest_level:
-            return
+    def _process_reply_run(self, run, campaign, dry_run):
+        """Send the next step of ONE per-reply sub-sequence run.
 
-        target_interest = contact.reply_interest_level
+        Mirrors the old per-contact sender but drives entirely off the run row
+        (run.step / run.last_sent_at) and the reply's timestamp — so multiple runs
+        for the same lead advance independently. Returns 'sent'/'skipped'/'stopped'.
+        """
+        lead = run.lead
+        sub_sequence = run.sub_sequence
 
-        # Try exact interest match -> 'any' -> any active sub-sequence
-        for filter_kwargs in [
-            {'interest_level': target_interest},
-            {'interest_level': 'any'},
-            {},
-        ]:
-            sub_seq = EmailSequence.objects.filter(
-                parent_sequence=contact.sequence,
-                is_sub_sequence=True, is_active=True,
-                **filter_kwargs
-            ).first()
-            if sub_seq:
-                break
+        if not sub_sequence or not sub_sequence.is_active:
+            run.cancelled = True
+            run.save(update_fields=['cancelled', 'updated_at'])
+            return 'skipped'
 
-        if not sub_seq:
-            return
+        steps = sub_sequence.steps.all().order_by('step_order')
+        step_count = steps.count()
+        if step_count == 0:
+            return 'skipped'
 
-        contact.sub_sequence = sub_seq
-        contact.sub_sequence_step = 0
-        contact.sub_sequence_last_sent_at = None
-        contact.sub_sequence_completed = False
-        if not contact.replied_at:
-            contact.replied_at = timezone.now()
-        contact.save()
-        self.stdout.write(self.style.SUCCESS(
-            f'  Sub-sequence "{sub_seq.name}" assigned to {contact.lead.email}'
-        ))
+        next_step_number = run.step + 1
+        if next_step_number > step_count:
+            run.completed = True
+            run.save(update_fields=['completed', 'updated_at'])
+            return 'stopped'
+
+        next_step = steps.filter(step_order=next_step_number).first()
+        if not next_step:
+            return 'skipped'
+
+        # Timing: first step anchors off the reply time; later steps off last send.
+        delay = timedelta(
+            days=next_step.delay_days, hours=next_step.delay_hours,
+            minutes=next_step.delay_minutes,
+        )
+        if run.step == 0:
+            reference_time = (run.reply.replied_at if run.reply_id else None) or run.created_at
+            send_time = reference_time + delay
+            should_send = delay.total_seconds() <= 60 or timezone.now() >= send_time
+        else:
+            if not run.last_sent_at:
+                # Shouldn't happen, but recover: treat as first step.
+                run.step = 0
+                run.save(update_fields=['step', 'updated_at'])
+                return 'skipped'
+            send_time = run.last_sent_at + delay
+            should_send = timezone.now() >= send_time
+
+        if not should_send:
+            return 'skipped'
+
+        if lead and lead.pk:
+            lead.refresh_from_db(fields=['email', 'first_name', 'last_name', 'company', 'job_title'])
+
+        if dry_run:
+            self.stdout.write(f'  [DRY RUN] Sub-seq run step {next_step_number} -> {lead.email} ({sub_sequence.name})')
+            return 'sent'
+
+        email_account = sub_sequence.get_sending_account()
+        result = email_service.send_email(
+            template=next_step.template, lead=lead,
+            campaign=campaign, email_account=email_account,
+        )
+        if result.get('success'):
+            run.step = next_step_number
+            run.last_sent_at = timezone.now()
+            if next_step_number >= step_count:
+                run.completed = True
+            run.save(update_fields=['step', 'last_sent_at', 'completed', 'updated_at'])
+            self.stdout.write(self.style.SUCCESS(
+                f'  [SENT] Sub-seq run step {next_step_number} -> {lead.email} ({sub_sequence.name})'
+            ))
+            return 'stopped' if run.completed else 'sent'
+        else:
+            self.stdout.write(self.style.ERROR(
+                f'  [FAIL] Sub-seq run step {next_step_number} -> {lead.email}: {result.get("error", "Unknown")}'
+            ))
+            return 'skipped'
 
     def _process_main_sequence_contact(self, contact, campaign, sequences, dry_run):
         """Process a contact in the main sequence. Returns 'sent', 'skipped', or 'stopped'"""
@@ -278,170 +314,6 @@ class Command(BaseCommand):
             return 'skipped'
 
         return self._send_sequence_email(contact, campaign, sequence, next_step, next_step_number, step_count, dry_run)
-
-    def _reply_was_to_sub_sequence_email(self, contact, campaign):
-        """True if the contact's most recent reply was to a sub-sequence email.
-
-        Trusts Reply.sub_sequence (set authoritatively in reply_processor when the
-        triggering email was matched to a sub-seq template). Falls back to a
-        template-based check only if that field is null — using any() so a template
-        shared across main and sub still counts as sub when any linked step is sub.
-        """
-        latest = (
-            Reply.objects.filter(campaign=campaign, lead=contact.lead)
-            .select_related('sub_sequence', 'triggering_email', 'triggering_email__email_template')
-            .order_by('-replied_at')
-            .first()
-        )
-        if not latest:
-            return False
-        if latest.sub_sequence_id is not None:
-            return True
-        if not latest.triggering_email_id or not latest.triggering_email.email_template_id:
-            return False
-        template = latest.triggering_email.email_template
-        steps = list(template.sequence_steps.select_related('sequence').all())
-        if not steps:
-            return False
-        return any(step.sequence.is_sub_sequence for step in steps)
-
-    def _process_sub_sequence_contact(self, contact, campaign, dry_run):
-        """Process a contact in a sub-sequence (after they replied). Returns 'sent', 'skipped', or 'stopped'"""
-        lead = contact.lead
-        sub_sequence = contact.sub_sequence
-
-        if not sub_sequence:
-            return 'skipped'
-
-        # Skip if reply was to a sub-sequence email
-        if self._reply_was_to_sub_sequence_email(contact, campaign):
-            contact.sub_sequence = None
-            contact.sub_sequence_step = 0
-            contact.sub_sequence_last_sent_at = None
-            contact.sub_sequence_completed = False
-            contact.save()
-            return 'skipped'
-
-        # Verify interest level match
-        if sub_sequence.interest_level != 'any':
-            if not contact.reply_interest_level or contact.reply_interest_level != sub_sequence.interest_level:
-                # Clear wrong sub-sequence and try to find correct one
-                contact.sub_sequence = None
-                contact.sub_sequence_step = 0
-                contact.sub_sequence_last_sent_at = None
-                contact.sub_sequence_completed = False
-
-                target_interest = contact.reply_interest_level or 'neutral'
-                correct_sub = (
-                    EmailSequence.objects.filter(
-                        parent_sequence=contact.sequence, is_sub_sequence=True,
-                        is_active=True, interest_level=target_interest
-                    ).first()
-                    or EmailSequence.objects.filter(
-                        parent_sequence=contact.sequence, is_sub_sequence=True,
-                        is_active=True, interest_level='any'
-                    ).first()
-                )
-
-                if correct_sub:
-                    contact.sub_sequence = correct_sub
-                    contact.save()
-                    sub_sequence = correct_sub
-                else:
-                    contact.save()
-                    return 'skipped'
-
-        steps = sub_sequence.steps.all().order_by('step_order')
-        step_count = steps.count()
-
-        if step_count == 0:
-            return 'skipped'
-
-        next_step_number = contact.sub_sequence_step + 1
-
-        if next_step_number > step_count:
-            contact.sub_sequence_completed = True
-            contact.save()
-            return 'stopped'
-
-        next_step = steps.filter(step_order=next_step_number).first()
-        if not next_step:
-            return 'skipped'
-
-        # Calculate if it's time to send
-        should_send = False
-
-        if contact.sub_sequence_step == 0:
-            # First step - use replied_at as reference
-            if not contact.replied_at:
-                contact.replied_at = timezone.now()
-                contact.save()
-
-            reference_time = contact.replied_at
-            delay = timedelta(
-                days=next_step.delay_days, hours=next_step.delay_hours,
-                minutes=next_step.delay_minutes
-            )
-            send_time = reference_time + delay
-
-            if delay.total_seconds() <= 60:
-                should_send = True
-            elif timezone.now() >= send_time:
-                should_send = True
-            else:
-                return 'skipped'
-        else:
-            # Subsequent steps - check delay from last sub-sequence email
-            if not contact.sub_sequence_last_sent_at:
-                contact.sub_sequence_step = 0
-                contact.save()
-                return 'skipped'
-
-            delay = timedelta(
-                days=next_step.delay_days, hours=next_step.delay_hours,
-                minutes=next_step.delay_minutes
-            )
-            send_time = contact.sub_sequence_last_sent_at + delay
-
-            if timezone.now() >= send_time:
-                should_send = True
-            else:
-                return 'skipped'
-
-        if should_send:
-            if lead and lead.pk:
-                lead.refresh_from_db(fields=['email', 'first_name', 'last_name', 'company', 'job_title'])
-
-            if not dry_run:
-                email_account = sub_sequence.get_sending_account()
-                result = email_service.send_email(
-                    template=next_step.template, lead=lead,
-                    campaign=campaign, email_account=email_account
-                )
-
-                if result.get('success'):
-                    contact.sub_sequence_step = next_step_number
-                    contact.sub_sequence_last_sent_at = timezone.now()
-                    contact.save()
-                    self.stdout.write(self.style.SUCCESS(
-                        f'  [SENT] Sub-seq step {next_step_number} -> {lead.email} ({sub_sequence.name})'
-                    ))
-
-                    if next_step_number >= step_count:
-                        contact.sub_sequence_completed = True
-                        contact.save()
-                        return 'stopped'
-                    return 'sent'
-                else:
-                    self.stdout.write(self.style.ERROR(
-                        f'  [FAIL] Sub-seq step {next_step_number} -> {lead.email}: {result.get("error", "Unknown")}'
-                    ))
-                    return 'skipped'
-            else:
-                self.stdout.write(f'  [DRY RUN] Sub-seq step {next_step_number} -> {lead.email}')
-                return 'sent'
-
-        return 'skipped'
 
     def _should_send_email(self, contact, campaign, next_step):
         """Determine if it's time to send the next email in main sequence"""
