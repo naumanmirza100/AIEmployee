@@ -439,6 +439,11 @@ else:
     MEDIA_URL = '/media/'
     MEDIA_ROOT = BASE_DIR / 'media'
 
+# Stable on-disk base for local-only artifacts (uploaded docs, FAISS indexes)
+# that never go to S3. When S3 is on, MEDIA_ROOT is '' — using it directly would
+# scatter these into the project root, so pin them under BASE_DIR/media instead.
+LOCAL_STORAGE_ROOT = MEDIA_ROOT or (BASE_DIR / 'media')
+
 
 # --------------------
 # Default PK

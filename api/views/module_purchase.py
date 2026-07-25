@@ -23,6 +23,23 @@ logger = logging.getLogger(__name__)
 
 stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
 
+
+def _format_duration(delta):
+    """Render a timedelta down to the minute, e.g. '29d 10h 45m', '10h 45m', '45m'.
+
+    Larger units are dropped when zero so short spans stay readable, and a span
+    under a minute still reads as '1m' rather than an empty string.
+    """
+    total_minutes = int(delta.total_seconds() // 60)
+    days, rem_minutes = divmod(total_minutes, 1440)
+    hours, minutes = divmod(rem_minutes, 60)
+
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{max(minutes, 1)}m"
+
 # Module pricing configuration (USD)
 MODULE_PRICES = {
     'recruitment_agent': 99,
@@ -155,9 +172,7 @@ def get_purchased_modules(request):
                 if effective_status == 'active':
                     diff = purchase.expires_at - now
                     if diff.total_seconds() > 0:
-                        days = diff.days
-                        hours = diff.seconds // 3600
-                        time_remaining = f"{days}d {hours}h remaining" if days > 0 else f"{hours}h remaining"
+                        time_remaining = f"{_format_duration(diff)} remaining"
                     else:
                         # Edge case: still active in DB but actually expired
                         is_expired = True
@@ -165,9 +180,7 @@ def get_purchased_modules(request):
                 if effective_status in ('expired',):
                     ended = now - purchase.expires_at
                     if ended.total_seconds() > 0:
-                        days = ended.days
-                        hours = ended.seconds // 3600
-                        time_ended_ago = f"Ended {days}d {hours}h ago" if days > 0 else f"Ended {hours}h ago"
+                        time_ended_ago = f"Ended {_format_duration(ended)} ago"
 
             # For active: time since purchase. For expired/cancelled: how long it was active.
             if effective_status == 'active':

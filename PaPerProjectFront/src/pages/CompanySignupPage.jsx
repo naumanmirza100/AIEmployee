@@ -21,28 +21,98 @@ const initialForm = {
   description: '',
 };
 
+const FieldError = ({ message }) =>
+  message ? <p className="text-xs text-destructive">{message}</p> : null;
+
+// Company size: a single count ("50") or a range ("50-100"). Every number in it
+// must be positive, and a range must not run backwards.
+const validateCompanySize = (raw) => {
+  const value = (raw || '').trim();
+  if (!value) return '';
+  if (!/^\d+(\s*-\s*\d+)?$/.test(value)) {
+    return 'Enter a positive number (e.g. 50) or a range (e.g. 50-100)';
+  }
+  const [from, to] = value.split('-').map((n) => parseInt(n, 10));
+  if (from <= 0 || (to !== undefined && to <= 0)) {
+    return 'Company size must be greater than 0';
+  }
+  if (to !== undefined && to <= from) {
+    return 'The end of the range must be greater than the start';
+  }
+  return '';
+};
+
+// The https:// prefix is fixed in the UI, so the user types only the domain.
+const validateWebsite = (raw) => {
+  const value = (raw || '').trim();
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value)) {
+    return 'No need for https:// — just enter the domain (e.g. laskon.com)';
+  }
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(value)) {
+    return 'Enter a valid domain (e.g. laskon.com)';
+  }
+  return '';
+};
+
+const validateForm = (form) => {
+  const errors = {};
+  if (!form.name.trim()) errors.name = 'Company name is required';
+  if (!form.email.trim()) errors.email = 'Email is required';
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+    errors.email = 'Enter a valid email address (e.g. name@example.com)';
+  }
+  if (!form.phone.trim()) errors.phone = 'Phone is required';
+  else if (form.phone.replace(/\D/g, '').length < 7) {
+    errors.phone = 'Enter a valid phone number';
+  }
+
+  const websiteError = validateWebsite(form.website);
+  if (websiteError) errors.website = websiteError;
+
+  const sizeError = validateCompanySize(form.company_size);
+  if (sizeError) errors.company_size = sizeError;
+
+  return errors;
+};
+
 const CompanySignupPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [form, setForm] = useState(initialForm);
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
 
-  const setField = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  const setField = (key) => (e) => {
+    setForm((f) => ({ ...f, [key]: e.target.value }));
+    // Clear the field's error as soon as the user starts correcting it.
+    setErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name || !form.email || !form.phone) {
-      toast({
-        title: 'Missing fields',
-        description: 'Company name, email, and phone are required.',
-        variant: 'destructive',
-      });
+
+    const nextErrors = validateForm(form);
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
       return;
     }
+    setErrors({});
+
     try {
       setLoading(true);
-      const res = await companyAuthService.signupCompany(form);
+      // The input holds a bare domain; the backend's URLField needs a scheme.
+      const payload = {
+        ...form,
+        website: form.website.trim() ? `https://${form.website.trim()}` : '',
+      };
+      const res = await companyAuthService.signupCompany(payload);
       toast({
         title: 'Account created',
         description: res.message || 'Check your email for a setup link.',
@@ -101,19 +171,51 @@ const CompanySignupPage = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="name">Company Name <span className="text-red-500">*</span></Label>
-                        <Input id="name" value={form.name} onChange={setField('name')} required placeholder="Acme Inc." />
+                        <Input
+                          id="name" value={form.name} onChange={setField('name')} placeholder="Acme Inc."
+                          aria-invalid={!!errors.name}
+                          className={errors.name ? 'border-destructive focus-visible:ring-destructive' : ''}
+                        />
+                        <FieldError message={errors.name} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="email">Email <span className="text-red-500">*</span></Label>
-                        <Input id="email" type="email" value={form.email} onChange={setField('email')} required placeholder="company@example.com" />
+                        <Input
+                          id="email" type="email" value={form.email} onChange={setField('email')} placeholder="company@example.com"
+                          aria-invalid={!!errors.email}
+                          className={errors.email ? 'border-destructive focus-visible:ring-destructive' : ''}
+                        />
+                        <FieldError message={errors.email} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="phone">Phone <span className="text-red-500">*</span></Label>
-                        <Input id="phone" value={form.phone} onChange={setField('phone')} required placeholder="+1 234 567 8900" />
+                        <Input
+                          id="phone" value={form.phone} onChange={setField('phone')} placeholder="+1 234 567 8900"
+                          aria-invalid={!!errors.phone}
+                          className={errors.phone ? 'border-destructive focus-visible:ring-destructive' : ''}
+                        />
+                        <FieldError message={errors.phone} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="website">Website</Label>
-                        <Input id="website" value={form.website} onChange={setField('website')} placeholder="https://acme.com" />
+                        <div
+                          className={`flex h-10 w-full items-center rounded-md border bg-background text-sm ring-offset-background focus-within:ring-2 focus-within:ring-offset-2 ${
+                            errors.website
+                              ? 'border-destructive focus-within:ring-destructive'
+                              : 'border-input focus-within:ring-ring'
+                          }`}
+                        >
+                          <span className="select-none pl-3 pr-0.5 text-muted-foreground">https://</span>
+                          <input
+                            id="website"
+                            value={form.website}
+                            onChange={setField('website')}
+                            placeholder="laskon.com"
+                            aria-invalid={!!errors.website}
+                            className="h-full flex-1 rounded-r-md bg-transparent pr-3 outline-none placeholder:text-muted-foreground"
+                          />
+                        </div>
+                        <FieldError message={errors.website} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="industry">Industry</Label>
@@ -121,7 +223,13 @@ const CompanySignupPage = () => {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="company_size">Company Size</Label>
-                        <Input id="company_size" value={form.company_size} onChange={setField('company_size')} placeholder="50-100" />
+                        <Input
+                          id="company_size" value={form.company_size} onChange={setField('company_size')}
+                          inputMode="numeric" placeholder="50 or 50-100"
+                          aria-invalid={!!errors.company_size}
+                          className={errors.company_size ? 'border-destructive focus-visible:ring-destructive' : ''}
+                        />
+                        <FieldError message={errors.company_size} />
                       </div>
                     </div>
                     <div className="space-y-2">

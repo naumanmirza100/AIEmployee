@@ -11,6 +11,8 @@ import {
   HelpCircle, Upload, Sparkles, MessageSquareText, Quote, Lightbulb,
 } from 'lucide-react';
 import operationsService from '@/services/operationsAgentService';
+import { ElapsedTimer } from '@/components/frontline/chatShellUtils';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 
 const ACCENT = '#f59e0b'; // amber / operations accent
 const ACCENT_SOFT = 'rgba(245,158,11,0.12)';
@@ -175,6 +177,9 @@ const KnowledgeQA = () => {
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendStartedAt, setSendStartedAt] = useState(null);
+  const [pendingDeleteChat, setPendingDeleteChat] = useState(null);
+  const [deletingChat, setDeletingChat] = useState(false);
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -276,12 +281,22 @@ const KnowledgeQA = () => {
     setMessages((prev) => [...prev, userMsg]);
     setQuestion('');
     setSending(true);
+    setSendStartedAt(performance.now());
     setTimeout(scrollToBottom, 10);
 
     try {
       const res = await operationsService.askQaQuestion(q, selectedChatId || null);
       if (res?.status === 'success' && res.message) {
-        const assistantMsg = res.message;
+        // Keep timing on the message so the badge renders (nested in responseData
+        // so it also survives a chat re-fetch).
+        const assistantMsg = {
+          ...res.message,
+          responseData: {
+            ...(res.message.responseData || {}),
+            timing_ms: res.timing_ms || res.message.responseData?.timing_ms || {},
+            cache_hit: res.cache_hit ?? res.message.responseData?.cache_hit ?? false,
+          },
+        };
         setMessages((prev) => [...prev, assistantMsg]);
 
         // If this was a new chat, pick up the new id + title and refresh sidebar list
@@ -325,21 +340,30 @@ const KnowledgeQA = () => {
       });
     } finally {
       setSending(false);
+      setSendStartedAt(null);
       setTimeout(scrollToBottom, 50);
     }
   };
 
-  const handleDeleteChat = async (e, chatId) => {
+  // Delete chat — opens the styled confirm modal (was window.confirm)
+  const handleDeleteChat = (e, chat) => {
     e.stopPropagation();
-    if (!window.confirm('Delete this chat? This cannot be undone.')) return;
+    setPendingDeleteChat(chat);
+  };
+
+  const confirmDeleteChat = async () => {
+    const chat = pendingDeleteChat;
+    if (!chat) return;
     try {
-      const res = await operationsService.deleteQaChat(chatId);
+      setDeletingChat(true);
+      const res = await operationsService.deleteQaChat(chat.id);
       if (res?.status === 'success') {
-        setChats((prev) => prev.filter((c) => c.id !== chatId));
-        if (selectedChatId === chatId) {
+        setChats((prev) => prev.filter((c) => c.id !== chat.id));
+        if (selectedChatId === chat.id) {
           setSelectedChatId(null);
           setMessages([]);
         }
+        setPendingDeleteChat(null);
         toast({ title: 'Chat deleted' });
       } else {
         throw new Error(res?.message || 'Delete failed');
@@ -350,6 +374,8 @@ const KnowledgeQA = () => {
         description: err?.message || 'Could not delete chat',
         variant: 'destructive',
       });
+    } finally {
+      setDeletingChat(false);
     }
   };
 
@@ -557,7 +583,7 @@ const KnowledgeQA = () => {
                                 <Pencil className="h-3 w-3 text-white/60 hover:text-amber-300" />
                               </button>
                               <button
-                                onClick={(e) => handleDeleteChat(e, chat.id)}
+                                onClick={(e) => handleDeleteChat(e, chat)}
                                 title="Delete"
                                 className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-500/20"
                               >
@@ -641,7 +667,10 @@ const KnowledgeQA = () => {
                     <div className="rounded-2xl px-4 py-3 bg-white/[0.04] border border-white/10">
                       <div className="flex items-center gap-2 text-white/65 text-sm">
                         <Loader2 className="h-4 w-4 animate-spin" style={{ color: ACCENT }} />
-                        Searching your documents...
+                        Searching your documents…
+                        {sendStartedAt != null && (
+                          <ElapsedTimer since={sendStartedAt} className="text-xs font-mono text-white/40" />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -765,6 +794,25 @@ const KnowledgeQA = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!pendingDeleteChat}
+        onOpenChange={(open) => { if (!open) setPendingDeleteChat(null); }}
+        title="Delete this chat?"
+        description={
+          <>
+            <span className="text-white/80 font-medium">
+              {pendingDeleteChat?.title || 'This chat'}
+            </span>
+            {' '}and all of its messages will be permanently deleted. Your
+            documents are not affected. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete chat"
+        variant="danger"
+        loading={deletingChat}
+        onConfirm={confirmDeleteChat}
+      />
     </div>
   );
 };
@@ -821,6 +869,10 @@ const Message = ({ message }) => {
 
   // assistant
   const sources = Array.isArray(message.sources) ? message.sources : [];
+  // Timing lives inside responseData so it survives a chat re-fetch.
+  const timing = message.responseData?.timing_ms || message.timing_ms || null;
+  const cacheHit = message.responseData?.cache_hit ?? message.cache_hit ?? false;
+  const totalMs = timing?.total;
   return (
     <div className="flex items-start gap-3">
       <div
@@ -854,6 +906,21 @@ const Message = ({ message }) => {
                 </span>
               ))}
             </div>
+          </div>
+        )}
+        {totalMs != null && (
+          <div className="mt-2 flex items-center gap-2 text-[10px] text-white/35 font-mono">
+            <span>⏱ Answered in {(totalMs / 1000).toFixed(2)}s</span>
+            {!cacheHit && timing?.retrieval != null && timing?.llm != null && totalMs > 1000 && (
+              <span className="text-white/25">
+                (retrieval {(timing.retrieval / 1000).toFixed(1)}s · llm {(timing.llm / 1000).toFixed(1)}s)
+              </span>
+            )}
+            {cacheHit && (
+              <span className="px-1.5 py-[1px] rounded bg-emerald-500/15 text-emerald-300 border border-emerald-400/25">
+                cached
+              </span>
+            )}
           </div>
         )}
       </div>
