@@ -1787,14 +1787,25 @@ const MarketingDashboard = () => {
         </TabsContent>
 
         <TabsContent value="saved-graphs" data-tour-mkt="page-saved-graphs" className="!mt-2">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm" data-tour-mkt="graphs-card">
+          <Card className="relative overflow-hidden border-amber-500/20 bg-gradient-to-br from-amber-500/[0.04] via-black/20 to-black/20 backdrop-blur-sm" data-tour-mkt="graphs-card">
+            {/* top amber accent strip */}
+            <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-amber-500/0 via-amber-400/80 to-amber-500/0" />
             <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-amber-500" />
-                Saved Graph Prompts
+              <CardTitle className="text-white flex items-center gap-2.5">
+                <span className="inline-flex items-center justify-center h-9 w-9 rounded-xl bg-amber-500/10 border border-amber-500/25">
+                  <Sparkles className="h-5 w-5 text-amber-400" />
+                </span>
+                <span className="bg-gradient-to-r from-amber-200 via-amber-100 to-white bg-clip-text text-transparent">
+                  Saved Graph Prompts
+                </span>
+                {savedGraphPrompts.length > 0 && (
+                  <span className="ml-1 rounded-full bg-amber-500/15 border border-amber-500/25 px-2 py-0.5 text-xs font-semibold text-amber-300">
+                    {savedGraphsTotal || savedGraphPrompts.length}
+                  </span>
+                )}
               </CardTitle>
               <CardDescription className="text-white/60">
-                Manage your saved graph prompts. Click View to preview saved chart data without regenerating.
+                Manage your saved graph prompts. Click <span className="text-amber-300/90 font-medium">View</span> to preview saved chart data without regenerating.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -1803,11 +1814,13 @@ const MarketingDashboard = () => {
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 </div>
               ) : savedGraphPrompts.length === 0 ? (
-                <div className="text-center py-12">
-                  <Sparkles className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
-                  <p className="text-muted-foreground">No saved graphs yet</p>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Go to the Q&A tab and save your graph prompts
+                <div className="text-center py-14">
+                  <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 mb-4">
+                    <Sparkles className="h-8 w-8 text-amber-400/70" />
+                  </div>
+                  <p className="text-white/80 font-medium">No saved graphs yet</p>
+                  <p className="text-sm text-white/50 mt-1">
+                    Go to the <span className="text-amber-300/90">Q&amp;A</span> tab and save your graph prompts to pin them here
                   </p>
                 </div>
               ) : (
@@ -1829,12 +1842,16 @@ const MarketingDashboard = () => {
                       return (
                         <Card
                           key={prompt.id}
-                          className={`group flex flex-col transition-all duration-200 border-white/10 bg-white/[0.03] backdrop-blur-sm ${
+                          className={`group relative flex flex-col overflow-hidden transition-all duration-200 backdrop-blur-sm ${
                             isActive
-                              ? 'ring-2 ring-primary/60 bg-primary/10 border-primary/30'
-                              : 'hover:bg-white/[0.06] hover:border-white/20'
+                              ? 'ring-1 ring-amber-400/30 bg-amber-500/[0.03] border-amber-400/20'
+                              : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.05] hover:border-white/15'
                           }`}
                         >
+                          {/* per-card top accent, brighter when active */}
+                          {isActive && (
+                            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-amber-400/0 via-amber-400/50 to-amber-400/0" />
+                          )}
                           <CardHeader className="pb-2 pt-4 px-4">
                             <div className="flex items-start gap-3">
                               <div className={`shrink-0 p-2 rounded-lg bg-white/5 border border-white/10 ${chartColor}`}>
@@ -1901,33 +1918,34 @@ const MarketingDashboard = () => {
                            
                           </CardContent>
 
-                          <div className="px-4 pb-3 pt-2 mt-auto">
-                            <div className="flex items-center gap-2">
-                              <Button
-                                size="sm"
-                                variant={isActive ? "default" : "secondary"}
-                                className={`flex-1 text-xs h-8 font-medium transition-all ${
-                                  isActive
-                                    ? ''
-                                    : 'bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:text-white'
-                                }`}
-                                disabled={isLoading}
-                                onClick={() => handleViewGraph(prompt)}
-                              >
-                                {isLoading ? (
-                                  <>
-                                    <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                                    Generating...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Eye className="h-3 w-3 mr-1.5" />
-                                    {isActive ? 'Viewing' : 'View Chart'}
-                                  </>
-                                )}
-                              </Button>
-                             
-                            </div>
+                          <div className="px-4 pb-3 pt-2 mt-auto flex items-center justify-between gap-2 border-t border-white/5">
+                            {/* chart-type mini indicator on the left */}
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${chartColor} opacity-70`}>
+                              <ChartIcon className="h-3 w-3" />
+                              {chartType}
+                            </span>
+                            <Button
+                              size="sm"
+                              disabled={isLoading}
+                              onClick={() => handleViewGraph(prompt)}
+                              className={`h-7 px-3 text-xs font-semibold rounded-md transition-all ${
+                                isActive
+                                  ? 'bg-amber-500 text-black hover:bg-amber-400'
+                                  : 'bg-white/5 text-white/80 border border-white/10 hover:bg-white/10 hover:text-white'
+                              }`}
+                            >
+                              {isLoading ? (
+                                <>
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  Loading
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  {isActive ? 'Viewing' : 'View'}
+                                </>
+                              )}
+                            </Button>
                           </div>
                         </Card>
                       );

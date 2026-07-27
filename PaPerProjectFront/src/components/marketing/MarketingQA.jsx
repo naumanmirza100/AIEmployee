@@ -314,11 +314,13 @@ const SimpleBarChart = ({ data, colors, height = 250, title }) => {
 };
 
 const SimplePieChart = ({ data, colors, title }) => {
+  const [hoveredIndex, setHoveredIndex] = useState(null);
   if (!data || Object.keys(data).length === 0) return <div className="text-sm text-muted-foreground">No data available</div>;
   const total = Object.values(data).reduce((sum, val) => sum + val, 0);
   if (total === 0) return <div className="text-sm text-muted-foreground">No data available</div>;
-  const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
-  const chartColors = colors || defaultColors;
+  // Distinct fallback palette; used per-slice so no two adjacent slices repeat a hue.
+  const defaultColors = ['#3b82f6', '#8b5cf6', '#10b981', '#06b6d4', '#f59e0b', '#ef4444', '#ec4899', '#84cc16', '#f97316', '#14b8a6'];
+  const chartColors = colors && colors.length ? colors : defaultColors;
   let currentAngle = 0;
   const segments = Object.entries(data).map(([key, value], index) => {
     const angle = (value / total) * 360;
@@ -337,6 +339,7 @@ const SimplePieChart = ({ data, colors, title }) => {
             const x2 = 100 + 100 * Math.cos(((segment.startAngle + segment.angle) * Math.PI) / 180);
             const y2 = 100 + 100 * Math.sin(((segment.startAngle + segment.angle) * Math.PI) / 180);
             const largeArc = segment.angle > 180 ? 1 : 0;
+            const isHovered = hoveredIndex === index;
             return (
               <motion.path
                 key={index}
@@ -347,12 +350,15 @@ const SimplePieChart = ({ data, colors, title }) => {
                 fill={segment.color}
                 stroke="#000"
                 strokeWidth="1"
-                className="hover:opacity-80 transition-opacity cursor-pointer"
+                className="cursor-pointer transition-opacity"
+                style={{ opacity: hoveredIndex === null || isHovered ? 1 : 0.55 }}
+                onMouseEnter={() => setHoveredIndex(index)}
+                onMouseLeave={() => setHoveredIndex(null)}
               />
             );
           })}
         </svg>
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
@@ -365,6 +371,14 @@ const SimplePieChart = ({ data, colors, title }) => {
             </div>
           </motion.div>
         </div>
+        {hoveredIndex !== null && (
+          <div className="absolute left-1/2 -top-2 -translate-x-1/2 -translate-y-full z-10 pointer-events-none whitespace-nowrap rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-lg">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: segments[hoveredIndex].color }} />
+              {segments[hoveredIndex].key}: {segments[hoveredIndex].value} ({segments[hoveredIndex].percentage}%)
+            </span>
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
         {segments.map((segment, index) => (
@@ -373,7 +387,9 @@ const SimplePieChart = ({ data, colors, title }) => {
             initial={{ x: -10, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: index * 0.05 }}
-            className="flex items-center gap-2 text-xs sm:text-sm p-1.5 rounded-lg hover:bg-muted/30 transition-colors"
+            onMouseEnter={() => setHoveredIndex(index)}
+            onMouseLeave={() => setHoveredIndex(null)}
+            className={`flex items-center gap-2 text-xs sm:text-sm p-1.5 rounded-lg cursor-pointer transition-colors ${hoveredIndex === index ? 'bg-muted/40' : 'hover:bg-muted/30'}`}
           >
             <div className="w-3 h-3 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: segment.color }} />
             <span className="truncate flex-1 font-medium">{segment.key}</span>
