@@ -184,6 +184,9 @@ def email_sending_status(request, campaign_id):
                 campaign=campaign,
                 sequence__is_active=True,
                 sequence__isnull=False,
+                sequence__is_sub_sequence=False,  # MAIN sequence only — sub-seq
+                # emails are reply-triggered and must not appear as upcoming main
+                # sends before the lead has replied.
                 completed=False,
                 replied=False,
             )
@@ -276,6 +279,8 @@ def email_sending_status(request, campaign_id):
                     'lead': contact.lead,
                     'sequence': sequence,
                     'next_step': next_step,
+                    'subject': next_step.template.subject if next_step.template else '',
+                    'template_name': next_step.template.name if next_step.template else '',
                     'next_send_time': next_send_time,
                     'delay_days': next_step.delay_days,
                     'delay_hours': next_step.delay_hours,
@@ -285,7 +290,12 @@ def email_sending_status(request, campaign_id):
 
     # Handle sub-sequences for pending and upcoming emails
     if campaign.status == 'active':
-        # First, get contacts with sub-sequences (existing logic for current sub-sequence progress)
+        # NOTE (per-reply sub-sequences): this upcoming-emails PREVIEW still reads
+        # the legacy per-contact sub_sequence* fields. Actual sending is now driven
+        # by ReplySubSequenceRun (see send_sequence_emails._process_reply_run), so
+        # this preview can under-count when a lead has multiple parallel sub-seq
+        # runs. It's display-only and does not affect what actually sends. TODO:
+        # rebuild this section off ReplySubSequenceRun to match real sends.
         sub_sequence_contacts = (
             CampaignContact.objects
             .filter(
@@ -1206,6 +1216,9 @@ def email_status_api(request, campaign_id):
                 campaign=campaign,
                 sequence__is_active=True,
                 sequence__isnull=False,
+                sequence__is_sub_sequence=False,  # MAIN sequence only — sub-seq
+                # emails are reply-triggered and must not appear as upcoming main
+                # sends before the lead has replied.
                 completed=False,
                 replied=False,
             )

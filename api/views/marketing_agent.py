@@ -2483,13 +2483,16 @@ def _get_pending_and_upcoming_emails(campaign):
         return pending_list, upcoming_list
 
     email_svc = EmailService()
-    # Main sequence contacts: not completed, not replied
+    # Main sequence contacts: not completed, not replied.
+    # is_sub_sequence=False is essential — sub-sequence emails are reply-triggered
+    # and must NOT appear as upcoming main sends before the lead has replied.
     contacts = (
         CampaignContact.objects
         .filter(
             campaign=campaign,
             sequence__is_active=True,
             sequence__isnull=False,
+            sequence__is_sub_sequence=False,
             completed=False,
             replied=False,
         )
@@ -2547,6 +2550,7 @@ def _get_pending_and_upcoming_emails(campaign):
         elif next_send_time <= horizon:
             upcoming_list.append({
                 'lead_email': contact.lead.email,
+                'subject': email_svc.render_with_lead(next_step.template.subject or '', contact.lead, campaign),
                 'sequence_name': sequence.name,
                 'sequence_id': sequence.id,
                 'next_send_time': next_send_time.isoformat(),
@@ -2558,37 +2562,35 @@ def _get_pending_and_upcoming_emails(campaign):
                 'is_sub_sequence': False,
             })
 
-    # Sub-sequence contacts: replied, sub_sequence active, not sub_sequence_completed
-    sub_contacts = (
-        CampaignContact.objects
-        .filter(
-            campaign=campaign,
-            sub_sequence__is_active=True,
-            sub_sequence__isnull=False,
-            sub_sequence_completed=False,
-            replied=True,
-        )
-        .select_related('lead', 'sequence', 'sub_sequence', 'sub_sequence__parent_sequence')
+    # Per-reply sub-sequence runs (the new model — mirrors what the sender actually
+    # processes). Each reply that matched a sub-sequence has its own run row, so we
+    # show pending/upcoming per run instead of per single contact slot.
+    from marketing_agent.models import ReplySubSequenceRun
+    runs = (
+        ReplySubSequenceRun.objects
+        .filter(campaign=campaign, completed=False, cancelled=False)
+        .select_related('lead', 'contact', 'sub_sequence', 'sub_sequence__parent_sequence', 'reply')
         .prefetch_related('sub_sequence__steps__template')
     )[:200]
 
-    for contact in sub_contacts:
-        sub_sequence = contact.sub_sequence
-        if not sub_sequence:
+    for run in runs:
+        sub_sequence = run.sub_sequence
+        if not sub_sequence or not sub_sequence.is_active:
             continue
-        parent_sequence = getattr(sub_sequence, 'parent_sequence', None) or contact.sequence
+        parent_sequence = getattr(sub_sequence, 'parent_sequence', None) or getattr(run.contact, 'sequence', None)
         if not parent_sequence:
             continue
         steps = list(sub_sequence.steps.all().order_by('step_order'))
-        next_step = next((s for s in steps if s.step_order == contact.sub_sequence_step + 1), None)
+        next_step = next((s for s in steps if s.step_order == run.step + 1), None)
         if not next_step:
             continue
-        if contact.sub_sequence_step == 0:
-            reference_time = contact.replied_at or contact.updated_at
+        # First step anchors off the reply time; later steps off the last send.
+        if run.step == 0:
+            reference_time = (run.reply.replied_at if run.reply_id else None) or run.created_at
         else:
-            if contact.sub_sequence_last_sent_at and contact.sub_sequence_last_sent_at <= now:
-                time_since = now - contact.sub_sequence_last_sent_at
-                reference_time = contact.sub_sequence_last_sent_at if time_since <= timedelta(hours=24) else now
+            if run.last_sent_at and run.last_sent_at <= now:
+                time_since = now - run.last_sent_at
+                reference_time = run.last_sent_at if time_since <= timedelta(hours=24) else now
             else:
                 reference_time = now
         next_send_time = reference_time + timedelta(
@@ -2596,26 +2598,24 @@ def _get_pending_and_upcoming_emails(campaign):
             hours=next_step.delay_hours,
             minutes=next_step.delay_minutes,
         )
-        if contact.sub_sequence_step > 0 and next_send_time < now - timedelta(hours=1):
-            reference_time = now
-            next_send_time = reference_time + timedelta(
-                days=next_step.delay_days,
-                hours=next_step.delay_hours,
-                minutes=next_step.delay_minutes,
+        if run.step > 0 and next_send_time < now - timedelta(hours=1):
+            next_send_time = now + timedelta(
+                days=next_step.delay_days, hours=next_step.delay_hours, minutes=next_step.delay_minutes,
             )
+        # NOTE: we intentionally do NOT skip a run just because this template was
+        # sent before. Each ReplySubSequenceRun is independent — a lead who replied
+        # again gets a fresh sub-sequence run that re-sends the same template. The
+        # run's own step/completed state is the source of truth, not EmailSendHistory.
+        # (This previously hid the 2nd lead's upcoming sub-seq when they'd received
+        # the same follow-up template on an earlier reply.)
         existing_email = EmailSendHistory.objects.filter(
-            campaign=campaign,
-            lead=contact.lead,
-            email_template=next_step.template,
-        ).first()
-        if existing_email and existing_email.status in ['sent', 'delivered', 'opened', 'clicked']:
-            continue
+            campaign=campaign, lead=run.lead, email_template=next_step.template,
+        ).order_by('-sent_at').first()
         if next_send_time <= now:
             is_retry = existing_email and existing_email.status in ['pending', 'failed']
-            rendered_subject = email_svc.render_with_lead(next_step.template.subject or '', contact.lead, campaign)
             pending_list.append({
-                'recipient_email': contact.lead.email,
-                'subject': rendered_subject,
+                'recipient_email': run.lead.email,
+                'subject': email_svc.render_with_lead(next_step.template.subject or '', run.lead, campaign),
                 'sequence_name': parent_sequence.name,
                 'sequence_id': parent_sequence.id,
                 'sub_sequence_name': sub_sequence.name,
@@ -2627,7 +2627,8 @@ def _get_pending_and_upcoming_emails(campaign):
             })
         elif next_send_time <= horizon:
             upcoming_list.append({
-                'lead_email': contact.lead.email,
+                'lead_email': run.lead.email,
+                'subject': email_svc.render_with_lead(next_step.template.subject or '', run.lead, campaign),
                 'sequence_name': parent_sequence.name,
                 'sequence_id': parent_sequence.id,
                 'sub_sequence_name': sub_sequence.name,
@@ -2766,11 +2767,45 @@ def get_email_status_full(request, campaign_id):
                 return ('sub_sequence', (seq.parent_sequence.name if seq.parent_sequence else seq.name))
             return ('sequence', seq.name)
 
+        # Link each sub-sequence send to the MAIN email whose reply triggered it, so
+        # the frontend can nest sub-seq rows under their parent sequence email.
+        # Chain: sub-seq send -> (lead, sub_sequence template) -> ReplySubSequenceRun
+        #        -> reply -> triggering_email (the main-sequence send).
+        # Keyed by (lead_id, sub_sequence_id) -> triggering main-email id.
+        parent_email_by_key = {}
+        try:
+            from marketing_agent.models import ReplySubSequenceRun
+            for run in ReplySubSequenceRun.objects.filter(campaign=campaign).select_related('reply'):
+                trig = getattr(run.reply, 'triggering_email_id', None) if run.reply_id else None
+                if trig:
+                    parent_email_by_key[(run.lead_id, run.sub_sequence_id)] = trig
+        except Exception:
+            pass
+
+        # Which sub_sequence a given send belongs to (for the parent lookup above).
+        def _sub_sequence_id_for_send(email_send):
+            if not email_send.email_template_id:
+                return None
+            for step in EmailSequenceStep.objects.filter(
+                template_id=email_send.email_template_id, sequence__campaign=campaign,
+                sequence__is_sub_sequence=True,
+            ).select_related('sequence'):
+                return step.sequence_id
+            return None
+
         emails_by_sequence = {}
         for email_send in recent_emails:
             email_type, seq_name = get_email_type_and_sequence(email_send)
             is_replied = email_send.id in replied_map
             reply_interest_level = replied_map.get(email_send.id)
+
+            # For sub-sequence sends, find the main email this reply-chain started from.
+            parent_email_id = None
+            if email_type == 'sub_sequence':
+                sub_id = _sub_sequence_id_for_send(email_send)
+                if sub_id:
+                    parent_email_id = parent_email_by_key.get((email_send.lead_id, sub_id))
+
             if seq_name not in emails_by_sequence:
                 emails_by_sequence[seq_name] = []
             emails_by_sequence[seq_name].append({
@@ -2782,6 +2817,7 @@ def get_email_status_full(request, campaign_id):
                 'sent_at': email_send.sent_at.isoformat() if email_send.sent_at else None,
                 'template_name': email_send.email_template.name if email_send.email_template else None,
                 'type': email_type,
+                'parent_email_id': parent_email_id,  # main email whose reply triggered this sub-seq
                 'is_replied': is_replied,
                 'reply_interest_level': reply_interest_level,
             })
@@ -2826,6 +2862,19 @@ def get_email_status_full(request, campaign_id):
         except Exception as e:
             logger.warning("Could not load replies for email status: %s", e)
 
+        # Is the AI reply analyzer currently running on keyword fallback (because the
+        # company's marketing token quota is exhausted)? Surface one flag so the UI
+        # can show a single banner instead of repeating it on every reply.
+        ai_quota_exhausted = False
+        try:
+            from core.api_key_service import resolve_for_call, QuotaExhausted
+            from core.models import Company
+            resolve_for_call(Company.objects.get(pk=company_user.company_id), 'marketing_agent')
+        except QuotaExhausted:
+            ai_quota_exhausted = True
+        except Exception:
+            pass  # any other resolution issue isn't a quota banner
+
         return Response({
             'status': 'success',
             'data': {
@@ -2838,6 +2887,7 @@ def get_email_status_full(request, campaign_id):
                 'upcoming_emails': upcoming_emails,
                 'replies': replies_list,
                 'replies_by_sequence': replies_by_sequence,
+                'ai_quota_exhausted': ai_quota_exhausted,
             }
         }, status=status.HTTP_200_OK)
     except KeyServiceError:

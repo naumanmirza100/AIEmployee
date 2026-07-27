@@ -1397,35 +1397,21 @@ def delete_lead(request, campaign_id, lead_id):
 @login_required
 @require_http_methods(["POST"])
 def mark_contact_replied(request, campaign_id, lead_id):
-    """Mark a contact as having replied - stops automation for this contact and analyzes reply with AI"""
+    """Mark a contact as having replied — delegates to the single source of truth.
+
+    Previously this duplicated the full reply-processing + sub-sequence logic and
+    so never created the per-reply ReplySubSequenceRun rows. It now parses the
+    request and calls process_reply_directly, so HTTP replies and background
+    inbox-sync replies go through exactly the same path (and both get per-reply
+    parallel sub-sequences).
+    """
     campaign = get_object_or_404(Campaign, id=campaign_id, owner=request.user)
     lead = get_object_or_404(Lead, id=lead_id, owner=request.user)
-    
+
     try:
-        from marketing_agent.models import CampaignContact, EmailSequence
-        from marketing_agent.utils.reply_analyzer import ReplyAnalyzer
-        
-        # Get or create contact (handle multiple contacts per campaign/lead - use first one or create)
-        # Note: There can be multiple contacts if lead is in multiple sequences
-        all_contacts = list(CampaignContact.objects.filter(
-            campaign=campaign,
-            lead=lead
-        ).select_related('sequence', 'sub_sequence', 'sub_sequence__parent_sequence'))
-        
-        contact = all_contacts[0] if all_contacts else None
-        if not contact:
-            # Create new contact
-            contact = CampaignContact.objects.create(
-                campaign=campaign,
-                lead=lead,
-                current_step=0
-            )
-            all_contacts = [contact]
-            created = True
-        else:
-            created = False
-        
-        # Get reply data from request
+        from marketing_agent.services.reply_processor import process_reply_directly
+        from django.utils import timezone as _tz
+
         if request.content_type == 'application/json':
             data = json.loads(request.body)
             reply_subject = data.get('reply_subject', '')
@@ -1433,305 +1419,15 @@ def mark_contact_replied(request, campaign_id, lead_id):
         else:
             reply_subject = request.POST.get('reply_subject', '')
             reply_content = request.POST.get('reply_content', '')
-        
-        # First, determine which sequence this reply is for (to check if it's a sub-sequence reply)
-        # IMPORTANT: Check this BEFORE analyzing - sub-sequence replies should NOT be analyzed
-        is_sub_sequence_reply = False
-        reply_sequence = None
-        reply_sub_sequence = None
-        triggering_email = None
-        
-        try:
-            from marketing_agent.models import Reply, EmailSendHistory
-            from marketing_agent.services.reply_processor import (
-                _parse_quoted_date_from_reply,
-                _find_triggering_email_by_quoted_date,
-            )
-            
-            # Get reply subject for matching (remove "Re:" prefix if present)
-            reply_subject_clean = reply_subject.replace('Re:', '').replace('RE:', '').replace('re:', '').strip() if reply_subject else ''
-            
-            # Get all emails sent to this lead (recent ones first, but check all)
-            all_sent_emails = list(EmailSendHistory.objects.filter(
-                campaign=campaign,
-                lead=lead,
-                sent_at__isnull=False
-            ).order_by('-sent_at').select_related('email_template'))
-            
-            # 1) Prefer match by reply subject to sent email subject (most reliable; quoted date can be wrong due to timezones)
-            triggering_email = None
-            if reply_subject_clean:
-                best_match_score = 0
-                exact_match = None
-                for email in all_sent_emails:
-                    email_subject = (email.subject or (email.email_template.subject if email.email_template else None) or '').strip()
-                    if not email_subject or '{{' in email_subject:
-                        if email.email_template and email.email_template.subject:
-                            email_subject = email.email_template.subject.strip()
-                    if not email_subject:
-                        continue
-                    if reply_subject_clean.strip().lower() == email_subject.strip().lower():
-                        exact_match = email
-                        break
-                    if reply_subject_clean.lower() in email_subject.lower() or email_subject.lower() in reply_subject_clean.lower():
-                        match_score = len(email_subject) if email_subject.lower() in reply_subject_clean.lower() else len(reply_subject_clean)
-                        if email.sent_at and (timezone.now() - email.sent_at) < timedelta(days=7):
-                            match_score += 10
-                        if match_score > best_match_score:
-                            best_match_score = match_score
-                            triggering_email = email
-                if exact_match:
-                    triggering_email = exact_match
-                    logger.info(f"Matched reply to email by exact subject: {lead.email} -> subject '{getattr(exact_match, 'subject', '')}'")
-                elif triggering_email:
-                    logger.info(f"Matched reply to email by subject: {lead.email} -> subject '{getattr(triggering_email, 'subject', '')}'")
-            
-            # 2) Else try quoted date in reply body
-            if not triggering_email and reply_content:
-                quoted_dt = _parse_quoted_date_from_reply(reply_content)
-                if quoted_dt:
-                    by_date = _find_triggering_email_by_quoted_date(all_sent_emails, quoted_dt, max_diff_seconds=24 * 3600)
-                    if by_date:
-                        triggering_email = by_date
-                        logger.info(f"Matched reply to email by quoted date: {lead.email} -> subject '{getattr(by_date, 'subject', '')}'")
-            
-            # 3) If no subject or quoted-date match, use most recent email (but with time-based logic)
-            if not triggering_email:
-                most_recent_email = all_sent_emails[0] if all_sent_emails else None
-                if most_recent_email:
-                    # Check if most recent email is sub-sequence and was sent recently (within 48 hours)
-                    # If it's old, it might not be the one being replied to
-                    is_recent = most_recent_email.sent_at and (timezone.now() - most_recent_email.sent_at) < timedelta(hours=48)
-                    
-                    if is_recent:
-                        # Recent email - likely the one being replied to
-                        triggering_email = most_recent_email
-                    else:
-                        # Old sub-sequence email - check if there are main sequence emails that might be the actual target
-                        # Look for main sequence emails sent in the last 14 days
-                        main_seq_emails = [
-                            e for e in all_sent_emails[:10]  # Check last 10 emails
-                            if e.email_template and e.email_template.sequence_steps.exists() and
-                            not e.email_template.sequence_steps.first().sequence.is_sub_sequence and
-                            e.sent_at and (timezone.now() - e.sent_at) < timedelta(days=14)
-                        ]
-                        if main_seq_emails:
-                            # Use the most recent main sequence email if available
-                            triggering_email = main_seq_emails[0]
-                        else:
-                            # Fallback to most recent
-                            triggering_email = most_recent_email
-            
-            # Decide main vs sub from the EMAIL they replied to (triggering_email), not from timing.
-            email_sent_at = getattr(triggering_email, 'sent_at', None) if triggering_email else None
-            if triggering_email and triggering_email.email_template and email_sent_at:
-                sequence_steps = list(triggering_email.email_template.sequence_steps.select_related('sequence', 'sequence__parent_sequence').all())
-                main_seq_ids = {s.sequence_id for s in sequence_steps if not s.sequence.is_sub_sequence}
-                sub_seq_ids = {s.sequence_id for s in sequence_steps if s.sequence.is_sub_sequence}
-                # Primary rule: reply is to main or sub based on which sequence the triggering email belongs to
-                is_sub_sequence_reply = any(s.sequence.is_sub_sequence for s in sequence_steps)
-                resolved_contact = None
-                if is_sub_sequence_reply and sub_seq_ids:
-                    for c in all_contacts:
-                        if c.sub_sequence_id and c.sub_sequence_id in sub_seq_ids:
-                            resolved_contact = c
-                            reply_sub_sequence = next((s.sequence for s in sequence_steps if s.sequence_id == c.sub_sequence_id), None)
-                            if reply_sub_sequence:
-                                reply_sequence = getattr(reply_sub_sequence, 'parent_sequence', None) or reply_sub_sequence
-                                logger.info(f"Reply detected as sub-sequence reply. {lead.email} - sub '{reply_sub_sequence.name}'")
-                            break
-                if resolved_contact is None:
-                    for c in all_contacts:
-                        if c.sequence_id and c.sequence_id in main_seq_ids:
-                            resolved_contact = c
-                            reply_sequence = next((s.sequence for s in sequence_steps if s.sequence_id == c.sequence_id), None)
-                            if reply_sequence:
-                                logger.info(f"Reply detected as main sequence reply. {lead.email} - sequence '{reply_sequence.name}'")
-                            break
-                if resolved_contact is not None:
-                    contact = resolved_contact
-                elif sequence_steps:
-                    for step in sequence_steps:
-                        if not step.sequence.is_sub_sequence:
-                            reply_sequence = step.sequence
-                            break
-                    if reply_sequence is None and sequence_steps:
-                        step = sequence_steps[0]
-                        reply_sequence = step.sequence.parent_sequence if step.sequence.is_sub_sequence else step.sequence
-                        if step.sequence.is_sub_sequence:
-                            reply_sub_sequence = step.sequence
-            elif triggering_email and triggering_email.email_template:
-                sequence_steps = list(triggering_email.email_template.sequence_steps.select_related('sequence', 'sequence__parent_sequence').all())
-                if sequence_steps:
-                    for step in sequence_steps:
-                        if not step.sequence.is_sub_sequence:
-                            reply_sequence = step.sequence
-                            break
-                    if reply_sequence is None and sequence_steps:
-                        step = sequence_steps[0]
-                        reply_sequence = step.sequence.parent_sequence if step.sequence.is_sub_sequence else step.sequence
-                else:
-                    reply_sequence = contact.sequence
-                    logger.warning(f"No sequence steps found for triggering email template, using contact sequence: {contact.sequence.name if contact.sequence else 'None'}")
-            else:
-                # No triggering email found - check most recent email
-                reply_sequence = contact.sequence
-                if all_sent_emails:
-                    most_recent = all_sent_emails[0]
-                    if most_recent and most_recent.email_template:
-                        sequence_steps = most_recent.email_template.sequence_steps.all()
-                        if sequence_steps.exists():
-                            seq_step = sequence_steps.first()
-                            if seq_step and seq_step.sequence and seq_step.sequence.is_sub_sequence:
-                                # Most recent email is from sub-sequence - this is a sub-sequence reply
-                                is_sub_sequence_reply = True
-                                reply_sub_sequence = seq_step.sequence
-                                reply_sequence = seq_step.sequence.parent_sequence
-                                logger.info(f"Reply detected as sub-sequence reply (fallback). Most recent email is from sub-sequence '{reply_sub_sequence.name}'")
-        except (ImportError, AttributeError, Exception) as e:
-            logger.warning(f'Could not determine reply sequence: {str(e)}')
-            reply_sequence = contact.sequence
-            # Do NOT assume sub-sequence reply just because contact is in a sub_sequence - they may be
-            # replying to a main sequence email. Leave is_sub_sequence_reply False so we still analyze.
-        
-        # ALWAYS analyze every reply that has content - no reply left "not analyzed"
-        interest_level = 'not_analyzed'
-        analysis = ''
-        if reply_content or reply_subject:
-            try:
-                from marketing_agent.utils.reply_analyzer import ReplyAnalyzer
-                analyzer = ReplyAnalyzer()
-                analysis_result = analyzer.analyze_reply(
-                    reply_subject=reply_subject,
-                    reply_content=reply_content,
-                    campaign_name=campaign.name
-                )
-                interest_level = analysis_result.get('interest_level', 'neutral')
-                analysis = analysis_result.get('analysis', '')
-                logger.info(f"AI analyzed reply for {lead.email}: {interest_level}" + (" (sub-seq)" if is_sub_sequence_reply else ""))
-            except Exception as e:
-                logger.error(f"Error analyzing reply with AI: {str(e)}")
-                interest_level = 'not_analyzed'
-                analysis = f'AI analysis failed: {str(e)}'
-        
-        # Create Reply record to preserve reply history (EACH REPLY IS A SEPARATE RECORD - NO OVERWRITE)
-        sub_sequence = None
-        try:
-            reply_record = Reply.objects.create(
-                contact=contact,
-                campaign=campaign,
-                lead=lead,
-                sequence=reply_sequence,
-                sub_sequence=reply_sub_sequence,
-                reply_subject=reply_subject,
-                reply_content=reply_content,
-                interest_level=interest_level,
-                analysis=analysis,
-                triggering_email=triggering_email,
-                replied_at=timezone.now()
-            )
-            logger.info(f"Created Reply record #{reply_record.id} for {lead.email} - {'Sub-sequence reply' if is_sub_sequence_reply else 'Main sequence reply'} (sequence: {reply_sequence.name if reply_sequence else 'None'})")
-        except (ImportError, AttributeError, Exception) as e:
-            # Reply model doesn't exist yet or migration not applied - skip creating Reply record
-            logger.warning(f'Could not create Reply record (model may not exist yet): {str(e)}')
-        
-        # Find sub-sequence for main sequence replies (even if already in one - will restart it)
-        # ONLY if:
-        # 1. This is NOT a reply to a sub-sequence email (is_sub_sequence_reply == False)
-        # 2. This is a reply to a main sequence email
-        # NOTE: We allow finding sub-sequence even if already in one - this will restart it for the new reply
-        if not is_sub_sequence_reply and contact.sequence:
-            # First try to find sub-sequence matching the detected interest level
-            target_interest = interest_level if interest_level and interest_level != 'not_analyzed' else 'neutral'
-            
-            # Map AI interest levels to sub-sequence interest levels
-            # Include ALL possible interest levels from INTEREST_LEVEL_CHOICES
-            interest_mapping = {
-                'positive': 'positive',
-                'negative': 'negative',
-                'neutral': 'neutral',
-                'requested_info': 'requested_info',
-                'objection': 'objection',
-                'unsubscribe': 'unsubscribe',
-                'not_analyzed': 'any'
-            }
-            # Use the mapping, but if not found, use the original interest_level directly (don't default to 'any')
-            target_interest = interest_mapping.get(target_interest, target_interest if target_interest in ['positive', 'negative', 'neutral', 'requested_info', 'objection', 'unsubscribe'] else 'any')
-            
-            # Look for sub-sequences matching the interest level
-            sub_sequences = EmailSequence.objects.filter(
-                parent_sequence=contact.sequence,
-                is_sub_sequence=True,
-                is_active=True,
-                interest_level=target_interest
-            )
-            
-            # If no exact match, try 'any' (but only if target_interest is not 'any')
-            if not sub_sequences.exists() and target_interest != 'any':
-                sub_sequences = EmailSequence.objects.filter(
-                    parent_sequence=contact.sequence,
-                    is_sub_sequence=True,
-                    is_active=True,
-                    interest_level='any'
-                )
-                logger.info(f"No exact match for interest '{target_interest}'. Trying 'any' sub-sequence...")
-            
-            # DON'T fall back to any random sub-sequence - this causes wrong sub-sequence assignment
-            # Only use exact match or 'any' - if neither exists, don't assign a sub-sequence
-            if sub_sequences.exists():
-                sub_sequence = sub_sequences.first()
-                logger.info(f"Found sub-sequence '{sub_sequence.name}' (interest: {sub_sequence.interest_level}) for contact {lead.email} after main sequence reply (detected interest: {target_interest}, mapped to: {target_interest})")
-            else:
-                logger.warning(f"No matching sub-sequence found for contact {lead.email} with interest level '{target_interest}' (original: '{interest_level}'). No sub-sequence will be assigned.")
-                sub_sequence = None
-        
-        # Check if contact was already in a sub-sequence BEFORE calling mark_replied (for message)
-        was_already_in_sub_sequence = bool(contact.sub_sequence)
-        existing_sub_sequence_id = contact.sub_sequence.id if contact.sub_sequence else None
-        
-        # Mark as replied - but don't start sub-sequence if it's a sub-sequence reply
-        # This updates CampaignContact with the latest reply info (for backward compatibility)
-        # BUT won't start a new sub-sequence if replying to sub-sequence email
-        # NOTE: If already in sub-sequence and this is a main sequence reply, mark_replied will RESTART it
-        contact.mark_replied(
-            reply_subject=reply_subject,
-            reply_content=reply_content,
-            reply_at=timezone.now(),  # Use current time as reply time for delay calculations
-            interest_level=interest_level,
-            analysis=analysis,
-            sub_sequence=sub_sequence if not is_sub_sequence_reply else None  # Only pass sub_sequence if not a sub-sequence reply
+
+        result = process_reply_directly(
+            campaign, lead, reply_subject, reply_content, reply_date=_tz.now()
         )
-        
-        if is_sub_sequence_reply:
-            message = f'Reply received from {lead.email} for sub-sequence email. Reply recorded (sub-sequence continues).'
-        else:
-            message = f'Contact {lead.email} marked as replied. Main sequence stopped.'
-            if sub_sequence:
-                if was_already_in_sub_sequence and existing_sub_sequence_id == sub_sequence.id:
-                    # Already in this sub-sequence - restarting for new reply
-                    message += f' Sub-sequence "{sub_sequence.name}" restarted for this new reply (will send emails again).'
-                else:
-                    # New sub-sequence started
-                    message += f' Sub-sequence "{sub_sequence.name}" started.'
-            else:
-                message += ' No sub-sequence found.'
-        
-        return JsonResponse({
-            'success': True,
-            'message': message,
-            'contact_id': contact.id,
-            'interest_level': interest_level,
-            'analysis': analysis,
-            'sub_sequence_started': sub_sequence is not None,
-            'sub_sequence_name': sub_sequence.name if sub_sequence else None
-        })
-        
+        return JsonResponse(result, status=200 if result.get('success') else 400)
+
     except Exception as e:
         logger.error(f"Error marking contact as replied: {str(e)}")
-        return JsonResponse({
-            'success': False,
-            'error': str(e)
-        }, status=400)
+        return JsonResponse({'success': False, 'error': str(e)}, status=400)
 
 
 @login_required

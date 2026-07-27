@@ -12,6 +12,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import * as operationsService from '@/services/operationsAgentService';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
+import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager';
 
 // ─── Helpers ────────────────────────────────
 const FILE_TYPE_CONFIG = {
@@ -40,6 +42,7 @@ const formatDate = (iso) => {
 // ─── Main Component ─────────────────────────
 const SummarizationInsights = () => {
   const { toast } = useToast();
+  const { startUpload: startBackgroundUpload } = useBackgroundUpload();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
@@ -96,38 +99,26 @@ const SummarizationInsights = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Upload and summarize
-  const handleUpload = async () => {
+  // Upload and summarize — non-blocking, via the shared BackgroundUploadManager.
+  // Summarising a large doc takes several LLM calls, so the dialog closes
+  // immediately and the floating pill reports progress.
+  const handleUpload = () => {
     if (!selectedFile) return;
+    const file = selectedFile;
 
-    try {
-      setUploading(true);
-      const res = await operationsService.uploadAndSummarize(selectedFile);
-      if (res.status === 'success') {
-        toast({
-          title: 'Summary Generated',
-          description: `"${selectedFile.name}" has been summarized successfully`,
-        });
-        if (res.summary) {
-          setSummaries(prev => [res.summary, ...prev]);
-        } else {
-          fetchSummaries();
-        }
-        setShowUploadModal(false);
-        setSelectedFile(null);
-      }
-    } catch (e) {
-      const isHardBlock = e?.status === 402 || e?.status === 403 || e?.data?.hard_block;
-      toast({
-        title: isHardBlock ? 'Summarization blocked' : 'Summarization Failed',
-        description: isHardBlock
-          ? (e?.message || 'API key or token quota issue. Check your API Keys settings.')
-          : (e?.message || 'Failed to process document'),
-        variant: 'destructive',
-      });
-    } finally {
-      setUploading(false);
-    }
+    startBackgroundUpload({
+      title: file.name,
+      agent: 'operations',
+      // Reshape into the manager's { data: {...} } contract.
+      upload: (onProgress) =>
+        operationsService.uploadAndSummarize(file, { onProgress })
+          .then((res) => ({ data: res.summary || {} })),
+      poll: (summaryId) => operationsService.getSummaryStatus(summaryId),
+      onDone: () => fetchSummaries(),
+    });
+
+    setShowUploadModal(false);
+    setSelectedFile(null);
   };
 
   // Close modal
@@ -137,13 +128,20 @@ const SummarizationInsights = () => {
     setSelectedFile(null);
   };
 
-  // Delete summary
-  const handleDelete = async (summaryId) => {
+  // Delete summary — confirm first (also drops its indexed chunks)
+  const [pendingDelete, setPendingDelete] = useState(null);
+
+  const handleDelete = (summary) => setPendingDelete(summary);
+
+  const confirmDelete = async () => {
+    const summary = pendingDelete;
+    if (!summary) return;
     try {
-      setDeletingId(summaryId);
-      await operationsService.deleteSummary(summaryId);
+      setDeletingId(summary.id);
+      await operationsService.deleteSummary(summary.id);
       toast({ title: 'Deleted', description: 'Summary deleted successfully' });
-      setSummaries(prev => prev.filter(s => s.id !== summaryId));
+      setSummaries(prev => prev.filter(s => s.id !== summary.id));
+      setPendingDelete(null);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to delete', variant: 'destructive' });
     } finally {
@@ -272,7 +270,7 @@ const SummarizationInsights = () => {
                             <ArrowRight className="h-3.5 w-3.5" />View
                           </Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10"
-                            onClick={() => handleDelete(s.id)} disabled={deletingId === s.id}>
+                            onClick={() => handleDelete(s)} disabled={deletingId === s.id}>
                             {deletingId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                           </Button>
                         </div>
@@ -333,7 +331,7 @@ const SummarizationInsights = () => {
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/40 hover:text-red-400 hover:bg-red-500/10"
-                                onClick={() => handleDelete(s.id)} disabled={deletingId === s.id}>
+                                onClick={() => handleDelete(s)} disabled={deletingId === s.id}>
                                 {deletingId === s.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                               </Button>
                             </div>
@@ -555,6 +553,27 @@ const SummarizationInsights = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+        title="Delete this summary?"
+        description={
+          <>
+            The summary for{' '}
+            <span className="text-white/80 font-medium">
+              {pendingDelete?.original_filename}
+            </span>
+            {' '}will be permanently deleted, along with its stored text and
+            indexed chunks. Knowledge Q&amp;A will no longer be able to answer
+            from it. This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete summary"
+        variant="danger"
+        loading={deletingId === pendingDelete?.id}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 };

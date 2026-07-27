@@ -6,9 +6,11 @@ Document Processing, Summarization, Analytics, Knowledge Q&A, Authoring, Notific
 import os
 import hashlib
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -23,8 +25,13 @@ from operations_agent.models import (
 )
 
 from core.api_key_service import KeyServiceError
+from operations_agent.agents.document_processing_agent import _invalidate_operations_indexes
 
 logger = logging.getLogger(__name__)
+
+# How recently an identical generation counts as the same request, so a retry
+# after an apparent failure reuses that document instead of duplicating it.
+DUPLICATE_GENERATION_WINDOW_SECONDS = 120
 
 
 # ──────────────────────────────────────────────
@@ -52,7 +59,7 @@ def upload_document(request):
             return Response({'status': 'error', 'message': 'File too large. Maximum 50 MB.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Save to disk
-        upload_dir = Path(settings.MEDIA_ROOT) / 'operations' / 'documents' / str(company.id)
+        upload_dir = Path(settings.LOCAL_STORAGE_ROOT) / 'operations' / 'documents' / str(company.id)
         upload_dir.mkdir(parents=True, exist_ok=True)
 
         # Hash for duplicate detection
@@ -83,37 +90,101 @@ def upload_document(request):
                 'document_id': existing.id,
             }, status=status.HTTP_409_CONFLICT)
 
-        # Process with agent
+        # Fail fast on a bad/missing API key BEFORE we background the work, so
+        # the client gets a real error instead of a doc stuck in 'processing'.
+        from core.api_key_service import resolve_for_call
+        resolve_for_call(company, 'operations_agent')
+
+        # Create a pending placeholder so the client can poll status immediately.
+        placeholder = OperationsDocument.objects.create(
+            company=company,
+            uploaded_by=company_user,
+            title=title or Path(uploaded_file.name).stem,
+            original_filename=uploaded_file.name,
+            file=str(file_path),
+            file_type='other',
+            file_size=uploaded_file.size,
+            tags=tags,
+            is_processed=False,
+            processing_status='pending',
+        )
+
+        # Process in the background (thread — not Celery — because the pipeline
+        # needs the per-company key resolved from this request context).
         from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
+        from operations_agent.tasks import process_document_in_background
         agent = DocumentProcessingAgent()
         agent.company_id = company.id
         agent.agent_key_name = 'operations_agent'
-        result = agent.process(
-            action='process_file',
+        process_document_in_background(
+            agent=agent,
             file_path=str(file_path),
             original_filename=uploaded_file.name,
             company_id=company.id,
             uploaded_by_id=company_user.id,
+            existing_doc_id=placeholder.id,
             title=title,
             tags=tags,
         )
 
-        if not result.get('success'):
-            # Clean up on failure
-            if file_path.exists():
-                os.remove(file_path)
-            return Response({'status': 'error', 'message': result.get('error', 'Processing failed')}, status=status.HTTP_400_BAD_REQUEST)
-
         return Response({
-            'status': 'success',
-            'message': 'Document uploaded and processed successfully',
-            'document': result['document'],
-        }, status=status.HTTP_201_CREATED)
+            'status': 'accepted',
+            'message': 'Document uploaded — processing in the background.',
+            'document': {
+                'id': placeholder.id,
+                'title': placeholder.title,
+                'processing_status': placeholder.processing_status,
+            },
+        }, status=status.HTTP_202_ACCEPTED)
 
     except KeyServiceError:
         raise
     except Exception as e:
         logger.error(f'Upload document error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_document_status(request, document_id):
+    """Lightweight processing-status poll for a document.
+
+    Deliberately minimal — the frontend polls this every ~1.5s during indexing,
+    so it does no heavy work and writes nothing (no access log).
+    """
+    try:
+        company = request.user.company
+        doc = OperationsDocument.objects.filter(
+            company=company, id=document_id,
+        ).only(
+            'id', 'processing_status', 'chunks_processed', 'chunks_total',
+            'processing_error', 'is_indexed', 'is_processed', 'updated_at',
+        ).first()
+        if not doc:
+            return Response({'status': 'error', 'message': 'Document not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        total = doc.chunks_total or 0
+        done = doc.chunks_processed or 0
+        percent = 100 if doc.processing_status == 'ready' else (
+            int((done / total) * 100) if total else (0 if doc.processing_status != 'failed' else 0)
+        )
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': doc.id,
+                'processing_status': doc.processing_status,
+                'chunks_processed': done,
+                'chunks_total': total,
+                'percent': percent,
+                'processing_error': doc.processing_error or '',
+                'is_indexed': doc.is_indexed,
+                'updated_at': doc.updated_at.isoformat() if doc.updated_at else None,
+            },
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f'Document status error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -255,7 +326,12 @@ def delete_document(request, document_id):
             except OSError:
                 pass
 
-        doc.delete()
+        was_indexed = doc.is_indexed
+        doc.delete()  # cascades to its chunks
+
+        # Drop the document's vectors from the FAISS index and clear cached
+        # answers that may have cited it.
+        _invalidate_operations_indexes(company.id, was_indexed)
 
         return Response({
             'status': 'success',
@@ -290,7 +366,7 @@ def upload_and_summarize(request):
             return Response({'status': 'error', 'message': 'File too large. Maximum 50 MB.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Save to temp location
-        upload_dir = Path(settings.MEDIA_ROOT) / 'operations' / 'summaries_tmp'
+        upload_dir = Path(settings.LOCAL_STORAGE_ROOT) / 'operations' / 'summaries_tmp'
         upload_dir.mkdir(parents=True, exist_ok=True)
 
         file_hash = hashlib.sha256(uploaded_file.read()).hexdigest()[:16]
@@ -301,39 +377,88 @@ def upload_and_summarize(request):
             for chunk in uploaded_file.chunks():
                 f.write(chunk)
 
-        # Process with summarization agent
+        # Fail fast on a bad/missing API key BEFORE backgrounding the work, so
+        # the client gets a real error instead of a row stuck in 'processing'.
+        from core.api_key_service import resolve_for_call
+        resolve_for_call(company, 'operations_agent')
+
+        # Pending placeholder so the client can poll status immediately.
+        placeholder = OperationsDocumentSummary.objects.create(
+            company=company,
+            created_by=company_user,
+            original_filename=uploaded_file.name,
+            file_type=Path(uploaded_file.name).suffix.lower().lstrip('.') or 'other',
+            file_size=uploaded_file.size,
+            rich_summary='',
+            processing_status='pending',
+        )
+
+        # Summarising a large doc means several LLM calls — run it in the
+        # background so the request returns immediately (mirrors doc upload).
         from operations_agent.agents.summarization_agent import DocumentSummarizationAgent
+        from operations_agent.tasks import summarize_document_in_background
         agent = DocumentSummarizationAgent()
         agent.company_id = company.id
         agent.agent_key_name = 'operations_agent'
-        result = agent.process(
-            action='summarize_file',
+        summarize_document_in_background(
+            agent=agent,
             file_path=str(temp_path),
             original_filename=uploaded_file.name,
             company_id=company.id,
             uploaded_by_id=company_user.id,
+            existing_summary_id=placeholder.id,
         )
 
-        # Agent deletes the file, but clean up just in case
-        if temp_path.exists():
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-
-        if not result.get('success'):
-            return Response({'status': 'error', 'message': result.get('error', 'Summarization failed')}, status=status.HTTP_400_BAD_REQUEST)
-
         return Response({
-            'status': 'success',
-            'message': 'Document summarized successfully',
-            'summary': result['summary'],
-        }, status=status.HTTP_201_CREATED)
+            'status': 'accepted',
+            'message': 'Document uploaded — summarizing in the background.',
+            'summary': {
+                'id': placeholder.id,
+                'original_filename': placeholder.original_filename,
+                'processing_status': placeholder.processing_status,
+            },
+        }, status=status.HTTP_202_ACCEPTED)
 
     except KeyServiceError:
         raise
     except Exception as e:
         logger.error(f'Upload and summarize error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def get_summary_status(request, summary_id):
+    """Lightweight summarisation-status poll. Polled every ~1.5s by the client,
+    so it stays minimal and writes nothing."""
+    try:
+        company = request.user.company
+        s = OperationsDocumentSummary.objects.filter(
+            company=company, id=summary_id,
+        ).only(
+            'id', 'processing_status', 'processing_error', 'is_indexed',
+            'original_filename', 'created_at',
+        ).first()
+        if not s:
+            return Response({'status': 'error', 'message': 'Summary not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        st = s.processing_status
+        percent = 100 if st == 'ready' else (0 if st in ('pending', 'failed') else 50)
+        return Response({
+            'status': 'success',
+            'data': {
+                'id': s.id,
+                'processing_status': st,
+                'percent': percent,
+                'processing_error': s.processing_error or '',
+                'is_indexed': s.is_indexed,
+                'original_filename': s.original_filename,
+            },
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f'Summary status error: {e}', exc_info=True)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -470,7 +595,12 @@ def delete_summary(request, summary_id):
             return Response({'status': 'error', 'message': 'Summary not found'}, status=status.HTTP_404_NOT_FOUND)
 
         filename = s.original_filename
-        s.delete()
+        was_indexed = s.is_indexed
+        s.delete()  # cascades to its chunks
+
+        # Drop the summary's vectors from the FAISS index and clear cached answers
+        # that may have cited it.
+        _invalidate_operations_indexes(company.id, was_indexed)
 
         return Response({
             'status': 'success',
@@ -746,23 +876,15 @@ def ask_qa_question(request):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-        if not chat:
-            # New chat — temporary title, updated after answer
-            chat = OperationsChat.objects.create(
-                company=company, user=user, title=question[:60] or 'New chat',
-            )
-
-        # Build chat history from DB
+        # Build chat history from DB (empty for a brand-new chat)
         existing_msgs = list(
             chat.messages.order_by('created_at').values('role', 'content')
-        )
+        ) if chat else []
 
-        # Persist user message
-        OperationsChatMessage.objects.create(
-            chat=chat, role='user', content=question,
-        )
-
-        # Run agent
+        # Run the agent BEFORE writing anything. If it raises (bad key, quota
+        # exhausted, …) we must not leave behind a chat holding only the user's
+        # question — that orphan is what made every failed ask spawn a second
+        # chat in the sidebar when the user retried.
         from operations_agent.agents.knowledge_qa_agent import OperationsKnowledgeQAAgent
         agent = OperationsKnowledgeQAAgent()
         agent.company_id = company.id
@@ -777,19 +899,38 @@ def ask_qa_question(request):
         answer_text = result.get('answer') or 'Sorry, I could not produce an answer.'
         sources = result.get('sources') or []
 
-        # Persist assistant message even on soft errors so the user sees something
-        assistant_msg = OperationsChatMessage.objects.create(
-            chat=chat,
-            role='assistant',
-            content=answer_text,
-            sources=sources,
-            response_data={'success': bool(result.get('success'))},
-        )
+        # Persist the whole exchange atomically: chat (if new) + both messages
+        # land together, or not at all.
+        with transaction.atomic():
+            if not chat:
+                chat = OperationsChat.objects.create(
+                    company=company, user=user,
+                    title=(result.get('suggested_title') or question[:60] or 'New chat')[:255],
+                )
+                is_new_chat = True
+            else:
+                is_new_chat = False
 
-        # If this was a new chat and the first exchange, upgrade the title
-        if chat.messages.count() <= 2 and result.get('suggested_title'):
-            chat.title = result['suggested_title'][:255]
-        chat.save(update_fields=['title', 'updated_at'])
+            OperationsChatMessage.objects.create(
+                chat=chat, role='user', content=question,
+            )
+            assistant_msg = OperationsChatMessage.objects.create(
+                chat=chat,
+                role='assistant',
+                content=answer_text,
+                sources=sources,
+                # Nest timing inside response_data so it survives chat re-fetch.
+                response_data={
+                    'success': bool(result.get('success')),
+                    'timing_ms': result.get('timing_ms') or {},
+                    'cache_hit': bool(result.get('cache_hit')),
+                },
+            )
+
+            # Title the chat from its first exchange only.
+            if not is_new_chat and chat.messages.count() <= 2 and result.get('suggested_title'):
+                chat.title = result['suggested_title'][:255]
+            chat.save(update_fields=['title', 'updated_at'])
 
         return Response({
             'status': 'success',
@@ -801,9 +942,12 @@ def ask_qa_question(request):
                 'content': answer_text,
                 'sources': sources,
                 'created_at': assistant_msg.created_at.isoformat(),
+                'responseData': assistant_msg.response_data,
             },
             'success': bool(result.get('success')),
             'error': result.get('error'),
+            'timing_ms': result.get('timing_ms') or {},
+            'cache_hit': bool(result.get('cache_hit')),
         })
 
     except KeyServiceError:
@@ -1312,20 +1456,46 @@ def stream_generate_document(request):
 
             # Persist to DB
             try:
-                doc = OperationsGeneratedDocument.objects.create(
-                    company=company,
-                    generated_by=user,
-                    title=final_payload['title'][:500],
-                    template_type=resolved_template,
-                    tone=resolved_tone,
-                    prompt=prompt,
-                    content=final_payload['content_markdown'],
-                    version=1,
-                    edit_history=[],
-                    tokens_used=final_payload.get('tokens_used') or {},
+                # A retry of the same request must not leave a twin behind. The
+                # client can give up (network blip, tab close) while this
+                # generator keeps running server-side and saves anyway; the user
+                # then sees a failure, retries, and ends up with two identical
+                # v1 documents. Reuse an untouched identical doc saved moments
+                # ago instead of creating another.
+                doc = (
+                    OperationsGeneratedDocument.objects
+                    .filter(
+                        company=company,
+                        generated_by=user,
+                        prompt=prompt,
+                        template_type=resolved_template,
+                        tone=resolved_tone,
+                        version=1,
+                        created_at__gte=timezone.now() - timedelta(seconds=DUPLICATE_GENERATION_WINDOW_SECONDS),
+                    )
+                    .order_by('-created_at')
+                    .first()
                 )
-                if valid_refs:
-                    doc.reference_documents.set(valid_refs)
+                if doc:
+                    logger.info(
+                        'stream_generate_document: reusing recent identical doc %s for company %s',
+                        doc.id, company.id,
+                    )
+                else:
+                    doc = OperationsGeneratedDocument.objects.create(
+                        company=company,
+                        generated_by=user,
+                        title=final_payload['title'][:500],
+                        template_type=resolved_template,
+                        tone=resolved_tone,
+                        prompt=prompt,
+                        content=final_payload['content_markdown'],
+                        version=1,
+                        edit_history=[],
+                        tokens_used=final_payload.get('tokens_used') or {},
+                    )
+                    if valid_refs:
+                        doc.reference_documents.set(valid_refs)
             except Exception as db_err:
                 logger.error(f'stream_generate_document DB save error: {db_err}', exc_info=True)
                 yield _emit('error', {'message': f'Could not save document: {db_err}'})
@@ -1333,6 +1503,11 @@ def stream_generate_document(request):
 
             yield _emit('done', {'document': _serialize_generated(doc, include_content=True)})
 
+        except GeneratorExit:
+            # Client hung up mid-stream. Django closes the generator here; do not
+            # save, or the user gets a document they never saw finish.
+            logger.info('stream_generate_document: client disconnected, discarding generation')
+            raise
         except KeyServiceError as e:
             yield _emit('error', {'message': e.user_message, 'error_code': e.reason})
         except Exception as e:

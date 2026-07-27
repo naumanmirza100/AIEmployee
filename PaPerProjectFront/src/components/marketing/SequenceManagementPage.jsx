@@ -505,8 +505,11 @@ const SequenceManagementPage = ({ embedded = false }) => {
         if (genRes?.status !== 'success' || !genRes?.data) {
           throw new Error(genRes?.message || `Failed to generate email for ${defaults.name}.`);
         }
+        // Keep the name unique per sub-sequence by tagging the interest type — the
+        // AI can reuse a subject across different reply types otherwise.
         const suggestedSubject = (genRes.data.subject || '').trim();
-        const suggestedName = suggestedSubject ? suggestedSubject.slice(0, 60) : defaults.name;
+        const baseName = suggestedSubject ? suggestedSubject.slice(0, 45) : defaults.name;
+        const suggestedName = `${baseName} (${defaults.name})`;
         const createRes = await createTemplate(id, {
           name: suggestedName,
           subject: suggestedSubject || defaults.name,
@@ -578,6 +581,10 @@ const SequenceManagementPage = ({ embedded = false }) => {
       const existingSteps = mode === 'append' ? sequenceForm.steps : [];
       const newSteps = [];
       let cumulativeMinutes = existingSteps.length > 0 ? stepTotalMinutes(existingSteps[existingSteps.length - 1]) : 0;
+      // Safety net: if the AI still hands back a subject we've already used in this
+      // sequence, differentiate it so no two steps share the exact same subject.
+      const usedSubjects = new Set();
+      const dedupePrefixes = ['Following up: ', 'Reminder: ', 'One more thing: ', 'Quick nudge: '];
 
       for (let i = 0; i < count; i++) {
         const stepLabel = `Email ${i + 1} of ${count}`;
@@ -595,27 +602,31 @@ const SequenceManagementPage = ({ embedded = false }) => {
               ? `A single reply email in a sub-sequence. Sequence goal: ${goal}.`
               : `${stepLabel} in an email follow-up sequence. Sequence goal: ${goal}. ${
                   i === 0
-                    ? 'This is the opening email — introduce the topic.'
+                    ? 'This is the opening email — introduce the topic. Give it a strong, distinct subject line.'
                     : i === count - 1
-                      ? 'This is the final email — a last, polite call to action.'
-                      : 'This is a follow-up/reminder email — build on the previous ones without repeating them verbatim.'
+                      ? 'This is the final email — a last, polite call to action. Use a DIFFERENT subject line from the earlier emails (e.g. a last-chance / final-nudge angle).'
+                      : 'This is a follow-up/reminder email — build on the previous ones without repeating them verbatim. Use a DIFFERENT, fresh subject line from the earlier emails (a reminder or new-angle subject), not the same as the opening email.'
                 }`,
           });
           if (genRes?.status !== 'success' || !genRes?.data) {
             throw new Error(genRes?.message || `Failed to generate ${stepLabel}.`);
           }
 
-          // Derive the template's name from the AI-written subject (same as a
-          // user naming a template after seeing its subject) rather than a
-          // generic sequence-based label — editable afterward either way.
-          const suggestedSubject = (genRes.data.subject || '').trim();
-          const suggestedName = suggestedSubject
-            ? suggestedSubject.slice(0, 60)
-            : `${seqName} — ${stepLabel}`;
+          let suggestedSubject = (genRes.data.subject || '').trim() || seqName;
+          // Guarantee a unique subject per step even if the AI reused one.
+          if (usedSubjects.has(suggestedSubject.toLowerCase()) && i > 0) {
+            const prefix = dedupePrefixes[(i - 1) % dedupePrefixes.length];
+            suggestedSubject = `${prefix}${suggestedSubject}`;
+          }
+          usedSubjects.add(suggestedSubject.toLowerCase());
+
+          // Template name = subject + step number, so it's always unique and
+          // identifiable in the picker. Editable afterward.
+          const suggestedName = `${suggestedSubject.slice(0, 50)} (Step ${i + 1})`;
 
           const createRes = await createTemplate(id, {
             name: suggestedName,
-            subject: suggestedSubject || seqName,
+            subject: suggestedSubject,
             html_content: genRes.data.html_content || '',
           });
           if (createRes?.status !== 'success' || !createRes?.data?.template_id) {

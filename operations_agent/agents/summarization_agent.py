@@ -44,15 +44,38 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             return {'success': False, 'error': str(e)}
 
     def _summarize_file(self, file_path: str, original_filename: str,
-                        company_id: int, uploaded_by_id: int = None) -> Dict:
-        """Extract text from file, generate rich summary, save summary, delete file."""
+                        company_id: int, uploaded_by_id: int = None,
+                        existing_summary_id: int = None) -> Dict:
+        """Extract text from file, generate rich summary, save summary, delete file.
+
+        When ``existing_summary_id`` is given (async upload flow), that pending
+        placeholder row is filled in and stamped ready/failed so the client's
+        status poll can follow along.
+        """
         from operations_agent.models import OperationsDocumentSummary
         from core.models import Company, CompanyUser
+
+        placeholder = None
+        if existing_summary_id:
+            placeholder = OperationsDocumentSummary.objects.filter(id=existing_summary_id).first()
+            if placeholder:
+                placeholder.processing_status = 'processing'
+                placeholder.save(update_fields=['processing_status'])
+
+        def _fail(message):
+            if placeholder is not None:
+                try:
+                    placeholder.processing_status = 'failed'
+                    placeholder.processing_error = str(message)[:2000]
+                    placeholder.save(update_fields=['processing_status', 'processing_error'])
+                except Exception:
+                    logger.exception("Operations: failed to stamp summary %s failed", existing_summary_id)
+            return {'success': False, 'error': message}
 
         ext = Path(original_filename).suffix.lower()
         file_type = self._doc_agent.SUPPORTED_EXTENSIONS.get(ext)
         if not file_type:
-            return {'success': False, 'error': f'Unsupported file type: {ext}'}
+            return _fail(f'Unsupported file type: {ext}')
 
         file_size = os.path.getsize(file_path)
 
@@ -67,10 +90,10 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             pass
 
         if not success:
-            return {'success': False, 'error': error or 'Text extraction failed'}
+            return _fail(error or 'Text extraction failed')
 
         if not extracted_text or not extracted_text.strip():
-            return {'success': False, 'error': 'No text could be extracted from this document'}
+            return _fail('No text could be extracted from this document')
 
         word_count = len(extracted_text.split())
 
@@ -81,7 +104,7 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             summary_result = self._summarize_single(extracted_text, original_filename, page_count)
 
         if not summary_result.get('success'):
-            return summary_result
+            return _fail(summary_result.get('error') or 'Summarization failed')
 
         # 3. Extract proper insights via dedicated LLM call
         insights = self._extract_insights(extracted_text, original_filename)
@@ -90,7 +113,7 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
         company = Company.objects.get(pk=company_id)
         uploaded_by = CompanyUser.objects.get(pk=uploaded_by_id) if uploaded_by_id else None
 
-        summary_obj = OperationsDocumentSummary.objects.create(
+        summary_fields = dict(
             company=company,
             created_by=uploaded_by,
             original_filename=original_filename,
@@ -99,6 +122,9 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             page_count=page_count,
             word_count=word_count,
             rich_summary=summary_result['rich_summary'],
+            # Store the full extracted text so Knowledge-QA can answer from the
+            # whole document, not just the summary.
+            parsed_text=extracted_text,
             key_findings=summary_result.get('key_findings', []),
             action_items=summary_result.get('action_items', []),
             # Insights fields
@@ -112,7 +138,35 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             opportunities=insights.get('opportunities', []),
             deadlines=insights.get('deadlines', []),
             document_category=insights.get('document_category', ''),
+            processing_status='ready',
+            processing_error='',
         )
+        if placeholder is not None:
+            for k, v in summary_fields.items():
+                setattr(placeholder, k, v)
+            placeholder.save()
+            summary_obj = placeholder
+        else:
+            summary_obj = OperationsDocumentSummary.objects.create(**summary_fields)
+
+        # Chunk + embed the full text so QA retrieval works on the whole file
+        # (same pipeline as the Documents tab). Graceful keyword fallback when
+        # no embedding provider is configured.
+        try:
+            doc_cat = insights.get('document_category') or 'other'
+            chunk_count, embedded, embed_model = self._doc_agent._chunk_embed_and_store(
+                summary_obj, extracted_text, page_count, doc_cat, owner_kind='summary',
+            )
+            summary_obj.is_indexed = embedded
+            summary_obj.embedding_model = embed_model or ''
+            summary_obj.save(update_fields=['is_indexed', 'embedding_model'])
+            if embedded:
+                from operations_agent.agents.knowledge_qa_agent import invalidate_answer_cache_for_company
+                from operations_agent.vector_store import mark_index_dirty
+                mark_index_dirty(company_id)
+                invalidate_answer_cache_for_company(company_id)
+        except Exception:
+            logger.exception("Operations: failed to chunk/embed summarised file %s", original_filename)
 
         self.log_action('summarize_file', {
             'summary_id': summary_obj.id,
@@ -322,9 +376,16 @@ IMPORTANT:
             chunks.append(text[start:end])
             start = end - overlap
 
-        # Phase 1: Summarize each chunk
-        chunk_summaries = []
-        for i, chunk in enumerate(chunks):
+        # Phase 1: Summarize each chunk.
+        # Run concurrently — a 65k-char doc is ~9 chunks, and doing them one at a
+        # time was the bulk of the wait (~40-90s). Bounded pool so we don't
+        # hammer the provider's rate limit. Results are slotted back by index so
+        # section order is preserved regardless of completion order.
+        from concurrent.futures import ThreadPoolExecutor
+        from core.api_key_service import KeyServiceError
+
+        def _summarize_chunk(idx_chunk):
+            i, chunk = idx_chunk
             prompt = f"""Summarize this section (Part {i + 1} of {len(chunks)}) of "{filename}".
 Extract ALL key points, findings, names, dates, and important details.
 
@@ -333,16 +394,32 @@ Extract ALL key points, findings, names, dates, and important details.
 \"\"\"
 
 Provide a detailed bullet-point summary. Be thorough and specific."""
-
             try:
                 result = self._call_llm_for_reasoning(prompt, temperature=0.2, max_tokens=1000)
                 if result and result.strip():
-                    chunk_summaries.append(f"**Section {i + 1}:**\n{result.strip()}")
+                    return i, f"**Section {i + 1}:**\n{result.strip()}"
+                return i, None
             except Exception as e:
-                from core.api_key_service import KeyServiceError
                 if isinstance(e, KeyServiceError):
-                    raise
+                    return i, e          # propagate after the pool drains
                 logger.warning(f'Chunk {i + 1} summarization failed: {e}')
+                return i, None
+
+        max_workers = min(5, len(chunks)) or 1
+        slots = [None] * len(chunks)
+        key_error = None
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for i, value in pool.map(_summarize_chunk, enumerate(chunks)):
+                if isinstance(value, KeyServiceError):
+                    key_error = key_error or value
+                else:
+                    slots[i] = value
+
+        # A key/quota failure must surface to the caller, not be silently partial.
+        if key_error is not None:
+            raise key_error
+
+        chunk_summaries = [s for s in slots if s]
 
         if not chunk_summaries:
             return {'success': False, 'error': 'Failed to summarize any section'}
