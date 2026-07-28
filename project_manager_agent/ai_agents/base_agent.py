@@ -307,10 +307,106 @@ class BaseAgent:
             raise_if_auth_error(e, key_ctx)
             raise
     
+    def _call_llm_stream(self, prompt, system_prompt=None, temperature=0.3,
+                         max_tokens=400):
+        """Streaming variant of `_call_llm`. Yields text chunks as the model
+        generates them. Uses the same key-resolution + provider selection as
+        the blocking version but drives the OpenAI/Groq streaming API.
+
+        Yields dicts:
+          * ``{'type': 'token', 'value': '...'}`` — one per chunk from the LLM.
+          * ``{'type': 'done', 'text': '<full>', 'usage': {...}, 'elapsed_ms': N}``
+            — sent once at the end. Callers should accumulate ``text`` for
+            caching / persistence.
+          * ``{'type': 'error', 'message': '...'}`` — on unrecoverable errors.
+            Errors from `KeyServiceError` propagate as raises instead.
+        """
+        import time as _time
+        _start = _time.time()
+        client, key_ctx = self._resolve_company_client()
+        if client is None:
+            raise ValueError(
+                "No API key available. Set self.company_id and self.agent_key_name "
+                "on this agent instance before making LLM calls."
+            )
+        effective_model = (
+            getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+            if key_ctx and key_ctx.provider == 'openai'
+            else self.model
+        )
+        messages = []
+        if system_prompt:
+            messages.append({'role': 'system', 'content': system_prompt})
+        messages.append({'role': 'user', 'content': prompt})
+
+        collected = []
+        completion_tokens = 0
+        try:
+            stream = client.chat.completions.create(
+                model=effective_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+            for chunk in stream:
+                try:
+                    delta = chunk.choices[0].delta
+                    piece = getattr(delta, 'content', None) or ''
+                except Exception:
+                    piece = ''
+                if piece:
+                    collected.append(piece)
+                    completion_tokens += 1  # approximation
+                    yield {'type': 'token', 'value': piece}
+
+            full_text = ''.join(collected)
+            elapsed_ms = int((_time.time() - _start) * 1000)
+            usage_dict = {
+                'prompt_tokens': None,           # streaming APIs typically don't
+                'completion_tokens': completion_tokens,  # return usage; approximate
+                'total_tokens': None,
+            }
+            self.last_llm_usage = usage_dict
+            logger.info(f"[LLM STREAM] {self.agent_name} | {elapsed_ms}ms | "
+                        f"~{completion_tokens} chunks | model={effective_model}")
+
+            _record_llm_usage(
+                company_id=getattr(self, 'company_id', None),
+                agent_name=self.agent_name,
+                model=effective_model,
+                usage_dict=usage_dict,
+                duration_ms=elapsed_ms,
+                success=True,
+            )
+            yield {
+                'type': 'done',
+                'text': full_text,
+                'usage': usage_dict,
+                'elapsed_ms': elapsed_ms,
+                'model': effective_model,
+            }
+        except Exception as exc:
+            from core.api_key_service import KeyServiceError, raise_if_auth_error
+            if isinstance(exc, KeyServiceError):
+                raise
+            elapsed_ms = int((_time.time() - _start) * 1000)
+            _record_llm_usage(
+                company_id=getattr(self, 'company_id', None),
+                agent_name=self.agent_name,
+                model=effective_model,
+                usage_dict=None,
+                duration_ms=elapsed_ms,
+                success=False,
+            )
+            logger.error(f"{self.agent_name} streaming LLM error: {exc}")
+            raise_if_auth_error(exc, key_ctx)
+            yield {'type': 'error', 'message': str(exc)}
+
     def log_action(self, action, details=None):
         """
         Log agent actions for debugging and monitoring.
-        
+
         Args:
             action (str): Action description
             details (dict): Additional details

@@ -1968,6 +1968,84 @@ def knowledge_qa(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+def knowledge_qa_stream(request):
+    """Streaming variant of :func:`knowledge_qa` for the Frontline agent.
+
+    Returns application/x-ndjson — one JSON event per line:
+      * ``{"type":"meta", ...}`` — citations + source, sent before tokens.
+      * ``{"type":"token", "value":"..."}``
+      * ``{"type":"done", "answer":"<full>", "timing_ms":{...},
+             "cache_hit": bool}``
+      * ``{"type":"error", "message":"..."}``
+    """
+    import json as _json
+    from django.http import StreamingHttpResponse
+
+    try:
+        company_user = request.user
+        company = company_user.company
+        data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        question = (data.get('question') or '').strip()
+        if not question:
+            return Response({'status': 'error', 'message': 'question is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        scope_document_type = data.get('scope_document_type') or None
+        scope_document_ids = data.get('scope_document_ids') or None
+        min_similarity = data.get('min_similarity')
+        max_age_days = data.get('max_age_days')
+        max_results = int(data.get('max_results') or 3)
+        history = data.get('chat_history') or None
+
+        agent = FrontlineAgent(company_id=company.id)
+
+        def _event_stream():
+            collected_doc_ids = []
+            try:
+                for event in agent.answer_question_stream(
+                    question,
+                    company_id=company.id,
+                    scope_document_type=scope_document_type,
+                    scope_document_ids=scope_document_ids,
+                    min_similarity=min_similarity,
+                    max_age_days=max_age_days,
+                    max_results=max_results,
+                    company_user_id=company_user.id,
+                    history=history,
+                ):
+                    if event.get('type') == 'meta':
+                        for c in (event.get('citations') or []):
+                            if isinstance(c, dict) and c.get('document_id'):
+                                try:
+                                    collected_doc_ids.append(int(c['document_id']))
+                                except (TypeError, ValueError):
+                                    continue
+                    yield _json.dumps(event) + '\n'
+            except KeyServiceError as exc:
+                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+            except Exception as exc:
+                logger.exception("knowledge_qa_stream: agent raised")
+                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+
+        response = StreamingHttpResponse(
+            _event_stream(),
+            content_type='application/x-ndjson',
+        )
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['X-Accel-Buffering'] = 'no'
+        return response
+
+    except KeyServiceError:
+        raise
+    except Exception:
+        logger.exception("knowledge_qa_stream setup failed")
+        return Response({'status': 'error', 'message': 'Failed to start stream'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 def knowledge_feedback(request):
     """Submit helpful/not helpful feedback for a knowledge-base answer. Improves docs and RAG."""
     try:
