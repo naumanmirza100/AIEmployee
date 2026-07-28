@@ -113,6 +113,84 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     setTimeout(scrollToBottom, 100);
   };
 
+  // Resolve a Project Pilot confirmation card: user picked one of the
+  // options offered when the pipeline flagged an ambiguous / duplicate
+  // request. Builds a follow-up prompt tuned to the option and sends it
+  // through the normal chat path; the LLM sees the previous confirmation
+  // card (which lists the proposed tasks) in chat history and regenerates
+  // actions accordingly.
+  const submitPilotChat = async (followUpText, extraContent = '') => {
+    if (!followUpText || !followUpText.trim()) return;
+    const q = followUpText.trim();
+    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectTitle = getProjectTitle(projectId);
+    try {
+      setLoading(true);
+      const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      if (response.status === 'success') {
+        const data = response.data || response;
+        const answerText = data.answer || '';
+        const actionResults = data.action_results || response.action_results || [];
+        const cannotDo = data.cannot_do || response.cannot_do;
+        const userMsg = {
+          role: 'user',
+          content: extraContent ? `${q}\n\n${extraContent}` : q,
+          responseData: projectTitle ? { project_id: projectId, project_title: projectTitle } : undefined,
+        };
+        const assistantMsg = {
+          role: 'assistant',
+          content: answerText || (cannotDo || 'No response.'),
+          responseData: {
+            answer: answerText,
+            action_results: actionResults,
+            cannot_do: cannotDo,
+            project_id: projectId,
+            project_title: projectTitle,
+          },
+        };
+        await addMessagePairToChat(userMsg, assistantMsg, q);
+        if (actionResults.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
+      } else {
+        throw new Error(response.message || 'Failed to process request');
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: apiErrorMessage(error, 'Failed to process request'), variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handler for confirmation-card option clicks. Maps the option id to a
+  // natural-language follow-up the LLM will act on.
+  const handleConfirmationChoice = async (option, confirmation, msg) => {
+    if (!option) return;
+    if (option.id === 'cancel') {
+      // Nothing to send — just tell the user we stopped. Local-only UI hint.
+      toast({ title: 'Cancelled', description: 'No projects or tasks were created.' });
+      return;
+    }
+    let followUp = '';
+    if (option.id === 'update_existing' && option.existing_project_id) {
+      followUp = (
+        `Instead of creating a new project, please add the tasks you just listed to my existing ` +
+        `project "${option.existing_project_name}" (id=${option.existing_project_id}). ` +
+        `Use the same task titles, priorities, and dates you proposed above.`
+      );
+    } else if (option.id === 'create_new') {
+      followUp = (
+        `Yes, please go ahead and create the new project with the tasks you proposed above. ` +
+        `Use the same project name, task titles, priorities, and dates.`
+      );
+    } else if (option.id === 'summarize') {
+      followUp = 'Skip creating anything. Just summarise the key points from the document I uploaded in 4-6 bullet points.';
+    } else if (option.id === 'extract_tasks_only') {
+      followUp = 'Do not create any projects or tasks. Just list the tasks you would have created, as a numbered plain-text list.';
+    } else {
+      followUp = option.label || '';
+    }
+    await submitPilotChat(followUp);
+  };
+
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
     if (!question.trim()) {
@@ -287,6 +365,10 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
               answer: answerText,
               action_results: actionResults,
               cannot_do: cannotDo,
+              // Passes the confirmation-gate payload through so the chat
+              // card renders clickable options. Null when the pipeline
+              // executed normally.
+              confirmation_required: data.confirmation_required || null,
               project_id: projectId,
               project_title: projectTitle,
               from_file: true,
@@ -301,6 +383,11 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             toast({
               title: 'Project Pilot done',
               description: `${created} action${created === 1 ? '' : 's'} completed for "${file.name}".`,
+            });
+          } else if (data.confirmation_required) {
+            toast({
+              title: 'Needs your input',
+              description: 'Open the chat to confirm what to do with the uploaded document.',
             });
           }
         } catch (err) {
@@ -749,6 +836,55 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           })}
                         </div>
                       )}
+                      {/* Confirmation gate — pipeline decided this upload
+                          was ambiguous (no explicit "create" verb) or
+                          duplicates an existing project. User picks how to
+                          proceed via clickable options. */}
+                      {msg.responseData?.confirmation_required && (() => {
+                        const conf = msg.responseData.confirmation_required;
+                        const similar = conf.similar_projects || [];
+                        const options = conf.options || [];
+                        return (
+                          <div className="mt-3 rounded-lg border border-amber-300 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-2.5">
+                            <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 text-xs font-semibold uppercase tracking-wider">
+                              ⚠ Needs your confirmation
+                            </div>
+                            {similar.length > 0 && (
+                              <div className="rounded border border-amber-200/70 dark:border-amber-700/40 bg-white/60 dark:bg-black/25 p-2 text-xs space-y-1">
+                                <div className="font-medium text-amber-800 dark:text-amber-200">Similar projects that already exist:</div>
+                                {similar.map((s, i) => (
+                                  <div key={i} className="flex items-center gap-2 text-muted-foreground">
+                                    <span className="font-medium text-foreground">{s.existing_name}</span>
+                                    <span className="text-[10px] opacity-70">#{s.existing_id} · match {Math.round((s.similarity || 0) * 100)}%</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex flex-wrap gap-2 pt-1">
+                              {options.map((opt) => (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => handleConfirmationChoice(opt, conf, msg)}
+                                  disabled={loading}
+                                  className={`text-xs font-medium rounded-md px-3 py-1.5 border transition-colors ${
+                                    opt.id === 'cancel'
+                                      ? 'border-white/[0.15] bg-white/[0.03] text-muted-foreground hover:bg-white/[0.06]'
+                                      : opt.id === 'update_existing'
+                                        ? 'border-emerald-400/50 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                                        : 'border-violet-400/50 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20'
+                                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                >
+                                  <span>{opt.label}</span>
+                                  {opt.hint && (
+                                    <span className="ml-1.5 text-[10px] opacity-70">{opt.hint}</span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {msg.responseData?.cannot_do && (
                         <p className="text-sm text-amber-700 dark:text-amber-300 mt-2">{msg.responseData.cannot_do}</p>
                       )}

@@ -3381,35 +3381,89 @@ const FrontlineDashboard = () => {
           throw new Error(graphRes.message || 'Failed to generate graph');
         }
       } else {
-        const response = await frontlineAgentService.knowledgeQA(q, scopeOptions);
-        if (response.status === 'success' && response.data) {
-          const data = response.data;
-          const answerText = data.answer || 'No answer available.';
-          assistantMsg = {
-            role: 'assistant',
-            content: answerText,
-            responseData: {
-              answer: answerText,
-              has_verified_info: data.has_verified_info || false,
-              source: data.source || 'Knowledge Base',
-              type: data.type || 'general',
-              document_id: data.document_id ?? null,
-              cache_hit: !!data.cache_hit,
-              // Server-side per-phase timing (retrieval / llm / total in ms).
-              // Persisted through the backend's JSON responseData field.
-              timing_ms: data.timing_ms || null,
-            },
-          };
-        } else {
-          throw new Error(response.message || 'Failed to get response');
+        // Streaming path — insert a placeholder assistant message into the
+        // current chat, mutate its `.content` as tokens arrive, then persist
+        // to backend after the stream completes. This gives sub-second time
+        // to first visible token instead of 5-10s waiting for a full reply.
+        const placeholder = {
+          role: 'assistant',
+          content: '',
+          streaming: true,
+          responseData: {},
+        };
+        // Show placeholder in the currently-selected chat so tokens render live.
+        const streamChatId = selectedChatId;
+        if (streamChatId) {
+          setChats((prev) => prev.map((c) => (
+            c.id === streamChatId
+              ? { ...c, messages: [...(c.messages || []), userMsg, placeholder] }
+              : c
+          )));
         }
+        const patchStreamingMsg = (updater) => {
+          if (!streamChatId) return;
+          setChats((prev) => prev.map((c) => {
+            if (c.id !== streamChatId) return c;
+            const msgs = c.messages ? c.messages.slice() : [];
+            const lastIdx = msgs.length - 1;
+            if (lastIdx < 0) return c;
+            msgs[lastIdx] = updater(msgs[lastIdx]);
+            return { ...c, messages: msgs };
+          }));
+        };
+
+        let accumulated = '';
+        let metaEvent = null;
+        let doneEvent = null;
+        try {
+          await frontlineAgentService.knowledgeQAStream(q, {
+            ...scopeOptions,
+            onMeta: (meta) => {
+              metaEvent = meta;
+              patchStreamingMsg((m) => ({
+                ...m,
+                responseData: {
+                  ...(m.responseData || {}),
+                  has_verified_info: meta.has_verified_info,
+                  source: meta.source || 'Knowledge Base',
+                  type: meta.type_hint || 'general',
+                  document_id: meta.document_id ?? null,
+                  citations: meta.citations || [],
+                  cache_hit: !!meta.cache_hit,
+                },
+              }));
+            },
+            onToken: (piece) => {
+              accumulated += (piece || '');
+              patchStreamingMsg((m) => ({ ...m, content: accumulated }));
+            },
+            onDone: (done) => { doneEvent = done; },
+          });
+        } catch (streamErr) {
+          throw streamErr;
+        }
+        const answerText = (doneEvent && doneEvent.answer) || accumulated || 'No answer available.';
+        assistantMsg = {
+          role: 'assistant',
+          content: answerText,
+          responseData: {
+            answer: answerText,
+            has_verified_info: metaEvent?.has_verified_info || false,
+            source: metaEvent?.source || 'Knowledge Base',
+            type: metaEvent?.type_hint || 'general',
+            document_id: metaEvent?.document_id ?? null,
+            citations: metaEvent?.citations || [],
+            cache_hit: !!(doneEvent?.cache_hit),
+            timing_ms: doneEvent?.timing_ms || null,
+          },
+        };
+        // Flip the placeholder out of streaming mode so the badge renders
+        // instead of the blinking cursor. The persist step just below will
+        // replace this chat's messages with server-normalised data anyway,
+        // but this makes the transition smoother.
+        patchStreamingMsg(() => ({ ...assistantMsg }));
       }
 
-      // Stamp the assistant message with how long the round-trip took.
-      // We store it INSIDE responseData (a JSON blob that the backend
-      // persists) so the badge survives round-tripping through the server
-      // when the chat is re-fetched — otherwise the timing would only show
-      // on the exact request-response cycle and disappear after re-render.
       const endedAt = (typeof performance !== 'undefined' && performance.now)
         ? performance.now() : Date.now();
       if (assistantMsg) {
@@ -4348,7 +4402,13 @@ const FrontlineDashboard = () => {
                               )}
                               <div className="flex-1 min-w-0">
                                 <div className="text-sm text-foreground whitespace-pre-wrap break-words">
-                                  {msg.responseData?.answer ?? msg.content}
+                                  {msg.streaming ? msg.content : (msg.responseData?.answer ?? msg.content)}
+                                  {msg.streaming && (
+                                    <>
+                                      {!msg.content && <span className="text-muted-foreground italic">Thinking…</span>}
+                                      <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-primary/70 animate-pulse align-middle" />
+                                    </>
+                                  )}
                                 </div>
                                 {msg.responseData?.confidence === 'low' && (
                                   <div className="mt-2 text-xs rounded-md px-2 py-1 bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30">
@@ -4498,7 +4558,9 @@ const FrontlineDashboard = () => {
                       </div>
                     </div>
                   ))}
-                  {answering && (
+                  {/* Suppress spinner when a streaming assistant message is
+                      already visible — it has its own inline cursor. */}
+                  {answering && !currentMessages.some((m) => m.streaming) && (
                     <div className="flex justify-start">
                       <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />

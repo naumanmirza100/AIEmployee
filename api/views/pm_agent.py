@@ -3514,6 +3514,12 @@ def project_pilot_job_status(request, job_id):
             {"status": "error", "message": "Job not found"},
             status=status.HTTP_404_NOT_FOUND,
         )
+    # `confirmation_required` piggybacks on timing_ms so we don't need an
+    # extra migration for a rarely-populated field. Lift it into a clean
+    # top-level key for the frontend and remove it from timing_ms so the
+    # timing display isn't polluted.
+    timing = dict(job.timing_ms or {})
+    confirmation_required = timing.pop('_confirmation_required', None)
     return Response({
         "status": "success",
         "data": {
@@ -3523,8 +3529,9 @@ def project_pilot_job_status(request, job_id):
             "answer": job.answer or "",
             "action_results": job.action_results or [],
             "cannot_do": job.cannot_do or "",
+            "confirmation_required": confirmation_required,
             "error": job.error_message or "",
-            "timing_ms": job.timing_ms or {},
+            "timing_ms": timing,
             "created_at": job.created_at.isoformat() if job.created_at else None,
             "completed_at": job.completed_at.isoformat() if job.completed_at else None,
         },
