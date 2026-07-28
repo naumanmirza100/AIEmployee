@@ -579,6 +579,7 @@ urlpatterns = [
     re_path(r'^operations/documents/(?P<document_id>\d+)/status/?$', operations_agent.get_document_status, name='operations_document_status'),  # GET
     re_path(r'^operations/documents/?$', operations_agent.list_documents, name='operations_list_documents'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/?$', operations_agent.get_document, name='operations_get_document'),  # GET
+    re_path(r'^operations/documents/(?P<document_id>\d+)/reprocess/?$', operations_agent.reprocess_document, name='operations_reprocess_document'),  # POST
     re_path(r'^operations/documents/(?P<document_id>\d+)/delete/?$', operations_agent.delete_document, name='operations_delete_document'),  # DELETE
     re_path(r'^operations/summaries/upload/?$', operations_agent.upload_and_summarize, name='operations_upload_and_summarize'),  # POST
     re_path(r'^operations/summaries/(?P<summary_id>\d+)/status/?$', operations_agent.get_summary_status, name='operations_summary_status'),  # GET

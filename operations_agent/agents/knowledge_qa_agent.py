@@ -742,6 +742,22 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             for s, srow in self._score_summaries(company_id, tokens):
                 scored.append((float(s), srow))
 
+        # Confidence gate — decide whether the matches are strong enough to be
+        # treated as "the document answers this". Without it, a single incidental
+        # keyword hit made the LLM present unrelated excerpts as an answer (with
+        # a Sources section). We look at the strongest evidence from either path:
+        #   * best semantic cosine >= OPERATIONS_RAG_MIN_CONFIDENCE, OR
+        #   * a keyword match covering >= 2 distinct query tokens (or 1 strong
+        #     long token) — a lone short common word isn't enough.
+        min_conf = float(getattr(settings, 'OPERATIONS_RAG_MIN_CONFIDENCE', 0.30))
+        best_semantic = max(semantic_hits.values()) if semantic_hits else 0.0
+        best_keyword = max(keyword_scores.values()) if keyword_scores else 0
+        strong_semantic = best_semantic >= min_conf
+        # _score_chunk gives >=2 for a long token or a token seen twice, so a
+        # score of >=3 means real overlap rather than one incidental short word.
+        strong_keyword = best_keyword >= 3
+        is_confident = strong_semantic or strong_keyword
+
         # Fallback: if nothing matched, grab summary/parsed_text of most recent docs
         if not scored:
             fb_text, fb_sources = self._fallback_context(company_id, document_ids, tokens)
@@ -785,7 +801,11 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
             unique_sources.append(s)
 
         self.last_retrieval_timing['search_total'] = int((time.time() - _t_all) * 1000)
-        return '\n---\n'.join(parts), unique_sources, True
+        self.last_retrieval_path += f'confident={is_confident}(sem={best_semantic:.2f},kw={best_keyword})|'
+        # is_relevant carries the confidence verdict: on a weak match the caller
+        # tells the LLM the excerpts likely don't answer the question and omits
+        # the Sources section, so we don't present unrelated text as an answer.
+        return '\n---\n'.join(parts), unique_sources, is_confident
 
     # ──────────────────────────────────────────────
     # Semantic retrieval + fusion (RAG)
@@ -925,7 +945,7 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         """No keyword match: provide recent-doc summaries so the LLM can at least orient."""
         docs_qs = OperationsDocument.objects.filter(
             company_id=company_id, is_processed=True,
-        )
+        ).only('id', 'title', 'original_filename', 'summary', 'parsed_text')
         if document_ids:
             docs_qs = docs_qs.filter(id__in=document_ids)
         docs = list(docs_qs.order_by('-created_at')[:5])

@@ -118,25 +118,91 @@ def _reindex_impl(document_id):
     if not (doc.parsed_text or '').strip():
         return {'status': 'no_text', 'document_id': document_id}
 
-    doc.processing_status = 'processing'
-    doc.save(update_fields=['processing_status', 'updated_at'])
-    OperationsDocumentChunk.objects.filter(document=doc).delete()
+    from django.db import transaction
 
+    doc.processing_status = 'processing'
+    doc.processing_error = ''
+    doc.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
+
+    # Re-chunk + re-embed + stamp ready in one transaction so a failure can't
+    # leave the doc chunk-less-but-ready or stuck mid-way.
     agent = DocumentProcessingAgent()
-    count, embedded, model = agent._chunk_embed_and_store(
-        doc, doc.parsed_text, doc.page_count or 1, doc.document_type or 'other',
-    )
-    doc.chunks_total = count
-    doc.chunks_processed = count
-    doc.is_indexed = embedded
-    doc.embedding_model = model or ''
-    doc.processing_status = 'ready'
-    doc.save(update_fields=[
-        'chunks_total', 'chunks_processed', 'is_indexed',
-        'embedding_model', 'processing_status', 'updated_at',
-    ])
+    with transaction.atomic():
+        OperationsDocumentChunk.objects.filter(document=doc).delete()
+        count, embedded, model = agent._chunk_embed_and_store(
+            doc, doc.parsed_text, doc.page_count or 1, doc.document_type or 'other',
+        )
+        doc.chunks_total = count
+        doc.chunks_processed = count
+        doc.is_indexed = embedded
+        doc.embedding_model = model or ''
+        doc.processing_status = 'ready'
+        doc.is_processed = True
+        doc.save(update_fields=[
+            'chunks_total', 'chunks_processed', 'is_indexed',
+            'embedding_model', 'processing_status', 'is_processed', 'updated_at',
+        ])
     _invalidate_operations_indexes(doc.company_id, embedded)
     return {'status': 'ready', 'document_id': document_id, 'chunks': count, 'embedded': embedded}
+
+
+def reindex_document_in_background(document_id):
+    """Run `_reindex_impl` in a daemon thread (used by the reprocess endpoint so
+    the request returns immediately). Stamps 'failed' if it dies."""
+    def _run():
+        from django.db import close_old_connections
+        close_old_connections()
+        try:
+            _reindex_impl(document_id)
+        except Exception as exc:
+            logger.exception("Operations reprocess failed for doc %s", document_id)
+            try:
+                from operations_agent.models import OperationsDocument
+                OperationsDocument.objects.filter(id=document_id).update(
+                    processing_status='failed', processing_error=str(exc)[:2000],
+                )
+            except Exception:
+                pass
+        finally:
+            close_old_connections()
+
+    t = threading.Thread(target=_run, name='ops-doc-reindex', daemon=True)
+    t.start()
+    return t
+
+
+def _reindex_summary_impl(summary_id):
+    """Re-chunk + re-embed a summarised file from its stored `parsed_text`.
+    No LLM, no per-company key. Used by the reindex command's --summaries mode
+    and to backfill embeddings once a provider key is added."""
+    from django.db import transaction
+    from operations_agent.models import OperationsDocumentSummary, OperationsDocumentChunk
+    from operations_agent.agents.document_processing_agent import (
+        DocumentProcessingAgent, _invalidate_operations_indexes,
+    )
+
+    s = OperationsDocumentSummary.objects.filter(id=summary_id).first()
+    if not s:
+        return {'status': 'not_found', 'summary_id': summary_id}
+    if not (s.parsed_text or '').strip():
+        return {'status': 'no_text', 'summary_id': summary_id}
+
+    s.processing_status = 'processing'
+    s.save(update_fields=['processing_status'])
+
+    agent = DocumentProcessingAgent()
+    with transaction.atomic():
+        OperationsDocumentChunk.objects.filter(summary=s).delete()
+        count, embedded, model = agent._chunk_embed_and_store(
+            s, s.parsed_text, s.page_count or 1, s.document_category or 'other',
+            owner_kind='summary',
+        )
+        s.is_indexed = embedded
+        s.embedding_model = model or ''
+        s.processing_status = 'ready'
+        s.save(update_fields=['is_indexed', 'embedding_model', 'processing_status'])
+    _invalidate_operations_indexes(s.company_id, embedded)
+    return {'status': 'ready', 'summary_id': summary_id, 'chunks': count, 'embedded': embedded}
 
 
 if shared_task is not None:

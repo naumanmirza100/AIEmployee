@@ -58,56 +58,64 @@ def upload_document(request):
         if uploaded_file.size > 50 * 1024 * 1024:
             return Response({'status': 'error', 'message': 'File too large. Maximum 50 MB.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Save to disk
-        upload_dir = Path(settings.LOCAL_STORAGE_ROOT) / 'operations' / 'documents' / str(company.id)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-
-        # Hash for duplicate detection
+        # Content hash for duplicate detection (full SHA-256).
         file_bytes = uploaded_file.read()
-        file_hash = hashlib.sha256(file_bytes).hexdigest()[:16]
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
         uploaded_file.seek(0)
 
-        safe_name = f"{file_hash}_{uploaded_file.name}"
-        file_path = upload_dir / safe_name
-
-        with open(file_path, 'wb') as f:
-            for chunk in uploaded_file.chunks():
-                f.write(chunk)
-
-        # Check duplicate
+        # Cheap pre-check (nice error) — the DB constraint below is the real,
+        # race-safe guard.
         existing = OperationsDocument.objects.filter(
-            company=company,
-            original_filename=uploaded_file.name,
-            file_size=uploaded_file.size,
-        ).first()
+            company=company, file_hash=file_hash,
+        ).only('id').first()
         if existing:
-            # Clean up saved file
-            if file_path.exists():
-                os.remove(file_path)
             return Response({
                 'status': 'error',
                 'message': f'Document "{uploaded_file.name}" already exists',
                 'document_id': existing.id,
             }, status=status.HTTP_409_CONFLICT)
 
-        # Fail fast on a bad/missing API key BEFORE we background the work, so
-        # the client gets a real error instead of a doc stuck in 'processing'.
+        # Fail fast on a bad/missing API key BEFORE writing the file or a row,
+        # so a bad key never leaves an orphan file on disk.
         from core.api_key_service import resolve_for_call
         resolve_for_call(company, 'operations_agent')
 
-        # Create a pending placeholder so the client can poll status immediately.
-        placeholder = OperationsDocument.objects.create(
-            company=company,
-            uploaded_by=company_user,
-            title=title or Path(uploaded_file.name).stem,
-            original_filename=uploaded_file.name,
-            file=str(file_path),
-            file_type='other',
-            file_size=uploaded_file.size,
-            tags=tags,
-            is_processed=False,
-            processing_status='pending',
-        )
+        # Save to disk.
+        upload_dir = Path(settings.LOCAL_STORAGE_ROOT) / 'operations' / 'documents' / str(company.id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        file_path = upload_dir / f"{file_hash[:16]}_{uploaded_file.name}"
+        with open(file_path, 'wb') as f:
+            for chunk in uploaded_file.chunks():
+                f.write(chunk)
+
+        # Create the pending placeholder. The unique (company, file_hash)
+        # constraint rejects a concurrent duplicate here — catch it, clean up
+        # the file, and return 409 instead of orphaning a second row/file.
+        from django.db import IntegrityError
+        try:
+            placeholder = OperationsDocument.objects.create(
+                company=company,
+                uploaded_by=company_user,
+                title=title or Path(uploaded_file.name).stem,
+                original_filename=uploaded_file.name,
+                file=str(file_path),
+                file_type='other',
+                file_size=uploaded_file.size,
+                file_hash=file_hash,
+                tags=tags,
+                is_processed=False,
+                processing_status='pending',
+            )
+        except IntegrityError:
+            if file_path.exists():
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+            return Response({
+                'status': 'error',
+                'message': f'Document "{uploaded_file.name}" already exists',
+            }, status=status.HTTP_409_CONFLICT)
 
         # Process in the background (thread — not Celery — because the pipeline
         # needs the per-company key resolved from this request context).
@@ -195,7 +203,15 @@ def list_documents(request):
     """List all documents for the company with pagination and filters."""
     try:
         company = request.user.company
-        docs = OperationsDocument.objects.filter(company=company).order_by('-created_at')
+        # .only() so the list doesn't drag every doc's multi-MB parsed_text
+        # into memory — the serializer below never reads it.
+        docs = OperationsDocument.objects.filter(company=company).only(
+            'id', 'title', 'original_filename', 'file_type', 'document_type',
+            'file_size', 'page_count', 'is_processed', 'processing_status',
+            'processing_error', 'is_indexed', 'chunks_total', 'tags', 'entities',
+            'metadata', 'summary', 'key_insights', 'uploaded_by', 'created_at',
+            'processed_at',
+        ).select_related('uploaded_by').order_by('-created_at')
 
         # Filters
         doc_type = request.query_params.get('document_type')
@@ -235,6 +251,10 @@ def list_documents(request):
                 'file_size': doc.file_size,
                 'page_count': doc.page_count,
                 'is_processed': doc.is_processed,
+                'processing_status': doc.processing_status,
+                'processing_error': doc.processing_error or '',
+                'is_indexed': doc.is_indexed,
+                'chunks_total': doc.chunks_total,
                 'tags': doc.tags,
                 'entities': doc.entities,
                 'metadata': doc.metadata,
@@ -292,6 +312,9 @@ def get_document(request, document_id):
                 'entities': doc.entities,
                 'tags': doc.tags,
                 'is_processed': doc.is_processed,
+                'processing_status': doc.processing_status,
+                'processing_error': doc.processing_error or '',
+                'is_indexed': doc.is_indexed,
                 'chunks_count': chunks.count(),
                 'uploaded_by': doc.uploaded_by.full_name if doc.uploaded_by else None,
                 'created_at': doc.created_at.isoformat(),
@@ -345,6 +368,49 @@ def delete_document(request, document_id):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def reprocess_document(request, document_id):
+    """Re-run indexing for a failed/stuck document from its stored text.
+
+    Re-chunks and re-embeds from `parsed_text` (no re-extraction, no LLM), which
+    recovers docs stuck by a worker restart or a failed embed. If the document
+    never got as far as extracting text, it can't be recovered here — the user
+    must re-upload.
+    """
+    try:
+        company = request.user.company
+        doc = OperationsDocument.objects.filter(company=company, pk=document_id).first()
+        if not doc:
+            return Response({'status': 'error', 'message': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not (doc.parsed_text or '').strip():
+            return Response({
+                'status': 'error',
+                'message': 'This document has no stored text to reprocess. Please re-upload it.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fail fast on a bad key before backgrounding.
+        from core.api_key_service import resolve_for_call
+        resolve_for_call(company, 'operations_agent')
+
+        from operations_agent.tasks import reindex_document_in_background
+        reindex_document_in_background(doc.id)
+
+        return Response({
+            'status': 'accepted',
+            'message': 'Reprocessing started.',
+            'document': {'id': doc.id, 'processing_status': 'processing'},
+        }, status=status.HTTP_202_ACCEPTED)
+
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error(f'Reprocess document error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ──────────────────────────────────────────────
 # Summarization Endpoints
 # ──────────────────────────────────────────────
@@ -365,22 +431,35 @@ def upload_and_summarize(request):
         if uploaded_file.size > 50 * 1024 * 1024:
             return Response({'status': 'error', 'message': 'File too large. Maximum 50 MB.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Save to temp location
+        # Guard against an accidental double-submit: reject if the same file
+        # (name + size) is already being summarised right now. Re-summarising a
+        # finished file later is still allowed.
+        in_flight = OperationsDocumentSummary.objects.filter(
+            company=company,
+            original_filename=uploaded_file.name,
+            file_size=uploaded_file.size,
+            processing_status__in=('pending', 'processing'),
+        ).only('id').first()
+        if in_flight:
+            return Response({
+                'status': 'error',
+                'message': f'"{uploaded_file.name}" is already being summarized.',
+                'summary_id': in_flight.id,
+            }, status=status.HTTP_409_CONFLICT)
+
+        # Fail fast on a bad/missing API key BEFORE writing the file.
+        from core.api_key_service import resolve_for_call
+        resolve_for_call(company, 'operations_agent')
+
+        # Save to temp location.
         upload_dir = Path(settings.LOCAL_STORAGE_ROOT) / 'operations' / 'summaries_tmp'
         upload_dir.mkdir(parents=True, exist_ok=True)
-
         file_hash = hashlib.sha256(uploaded_file.read()).hexdigest()[:16]
         uploaded_file.seek(0)
-
         temp_path = upload_dir / f"{file_hash}_{uploaded_file.name}"
         with open(temp_path, 'wb') as f:
             for chunk in uploaded_file.chunks():
                 f.write(chunk)
-
-        # Fail fast on a bad/missing API key BEFORE backgrounding the work, so
-        # the client gets a real error instead of a row stuck in 'processing'.
-        from core.api_key_service import resolve_for_call
-        resolve_for_call(company, 'operations_agent')
 
         # Pending placeholder so the client can poll status immediately.
         placeholder = OperationsDocumentSummary.objects.create(
@@ -627,8 +706,24 @@ def dashboard_stats(request):
         company = request.user.company
 
         total_docs = OperationsDocument.objects.filter(company=company).count()
-        processed_docs = OperationsDocument.objects.filter(company=company, is_processed=True).count()
+        # Count 'ready' (not the looser is_processed) so a mid-pipeline or failed
+        # doc isn't reported as done.
+        processed_docs = OperationsDocument.objects.filter(
+            company=company, processing_status='ready',
+        ).count()
         total_chunks = OperationsDocumentChunk.objects.filter(document__company=company).count()
+
+        # Semantic-search availability: is a provider configured, and how many
+        # of this company's files actually have embeddings? The UI shows a banner
+        # when semantic search is off so users know retrieval is keyword-only.
+        try:
+            from core.Frontline_agent.embedding_service import EmbeddingService
+            provider_available = EmbeddingService().is_available()
+        except Exception:
+            provider_available = False
+        indexed_docs = OperationsDocument.objects.filter(company=company, is_indexed=True).count()
+        indexed_summaries = OperationsDocumentSummary.objects.filter(company=company, is_indexed=True).count()
+        semantic_active = provider_available and (indexed_docs + indexed_summaries) > 0
 
         # Doc type breakdown
         from django.db.models import Count
@@ -657,6 +752,13 @@ def dashboard_stats(request):
                 'total_chunks': total_chunks,
                 'document_types': type_breakdown,
                 'file_types': file_breakdown,
+                # Semantic-search status for the UI banner.
+                'semantic_search': {
+                    'active': semantic_active,
+                    'provider_available': provider_available,
+                    'indexed_documents': indexed_docs,
+                    'indexed_summaries': indexed_summaries,
+                },
             },
         })
 
@@ -1089,7 +1191,11 @@ def list_generated_documents(request):
     """List all generated documents for the company."""
     try:
         company = request.user.company
-        docs = OperationsGeneratedDocument.objects.filter(company=company).order_by('-updated_at')
+        # prefetch_related so _serialize_generated's doc.reference_documents.all()
+        # doesn't fire one query per row across the list.
+        docs = OperationsGeneratedDocument.objects.filter(
+            company=company,
+        ).prefetch_related('reference_documents').order_by('-updated_at')
 
         search = (request.query_params.get('search') or '').strip()
         template = request.query_params.get('template_type')
@@ -1620,26 +1726,40 @@ def operations_analytics(request):
                 lookback_days = days_total
                 bucket_days = max(1, days_total // 30)
 
-        series_docs = []
-        series_generated = []
-        series_qa = []
+        # Build the bucket edges once.
+        buckets = []  # list of (start, end, label)
         for i in range(lookback_days, 0, -bucket_days):
-            bucket_end = now - timedelta(days=i - bucket_days)
-            bucket_start = now - timedelta(days=i)
-            label = bucket_start.strftime('%b %d')
-            c_docs = OperationsDocument.objects.filter(
-                company=company, created_at__gte=bucket_start, created_at__lt=bucket_end,
-            ).count()
-            c_gen = OperationsGeneratedDocument.objects.filter(
-                company=company, created_at__gte=bucket_start, created_at__lt=bucket_end,
-            ).count()
-            c_qa = OperationsChatMessage.objects.filter(
-                chat__company=company, role='user',
-                created_at__gte=bucket_start, created_at__lt=bucket_end,
-            ).count()
-            series_docs.append({'label': label, 'value': c_docs})
-            series_generated.append({'label': label, 'value': c_gen})
-            series_qa.append({'label': label, 'value': c_qa})
+            b_start = now - timedelta(days=i)
+            b_end = now - timedelta(days=i - bucket_days)
+            buckets.append((b_start, b_end, b_start.strftime('%b %d')))
+        window_start = buckets[0][0] if buckets else now
+
+        def _bucketise(timestamps):
+            """Count timestamps into the pre-built buckets. One pass, no per-bucket query."""
+            counts = [0] * len(buckets)
+            for ts in timestamps:
+                # buckets are contiguous ascending — linear scan is fine (<=30).
+                for idx, (b_start, b_end, _lbl) in enumerate(buckets):
+                    if b_start <= ts < b_end:
+                        counts[idx] += 1
+                        break
+            return counts
+
+        # 3 queries total (was 3 per bucket = up to ~90). Pull only created_at.
+        doc_ts = OperationsDocument.objects.filter(
+            company=company, created_at__gte=window_start,
+        ).values_list('created_at', flat=True)
+        gen_ts = OperationsGeneratedDocument.objects.filter(
+            company=company, created_at__gte=window_start,
+        ).values_list('created_at', flat=True)
+        qa_ts = OperationsChatMessage.objects.filter(
+            chat__company=company, role='user', created_at__gte=window_start,
+        ).values_list('created_at', flat=True)
+
+        c_docs, c_gen, c_qa = _bucketise(doc_ts), _bucketise(gen_ts), _bucketise(qa_ts)
+        series_docs = [{'label': b[2], 'value': c_docs[i]} for i, b in enumerate(buckets)]
+        series_generated = [{'label': b[2], 'value': c_gen[i]} for i, b in enumerate(buckets)]
+        series_qa = [{'label': b[2], 'value': c_qa[i]} for i, b in enumerate(buckets)]
 
         # ── Insights from summaries ────────────────
         sentiment_counts = Counter()

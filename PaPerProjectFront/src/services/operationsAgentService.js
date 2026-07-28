@@ -145,6 +145,16 @@ export const deleteDocument = async (documentId) => {
   }
 };
 
+/** Re-run indexing for a failed/stuck document (from its stored text). */
+export const reprocessDocument = async (documentId) => {
+  try {
+    return await companyApi.post(`/operations/documents/${documentId}/reprocess`, {});
+  } catch (error) {
+    console.error('Reprocess document error:', error);
+    throw error;
+  }
+};
+
 /**
  * Upload a file and generate a rich summary.
  *
@@ -548,6 +558,7 @@ export default {
   listDocuments,
   getDocument,
   deleteDocument,
+  reprocessDocument,
   uploadAndSummarize,
   getSummaryStatus,
   listSummaries,
