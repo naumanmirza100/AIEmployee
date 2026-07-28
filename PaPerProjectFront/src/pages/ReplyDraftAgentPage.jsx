@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
@@ -44,6 +44,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Plus, CheckCircle2, Settings as SettingsIcon, BarChart3, Link2 } from 'lucide-react';
 // Sparkles, RefreshCw and Inbox are already imported in the main lucide block above.
+import HoverTip from '@/components/common/HoverTip';
 import HowItWorksModal from '@/components/common/HowItWorksModal';
 import { hasSeenTutorial, markTutorialSeen } from '@/components/frontline/FrontlineTutorial';
 import { REPLY_DRAFT_HOWITWORKS_STEPS, REPLY_DRAFT_HOWITWORKS_KEY } from './replyDraftHowItWorks';
@@ -1094,15 +1095,16 @@ const ReplyDraftAgentPage = () => {
               </span>
 
               {/* How it works — re-open the onboarding summary any time */}
-              <Button
-                variant="outline"
-                className="bg-white/5 border-white/15 text-white/80 hover:bg-white/10 hover:text-white gap-2"
-                onClick={() => setHowItWorksOpen(true)}
-                title="How this agent works"
-              >
-                <Sparkles className="h-4 w-4" />
-                <span className="hidden sm:inline text-xs font-medium">How it works</span>
-              </Button>
+              <HoverTip tip="See how this agent works — a quick walkthrough of drafting and sending replies">
+                <Button
+                  variant="outline"
+                  className="bg-white/5 border-white/15 text-white/80 hover:bg-white/10 hover:text-white gap-2"
+                  onClick={() => setHowItWorksOpen(true)}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span className="hidden sm:inline text-xs font-medium">How it works</span>
+                </Button>
+              </HoverTip>
 
               <AttachedAccountButton
                 syncAccounts={syncAccounts}
@@ -1113,37 +1115,39 @@ const ReplyDraftAgentPage = () => {
                   until the user attaches an inbox account, since the
                   send pipeline picks credentials off that account. */}
               {syncAccounts.length > 0 && (
-                <Button
-                  variant="outline"
-                  className="bg-white/5 border-fuchsia-500/30 text-fuchsia-200 hover:bg-fuchsia-500/10 hover:text-fuchsia-100 gap-2"
-                  onClick={() => setComposeOpen(true)}
-                  title="Write a new email"
-                >
-                  <PenSquare className="h-4 w-4" />
-                  <span className="hidden sm:inline text-xs font-medium">Compose</span>
-                </Button>
+                <HoverTip tip="Write a brand-new email from your attached inbox account">
+                  <Button
+                    variant="outline"
+                    className="bg-white/5 border-fuchsia-500/30 text-fuchsia-200 hover:bg-fuchsia-500/10 hover:text-fuchsia-100 gap-2"
+                    onClick={() => setComposeOpen(true)}
+                  >
+                    <PenSquare className="h-4 w-4" />
+                    <span className="hidden sm:inline text-xs font-medium">Compose</span>
+                  </Button>
+                </HoverTip>
               )}
 
               {syncAccounts.length > 0 && (
-                <Button
-                  variant="outline"
-                  className="bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white gap-2"
-                  onClick={() => setSettingsOpen(true)}
-                  title="Inbox analytics & account settings"
-                >
-                  <SettingsIcon className="h-4 w-4" />
-                  <span className="hidden sm:inline text-xs font-medium">Settings</span>
-                </Button>
+                <HoverTip tip="Inbox analytics and attached-account settings">
+                  <Button
+                    variant="outline"
+                    className="bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white gap-2"
+                    onClick={() => setSettingsOpen(true)}
+                  >
+                    <SettingsIcon className="h-4 w-4" />
+                    <span className="hidden sm:inline text-xs font-medium">Settings</span>
+                  </Button>
+                </HoverTip>
               )}
 
-              <Button
-                onClick={refreshAll}
-                disabled={refreshing}
-                className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 disabled:opacity-60"
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Refreshing…' : 'Refresh'}
-              </Button>
+                <Button
+                  onClick={refreshAll}
+                  disabled={refreshing}
+                  className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                  {refreshing ? 'Refreshing…' : 'Refresh'}
+                </Button>
             </div>
           </div>
 
@@ -1170,54 +1174,60 @@ const ReplyDraftAgentPage = () => {
                 {/* Tabs */}
                 <div className="p-2 border-b border-white/10 flex items-center gap-2">
                   <div className="flex-1 flex">
-                    <button
-                      onClick={() => setActiveTab('inbox')}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeTab === 'inbox'
-                        ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-200 border border-cyan-500/30'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
-                    >
-                      <Inbox className="h-4 w-4" />
-                      Inbox
-                      {pendingReplies.length > 0 && (
-                        <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-cyan-500/30 text-cyan-100' : 'bg-white/10 text-gray-300'}`}>
-                          {pendingReplies.length}
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('drafts')}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeTab === 'drafts'
-                        ? 'bg-gradient-to-r from-fuchsia-500/20 to-purple-500/20 text-fuchsia-200 border border-fuchsia-500/30'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
-                    >
-                      <Edit3 className="h-4 w-4" />
-                      Drafts
-                      {unsentDrafts.length > 0 && (
-                        <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
-                          {unsentDrafts.length}
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('sent')}
-                      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                        activeTab === 'sent'
-                          ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-200 border border-emerald-500/30'
+                    <HoverTip tip="Incoming replies waiting for you to draft an answer" className="flex-1">
+                      <button
+                        onClick={() => setActiveTab('inbox')}
+                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        activeTab === 'inbox'
+                          ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-200 border border-cyan-500/30'
                           : 'text-gray-400 hover:text-white hover:bg-white/5'
                       }`}
-                    >
-                      <Check className="h-4 w-4" />
-                      Sent
-                      {sentEmails.length > 0 && (
-                        <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'sent' ? 'bg-emerald-500/30 text-emerald-100' : 'bg-white/10 text-gray-300'}`}>
-                          {sentEmails.length}
-                        </span>
-                      )}
-                    </button>
+                      >
+                        <Inbox className="h-4 w-4" />
+                        Inbox
+                        {pendingReplies.length > 0 && (
+                          <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-cyan-500/30 text-cyan-100' : 'bg-white/10 text-gray-300'}`}>
+                            {pendingReplies.length}
+                          </span>
+                        )}
+                      </button>
+                    </HoverTip>
+                    <HoverTip tip="AI-written reply drafts you haven't sent yet" className="flex-1">
+                      <button
+                        onClick={() => setActiveTab('drafts')}
+                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                        activeTab === 'drafts'
+                          ? 'bg-gradient-to-r from-fuchsia-500/20 to-purple-500/20 text-fuchsia-200 border border-fuchsia-500/30'
+                          : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
+                      >
+                        <Edit3 className="h-4 w-4" />
+                        Drafts
+                        {unsentDrafts.length > 0 && (
+                          <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
+                            {unsentDrafts.length}
+                          </span>
+                        )}
+                      </button>
+                    </HoverTip>
+                    <HoverTip tip="Replies you've already approved and sent" className="flex-1">
+                      <button
+                        onClick={() => setActiveTab('sent')}
+                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                          activeTab === 'sent'
+                            ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-200 border border-emerald-500/30'
+                            : 'text-gray-400 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <Check className="h-4 w-4" />
+                        Sent
+                        {sentEmails.length > 0 && (
+                          <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'sent' ? 'bg-emerald-500/30 text-emerald-100' : 'bg-white/10 text-gray-300'}`}>
+                            {sentEmails.length}
+                          </span>
+                        )}
+                      </button>
+                    </HoverTip>
                   </div>
                 </div>
 
@@ -1379,6 +1389,30 @@ const ReplyDraftAgentPage = () => {
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-base font-semibold text-white truncate">
                               {selectedContact?.name || selectedContact?.email || 'Unknown sender'}
+                              
+                    {/* "In reply to" chip — only on Sent-tab rows whose
+                        backend payload included a `replies_to` lookup.
+                        Clicking it jumps to the original inbound message
+                        so the user can see what they were replying to. */}
+                    {selectedReply?.replies_to && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenParentEmail(selectedReply.replies_to)}
+                        className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-500/50 transition group max-w-full"
+                        title="Open the message this reply was sent in response to"
+                      >
+                        <CornerUpLeft className="h-3 w-3 shrink-0" />
+                        <span className="text-cyan-300/80 font-semibold">In reply to:</span>
+                        <span className="truncate text-white/90 group-hover:text-white">
+                          {selectedReply.replies_to.subject || '(no subject)'}
+                        </span>
+                        {selectedReply.replies_to.from_email && (
+                          <span className="hidden sm:inline text-cyan-300/60">
+                            · {selectedReply.replies_to.from_name || selectedReply.replies_to.from_email}
+                          </span>
+                        )}
+                      </button>
+                    )}
                             </span>
                             {selectedReply?.interest_level && INTEREST_STYLES[selectedReply.interest_level] && (
                               <Badge variant="outline" className={`${INTEREST_STYLES[selectedReply.interest_level].className} border`}>
@@ -1428,29 +1462,6 @@ const ReplyDraftAgentPage = () => {
                       </div>
                     )}
 
-                    {/* "In reply to" chip — only on Sent-tab rows whose
-                        backend payload included a `replies_to` lookup.
-                        Clicking it jumps to the original inbound message
-                        so the user can see what they were replying to. */}
-                    {selectedReply?.replies_to && (
-                      <button
-                        type="button"
-                        onClick={() => handleOpenParentEmail(selectedReply.replies_to)}
-                        className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-500/50 transition group max-w-full"
-                        title="Open the message this reply was sent in response to"
-                      >
-                        <CornerUpLeft className="h-3 w-3 shrink-0" />
-                        <span className="text-cyan-300/80 font-semibold">In reply to:</span>
-                        <span className="truncate text-white/90 group-hover:text-white">
-                          {selectedReply.replies_to.subject || '(no subject)'}
-                        </span>
-                        {selectedReply.replies_to.from_email && (
-                          <span className="hidden sm:inline text-cyan-300/60">
-                            · {selectedReply.replies_to.from_name || selectedReply.replies_to.from_email}
-                          </span>
-                        )}
-                      </button>
-                    )}
                   </div>
 
                   {!isComposeDraft && (
@@ -1501,13 +1512,15 @@ const ReplyDraftAgentPage = () => {
                       and hidden once the composer is already open. */}
                   {selectedReply && !selectedDraft && selectedReply.direction !== 'out' && !composerOpen && (
                     <div className="border-t border-white/10 px-5 py-3 flex justify-end">
-                      <Button
-                        onClick={() => setComposerOpen(true)}
-                        className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-white"
-                      >
-                        <CornerUpLeft className="h-4 w-4 mr-2" />
-                        Reply
-                      </Button>
+                      <HoverTip tip="Draft a reply to this email with AI">
+                        <Button
+                          onClick={() => setComposerOpen(true)}
+                          className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-white"
+                        >
+                          <CornerUpLeft className="h-4 w-4 mr-2" />
+                          Reply
+                        </Button>
+                      </HoverTip>
                     </div>
                   )}
                 </div>
@@ -1624,14 +1637,16 @@ const ReplyDraftAgentPage = () => {
 
                     {/* Generate button when no draft yet */}
                     {selectedReply && !selectedDraft && (
-                      <Button
-                        onClick={handleGenerate}
-                        disabled={busy}
-                        className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 h-11"
-                      >
-                        {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
-                        {busy ? 'Drafting reply…' : 'Generate AI Draft'}
-                      </Button>
+                      <HoverTip tip="Let AI write a reply draft to this email for you to review" className="w-full">
+                        <Button
+                          onClick={handleGenerate}
+                          disabled={busy}
+                          className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 h-11"
+                        >
+                          {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                          {busy ? 'Drafting reply…' : 'Generate AI Draft'}
+                        </Button>
+                      </HoverTip>
                     )}
 
                     {/* Draft editor */}
@@ -1706,15 +1721,17 @@ const ReplyDraftAgentPage = () => {
 
                         {!isReadOnly && (
                           <div className="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-white/10">
-                            <Button
-                              onClick={handleReject}
-                              disabled={busy}
-                              variant="outline"
-                              className="bg-transparent border-rose-500/30 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Discard
-                            </Button>
+                            <HoverTip tip="Delete this draft without sending">
+                              <Button
+                                onClick={handleReject}
+                                disabled={busy}
+                                variant="outline"
+                                className="bg-transparent border-rose-500/30 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Discard
+                              </Button>
+                            </HoverTip>
                             <div className="flex items-center gap-2">
                               {/* Regenerate is an AI flow that needs a
                                   source message (Reply or InboxEmail) to
@@ -1724,24 +1741,28 @@ const ReplyDraftAgentPage = () => {
                                   required" error and matches user intent
                                   (compose = manual writing, not AI). */}
                               {!isComposeDraft && (
-                                <Button
-                                  onClick={handleRegenerate}
-                                  disabled={busy}
-                                  variant="outline"
-                                  className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                                >
-                                  {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-                                  Regenerate
-                                </Button>
+                                <HoverTip tip="Ask AI to write a fresh version of this draft">
+                                  <Button
+                                    onClick={handleRegenerate}
+                                    disabled={busy}
+                                    variant="outline"
+                                    className="bg-white/5 border-white/10 text-white hover:bg-white/10"
+                                  >
+                                    {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                                    Regenerate
+                                  </Button>
+                                </HoverTip>
                               )}
-                              <Button
-                                onClick={handleApproveAndSend}
-                                disabled={busy || !editedBody.trim() || !editedSubject.trim()}
-                                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-semibold shadow-lg shadow-emerald-500/20"
-                              >
-                                {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-                                Approve & Send
-                              </Button>
+                              <HoverTip tip="Send this reply from your attached inbox account">
+                                <Button
+                                  onClick={handleApproveAndSend}
+                                  disabled={busy || !editedBody.trim() || !editedSubject.trim()}
+                                  className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-semibold shadow-lg shadow-emerald-500/20"
+                                >
+                                  {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                                  Approve & Send
+                                </Button>
+                              </HoverTip>
                             </div>
                           </div>
                         )}
@@ -2431,12 +2452,14 @@ const SyncSourceCard = ({ accounts, onConfigure }) => {
             Add a mailbox in the Marketing Agent's <span className="font-medium">Email Accounts</span> settings to start syncing replies here. Without an account, this inbox stays empty.
           </div>
         </div>
-        <Button
-          onClick={onConfigure}
-          className="bg-amber-500 hover:bg-amber-400 text-black font-semibold"
-        >
-          Add email account
-        </Button>
+        <HoverTip tip="Connect an inbox account to start syncing replies into this agent">
+          <Button
+            onClick={onConfigure}
+            className="bg-amber-500 hover:bg-amber-400 text-black font-semibold"
+          >
+            Add email account
+          </Button>
+        </HoverTip>
       </div>
     );
   }
@@ -2686,14 +2709,15 @@ const AttachedAccountButton = ({ syncAccounts, onAddNew }) => {
 
   if (!attached) {
     return (
-      <Button
-        onClick={onAddNew}
-        className="bg-amber-500 hover:bg-amber-400 text-black font-semibold gap-2"
-        title="Connect an inbox to start pulling replies"
-      >
-        <Plus className="h-4 w-4" />
-        Add email account
-      </Button>
+        <HoverTip tip="Connect an inbox account to start syncing replies into this agent">
+        <Button
+          onClick={onAddNew}
+          className="bg-amber-500 hover:bg-amber-400 text-black font-semibold gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          Add email account
+        </Button>
+      </HoverTip>
     );
   }
 
@@ -2702,13 +2726,14 @@ const AttachedAccountButton = ({ syncAccounts, onAddNew }) => {
   const textTint = ready ? 'text-emerald-200' : 'text-amber-200';
 
   return (
-    <div
-      className={`h-9 max-w-[260px] rounded-md border px-3 flex items-center gap-2 ${borderTint} ${textTint}`}
-      title={ready ? 'Inbox sync active for this account' : 'Account connected but IMAP needs attention'}
-    >
-      {ready ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-      <span className="truncate text-xs font-medium">{attached.email}</span>
-    </div>
+    <HoverTip tip={ready ? 'Inbox sync is active for this account' : 'Account connected, but IMAP needs attention — check the account settings'}>
+      <div
+        className={`h-9 max-w-[260px] rounded-md border px-3 flex items-center gap-2 ${borderTint} ${textTint}`}
+      >
+        {ready ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+        <span className="truncate text-xs font-medium">{attached.email}</span>
+      </div>
+    </HoverTip>
   );
 };
 

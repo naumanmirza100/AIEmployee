@@ -965,6 +965,54 @@ const CampaignDetail = () => {
                     <div className="text-xs text-muted-foreground">Failed Emails</div>
                   </div>
                 </div>
+                {emailStats.reply_breakdown && (emailStats.total_replied ?? 0) > 0 && (() => {
+                  const REPLY_TYPES = [
+                    { key: 'positive', label: 'Positive / Interested', color: '#10b981' },
+                    { key: 'neutral', label: 'Neutral', color: '#f59e0b' },
+                    { key: 'requested_info', label: 'Requested Info', color: '#3b82f6' },
+                    { key: 'objection', label: 'Objection', color: '#f97316' },
+                    { key: 'negative', label: 'Negative / Not Interested', color: '#ef4444' },
+                    { key: 'unsubscribe', label: 'Unsubscribe', color: '#6b7280' },
+                    { key: 'not_analyzed', label: 'Not Analyzed', color: '#9ca3af' },
+                  ];
+                  const totalReplies = emailStats.total_replied ?? 0;
+                  const shown = REPLY_TYPES
+                    .map(t => ({ ...t, count: emailStats.reply_breakdown[t.key] ?? 0 }))
+                    .filter(t => t.count > 0)
+                    .sort((a, b) => b.count - a.count);
+                  const maxCount = shown.length ? shown[0].count : 0;
+                  return (
+                    <div className="space-y-4 rounded-xl border bg-muted/10 p-5">
+                      <div className="flex items-baseline justify-between">
+                        <h4 className="text-base font-semibold text-foreground">Reply breakdown</h4>
+                        <span className="text-sm font-normal text-muted-foreground">
+                          {totalReplies} total {totalReplies === 1 ? 'reply' : 'replies'}
+                        </span>
+                      </div>
+                      <div className="space-y-2.5">
+                        {shown.map(t => {
+                          const pct = totalReplies > 0 ? Math.round((t.count / totalReplies) * 100) : 0;
+                          // Bar fills relative to the biggest type so small ones stay visible.
+                          const barWidth = maxCount > 0 ? Math.max((t.count / maxCount) * 100, 4) : 0;
+                          return (
+                            <div key={t.key} className="group flex items-center gap-3">
+                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                              <span className="w-40 shrink-0 text-sm font-medium text-foreground truncate">{t.label}</span>
+                              <div className="relative flex-1 h-6 rounded-md bg-muted/40 overflow-hidden">
+                                <div
+                                  className="absolute inset-y-0 left-0 rounded-md transition-all duration-500 group-hover:brightness-110"
+                                  style={{ width: `${barWidth}%`, backgroundColor: t.color, opacity: 0.85 }}
+                                />
+                              </div>
+                              <span className="w-14 shrink-0 text-right text-sm font-bold tabular-nums">{t.count}</span>
+                              <span className="w-12 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{pct}%</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {(analytics.target_leads || analytics.target_conversions) && (
                   <div className="space-y-6">
                     <h4 className="text-base font-semibold text-foreground">Progress Towards Targets</h4>

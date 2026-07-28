@@ -234,6 +234,9 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedEmailId, setExpandedEmailId] = useState(null);
   const [repliesPage, setRepliesPage] = useState(1);   // "Replied contacts" pagination
+  const [collapsedSeqs, setCollapsedSeqs] = useState({}); // {seqName: true} = collapsed
+  const toggleSeq = (name) => setCollapsedSeqs((prev) => ({ ...prev, [name]: !prev[name] }));
+  const [breakdownOpen, setBreakdownOpen] = useState(false); // reply breakdown panel (toggled from Replied stat card)
   const REPLIES_PER_PAGE = 5;
 
   const fetchData = async (isRefresh = false) => {
@@ -418,10 +421,26 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
             <div className="text-xs text-muted-foreground mt-1">{stats?.click_rate ?? 0}% click rate</div>
           </CardContent>
         </Card>
-        <Card className="border-slate-200/80 dark:border-slate-800/80">
+        <Card
+          role={(stats?.total_replied ?? 0) > 0 ? 'button' : undefined}
+          onClick={(stats?.total_replied ?? 0) > 0 ? () => setBreakdownOpen((v) => !v) : undefined}
+          className={`transition-colors ${
+            (stats?.total_replied ?? 0) > 0
+              ? `cursor-pointer ${breakdownOpen
+                  ? 'border-emerald-500/50 bg-emerald-500/[0.07]'
+                  : 'border-slate-200/80 dark:border-slate-800/80 hover:border-emerald-500/40 hover:bg-emerald-500/[0.05]'}`
+              : 'border-slate-200/80 dark:border-slate-800/80'
+          }`}
+        >
           <CardContent className="pt-4 pb-4">
             <div className="text-sm text-muted-foreground">Replied</div>
             <div className="text-2xl font-semibold text-emerald-700/90 dark:text-emerald-400/90">{stats?.total_replied ?? 0}</div>
+            {(stats?.total_replied ?? 0) > 0 && (
+              <div className="text-[11px] mt-1 flex items-center gap-0.5 text-emerald-600/90 dark:text-emerald-400/80">
+                {breakdownOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {breakdownOpen ? 'Hide details' : 'Click to see more details'}
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card className="border-slate-200/80 dark:border-slate-800/80">
@@ -446,20 +465,118 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
         </Card>
       </div>
 
+      {/* Reply breakdown — expands right under the stat cards when "Replied" is clicked */}
+      {(() => {
+        // The 6 fixed interest types the reply analyzer can ever produce.
+        // These are ALWAYS shown (a type with 0 replies renders dimmed) so the
+        // layout is stable and users see every category, present or not.
+        const REPLY_TYPES = [
+          { key: 'positive', label: 'Positive', color: '#10b981' },
+          { key: 'neutral', label: 'Neutral', color: '#f59e0b' },
+          { key: 'requested_info', label: 'Requested Info', color: '#3b82f6' },
+          { key: 'objection', label: 'Objection', color: '#f97316' },
+          { key: 'negative', label: 'Negative', color: '#ef4444' },
+          { key: 'unsubscribe', label: 'Unsubscribe', color: '#6b7280' },
+        ];
+        const all = Object.keys(replies_by_sequence).length > 0
+          ? Object.values(replies_by_sequence).flatMap((g) => g.replies || [])
+          : replies;
+        const counts = {};
+        all.forEach((r) => {
+          const lvl = r.interest_level && r.interest_level !== 'not_analyzed' ? r.interest_level : 'not_analyzed';
+          counts[lvl] = (counts[lvl] || 0) + 1;
+        });
+        const total = all.length;
+        // Every fixed type in its canonical order (no filtering, no sorting).
+        const tiles = REPLY_TYPES.map((t) => ({ ...t, count: counts[t.key] || 0 }));
+        // Ribbon shows only the non-empty segments (empty slices would be invisible anyway).
+        const analyzedTotal = tiles.reduce((s, t) => s + t.count, 0);
+        const ribbon = tiles.filter((t) => t.count > 0);
+        if (total === 0) return null;
+        return (
+          // grid-rows 0fr -> 1fr gives a smooth, JS-free height animation
+          <div className={`grid transition-all duration-500 ease-out ${breakdownOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+            <div className="overflow-hidden">
+              <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.04] to-transparent p-4 space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 text-emerald-600" />
+                    Reply breakdown
+                  </h3>
+                  <span className="text-xs text-muted-foreground">{total} total {total === 1 ? 'reply' : 'replies'}</span>
+                </div>
+                {/* segmented ribbon — only non-empty types take width */}
+                <div className="flex h-2.5 w-full overflow-hidden rounded-full ring-1 ring-border">
+                  {ribbon.map((t) => (
+                    <div
+                      key={t.key}
+                      title={`${t.label}: ${t.count} (${Math.round((t.count / analyzedTotal) * 100)}%)`}
+                      className="h-full transition-all first:rounded-l-full last:rounded-r-full hover:brightness-110"
+                      style={{ width: `${(t.count / analyzedTotal) * 100}%`, backgroundColor: t.color }}
+                    />
+                  ))}
+                </div>
+                {/* type tiles — all 6 fixed types always shown; empty ones dimmed */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                  {tiles.map((t, i) => {
+                    const pct = analyzedTotal > 0 ? Math.round((t.count / analyzedTotal) * 100) : 0;
+                    const empty = t.count === 0;
+                    return (
+                      <div
+                        key={t.key}
+                        className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 transition-all ${
+                          empty
+                            ? 'bg-transparent opacity-45'
+                            : 'bg-background/50 hover:bg-background hover:shadow-sm'
+                        }`}
+                        style={{
+                          borderColor: empty ? undefined : `${t.color}33`,
+                          transitionDelay: breakdownOpen ? `${i * 40}ms` : '0ms',
+                        }}
+                      >
+                        <span className="h-8 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: t.color }} />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium text-foreground">{t.label}</div>
+                          <div className="text-[10px] text-muted-foreground">{empty ? 'no replies' : `${pct}% of replies`}</div>
+                        </div>
+                        <span className="text-lg font-bold tabular-nums" style={{ color: t.color }}>{t.count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Email history by sequence - matches template: Type (Initial/Seq/Sub-Seq), Replied + interest */}
       {emails_by_sequence && Object.keys(emails_by_sequence).length > 0 ? (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold">Full email history (last {total_emails_shown ?? 100}) – by sequence</h2>
           {Object.entries(emails_by_sequence).map(([seqName, emails]) => (
             <Card key={seqName} className="border-slate-700/80">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <span className="rounded bg-sky-600/90  text-sky-50 px-2 py-0.5 text-sm font-semibold">
-                    Sequence: {seqName}
+              <CardHeader
+                className="cursor-pointer select-none transition-colors hover:bg-muted/30 rounded-t-lg"
+                onClick={() => toggleSeq(seqName)}
+                role="button"
+                aria-expanded={!collapsedSeqs[seqName]}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    {collapsedSeqs[seqName]
+                      ? <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                      : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
+                    <span className="rounded bg-sky-600/90  text-sky-50 px-2 py-0.5 text-sm font-semibold">
+                      Sequence: {seqName}
+                    </span>
+                  </CardTitle>
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {emails.length} email(s) — {collapsedSeqs[seqName] ? 'click to open' : 'click to close'}
                   </span>
-                </CardTitle>
-                <CardDescription>{emails.length} email(s)</CardDescription>
+                </div>
               </CardHeader>
+              {!collapsedSeqs[seqName] && (
               <CardContent>
                 <div className="rounded-md  overflow-x-auto">
                   <table className="w-full text-sm">
@@ -626,6 +743,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                   </table>
                 </div>
               </CardContent>
+              )}
             </Card>
           ))}
         </div>
@@ -715,12 +833,21 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
             </CardTitle>
             <CardDescription>Reply content, the email it responded to, and AI-detected interest.</CardDescription>
             {ai_quota_exhausted && (
-              <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                <span className="text-amber-500 mt-0.5">⚠️</span>
-                <span>
-                  AI tokens finished — replies are being classified with keyword rules
-                  for now. Top up this agent's token quota to re-enable full AI analysis.
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                <span className="flex items-start gap-2 min-w-0">
+                  <span className="text-amber-500 mt-0.5">⚠️</span>
+                  <span>
+                    AI tokens finished — replies are being classified with keyword rules
+                    for now. Add tokens (or your own API key) to re-enable full AI analysis
+                    for more accurate reply detection.
+                  </span>
                 </span>
+                <Link
+                  to="/company/settings/api-keys"
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-700 px-3 py-1.5 font-semibold text-white hover:bg-amber-600 transition-colors"
+                >
+                  Add tokens / API key →
+                </Link>
               </div>
             )}
           </CardHeader>
