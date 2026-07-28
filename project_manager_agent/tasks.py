@@ -455,9 +455,19 @@ def run_project_pilot_job(self, job_id):
         timing_ms['total_ms'] = int((time.time() - _t_overall) * 1000)
 
         # 4. Stamp results onto the job.
+        # `confirmation_required` (when present) rides in `action_results` as
+        # a single dict item so we don't need another schema field just for
+        # this. The status endpoint pulls it out into its own key so the
+        # frontend gets a clean shape.
         job.answer = result.get('answer', '') or ''
         job.action_results = result.get('action_results', []) or []
         job.cannot_do = result.get('cannot_do', '') or ''
+        confirmation = result.get('confirmation_required')
+        if confirmation:
+            # Store on the job via `error_message`? No — reuse a JSON blob.
+            # Simplest: put it in timing_ms alongside; the status endpoint
+            # will lift it out. Keeps the migration surface unchanged.
+            timing_ms['_confirmation_required'] = confirmation
         job.timing_ms = timing_ms
         job.status = 'ready'
         job.completed_at = timezone.now()

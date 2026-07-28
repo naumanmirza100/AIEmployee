@@ -318,26 +318,61 @@ const FrontlineFloatingChat = () => {
     const startedAt = (typeof performance !== 'undefined' && performance.now)
       ? performance.now() : Date.now();
     setSendingStartedAt(startedAt);
+
+    // Streaming path — push an empty assistant placeholder that we mutate
+    // as tokens stream in.
+    pushMessage({
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      citations: [],
+    });
+    const patchLast = (updater) => setMessages((prev) => {
+      const next = prev.slice();
+      const lastIdx = next.length - 1;
+      if (lastIdx < 0) return prev;
+      next[lastIdx] = updater(next[lastIdx]);
+      return next;
+    });
+
+    let accumulated = '';
+    let metaEvent = null;
+    let doneEvent = null;
     try {
-      const res = await frontlineAgentService.knowledgeQA(q, {});
-      if (res && res.status === 'success' && res.data) {
-        const data = res.data;
-        const endedAt = (typeof performance !== 'undefined' && performance.now)
-          ? performance.now() : Date.now();
-        pushMessage({
-          role: 'assistant',
-          content: data.answer || 'No answer available.',
-          source: data.source || null,
-          has_verified_info: !!data.has_verified_info,
-          citations: data.citations || [],
-          responseTimeMs: Math.round(endedAt - startedAt),
-          cache_hit: !!data.cache_hit,
-        });
-      } else {
-        throw new Error((res && res.message) || 'Failed to get an answer');
-      }
+      await frontlineAgentService.knowledgeQAStream(q, {
+        onMeta: (meta) => {
+          metaEvent = meta;
+          patchLast((m) => ({
+            ...m,
+            source: meta.source ?? m.source,
+            has_verified_info: !!meta.has_verified_info,
+            citations: meta.citations || [],
+          }));
+        },
+        onToken: (piece) => {
+          accumulated += (piece || '');
+          patchLast((m) => ({ ...m, content: accumulated }));
+        },
+        onDone: (done) => { doneEvent = done; },
+      });
+      const endedAt = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      patchLast((m) => ({
+        ...m,
+        streaming: false,
+        content: (doneEvent && doneEvent.answer) || accumulated || 'No answer available.',
+        source: metaEvent?.source ?? m.source,
+        has_verified_info: !!(metaEvent?.has_verified_info),
+        citations: metaEvent?.citations || m.citations || [],
+        responseTimeMs: Math.round(endedAt - startedAt),
+        cache_hit: !!(doneEvent?.cache_hit),
+      }));
     } catch (e) {
-      pushMessage({ role: 'assistant', content: `Error: ${e.message || 'Something went wrong.'}`, error: true });
+      patchLast(() => ({
+        role: 'assistant',
+        content: `Error: ${e.message || 'Something went wrong.'}`,
+        error: true,
+      }));
     } finally {
       setSending(false);
       setSendingStartedAt(null);
@@ -710,7 +745,15 @@ const FrontlineFloatingChat = () => {
                               : 'bg-white/[0.06] text-white/90 border border-white/10'
                       }`}
                     >
-                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                      <div className="whitespace-pre-wrap break-words">
+                        {m.content}
+                        {m.streaming && (
+                          <>
+                            {!m.content && <span className="text-white/40 italic">Thinking…</span>}
+                            <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-violet-400/70 animate-pulse align-middle" />
+                          </>
+                        )}
+                      </div>
                       {m.role === 'assistant' && !m.error && !m.system && (m.citations?.length > 0 || m.source) && (
                         <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
                           <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Sources</p>
@@ -737,7 +780,7 @@ const FrontlineFloatingChat = () => {
                   </div>
                 ))
               )}
-              {sending && !uploading && (
+              {sending && !uploading && !messages.some((m) => m.streaming) && (
                 <div className="flex justify-start">
                   <div className="bg-white/[0.06] border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-white/60" />

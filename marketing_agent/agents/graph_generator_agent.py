@@ -862,7 +862,7 @@ class GraphGeneratorAgent(MarketingBaseAgent):
                 ('Opened', campaign.get('emails_opened', 0) or 0, '#10b981'),
                 ('Clicked', campaign.get('emails_clicked', 0) or 0, '#f59e0b'),
                 ('Replied', campaign.get('emails_replied', 0) or 0, '#06b6d4'),
-                ('Conversion Rate %', conv_rate, '#10b981'),
+                ('Conversion Rate %', conv_rate, '#ec4899'),
             ]
             colors = []
             for label, value, color in overview_fields:
@@ -1029,6 +1029,13 @@ Rules: Use actual data values. Only include non-zero values. Sort bar data by va
                     chart_config['data'] = single_chart['data']
                     chart_config['title'] = single_chart.get('title', chart_config['title'])
                     chart_config['insights'] = single_chart.get('insights', chart_config.get('insights', ''))
+                    # Preserve the deterministic per-category palette (e.g. reply
+                    # breakdown: positive=green, negative=red, unsubscribe=gray).
+                    # Without this the slices fall back to a single blue color.
+                    if single_chart.get('colors'):
+                        chart_config['colors'] = single_chart['colors']
+                    if single_chart.get('color'):
+                        chart_config['color'] = single_chart['color']
                 else:
                     # No email activity found – still restrict to this campaign only
                     # Build a simple summary from aggregate data, never show other campaigns

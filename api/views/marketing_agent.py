@@ -317,6 +317,25 @@ def _build_campaign_detail(campaign, user):
         campaign=campaign,
         interest_level__in=['negative', 'unsubscribe']
     ).count()
+    # Per-type reply breakdown (how many of each interest_level) for the dashboard.
+    _breakdown_counts = dict(
+        Reply.objects.filter(campaign=campaign)
+        .order_by()  # clear model default ordering (replied_at) so GROUP BY is valid on SQL Server
+        .values_list('interest_level')
+        .annotate(c=Count('id'))
+        .values_list('interest_level', 'c')
+    )
+    reply_breakdown = {
+        'positive': _breakdown_counts.get('positive', 0),
+        'neutral': _breakdown_counts.get('neutral', 0),
+        'requested_info': _breakdown_counts.get('requested_info', 0),
+        'objection': _breakdown_counts.get('objection', 0),
+        'negative': _breakdown_counts.get('negative', 0),
+        'unsubscribe': _breakdown_counts.get('unsubscribe', 0),
+        'not_analyzed': _breakdown_counts.get('not_analyzed', 0)
+                        + _breakdown_counts.get(None, 0)
+                        + _breakdown_counts.get('', 0),
+    }
     open_rate = (total_opened / total_sent * 100) if total_sent > 0 else 0
     click_rate = (total_clicked / total_sent * 100) if total_sent > 0 else 0
     reply_rate = (total_replied / total_sent * 100) if total_sent > 0 else 0
@@ -357,6 +376,7 @@ def _build_campaign_detail(campaign, user):
         'total_replied': total_replied,
         'positive_replies': positive_replies,
         'negative_replies': negative_replies,
+        'reply_breakdown': reply_breakdown,
         'total_leads': leads_count,
         'total_failed': total_failed,
         'total_bounced': total_bounced,

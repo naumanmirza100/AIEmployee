@@ -172,15 +172,23 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
     // Snapshot existing messages and append the user turn locally for instant feedback
     const baseMessages = currentMessages.slice();
     const newUserMsg = { role: 'user', content: q };
-    const optimisticMessages = [...baseMessages, newUserMsg];
+    // Streaming assistant placeholder — tokens append into `.content` live.
+    // `streaming: true` flag suppresses the timing badge until done.
+    const streamingAssistantMsg = {
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      responseData: {},
+    };
+    const optimisticMessages = [...baseMessages, newUserMsg, streamingAssistantMsg];
 
-    // Show optimistic message in current chat (or temp chat) right away
+    // Track which chat we're rendering into so token updates can target it.
+    const targetChatId = currentChat ? currentChat.id : 'draft';
     if (currentChat) {
       setChats((cs) => cs.map((c) =>
         c.id === currentChat.id ? { ...c, messages: optimisticMessages } : c,
       ));
     } else {
-      // No chat selected yet — create a temp draft on screen so the user sees their bubble
       setChats((cs) => [{
         id: 'draft', title: q.slice(0, 40), messages: optimisticMessages,
         updatedAt: new Date().toISOString(), timestamp: new Date().toISOString(), isDraft: true,
@@ -188,36 +196,76 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
       setSelectedChatId('draft');
     }
 
+    // Helper to update the streaming assistant message in place. React batches
+    // these state updates, so token-by-token rendering stays smooth.
+    const patchStreamingMsg = (updater) => {
+      setChats((cs) => cs.map((c) => {
+        if (c.id !== targetChatId) return c;
+        const msgs = c.messages ? c.messages.slice() : [];
+        const lastIdx = msgs.length - 1;
+        if (lastIdx < 0) return c;
+        msgs[lastIdx] = updater(msgs[lastIdx]);
+        return { ...c, messages: msgs };
+      }));
+    };
+
     let assistantMsg = null;
     const startedAt = (typeof performance !== 'undefined' && performance.now)
       ? performance.now() : Date.now();
-    // Mirror into state so the live thinking-clock has a reference point.
     setLoadingStartedAt(startedAt);
     try {
-      // Build chat_history payload from the prior turns (last 6) — keep it tight
       const history = baseMessages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
-      const res = await hrAgentService.askHRKnowledge(q, history);
-      const data = res?.data || {};
+      let accumulated = '';
+      let metaEvent = null;
+      let doneEvent = null;
+
+      await hrAgentService.askHRKnowledgeStream(q, history, {
+        onMeta: (meta) => {
+          metaEvent = meta;
+          // Attach citations early so the "Sources" strip shows up even
+          // before the first token — retrieval usually finishes fast.
+          patchStreamingMsg((m) => ({
+            ...m,
+            responseData: {
+              ...(m.responseData || {}),
+              has_verified_info: meta.has_verified_info,
+              confidence: meta.confidence,
+              best_score: meta.best_score,
+              threshold: meta.threshold,
+              citations: meta.citations || [],
+              cache_hit: !!meta.cache_hit,
+            },
+          }));
+        },
+        onToken: (piece) => {
+          accumulated += (piece || '');
+          patchStreamingMsg((m) => ({ ...m, content: accumulated }));
+        },
+        onDone: (done) => {
+          doneEvent = done;
+        },
+      });
+
       const endedAt = (typeof performance !== 'undefined' && performance.now)
         ? performance.now() : Date.now();
+      const finalAnswer = (doneEvent && doneEvent.answer) || accumulated || '(no answer)';
       assistantMsg = {
         role: 'assistant',
-        content: data.answer || '(no answer)',
-        // Persist timing inside responseData so it survives the backend
-        // round-trip when the chat is re-fetched (top-level fields are
-        // dropped by _normalize_chat).
+        content: finalAnswer,
+        // No `streaming` flag — persistence layer strips it anyway.
         responseData: {
-          has_verified_info: data.has_verified_info,
-          confidence: data.confidence,
-          best_score: data.best_score,
-          threshold: data.threshold,
-          citations: data.citations || [],
-          cache_hit: !!data.cache_hit,
+          has_verified_info: metaEvent?.has_verified_info,
+          confidence: metaEvent?.confidence,
+          best_score: metaEvent?.best_score,
+          threshold: metaEvent?.threshold,
+          citations: metaEvent?.citations || [],
+          cache_hit: !!(doneEvent?.cache_hit),
           responseTimeMs: Math.round(endedAt - startedAt),
-          // Server-side per-phase timing breakdown (retrieval subphases + llm)
-          timing_ms: data.timing_ms || null,
+          timing_ms: doneEvent?.timing_ms || null,
         },
       };
+      // Flip the placeholder out of streaming mode so the badge renders.
+      patchStreamingMsg(() => assistantMsg);
     } catch (err) {
       const endedAt = (typeof performance !== 'undefined' && performance.now)
         ? performance.now() : Date.now();
@@ -228,9 +276,10 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
           responseTimeMs: Math.round(endedAt - startedAt),
         },
       };
+      patchStreamingMsg(() => assistantMsg);
     }
 
-    const finalMessages = [...optimisticMessages, assistantMsg];
+    const finalMessages = [...baseMessages, newUserMsg, assistantMsg];
 
     // Persist — create chat if this was a draft, otherwise update
     try {
@@ -474,10 +523,24 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
                         <div className="whitespace-pre-wrap">{msg.content}</div>
                       ) : (
                         <>
-                          <div
-                            className="prose prose-invert max-w-none"
-                            dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.content) }}
-                          />
+                          {/* While streaming, render as plain text with a
+                              blinking cursor at the end — markdown parsing
+                              on every token would waste CPU and produce
+                              flicker on incomplete headers/lists. Once done,
+                              we flip to the markdown-rendered version. */}
+                          {msg.streaming ? (
+                            <div className="whitespace-pre-wrap text-white/90">
+                              {msg.content || (
+                                <span className="text-white/40 italic">Thinking…</span>
+                              )}
+                              <span className="inline-block w-2 h-4 ml-0.5 bg-violet-400/70 animate-pulse align-middle" />
+                            </div>
+                          ) : (
+                            <div
+                              className="prose prose-invert max-w-none"
+                              dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.content) }}
+                            />
+                          )}
                           {msg.responseData?.citations?.length > 0 && (
                             <div className="mt-3 pt-2 border-t border-white/10 text-xs text-white/60 space-y-1">
                               <div className="font-medium">Sources</div>
@@ -599,7 +662,10 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
                 ))
               )}
 
-              {loading && (
+              {/* Suppress this "Thinking…" bubble when a streaming assistant
+                  message is already visible — it has its own inline cursor
+                  and would create a duplicate. */}
+              {loading && !currentMessages.some((m) => m.streaming) && (
                 <div className="flex justify-start">
                   <div className="rounded-2xl px-4 py-2.5 bg-white/[0.04] border border-white/[0.08] text-white/70 text-sm flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-400" />

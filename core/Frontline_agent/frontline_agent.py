@@ -333,6 +333,187 @@ class FrontlineAgent(BaseAgent):
                 'citations': knowledge_result.get('citations', []),
             }
 
+    # ---- Streaming Q&A ---------------------------------------------------
+
+    def answer_question_stream(
+        self,
+        question: str,
+        company_id: Optional[int] = None,
+        scope_document_type: Optional[List[str]] = None,
+        scope_document_ids: Optional[List[int]] = None,
+        min_similarity: Optional[float] = None,
+        max_age_days: Optional[int] = None,
+        max_results: int = 3,
+        company_user_id: Optional[int] = None,
+        history: Optional[List[Dict]] = None,
+    ):
+        """Generator variant of :meth:`answer_question`. Yields:
+
+          * ``{'type': 'meta', ...}`` — retrieval results (citations, source,
+            confidence, retrieval_ms). Sent before any tokens so the UI
+            renders sources early.
+          * ``{'type': 'token', 'value': '...'}`` — one per LLM chunk.
+          * ``{'type': 'done', 'answer': '<full>', 'timing_ms': {...},
+             'cache_hit': bool}`` — final event.
+          * ``{'type': 'error', 'message': '...'}``.
+        """
+        _t_overall = time.time()
+        timing_ms: dict = {}
+        search_company_id = company_id or self.company_id
+
+        # Cache hit → replay as a single-shot burst so the wire protocol
+        # stays uniform across cached vs uncached responses.
+        cache_ttl = int(getattr(settings, 'FRONTLINE_ANSWER_CACHE_TTL_SECONDS', 300))
+        cache_key = None
+        if cache_ttl > 0 and not history:
+            cache_key = _answer_cache_key(
+                search_company_id, scope_document_ids, scope_document_type, question,
+            )
+            cached = _answer_cache_get(cache_key, cache_ttl)
+            if cached is not None:
+                logger.info("Frontline streaming: cache hit q=%r", question[:60])
+                yield {
+                    'type': 'meta',
+                    'has_verified_info': cached.get('has_verified_info'),
+                    'confidence': cached.get('confidence'),
+                    'best_score': cached.get('best_score'),
+                    'threshold': cached.get('threshold'),
+                    'source': cached.get('source'),
+                    'type_hint': cached.get('type'),
+                    'document_title': cached.get('document_title'),
+                    'document_id': cached.get('document_id'),
+                    'citations': cached.get('citations', []),
+                    'cache_hit': True,
+                }
+                if cached.get('answer'):
+                    yield {'type': 'token', 'value': cached['answer']}
+                yield {
+                    'type': 'done',
+                    'answer': cached.get('answer', ''),
+                    'timing_ms': {'total': int((time.time() - _t_overall) * 1000), 'cache': True},
+                    'cache_hit': True,
+                }
+                return
+
+        # Contextualise follow-ups against history (LLM call).
+        retrieval_question = question
+        if history:
+            _t_ctx = time.time()
+            contextualised = self._contextualise_with_history(question, history)
+            timing_ms['contextualise'] = int((time.time() - _t_ctx) * 1000)
+            if contextualised and contextualised.strip().lower() != question.strip().lower():
+                retrieval_question = contextualised
+
+        # Retrieval.
+        _t_retr = time.time()
+        knowledge_result = self.knowledge_service.get_answer(
+            retrieval_question,
+            company_id=search_company_id,
+            scope_document_type=scope_document_type,
+            scope_document_ids=scope_document_ids,
+            min_similarity=min_similarity,
+            max_age_days=max_age_days,
+            max_results=max_results,
+            company_user_id=company_user_id,
+        )
+        timing_ms['retrieval'] = int((time.time() - _t_retr) * 1000)
+        try:
+            timing_ms['retrieval_breakdown'] = dict(
+                getattr(self.knowledge_service, 'last_retrieval_timing', {}) or {}
+            )
+            timing_ms['retrieval_path'] = getattr(self.knowledge_service, 'last_retrieval_path', '') or ''
+        except Exception:
+            pass
+
+        if not knowledge_result.get('has_verified_info'):
+            fallback = ("I don't have verified information about this topic in "
+                        "our knowledge base. Let me create a ticket for a human "
+                        "agent to assist you.")
+            yield {
+                'type': 'meta',
+                'has_verified_info': False,
+                'confidence': knowledge_result.get('confidence', 'none'),
+                'best_score': knowledge_result.get('best_score'),
+                'threshold': knowledge_result.get('threshold'),
+                'source': None,
+                'citations': [],
+                'cache_hit': False,
+            }
+            yield {'type': 'token', 'value': fallback}
+            timing_ms['total'] = int((time.time() - _t_overall) * 1000)
+            yield {'type': 'done', 'answer': fallback, 'timing_ms': timing_ms, 'cache_hit': False}
+            return
+
+        # Meta first — carries citations so the UI can render "Sources" before
+        # the first token lands.
+        yield {
+            'type': 'meta',
+            'has_verified_info': True,
+            'confidence': knowledge_result.get('confidence'),
+            'best_score': knowledge_result.get('best_score'),
+            'threshold': knowledge_result.get('threshold'),
+            'source': knowledge_result.get('source', 'PayPerProject Database'),
+            'type_hint': knowledge_result.get('type', 'unknown'),
+            'document_title': knowledge_result.get('document_title'),
+            'document_id': knowledge_result.get('document_id'),
+            'citations': knowledge_result.get('citations', []),
+            'cache_hit': False,
+        }
+
+        # LLM streaming.
+        prompt = get_knowledge_prompt(question, [knowledge_result])
+        _t_llm = time.time()
+        collected = []
+        try:
+            for event in self._call_llm_stream(
+                prompt=prompt,
+                system_prompt=self.system_prompt,
+                temperature=0.3,
+                max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 250)),
+            ):
+                if event.get('type') == 'token':
+                    collected.append(event['value'])
+                    yield event
+                elif event.get('type') == 'error':
+                    yield event
+                    return
+        except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
+            logger.exception("Frontline streaming LLM error: %s", exc)
+            yield {'type': 'error', 'message': str(exc)}
+            return
+
+        full_answer = ''.join(collected).strip() or (knowledge_result.get('answer') or '')
+        timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
+        timing_ms['total'] = int((time.time() - _t_overall) * 1000)
+
+        if cache_key:
+            _answer_cache_put(cache_key, {
+                'success': True,
+                'answer': full_answer,
+                'has_verified_info': True,
+                'confidence': knowledge_result.get('confidence'),
+                'best_score': knowledge_result.get('best_score'),
+                'threshold': knowledge_result.get('threshold'),
+                'rewritten_query': knowledge_result.get('rewritten_query'),
+                'source': knowledge_result.get('source', 'PayPerProject Database'),
+                'type': knowledge_result.get('type', 'unknown'),
+                'document_title': knowledge_result.get('document_title'),
+                'document_id': knowledge_result.get('document_id'),
+                'citations': knowledge_result.get('citations', []),
+                'timing_ms': timing_ms,
+            })
+
+        logger.info("Frontline streaming done: %d chars, timing_ms=%s", len(full_answer), timing_ms)
+        yield {
+            'type': 'done',
+            'answer': full_answer,
+            'timing_ms': timing_ms,
+            'cache_hit': False,
+        }
+
     def _contextualise_with_history(self, question: str,
                                     history: List[Dict]) -> Optional[str]:
         """Rewrite a follow-up question into a standalone one using the prior

@@ -575,6 +575,124 @@ def hr_knowledge_qa(request):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRLLMThrottle])
+def hr_knowledge_qa_stream(request):
+    """Streaming variant of :func:`hr_knowledge_qa`. Returns a chunked HTTP
+    response where each line is a JSON event:
+
+      * ``{"type":"meta", "citations": [...], "has_verified_info": true, ...}``
+      * ``{"type":"token", "value": "..."}`` — one per LLM chunk.
+      * ``{"type":"done", "answer": "<full>", "timing_ms": {...},
+             "cache_hit": bool}``
+      * ``{"type":"error", "message": "..."}``
+
+    The client (frontend fetch + ReadableStream) appends tokens to the
+    assistant message live. Perceived latency drops from 5-10s to <1s to
+    first visible output.
+    """
+    import json as _json
+    from django.http import StreamingHttpResponse
+
+    try:
+        company_user = request.user
+        company = company_user.company
+        question = (request.data.get('question') or '').strip()
+        if not question:
+            return Response({'status': 'error', 'message': 'question is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        asker_employee = (Employee.objects.filter(company=company, company_user=company_user).first()
+                          or Employee.objects.filter(company=company, work_email__iexact=company_user.email).first())
+
+        # Same history contextualisation as the sync endpoint.
+        history = request.data.get('chat_history') or []
+        contextualized = question
+        if isinstance(history, list) and history:
+            recent = []
+            for turn in history[-6:]:
+                if not isinstance(turn, dict):
+                    continue
+                role = (turn.get('role') or '').lower()
+                content = (turn.get('content') or '')[:1500]
+                if role in ('user', 'assistant') and content:
+                    recent.append(f"{role.capitalize()}: {content}")
+            if recent:
+                contextualized = "Previous conversation:\n" + "\n".join(recent) + "\n\nCurrent question: " + question
+
+        agent = HRAgent(company_id=company.id)
+
+        def _event_stream():
+            """Generator that yields JSON-lines events. Django wraps this in
+            StreamingHttpResponse so bytes flush to the client as they're
+            produced. We use JSON lines (not SSE `data:` framing) because
+            the frontend just needs to split on newlines."""
+            collected_citations = []
+            collected_doc_ids = []
+            try:
+                for event in agent.answer_question_stream(
+                    contextualized,
+                    asker_role=_resolve_asker_role(company_user),
+                    asker_employee=asker_employee,
+                ):
+                    # Capture citations for the after-stream access-log write.
+                    if event.get('type') == 'meta':
+                        for c in (event.get('citations') or []):
+                            if isinstance(c, dict) and c.get('document_id'):
+                                try:
+                                    collected_doc_ids.append(int(c['document_id']))
+                                except (TypeError, ValueError):
+                                    continue
+                        collected_citations = event.get('citations') or []
+                    yield _json.dumps(event) + '\n'
+            except KeyServiceError as exc:
+                # Surface quota/key errors as a stream event rather than a
+                # non-streaming HTTP error — client is already reading a body.
+                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+            except Exception as exc:
+                logger.exception("hr_knowledge_qa_stream: agent raised")
+                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+
+            # Compliance log — mirror what the sync endpoint does. Cited docs
+            # are effectively "read" by the LLM into an answer, so we log
+            # once at the end (regardless of success/failure) if we saw any.
+            try:
+                doc_ids = list(dict.fromkeys(collected_doc_ids))
+                if doc_ids:
+                    docs = list(HRDocument.objects.filter(
+                        company=company, pk__in=doc_ids,
+                    ).only('id', 'company_id'))
+                    ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+                          or request.META.get('REMOTE_ADDR') or None)
+                    ua = (request.META.get('HTTP_USER_AGENT') or '')[:400]
+                    from hr_agent.models import HRDocumentAccessLog as _HRDAL
+                    _HRDAL.objects.bulk_create([
+                        _HRDAL(company=company, actor=company_user, document=d,
+                               action='read', ip_address=ip, user_agent=ua)
+                        for d in docs
+                    ])
+            except Exception:
+                logger.exception("hr_knowledge_qa_stream: access-log write failed")
+
+        response = StreamingHttpResponse(
+            _event_stream(),
+            content_type='application/x-ndjson',
+        )
+        # Disable nginx / proxy buffering so tokens actually flush live.
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['X-Accel-Buffering'] = 'no'
+        return response
+
+    except KeyServiceError:
+        raise
+    except Exception:
+        logger.exception("hr_knowledge_qa_stream setup failed")
+        return Response({'status': 'error', 'message': 'Failed to start stream'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ============================================================================
 # HR Knowledge Q&A — chat persistence (mirrors PM agent's chat shape)
 # ============================================================================
