@@ -10,6 +10,7 @@
  *   * Empty states: centered icon tile + sub-line.
  */
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from '@/components/ui/card';
@@ -49,14 +50,14 @@ import HRManagerTeamTab from './HRManagerTeamTab';
 import HROrgChartTab from './HROrgChartTab';
 // Tutorial + hints + floating chat (reused from Frontline, HR-specific content)
 import InfoHint, { HintsProvider, useHints } from '../frontline/InfoHint';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '../frontline/FrontlineTutorial';
+import FrontlineTutorial, { resetTutorial } from '../frontline/FrontlineTutorial';
 import HRFloatingChat from './HRFloatingChat';
 import {
   HR_MAIN_TOUR_STEPS, HR_TAB_TOURS, HR_HINTS, HR_MAIN_TOUR_KEY,
 } from './hrTutorialSteps';
 import { trackHRRecentlyViewed } from './hrLocalStore';
 import {
-  shouldSpotlightTour, markSpotlightSeen,
+  useTutorialNudge,
   tourAvailable, makeHoverLaunchHandlers,
 } from '../frontline/tourUtils';
 import { GraduationCap, Eye, EyeOff } from 'lucide-react';
@@ -89,42 +90,35 @@ const STAT_PALETTE = {
 const HRDashboard = () => {
   const { toast } = useToast();
   const { startUpload: startBackgroundUpload } = useBackgroundUpload();
-  const [activeTab, setActiveTab] = useState('overview');
+  // Tab state lives in the URL as `?tab=...` so browser reload keeps you on
+  // the tab you were on. Falls back to 'overview' when the param is missing
+  // or references an unknown tab.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const validTabValues = React.useMemo(() => HR_TAB_ITEMS.map((t) => t.value), []);
+  const rawTab = searchParams.get('tab');
+  const activeTab = validTabValues.includes(rawTab) ? rawTab : 'overview';
+  const setActiveTab = React.useCallback((v) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', v);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   // ---- Onboarding tutorial + per-tab tours ----
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [activeTabTour, setActiveTabTour] = useState(null);
 
-  useEffect(() => {
-    if (!hasSeenTutorial(HR_MAIN_TOUR_KEY)) {
-      const t = setTimeout(() => setTutorialOpen(true), 600);
-      return () => clearTimeout(t);
-    }
-  }, []);
+  // Per-tab tours are no longer auto-launched either. The "Tour this tab"
+  // button inside each TabsContent glows until the user takes that tab's tour.
 
-  useEffect(() => {
-    if (tutorialOpen) return;
-    const tour = HR_TAB_TOURS[activeTab];
-    if (!tour) return;
-    if (hasSeenTutorial(tour.key)) return;
-    const t = setTimeout(() => setActiveTabTour(activeTab), 500);
-    return () => clearTimeout(t);
-  }, [activeTab, tutorialOpen]);
-
-  // One-time spotlight on "Take the Tour" after the main tour closes
-  const [spotlightTour, setSpotlightTour] = useState(false);
-  useEffect(() => {
-    if (tutorialOpen) return;
-    if (!hasSeenTutorial(HR_MAIN_TOUR_KEY)) return;
-    if (!shouldSpotlightTour('hr')) return;
-    setSpotlightTour(true);
-    const t = setTimeout(() => { setSpotlightTour(false); markSpotlightSeen('hr'); }, 5500);
-    return () => clearTimeout(t);
-  }, [tutorialOpen]);
+  // First-login nudge: no auto-launched tour anymore. The header "Take the
+  // Tour" button glows persistently until the user takes the tour, with a
+  // short-lived tooltip on first load to point it out.
+  const { glow: spotlightTour, tooltip: spotlightTooltip, dismiss: dismissNudge } = useTutorialNudge(HR_MAIN_TOUR_KEY);
 
   const handleReplayTutorial = () => {
-    setSpotlightTour(false);
-    markSpotlightSeen('hr');
+    dismissNudge();
     resetTutorial(HR_MAIN_TOUR_KEY);
     setTutorialOpen(true);
   };
@@ -137,18 +131,25 @@ const HRDashboard = () => {
     setActiveTabTour(tabKey);
   };
 
-  // Small button rendered inside each TabsContent header
-  const TabTourButton = ({ tabKey }) => (
-    <button
-      type="button"
-      onClick={() => handleReplayTabTour(tabKey)}
-      title={`Take a guided tour of the ${HR_TAB_TOURS[tabKey]?.label || 'this'} tab`}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-violet-400/40 bg-violet-500/10 text-violet-200 text-xs font-semibold hover:bg-violet-500/20 hover:text-violet-100 transition"
-    >
-      <GraduationCap className="h-3.5 w-3.5" />
-      Tour this tab
-    </button>
-  );
+  // Small button rendered inside each TabsContent header. Glows on the first
+  // visit to a tab whose tour the user hasn't taken — no more auto-launched
+  // walkthrough. Glow stops once the user has taken (or completed) that tab's
+  // tour, since `useTutorialNudge` keys off `hasSeenTutorial(tour.key)`.
+  const TabTourButton = ({ tabKey }) => {
+    const tour = HR_TAB_TOURS[tabKey];
+    const { glow, dismiss } = useTutorialNudge(tour?.key);
+    return (
+      <button
+        type="button"
+        onClick={() => { dismiss(); handleReplayTabTour(tabKey); }}
+        title={`Take a guided tour of the ${tour?.label || 'this'} tab`}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-violet-400/40 bg-violet-500/10 text-violet-200 text-xs font-semibold hover:bg-violet-500/20 hover:text-violet-100 transition ${glow ? 'hr-tab-spotlight' : ''}`}
+      >
+        <GraduationCap className="h-3.5 w-3.5" />
+        Tour this tab
+      </button>
+    );
+  };
 
   // Toggle for showing/hiding every "!" InfoHint icon in the HR dashboard.
   const HintsToggleButton = () => {
@@ -840,7 +841,7 @@ const HRDashboard = () => {
               <GraduationCap className="h-4 w-4" />
               Take the Tour
             </button>
-            {spotlightTour && (
+            {spotlightTooltip && (
               <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-violet-400/40 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
                 👋 Take the tour anytime from here
                 <span className="absolute -top-1 right-6 h-2 w-2 bg-[#161630] border-t border-l border-violet-400/40 rotate-45" />
@@ -853,6 +854,11 @@ const HRDashboard = () => {
               50%      { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.15), 0 0 0 12px rgba(139, 92, 246, 0.08); }
             }
             .hr-spotlight { animation: hrSpotlight 1.6s ease-in-out infinite; }
+            @keyframes hrTabSpotlight {
+              0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.35), 0 0 0 0 rgba(139, 92, 246, 0.18); }
+              50%      { box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.14), 0 0 0 8px rgba(139, 92, 246, 0.07); }
+            }
+            .hr-tab-spotlight { animation: hrTabSpotlight 1.6s ease-in-out infinite; }
             @keyframes hrDotPulse {
               0%, 100% { transform: scale(1); opacity: 1; }
               50%      { transform: scale(1.3); opacity: 0.7; }
