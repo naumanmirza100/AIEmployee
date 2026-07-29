@@ -12,7 +12,7 @@ import {
 import {
   FileText, BarChart3, MessageSquare, MessageSquareText, PenTool, Bell,
   Upload, TrendingUp, Hash, Tag, Loader2, LayoutDashboard,
-  Menu, Check, ArrowUpRight, Info,
+  Menu, Check, ArrowUpRight,
 } from 'lucide-react';
 import * as operationsService from '@/services/operationsAgentService';
 
@@ -123,21 +123,6 @@ const OperationsDashboard = () => {
         <h1 className="text-2xl sm:text-3xl font-bold text-white">Operations Agent</h1>
         <p className="text-gray-400 mt-1">Internal ops & analysis workhorse for documents and metrics</p>
       </div>
-
-      {/* Semantic-search-off notice — retrieval is keyword-only until embeddings exist */}
-      {stats?.semantic_search && !stats.semantic_search.active && stats.total_documents > 0 && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] px-4 py-3">
-          <Info className="h-4 w-4 shrink-0 mt-0.5 text-amber-400" />
-          <p className="text-xs text-amber-200/90 leading-relaxed">
-            <span className="font-semibold text-amber-100">Semantic search is off</span> — Knowledge Q&A is
-            using keyword matching only, so paraphrased or synonym questions may miss.
-            {!stats.semantic_search.provider_available
-              ? ' No embedding provider is configured. '
-              : ' Your documents aren\'t embedded yet. '}
-            Once an embedding key is set, run <code className="px-1 rounded bg-black/30">manage.py reindex_operations_documents --summaries</code> to enable it.
-          </p>
-        </div>
-      )}
 
       {/* Stats Cards - always visible */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
