@@ -111,6 +111,15 @@ class Command(BaseCommand):
     # so caching beyond it is wasted IMAP bandwidth.
     DEFAULT_SINCE_DAYS = 90
 
+    # Hard cap on how many messages a single folder sweep will fetch+store,
+    # regardless of the day-window. On a busy mailbox 90 days can hold many
+    # thousands of emails; pulling every one made the initial add-account
+    # sync crawl and left the Reply Draft inbox so large the page choked on
+    # render. Messages are searched newest-first (see `reversed(...)` in
+    # _process_folder), so this keeps the most-recent N and drops the older
+    # tail — which the UI's rolling day-window would rarely surface anyway.
+    MAX_EMAILS_PER_FOLDER = 300
+
     def add_arguments(self, parser):
         parser.add_argument(
             '--account-id',
@@ -232,8 +241,18 @@ class Command(BaseCommand):
             # so honoring it as-is would have introduced exactly that
             # regression for every existing account.
             account_window = getattr(account, 'imap_sync_days', None) or 0
+            is_reply_agent = bool(getattr(account, 'is_reply_agent_account', False))
             if cli_since_days:
                 account_since_days = cli_since_days
+            elif is_reply_agent and account_window:
+                # Reply Draft Agent accounts now let the user pick the sync
+                # window (30 / 60 / 90) explicitly in the connect modal, so
+                # for these accounts imap_sync_days is the ACTUAL window, not
+                # a floor. Honouring it exactly is what lets "sync only the
+                # last 30 days" actually pull just 30 days. (Marketing
+                # accounts keep the floor semantics below — their window is
+                # a system concern, not a user choice.)
+                account_since_days = account_window
             else:
                 account_since_days = max(account_window, self.DEFAULT_SINCE_DAYS)
             self.stdout.write(f'  IMAP window for this account: last {account_since_days} day(s)')
@@ -322,17 +341,22 @@ class Command(BaseCommand):
         # already-resolved 90 here, which made every default run look
         # like a CLI override and collapsed the staged sweep into a
         # single 90-day fetch (the bug we're fixing).
+        is_reply_agent = bool(getattr(account, 'is_reply_agent_account', False))
+
         if cli_since_days and cli_since_days > 0:
             stages = [int(cli_since_days)]
         else:
             # Default rolling sync — staged so the user sees recent mail
-            # first. Stages cap at DEFAULT_SINCE_DAYS so a future bump
-            # of that constant doesn't accidentally skip a stage.
-            stages = [w for w in (30, 60, 90) if w <= self.DEFAULT_SINCE_DAYS]
+            # first. Cap the stages at the resolved window:
+            #   - Reply-agent accounts: `since_days` is the user's chosen
+            #     window (30 / 60 / 90), so picking "30" must run ONLY the
+            #     0-30 stage, not backfill 60/90.
+            #   - Marketing accounts: `since_days` is max(account, DEFAULT),
+            #     so the cap is DEFAULT_SINCE_DAYS as before.
+            window_cap = since_days if (is_reply_agent and since_days) else self.DEFAULT_SINCE_DAYS
+            stages = [w for w in (30, 60, 90) if w <= window_cap]
             if not stages:
-                stages = [self.DEFAULT_SINCE_DAYS]
-
-        is_reply_agent = bool(getattr(account, 'is_reply_agent_account', False))
+                stages = [window_cap]
 
         total_replies_found = 0
         total_replies_processed = 0
@@ -540,9 +564,26 @@ class Command(BaseCommand):
             self.stdout.write(f'  [INFO] No emails in folder {folder_label!r} for the last {since_days} day(s)')
             return 0, 0, 0
 
+        # Cap the sweep at the most-recent N so a busy mailbox can't dump
+        # thousands of rows into the Reply Draft inbox (which slowed the
+        # sync and choked the page's list render). Reply-agent accounts
+        # carry a user-chosen per-sweep cap (imap_sync_email_limit: 50 /
+        # 100 / 200); other accounts fall back to MAX_EMAILS_PER_FOLDER.
+        # Because email_ids is already newest-first, the slice keeps the
+        # freshest mail and drops the older tail.
+        folder_cap = getattr(account, 'imap_sync_email_limit', None) or self.MAX_EMAILS_PER_FOLDER
+        total_found = len(email_ids)
+        if total_found > folder_cap:
+            email_ids = email_ids[:folder_cap]
+            self.stdout.write(
+                f'   [{folder_label}] Capping to the {folder_cap} '
+                f'most-recent of {total_found} email(s) found in the last '
+                f'{since_days} day(s).'
+            )
+
         self.stdout.write(
-            f'   [{folder_label}] Found {len(email_ids)} email(s) in the last {since_days} day(s) '
-            f'(direction={direction!r}, processing newest first)'
+            f'   [{folder_label}] Processing {len(email_ids)} email(s) from the last {since_days} day(s) '
+            f'(direction={direction!r}, newest first)'
         )
 
         replies_found = 0
