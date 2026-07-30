@@ -138,7 +138,9 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             opportunities=insights.get('opportunities', []),
             deadlines=insights.get('deadlines', []),
             document_category=insights.get('document_category', ''),
-            processing_status='ready',
+            # Kept 'processing' until chunks land, so a crash between the summary
+            # save and chunking doesn't leave a 'ready' row with no chunks.
+            processing_status='processing',
             processing_error='',
         )
         if placeholder is not None:
@@ -150,16 +152,20 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
             summary_obj = OperationsDocumentSummary.objects.create(**summary_fields)
 
         # Chunk + embed the full text so QA retrieval works on the whole file
-        # (same pipeline as the Documents tab). Graceful keyword fallback when
-        # no embedding provider is configured.
+        # (same pipeline as the Documents tab), and flip to 'ready' in the same
+        # transaction. Graceful keyword fallback when no embedding provider is
+        # configured.
+        from django.db import transaction as _txn
         try:
             doc_cat = insights.get('document_category') or 'other'
-            chunk_count, embedded, embed_model = self._doc_agent._chunk_embed_and_store(
-                summary_obj, extracted_text, page_count, doc_cat, owner_kind='summary',
-            )
-            summary_obj.is_indexed = embedded
-            summary_obj.embedding_model = embed_model or ''
-            summary_obj.save(update_fields=['is_indexed', 'embedding_model'])
+            with _txn.atomic():
+                chunk_count, embedded, embed_model = self._doc_agent._chunk_embed_and_store(
+                    summary_obj, extracted_text, page_count, doc_cat, owner_kind='summary',
+                )
+                summary_obj.is_indexed = embedded
+                summary_obj.embedding_model = embed_model or ''
+                summary_obj.processing_status = 'ready'
+                summary_obj.save(update_fields=['is_indexed', 'embedding_model', 'processing_status'])
             if embedded:
                 from operations_agent.agents.knowledge_qa_agent import invalidate_answer_cache_for_company
                 from operations_agent.vector_store import mark_index_dirty
@@ -167,6 +173,14 @@ class DocumentSummarizationAgent(MarketingBaseAgent):
                 invalidate_answer_cache_for_company(company_id)
         except Exception:
             logger.exception("Operations: failed to chunk/embed summarised file %s", original_filename)
+            # The summary itself is valid even if chunking failed — it stays
+            # searchable via legacy rich_summary scoring. Don't strand it in
+            # 'processing'; mark it ready.
+            try:
+                summary_obj.processing_status = 'ready'
+                summary_obj.save(update_fields=['processing_status'])
+            except Exception:
+                logger.exception("Operations: failed to stamp summary %s ready", summary_obj.id)
 
         self.log_action('summarize_file', {
             'summary_id': summary_obj.id,

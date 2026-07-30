@@ -5,11 +5,10 @@ and auto-classification for PDF, DOCX, Excel, PPT, CSV, and TXT files.
 """
 
 import os
-import hashlib
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-from django.conf import settings
+from typing import Dict, Optional, Tuple
+from django.db import transaction
 from django.utils import timezone
 
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
@@ -160,6 +159,9 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         uploaded_by = CompanyUser.objects.get(pk=uploaded_by_id) if uploaded_by_id else None
 
         resolved_doc_type = doc_type.get('document_type', 'other') if isinstance(doc_type, dict) else 'other'
+        # `is_processed` stays False until the row is durably 'ready' — it is a
+        # derived mirror of processing_status, not a second source of truth, so
+        # the two never disagree mid-pipeline.
         doc_fields = dict(
             company=company,
             uploaded_by=uploaded_by,
@@ -176,7 +178,7 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             metadata=metadata,
             entities=entities.get('entities', {}) if isinstance(entities, dict) else {},
             tags=tags,
-            is_processed=True,
+            is_processed=False,
             processed_at=timezone.now(),
             processing_status='processing',
         )
@@ -189,32 +191,36 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         else:
             doc = OperationsDocument.objects.create(**doc_fields)
 
-        # 7. Chunk text (section-aware, TOC/junk filtered) + embed + save
-        chunk_count, embedded, embed_model = self._chunk_embed_and_store(
-            doc, extracted_text, page_count, resolved_doc_type,
-        )
+        # 7-8. Chunk + embed and stamp 'ready' in ONE transaction. If anything
+        #      here fails or the process dies, the row stays 'processing' with
+        #      its file intact and the chunks roll back — recoverable, never a
+        #      half-ready doc.
+        with transaction.atomic():
+            chunk_count, embedded, embed_model = self._chunk_embed_and_store(
+                doc, extracted_text, page_count, resolved_doc_type,
+            )
+            doc.chunks_total = chunk_count
+            doc.chunks_processed = chunk_count
+            doc.is_indexed = embedded
+            doc.embedding_model = embed_model or ''
+            doc.processing_status = 'ready'
+            doc.is_processed = True
+            doc.save(update_fields=[
+                'chunks_total', 'chunks_processed', 'is_indexed',
+                'embedding_model', 'processing_status', 'is_processed', 'updated_at',
+            ])
 
-        # 8. Drop the source file — everything we need (parsed_text, chunks,
-        #    summary, insights) is already in the DB, and reindex works from
-        #    parsed_text. Keeping the binary just wastes disk.
+        # 9. Only NOW that the row is durably 'ready' is it safe to drop the
+        #    source file — a crash before this point leaves the file reusable.
         try:
             src = Path(file_path)
             if src.exists():
                 src.unlink()
+            OperationsDocument.objects.filter(pk=doc.pk).update(file='')
+            doc.file = ''
         except OSError:
             logger.warning("Operations: could not delete source file %s", file_path)
 
-        # 9. Stamp final RAG state + invalidate FAISS / answer cache
-        doc.chunks_total = chunk_count
-        doc.chunks_processed = chunk_count
-        doc.is_indexed = embedded
-        doc.embedding_model = embed_model or ''
-        doc.processing_status = 'ready'
-        doc.file = ''  # file removed above — don't advertise a dead path
-        doc.save(update_fields=[
-            'chunks_total', 'chunks_processed', 'is_indexed',
-            'embedding_model', 'processing_status', 'file', 'updated_at',
-        ])
         _invalidate_operations_indexes(doc.company_id, embedded)
 
         self.log_action('process_file', {

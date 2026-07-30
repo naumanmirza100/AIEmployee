@@ -408,7 +408,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         docs = list(
             OperationsDocument.objects.filter(
                 company_id=company_id, id__in=reference_document_ids, is_processed=True,
-            )
+            ).only('id', 'title', 'original_filename', 'file_type', 'summary', 'parsed_text')
         )
         if not docs:
             return 'REFERENCE MATERIAL: (requested documents not found or not yet processed)\n\n', []
