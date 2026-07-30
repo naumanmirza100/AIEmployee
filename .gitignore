@@ -177,3 +177,11 @@ project_manager_ai/settings.py
 # Frontend directory
 PaPerProjectFront/node_modules/
 PaPerProjectFront/New/
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
