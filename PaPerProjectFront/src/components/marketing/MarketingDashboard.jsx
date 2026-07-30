@@ -62,6 +62,7 @@ import CampaignFilterBar from './CampaignFilterBar';
 import Documents from './Documents';
 import Notifications from './Notifications';
 import FrontlineTutorial, { hasSeenTutorial, resetTutorial, markTutorialSeen } from '@/components/frontline/FrontlineTutorial';
+import { useTutorialNudge } from '@/components/frontline/tourUtils';
 import HowItWorksModal from '@/components/common/HowItWorksModal';
 import HoverTip from '@/components/common/HoverTip';
 import {
@@ -216,32 +217,28 @@ const MarketingDashboard = () => {
     fetchStats();
   }, []);
 
-  // First visit: show the high-level "How it works" modal first, then the tour.
-  // The modal explains WHAT the agent does; the tour walks the UI. Showing both at
-  // once would collide, so the tour only auto-launches once the modal is gone.
+  // First visit: show the high-level "How it works" modal so the user knows
+  // what the agent does. The tour is NOT auto-launched anymore — the header
+  // "Take the Tour" button flickers/glows until the user takes it, and a
+  // short-lived tooltip points to it on first load.
   useEffect(() => {
-    const seenHow = hasSeenTutorial(MARKETING_HOWITWORKS_KEY);
-    const seenTour = hasSeenTutorial(MARKETING_TOUR_KEY);
-    if (!seenHow) {
+    if (!hasSeenTutorial(MARKETING_HOWITWORKS_KEY)) {
       const t = setTimeout(() => setHowItWorksOpen(true), 500);
-      return () => clearTimeout(t);
-    }
-    if (!seenTour) {
-      const t = setTimeout(() => setTourOpen(true), 600);
       return () => clearTimeout(t);
     }
   }, []);
 
-  // Closing the modal marks it seen, then hands off to the tour if not yet taken.
+  // Closing the modal just marks it seen. Discovery of the tour is now handled
+  // by the glowing header button, not by an auto-launched walkthrough.
   const handleCloseHowItWorks = () => {
     setHowItWorksOpen(false);
     markTutorialSeen(MARKETING_HOWITWORKS_KEY);
-    if (!hasSeenTutorial(MARKETING_TOUR_KEY)) {
-      setTimeout(() => setTourOpen(true), 300);
-    }
   };
 
+  const { glow: spotlightTour, tooltip: spotlightTooltip, dismiss: dismissNudge } = useTutorialNudge(MARKETING_TOUR_KEY);
+
   const handleReplayTour = () => {
+    dismissNudge();
     resetTutorial(MARKETING_TOUR_KEY);
     setTourOpen(true);
   };
@@ -895,16 +892,31 @@ const MarketingDashboard = () => {
             <Sparkles className="h-3.5 w-3.5" />
             How it works
           </button>
-          <button
-            type="button"
-            onClick={handleReplayTour}
-            data-tour-mkt="replay"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition"
-            style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', boxShadow: '0 0 8px 0 #a259ff55' }}
-          >
-            <GraduationCap className="h-3.5 w-3.5" />
-            Take the Tour
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={handleReplayTour}
+              data-tour-mkt="replay"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition ${spotlightTour ? 'mkt-spotlight' : ''}`}
+              style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', boxShadow: '0 0 8px 0 #a259ff55' }}
+            >
+              <GraduationCap className="h-3.5 w-3.5" />
+              Take the Tour
+            </button>
+            {spotlightTooltip && (
+              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-[#a259ff]/50 bg-[#1a1030] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+                👋 Take the tour anytime from here
+                <span className="absolute -top-1 right-6 h-2 w-2 bg-[#1a1030] border-t border-l border-[#a259ff]/50 rotate-45" />
+              </div>
+            )}
+            <style>{`
+              @keyframes mktSpotlight {
+                0%, 100% { box-shadow: 0 0 8px 0 rgba(162, 89, 255, 0.35), 0 0 0 0 rgba(162, 89, 255, 0.4); }
+                50%      { box-shadow: 0 0 12px 0 rgba(162, 89, 255, 0.55), 0 0 0 8px rgba(162, 89, 255, 0.12), 0 0 0 14px rgba(162, 89, 255, 0.06); }
+              }
+              .mkt-spotlight { animation: mktSpotlight 1.6s ease-in-out infinite; }
+            `}</style>
+          </div>
         </div>
       </div>
 

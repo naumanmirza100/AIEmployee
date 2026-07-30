@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { logoutCompany } from '@/services/companyAuthService';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -52,13 +52,13 @@ import DashboardNavbar from '@/components/common/DashboardNavbar';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 // Tutorial + hints + floating chat (generic components reused, PM-specific content)
 import InfoHint, { HintsProvider, useHints } from '@/components/frontline/InfoHint';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '@/components/frontline/FrontlineTutorial';
+import FrontlineTutorial, { resetTutorial } from '@/components/frontline/FrontlineTutorial';
 import PMFloatingChat from '@/components/pm-agent/PMFloatingChat';
 import {
   PM_MAIN_TOUR_STEPS, PM_TAB_TOURS, PM_HINTS, PM_MAIN_TOUR_KEY,
 } from '@/components/pm-agent/pmTutorialSteps';
 import {
-  shouldSpotlightTour, markSpotlightSeen,
+  useTutorialNudge,
   tourAvailable, makeHoverLaunchHandlers,
 } from '@/components/frontline/tourUtils';
 import { GraduationCap, Eye, EyeOff } from 'lucide-react';
@@ -78,42 +78,35 @@ const PM_TAB_ITEMS = [
 const ProjectManagerDashboardPage = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
+  // Tab state lives in the URL as `?tab=...` so browser reload keeps you on
+  // the tab you were on. Falls back to 'overview' when the param is missing
+  // or references an unknown tab.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const validTabValues = React.useMemo(() => PM_TAB_ITEMS.map((t) => t.value), []);
+  const rawTab = searchParams.get('tab');
+  const activeTab = validTabValues.includes(rawTab) ? rawTab : 'overview';
+  const setActiveTab = React.useCallback((v) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', v);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   // ---- Onboarding tutorial + per-tab tours ----
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [activeTabTour, setActiveTabTour] = useState(null);
 
-  useEffect(() => {
-    if (!hasSeenTutorial(PM_MAIN_TOUR_KEY)) {
-      const t = setTimeout(() => setTutorialOpen(true), 600);
-      return () => clearTimeout(t);
-    }
-  }, []);
+  // Per-tab tours are no longer auto-launched. Each TabTourButton glows on
+  // first visit to that tab until the user takes it.
 
-  useEffect(() => {
-    if (tutorialOpen) return;
-    const tour = PM_TAB_TOURS[activeTab];
-    if (!tour) return;
-    if (hasSeenTutorial(tour.key)) return;
-    const t = setTimeout(() => setActiveTabTour(activeTab), 500);
-    return () => clearTimeout(t);
-  }, [activeTab, tutorialOpen]);
-
-  // One-time spotlight on "Take the Tour"
-  const [spotlightTour, setSpotlightTour] = useState(false);
-  useEffect(() => {
-    if (tutorialOpen) return;
-    if (!hasSeenTutorial(PM_MAIN_TOUR_KEY)) return;
-    if (!shouldSpotlightTour('pm')) return;
-    setSpotlightTour(true);
-    const t = setTimeout(() => { setSpotlightTour(false); markSpotlightSeen('pm'); }, 5500);
-    return () => clearTimeout(t);
-  }, [tutorialOpen]);
+  // First-login nudge: no auto-launched tour. The header "Take the Tour"
+  // button glows until the user takes the tour, with a short-lived tooltip
+  // pointing to it on first load.
+  const { glow: spotlightTour, tooltip: spotlightTooltip, dismiss: dismissNudge } = useTutorialNudge(PM_MAIN_TOUR_KEY);
 
   const handleReplayTutorial = () => {
-    setSpotlightTour(false);
-    markSpotlightSeen('pm');
+    dismissNudge();
     resetTutorial(PM_MAIN_TOUR_KEY);
     setTutorialOpen(true);
   };
@@ -125,17 +118,21 @@ const ProjectManagerDashboardPage = () => {
     setActiveTabTour(tabKey);
   };
 
-  const TabTourButton = ({ tabKey }) => (
-    <button
-      type="button"
-      onClick={() => handleReplayTabTour(tabKey)}
-      title={`Take a guided tour of the ${PM_TAB_TOURS[tabKey]?.label || 'this'} tab`}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-xs font-semibold hover:bg-cyan-500/20 hover:text-cyan-100 transition"
-    >
-      <GraduationCap className="h-3.5 w-3.5" />
-      Tour this tab
-    </button>
-  );
+  const TabTourButton = ({ tabKey }) => {
+    const tour = PM_TAB_TOURS[tabKey];
+    const { glow, dismiss } = useTutorialNudge(tour?.key);
+    return (
+      <button
+        type="button"
+        onClick={() => { dismiss(); handleReplayTabTour(tabKey); }}
+        title={`Take a guided tour of the ${tour?.label || 'this'} tab`}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 text-xs font-semibold hover:bg-cyan-500/20 hover:text-cyan-100 transition ${glow ? 'pm-tab-spotlight' : ''}`}
+      >
+        <GraduationCap className="h-3.5 w-3.5" />
+        Tour this tab
+      </button>
+    );
+  };
 
   const HintsToggleButton = () => {
     const { enabled, toggle } = useHints();
@@ -393,7 +390,7 @@ const ProjectManagerDashboardPage = () => {
               <GraduationCap className="h-4 w-4" />
               Take the Tour
             </button>
-            {spotlightTour && (
+            {spotlightTooltip && (
               <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-cyan-400/40 bg-[#0a1929] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
                 👋 Take the tour anytime from here
                 <span className="absolute -top-1 right-6 h-2 w-2 bg-[#0a1929] border-t border-l border-cyan-400/40 rotate-45" />
@@ -406,6 +403,11 @@ const ProjectManagerDashboardPage = () => {
               50%      { box-shadow: 0 0 0 6px rgba(6, 182, 212, 0.15), 0 0 0 12px rgba(6, 182, 212, 0.08); }
             }
             .pm-spotlight { animation: pmSpotlight 1.6s ease-in-out infinite; }
+            @keyframes pmTabSpotlight {
+              0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.35), 0 0 0 0 rgba(6, 182, 212, 0.18); }
+              50%      { box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.14), 0 0 0 8px rgba(6, 182, 212, 0.07); }
+            }
+            .pm-tab-spotlight { animation: pmTabSpotlight 1.6s ease-in-out infinite; }
             @keyframes pmDotPulse {
               0%, 100% { transform: scale(1); opacity: 1; }
               50%      { transform: scale(1.3); opacity: 0.7; }

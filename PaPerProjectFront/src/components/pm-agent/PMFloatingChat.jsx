@@ -5,7 +5,8 @@ import {
   History, Trash2, Paperclip, Plus, Slash, Target, MessageSquare,
 } from 'lucide-react';
 import InfoHint, { useHints } from '../frontline/InfoHint';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '../frontline/FrontlineTutorial';
+import FrontlineTutorial, { resetTutorial } from '../frontline/FrontlineTutorial';
+import { useTutorialNudge } from '../frontline/tourUtils';
 import { PM_FLOATING_CHAT_TOUR, PM_HINTS } from './pmTutorialSteps';
 import {
   listPMChatHistory,
@@ -140,16 +141,16 @@ const PMFloatingChat = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Auto-launch tour on first open; otherwise focus input
+  // Tour is no longer auto-launched on first open — the header tour icon
+  // glows until the user takes it. Always focus the input when opening.
   useEffect(() => {
     if (!open) return;
-    if (!hasSeenTutorial(PM_FLOATING_CHAT_TOUR.key)) {
-      const t = setTimeout(() => setTourOpen(true), 500);
-      return () => clearTimeout(t);
-    }
     const f = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(f);
   }, [open]);
+
+  // First-open nudge for the header tour icon.
+  const { glow: tourGlow, dismiss: dismissTourNudge } = useTutorialNudge(PM_FLOATING_CHAT_TOUR.key);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -323,7 +324,7 @@ const PMFloatingChat = () => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }, [slashOpen, filteredCommands, slashActive]);
 
-  const replayTour = () => { resetTutorial(PM_FLOATING_CHAT_TOUR.key); setTourOpen(true); };
+  const replayTour = () => { dismissTourNudge(); resetTutorial(PM_FLOATING_CHAT_TOUR.key); setTourOpen(true); };
 
   const relativeTime = (ts) => {
     if (!ts) return '';
@@ -421,9 +422,16 @@ const PMFloatingChat = () => {
                 <Plus className="h-4 w-4" />
               </button>
               <button type="button" onClick={replayTour} title="Take a tour of PM Quick Chat"
-                className="p-1 rounded hover:bg-white/25 text-white transition">
+                className={`p-1 rounded hover:bg-white/25 text-white transition ${tourGlow ? 'pm-chat-tour-glow' : ''}`}>
                 <GraduationCap className="h-4 w-4" />
               </button>
+              <style>{`
+                @keyframes pmChatTourGlow {
+                  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.55); background-color: rgba(255,255,255,0.10); }
+                  50%      { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18); background-color: rgba(255,255,255,0.25); }
+                }
+                .pm-chat-tour-glow { animation: pmChatTourGlow 1.4s ease-in-out infinite; }
+              `}</style>
               <button type="button" onClick={() => setOpen(false)} title="Close (Ctrl+K)"
                 className="p-1 rounded hover:bg-white/25 text-white transition">
                 <X className="h-4 w-4" />

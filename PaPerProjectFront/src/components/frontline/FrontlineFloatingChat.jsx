@@ -17,7 +17,8 @@ import {
   Upload,
 } from 'lucide-react';
 import InfoHint, { useHints } from './InfoHint';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from './FrontlineTutorial';
+import FrontlineTutorial, { resetTutorial } from './FrontlineTutorial';
+import { useTutorialNudge } from './tourUtils';
 import { FLOATING_CHAT_TOUR, HINTS } from './frontlineTutorialSteps';
 import {
   listChatHistory,
@@ -158,17 +159,17 @@ const FrontlineFloatingChat = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Auto-launch the tour the first time the chat is opened, otherwise focus
-  // the input for immediate typing.
+  // The tour is no longer auto-launched on first open — the header tour icon
+  // glows instead until the user takes it themselves. Focus the input for
+  // immediate typing whenever the chat opens.
   useEffect(() => {
     if (!open) return;
-    if (!hasSeenTutorial(FLOATING_CHAT_TOUR.key)) {
-      const t = setTimeout(() => setTourOpen(true), 500);
-      return () => clearTimeout(t);
-    }
     const f = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(f);
   }, [open]);
+
+  // First-open nudge for the header tour icon.
+  const { glow: tourGlow, dismiss: dismissTourNudge } = useTutorialNudge(FLOATING_CHAT_TOUR.key);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -518,6 +519,7 @@ const FrontlineFloatingChat = () => {
   }, [slashOpen, filteredCommands, slashActive]);
 
   const replayTour = () => {
+    dismissTourNudge();
     resetTutorial(FLOATING_CHAT_TOUR.key);
     setTourOpen(true);
   };
@@ -622,9 +624,16 @@ const FrontlineFloatingChat = () => {
                 <Plus className="h-4 w-4" />
               </button>
               <button type="button" onClick={replayTour} title="Take a tour of Quick Chat" aria-label="Take a tour"
-                className="p-1 rounded hover:bg-white/25 text-white transition">
+                className={`p-1 rounded hover:bg-white/25 text-white transition ${tourGlow ? 'flt-chat-tour-glow' : ''}`}>
                 <GraduationCap className="h-4 w-4" />
               </button>
+              <style>{`
+                @keyframes fltChatTourGlow {
+                  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.55); background-color: rgba(255,255,255,0.10); }
+                  50%      { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18); background-color: rgba(255,255,255,0.25); }
+                }
+                .flt-chat-tour-glow { animation: fltChatTourGlow 1.4s ease-in-out infinite; }
+              `}</style>
               <button type="button" onClick={() => setOpen(false)} title="Close (Ctrl+K)" aria-label="Close Quick Chat"
                 className="p-1 rounded hover:bg-white/25 text-white transition">
                 <X className="h-4 w-4" />
