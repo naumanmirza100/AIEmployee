@@ -34,6 +34,9 @@ export function useIsMobile() {
 // Fires a one-time pulse animation on the header button so users notice it
 // exists after they close the auto-launched tour. Keyed per dashboard so
 // each dashboard shows its own spotlight independently.
+// NOTE: Kept for backward compatibility. New nudge behavior lives in
+// useTutorialNudge below — it drives a persistent glow whenever the user
+// hasn't taken the tour yet, instead of a one-shot pulse after the tour ends.
 
 export function shouldSpotlightTour(spotlightKey) {
   try { return localStorage.getItem(`${spotlightKey}__spotlight_seen`) !== '1'; }
@@ -43,6 +46,35 @@ export function shouldSpotlightTour(spotlightKey) {
 export function markSpotlightSeen(spotlightKey) {
   try { localStorage.setItem(`${spotlightKey}__spotlight_seen`, '1'); }
   catch (_) { /* ignore */ }
+}
+
+// --- Persistent "Take the Tour" nudge --------------------------------------
+// We no longer auto-launch the onboarding tour on first login — it overwhelms
+// new users. Instead the "Take the Tour" header button flickers/glows until
+// the user has taken the tour, and a short-lived tooltip nudges them the
+// first time they land on the dashboard in the session.
+//
+// - `glow` stays true as long as `!hasSeenTutorial(tutorialKey)` — persistent
+//   pulse until they either take the tour or manually dismiss.
+// - `tooltip` auto-dismisses after `tooltipMs` (default 10s) so it doesn't
+//   linger in the user's face.
+// - `dismiss()` clears both immediately without marking the tour seen — used
+//   when the user clicks the tour button (which resets + opens the tour).
+
+export function useTutorialNudge(tutorialKey, { tooltipMs = 10000 } = {}) {
+  const [glow, setGlow] = useState(false);
+  const [tooltip, setTooltip] = useState(false);
+
+  useEffect(() => {
+    if (hasSeenTutorial(tutorialKey)) return;
+    setGlow(true);
+    setTooltip(true);
+    const t = setTimeout(() => setTooltip(false), tooltipMs);
+    return () => clearTimeout(t);
+  }, [tutorialKey, tooltipMs]);
+
+  const dismiss = () => { setGlow(false); setTooltip(false); };
+  return { glow, tooltip, dismiss };
 }
 
 // --- Tour-available badge ---

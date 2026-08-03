@@ -5,7 +5,8 @@ import {
   History, Trash2, Paperclip, FileText, Plus, Slash, Users, Upload,
 } from 'lucide-react';
 import InfoHint, { useHints } from '../frontline/InfoHint';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from '../frontline/FrontlineTutorial';
+import FrontlineTutorial, { resetTutorial } from '../frontline/FrontlineTutorial';
+import { useTutorialNudge } from '../frontline/tourUtils';
 import { HR_FLOATING_CHAT_TOUR, HR_HINTS } from './hrTutorialSteps';
 import {
   listHRChatHistory,
@@ -100,16 +101,16 @@ const HRFloatingChat = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Auto-launch tour on first open; otherwise focus input
+  // Tour is no longer auto-launched on first open — the header tour icon
+  // glows until the user takes it. Always focus the input when opening.
   useEffect(() => {
     if (!open) return;
-    if (!hasSeenTutorial(HR_FLOATING_CHAT_TOUR.key)) {
-      const t = setTimeout(() => setTourOpen(true), 500);
-      return () => clearTimeout(t);
-    }
     const f = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(f);
   }, [open]);
+
+  // First-open nudge for the header tour icon.
+  const { glow: tourGlow, dismiss: dismissTourNudge } = useTutorialNudge(HR_FLOATING_CHAT_TOUR.key);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -246,29 +247,62 @@ const HRFloatingChat = () => {
     const startedAt = (typeof performance !== 'undefined' && performance.now)
       ? performance.now() : Date.now();
     setSendingStartedAt(startedAt);
+
+    // Streaming path — push a placeholder assistant msg and mutate its
+    // content as tokens land. `streaming: true` swaps the badge for a
+    // blinking cursor while the LLM is still emitting.
+    pushMessage({
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      citations: [],
+    });
+    const patchLast = (updater) => setMessages((prev) => {
+      const next = prev.slice();
+      const lastIdx = next.length - 1;
+      if (lastIdx < 0) return prev;
+      next[lastIdx] = updater(next[lastIdx]);
+      return next;
+    });
+
+    let accumulated = '';
+    let metaEvent = null;
+    let doneEvent = null;
     try {
-      // Pass short history (max last 6 messages) for multi-turn context
       const history = messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
-      const res = await hrAgentService.askHRKnowledge(q, history);
-      if (res && res.status === 'success' && res.data) {
-        const data = res.data;
-        const endedAt = (typeof performance !== 'undefined' && performance.now)
-          ? performance.now() : Date.now();
-        pushMessage({
-          role: 'assistant',
-          content: data.answer || data.response || 'No answer available.',
-          source: data.source || null,
-          citations: data.citations || data.sources || [],
-          responseTimeMs: Math.round(endedAt - startedAt),
-          cache_hit: !!data.cache_hit,
-          // Server-side per-phase timing breakdown for the badge to render.
-          timing_ms: data.timing_ms || null,
-        });
-      } else {
-        throw new Error((res && res.message) || 'Failed to get an answer');
-      }
+      await hrAgentService.askHRKnowledgeStream(q, history, {
+        onMeta: (meta) => {
+          metaEvent = meta;
+          patchLast((m) => ({
+            ...m,
+            source: meta?.source ?? m.source,
+            citations: meta?.citations || [],
+          }));
+        },
+        onToken: (piece) => {
+          accumulated += (piece || '');
+          patchLast((m) => ({ ...m, content: accumulated }));
+        },
+        onDone: (done) => { doneEvent = done; },
+      });
+      const endedAt = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      patchLast((m) => ({
+        ...m,
+        streaming: false,
+        content: (doneEvent && doneEvent.answer) || accumulated || 'No answer available.',
+        source: metaEvent?.source ?? m.source,
+        citations: metaEvent?.citations || m.citations || [],
+        responseTimeMs: Math.round(endedAt - startedAt),
+        cache_hit: !!(doneEvent?.cache_hit),
+        timing_ms: doneEvent?.timing_ms || null,
+      }));
     } catch (e) {
-      pushMessage({ role: 'assistant', content: `Error: ${e.message || 'Something went wrong.'}`, error: true });
+      patchLast(() => ({
+        role: 'assistant',
+        content: `Error: ${e.message || 'Something went wrong.'}`,
+        error: true,
+      }));
     } finally {
       setSending(false);
       setSendingStartedAt(null);
@@ -406,7 +440,7 @@ const HRFloatingChat = () => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }, [slashOpen, filteredCommands, slashActive]);
 
-  const replayTour = () => { resetTutorial(HR_FLOATING_CHAT_TOUR.key); setTourOpen(true); };
+  const replayTour = () => { dismissTourNudge(); resetTutorial(HR_FLOATING_CHAT_TOUR.key); setTourOpen(true); };
 
   const relativeTime = (ts) => {
     if (!ts) return '';
@@ -501,9 +535,16 @@ const HRFloatingChat = () => {
                 <Plus className="h-4 w-4" />
               </button>
               <button type="button" onClick={replayTour} title="Take a tour of HR Quick Chat"
-                className="p-1 rounded hover:bg-white/25 text-white transition">
+                className={`p-1 rounded hover:bg-white/25 text-white transition ${tourGlow ? 'hr-chat-tour-glow' : ''}`}>
                 <GraduationCap className="h-4 w-4" />
               </button>
+              <style>{`
+                @keyframes hrChatTourGlow {
+                  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.55); background-color: rgba(255,255,255,0.10); }
+                  50%      { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18); background-color: rgba(255,255,255,0.25); }
+                }
+                .hr-chat-tour-glow { animation: hrChatTourGlow 1.4s ease-in-out infinite; }
+              `}</style>
               <button type="button" onClick={() => setOpen(false)} title="Close (Ctrl+K)"
                 className="p-1 rounded hover:bg-white/25 text-white transition">
                 <X className="h-4 w-4" />
@@ -616,7 +657,18 @@ const HRFloatingChat = () => {
                             : 'bg-white/[0.06] text-white/90 border border-white/10'
                     }`}
                   >
-                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    <div className="whitespace-pre-wrap break-words">
+                      {m.content}
+                      {/* Streaming placeholder: while empty, show italic
+                          "Thinking…"; always add a blinking cursor at end
+                          until the stream finishes. */}
+                      {m.streaming && (
+                        <>
+                          {!m.content && <span className="text-white/40 italic">Thinking…</span>}
+                          <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-violet-400/70 animate-pulse align-middle" />
+                        </>
+                      )}
+                    </div>
                     {m.role === 'assistant' && !m.error && !m.system && (m.citations?.length > 0 || m.source) && (
                       <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
                         <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Sources</p>
@@ -673,7 +725,7 @@ const HRFloatingChat = () => {
                   </div>
                 </div>
               ))}
-              {sending && !uploading && (
+              {sending && !uploading && !messages.some((m) => m.streaming) && (
                 <div className="flex justify-start">
                   <div className="bg-white/[0.06] border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-white/60" />

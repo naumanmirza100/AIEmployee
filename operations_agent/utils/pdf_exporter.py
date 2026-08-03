@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -23,6 +24,21 @@ import markdown as md_lib
 from xhtml2pdf import pisa
 
 logger = logging.getLogger(__name__)
+
+
+def _block_external_resources(uri, rel):
+    """xhtml2pdf link_callback that refuses to fetch ANY resource.
+
+    Document content is user-controlled, and without this callback xhtml2pdf
+    would resolve every ``<img src>`` / ``<link href>`` / CSS ``url()`` — including
+    ``http://169.254.169.254/...`` (cloud metadata SSRF), ``http://internal-host``
+    (internal SSRF), and ``file:///etc/passwd`` (local file read). Only inline
+    ``data:`` URIs are allowed (self-contained, no network/disk access). Everything
+    else raises, so the PDF simply renders without that resource.
+    """
+    if isinstance(uri, str) and uri.startswith('data:'):
+        return uri
+    raise Exception('External resources are not permitted in PDF export.')
 
 
 # ──────────────────────────────────────────────
@@ -148,9 +164,20 @@ _TEMPLATE = """<!DOCTYPE html>
 </html>"""
 
 
+# Resource-loading / script tags that could carry an SSRF or local-file URI.
+# python-markdown passes raw HTML through unchanged, so we strip these after
+# conversion. Defense in depth on top of the link_callback — even if that guard
+# were removed, these tags never reach the PDF renderer.
+_RESOURCE_TAG_RE = re.compile(
+    r'<\s*(img|link|script|style|iframe|object|embed|base)\b[^>]*>(?:.*?<\s*/\s*\1\s*>)?',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 def _markdown_to_html(content: str) -> str:
-    """Convert markdown → HTML with GitHub-style extensions."""
-    return md_lib.markdown(
+    """Convert markdown → HTML with GitHub-style extensions, then strip any
+    resource-loading raw-HTML tags a user may have embedded."""
+    html = md_lib.markdown(
         content or '',
         extensions=[
             'tables',
@@ -160,6 +187,7 @@ def _markdown_to_html(content: str) -> str:
         ],
         output_format='html',
     )
+    return _RESOURCE_TAG_RE.sub('', html)
 
 
 def render_document_pdf(
@@ -186,7 +214,12 @@ def render_document_pdf(
     )
 
     buffer = io.BytesIO()
-    result = pisa.CreatePDF(src=html, dest=buffer, encoding='utf-8')
+    # link_callback blocks all remote/local resource fetches (SSRF / file read)
+    # from user-controlled document content.
+    result = pisa.CreatePDF(
+        src=html, dest=buffer, encoding='utf-8',
+        link_callback=_block_external_resources,
+    )
     if result.err:
         logger.error('xhtml2pdf failed to render PDF. Errors: %s', result.err)
         raise RuntimeError(f'PDF generation failed ({result.err} errors)')

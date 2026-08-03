@@ -573,32 +573,49 @@ def schedule_interview(request):
 @csrf_exempt  # Allow external access for candidate slot selection
 def confirm_interview_slot(request):
     """
-    Confirm a selected interview slot (can be called by candidate via email link or API).
-    Expected POST data:
-    - interview_id (required)
+    Confirm a selected interview slot (candidate, via the email link).
+
+    Expected data:
+    - confirmation_token (required) — the per-interview secret from the email
     - selected_slot_datetime (required, ISO format)
+
+    SECURITY: the interview is resolved ONLY by its unguessable
+    ``confirmation_token`` (``secrets.token_urlsafe`` value), never by a raw
+    sequential ``interview_id``. Accepting an id here previously allowed any
+    anonymous caller to enumerate ids and confirm/hijack arbitrary candidates'
+    interviews across all companies (IDOR).
     """
+    from recruitment_agent.models import Interview
+
     agents = get_agents()
     interview_agent = agents['interview_agent']
     log_service = agents['log_service']
-    
+
     try:
-        interview_id = request.POST.get('interview_id') or request.GET.get('interview_id')
+        confirmation_token = (
+            request.POST.get('confirmation_token')
+            or request.GET.get('confirmation_token')
+            or request.POST.get('token')
+            or request.GET.get('token')
+        )
         selected_slot_datetime = request.POST.get('selected_slot_datetime') or request.GET.get('selected_slot_datetime')
-        
-        if not interview_id or not selected_slot_datetime:
-            return JsonResponse({"error": "Missing required fields: interview_id, selected_slot_datetime"}, status=400)
-        
-        interview_id = int(interview_id)
-        result = interview_agent.confirm_slot(interview_id, selected_slot_datetime)
-        
+
+        if not confirmation_token or not selected_slot_datetime:
+            return JsonResponse({"error": "Missing required fields: confirmation_token, selected_slot_datetime"}, status=400)
+
+        try:
+            interview = Interview.objects.get(confirmation_token=confirmation_token)
+        except Interview.DoesNotExist:
+            # Don't reveal whether the token exists — same generic error.
+            return JsonResponse({"error": "Invalid or expired interview link."}, status=404)
+
+        result = interview_agent.confirm_slot(interview.id, selected_slot_datetime)
+
         if result.get('success'):
             return JsonResponse(result)
         else:
             return JsonResponse(result, status=400)
-            
-    except ValueError:
-        return JsonResponse({"error": "Invalid interview_id"}, status=400)
+
     except Exception as e:
         log_service.log_error("slot_confirmation_error", {"error": str(e)})
         return JsonResponse({"error": f"Confirmation failed: {str(e)}"}, status=500)

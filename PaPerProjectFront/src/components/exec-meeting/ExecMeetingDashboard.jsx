@@ -42,6 +42,7 @@ import { CalendarPanel } from './panels/CalendarPanel';
 import { DocumentsPanel } from './panels/DocumentsPanel';
 import { MeetingsPanel } from './panels/MeetingsPanel';
 import FrontlineTutorial, { hasSeenTutorial, resetTutorial, markTutorialSeen } from '@/components/frontline/FrontlineTutorial';
+import { useTutorialNudge } from '@/components/frontline/tourUtils';
 import HowItWorksModal from '@/components/common/HowItWorksModal';
 import {
   EXEC_MEETING_TOUR_STEPS, EXEC_MEETING_TOUR_KEY,
@@ -172,33 +173,28 @@ const ExecMeetingDashboard = () => {
 
   useEffect(() => { loadStats(); }, []);
 
-  // First visit: show the high-level "How it works" modal first, then the tour.
-  // The modal explains WHAT the agent does; the tour walks the UI. Showing both
-  // at once would collide, so the tour only auto-launches once the modal is gone.
+  // First visit: show the high-level "How it works" modal so the user knows
+  // what the agent does. The tour is NOT auto-launched anymore — it overwhelms
+  // new users. Instead the "Take the Tour" header button flickers/glows until
+  // they take it, and a short-lived tooltip points to it on first load.
   useEffect(() => {
-    const seenHow = hasSeenTutorial(EXEC_MEETING_HOWITWORKS_KEY);
-    const seenTour = hasSeenTutorial(EXEC_MEETING_TOUR_KEY);
-    if (!seenHow) {
+    if (!hasSeenTutorial(EXEC_MEETING_HOWITWORKS_KEY)) {
       const t = setTimeout(() => setHowItWorksOpen(true), 500);
-      return () => clearTimeout(t);
-    }
-    // Returning-but-hasn't-toured user (or reset): keep the old tour auto-launch.
-    if (!seenTour) {
-      const t = setTimeout(() => setTourOpen(true), 600);
       return () => clearTimeout(t);
     }
   }, []);
 
-  // Closing the modal marks it seen, then hands off to the tour if not yet taken.
+  // Closing the modal just marks it seen. No auto-launched tour; the glowing
+  // header button is the discovery affordance instead.
   const handleCloseHowItWorks = () => {
     setHowItWorksOpen(false);
     markTutorialSeen(EXEC_MEETING_HOWITWORKS_KEY);
-    if (!hasSeenTutorial(EXEC_MEETING_TOUR_KEY)) {
-      setTimeout(() => setTourOpen(true), 300);
-    }
   };
 
+  const { glow: spotlightTour, tooltip: spotlightTooltip, dismiss: dismissNudge } = useTutorialNudge(EXEC_MEETING_TOUR_KEY);
+
   const handleReplayTour = () => {
+    dismissNudge();
     resetTutorial(EXEC_MEETING_TOUR_KEY);
     setTourOpen(true);
   };
@@ -1120,18 +1116,33 @@ const ExecMeetingDashboard = () => {
                 How it works
               </button>
             </HoverTip>
-            {/* Take the Tour */}
-            <HoverTip tip="Replay the guided tour">
-              <button
-                type="button"
-                onClick={handleReplayTour}
-                data-tour-em="replay"
-                className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-300 text-sm font-semibold hover:bg-violet-400/20 hover:text-violet-200 transition"
-              >
-                <GraduationCap className="h-4 w-4" />
-                Take the Tour
-              </button>
-            </HoverTip>
+            {/* Take the Tour — spotlight-pulses until the user takes the tour */}
+            <div className="relative hidden sm:block">
+              <HoverTip tip="Replay the guided tour">
+                <button
+                  type="button"
+                  onClick={handleReplayTour}
+                  data-tour-em="replay"
+                  className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-300 text-sm font-semibold hover:bg-violet-400/20 hover:text-violet-200 transition ${spotlightTour ? 'em-spotlight' : ''}`}
+                >
+                  <GraduationCap className="h-4 w-4" />
+                  Take the Tour
+                </button>
+              </HoverTip>
+              {spotlightTooltip && (
+                <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-violet-400/40 bg-[#0d0b1f] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+                  👋 Take the tour anytime from here
+                  <span className="absolute -top-1 right-6 h-2 w-2 bg-[#0d0b1f] border-t border-l border-violet-400/40 rotate-45" />
+                </div>
+              )}
+              <style>{`
+                @keyframes emSpotlight {
+                  0%, 100% { box-shadow: 0 0 0 0 rgba(162, 89, 255, 0.4), 0 0 0 0 rgba(162, 89, 255, 0.2); }
+                  50%      { box-shadow: 0 0 0 6px rgba(162, 89, 255, 0.15), 0 0 0 12px rgba(162, 89, 255, 0.08); }
+                }
+                .em-spotlight { animation: emSpotlight 1.6s ease-in-out infinite; }
+              `}</style>
+            </div>
           {/* Mobile tab menu */}
           <div className="md:hidden">
             <DropdownMenu open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>

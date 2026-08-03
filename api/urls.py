@@ -428,6 +428,7 @@ urlpatterns = [
     re_path(r'^frontline/documents/(?P<document_id>\d+)/status/?$', frontline_agent.document_processing_status, name='frontline_document_status'),  # GET
     re_path(r'^frontline/documents/(?P<document_id>\d+)/metadata/?$', frontline_agent.update_document_metadata, name='frontline_update_document_metadata'),  # PATCH
     re_path(r'^frontline/knowledge/qa/?$', frontline_agent.knowledge_qa, name='frontline_knowledge_qa'),  # POST
+    re_path(r'^frontline/knowledge/qa/stream/?$', frontline_agent.knowledge_qa_stream, name='frontline_knowledge_qa_stream'),  # POST (streaming)
     re_path(r'^frontline/knowledge/feedback/?$', frontline_agent.knowledge_feedback, name='frontline_knowledge_feedback'),  # POST
     re_path(r'^frontline/knowledge/search/?$', frontline_agent.search_knowledge, name='frontline_search_knowledge'),  # GET
     re_path(r'^frontline/qa/chats/?$', frontline_agent.list_qa_chats, name='frontline_qa_chats_list'),  # GET
@@ -579,6 +580,7 @@ urlpatterns = [
     re_path(r'^operations/documents/(?P<document_id>\d+)/status/?$', operations_agent.get_document_status, name='operations_document_status'),  # GET
     re_path(r'^operations/documents/?$', operations_agent.list_documents, name='operations_list_documents'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/?$', operations_agent.get_document, name='operations_get_document'),  # GET
+    re_path(r'^operations/documents/(?P<document_id>\d+)/reprocess/?$', operations_agent.reprocess_document, name='operations_reprocess_document'),  # POST
     re_path(r'^operations/documents/(?P<document_id>\d+)/delete/?$', operations_agent.delete_document, name='operations_delete_document'),  # DELETE
     re_path(r'^operations/summaries/upload/?$', operations_agent.upload_and_summarize, name='operations_upload_and_summarize'),  # POST
     re_path(r'^operations/summaries/(?P<summary_id>\d+)/status/?$', operations_agent.get_summary_status, name='operations_summary_status'),  # GET
@@ -751,6 +753,7 @@ urlpatterns = [
 
     # Knowledge Q&A
     re_path(r'^hr/knowledge-qa/?$', hr_agent.hr_knowledge_qa, name='hr_knowledge_qa'),  # POST
+    re_path(r'^hr/knowledge-qa/stream/?$', hr_agent.hr_knowledge_qa_stream, name='hr_knowledge_qa_stream'),  # POST (streaming)
     # Persisted HR Q&A chats — sidebar history (mirrors PM agent's chat shape)
     re_path(r'^hr/ai/knowledge-qa/chats/?$', hr_agent.list_hr_knowledge_chats, name='hr_list_knowledge_chats'),  # GET
     re_path(r'^hr/ai/knowledge-qa/chats/create/?$', hr_agent.create_hr_knowledge_chat, name='hr_create_knowledge_chat'),  # POST

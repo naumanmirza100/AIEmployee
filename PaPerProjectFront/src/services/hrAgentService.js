@@ -65,6 +65,109 @@ export const askHRKnowledge = async (question, chatHistory = []) => {
   }
 };
 
+/**
+ * Streaming variant of askHRKnowledge. Reads the ndjson body via fetch +
+ * ReadableStream and invokes callbacks as each event lands. Falls back to
+ * non-streaming if the browser lacks Response.body streaming.
+ *
+ * @param {string} question
+ * @param {Array} chatHistory
+ * @param {{onMeta?: fn, onToken?: fn, onDone?: fn, onError?: fn, signal?: AbortSignal}} callbacks
+ * @returns {Promise<{answer:string, meta:object, doneEvent:object}>} resolves
+ *   after the stream ends. Rejects on network / auth errors.
+ */
+export const askHRKnowledgeStream = async (question, chatHistory = [], callbacks = {}) => {
+  const { onMeta, onToken, onDone, onError, signal } = callbacks;
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const token = localStorage.getItem('company_auth_token');
+
+  const payload = { question };
+  if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+    payload.chat_history = chatHistory;
+  }
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/hr/knowledge-qa/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Token ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (err) {
+    onError?.(err);
+    throw err;
+  }
+  if (!response.ok) {
+    const errMsg = `HTTP ${response.status}`;
+    onError?.(new Error(errMsg));
+    throw new Error(errMsg);
+  }
+  if (!response.body) {
+    // Very old browsers — fall back to reading the whole body then parsing.
+    const text = await response.text();
+    for (const line of text.split('\n')) {
+      if (line.trim()) _dispatchStreamEvent(JSON.parse(line), { onMeta, onToken, onDone, onError });
+    }
+    return null;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let answer = '';
+  let meta = null;
+  let doneEvent = null;
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // Split on newlines — server writes one JSON object per line.
+      let newlineIdx;
+      while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+        if (!line) continue;
+        let event;
+        try { event = JSON.parse(line); }
+        catch (parseErr) {
+          console.warn('askHRKnowledgeStream: bad JSON line', line, parseErr);
+          continue;
+        }
+        if (event.type === 'token') answer += (event.value || '');
+        if (event.type === 'meta') meta = event;
+        if (event.type === 'done') doneEvent = event;
+        _dispatchStreamEvent(event, { onMeta, onToken, onDone, onError });
+      }
+    }
+    // Flush any final buffered content (shouldn't happen with ndjson, but be safe).
+    if (buffer.trim()) {
+      try {
+        const event = JSON.parse(buffer.trim());
+        if (event.type === 'token') answer += (event.value || '');
+        if (event.type === 'done') doneEvent = event;
+        _dispatchStreamEvent(event, { onMeta, onToken, onDone, onError });
+      } catch (_) { /* ignore */ }
+    }
+  } catch (err) {
+    onError?.(err);
+    throw err;
+  }
+  return { answer, meta, doneEvent };
+};
+
+function _dispatchStreamEvent(event, { onMeta, onToken, onDone, onError }) {
+  if (event.type === 'meta') { onMeta?.(event); return; }
+  if (event.type === 'token') { onToken?.(event.value); return; }
+  if (event.type === 'done') { onDone?.(event); return; }
+  if (event.type === 'error') { onError?.(new Error(event.message || 'Stream error')); return; }
+}
+
 // ---------- Persisted HR Q&A chats ----------
 export const listHRKnowledgeChats = async () => {
   try {
@@ -1111,6 +1214,7 @@ export default {
   listHREmployees,
   createHREmployee,
   askHRKnowledge,
+  askHRKnowledgeStream,
   listHRKnowledgeChats,
   createHRKnowledgeChat,
   updateHRKnowledgeChat,

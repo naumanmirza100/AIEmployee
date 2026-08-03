@@ -23,9 +23,177 @@ from project_manager_agent.ai_agents import AgentRegistry
 logger = logging.getLogger(__name__)
 
 
+# --------------------------------------------------------------------------
+# Confirmation gate — decide whether to execute the LLM's proposed actions
+# outright or ask the user first.
+# --------------------------------------------------------------------------
+
+_EXPLICIT_CREATION_VERBS = frozenset([
+    'create', 'make', 'start', 'generate', 'add', 'build', 'plan',
+    'setup', 'set up', 'kick off', 'kickoff', 'initiate', 'convert',
+    'turn into', 'break down', 'break into', 'extract tasks',
+    'new project', 'new task',
+])
+
+
+def _has_explicit_intent(user_prompt: str) -> bool:
+    """True when the user's typed instruction contains an unambiguous verb
+    that authorises creating projects/tasks."""
+    if not user_prompt:
+        return False
+    low = user_prompt.lower()
+    return any(v in low for v in _EXPLICIT_CREATION_VERBS)
+
+
+def _find_similar_projects(proposed_name: str, existing_projects, threshold: float = 0.7):
+    """Find existing projects whose name is similar to ``proposed_name``
+    above ``threshold`` (Levenshtein-ish ratio, 0-1). Uses stdlib ``difflib``
+    so no new dependency."""
+    from difflib import SequenceMatcher
+    if not proposed_name:
+        return []
+    prop = proposed_name.strip().lower()
+    out = []
+    for p in existing_projects or []:
+        existing_name = (p.get('name') or '').strip().lower()
+        if not existing_name:
+            continue
+        ratio = SequenceMatcher(None, prop, existing_name).ratio()
+        # Also flag when proposed contains existing as a substring (or vice versa)
+        # — SequenceMatcher misses very-different-length pairs like
+        # "Website" vs "Website Redesign Q1 2026".
+        substring_hit = prop in existing_name or existing_name in prop
+        if ratio >= threshold or substring_hit:
+            out.append({
+                'existing_id': p.get('id'),
+                'existing_name': p.get('name'),
+                'similarity': round(ratio, 2),
+                'substring_match': bool(substring_hit),
+            })
+    # Sort by similarity descending, cap at 3
+    out.sort(key=lambda x: x['similarity'], reverse=True)
+    return out[:3]
+
+
+def _check_needs_confirmation(user_prompt, actions, existing_projects):
+    """Should the pipeline ASK the user before executing the LLM's proposed
+    actions? Returns a ``confirmation_required`` dict if yes, or None if the
+    pipeline should proceed with execution.
+
+    Two reasons we ask:
+
+    * **Implicit intent** — the user uploaded a document without an explicit
+      instruction ("create a project", "extract tasks", …). The old flow
+      would silently create a project anyway; users complained.
+    * **Duplicate risk** — a proposed project's name is very similar to an
+      existing project the user already owns. Better to check than to
+      accidentally create a near-duplicate.
+
+    We only gate on ``create_project`` actions. ``create_task`` on an existing
+    project the user explicitly named is fine to auto-execute.
+    """
+    create_proj_actions = [a for a in actions if isinstance(a, dict) and a.get('action') == 'create_project']
+    if not create_proj_actions:
+        return None
+
+    reasons = []
+    is_explicit = _has_explicit_intent(user_prompt or '')
+    if not is_explicit:
+        reasons.append({
+            'type': 'implicit_intent',
+            'message': (
+                "You uploaded a document without an explicit instruction, "
+                "and the assistant was about to create a new project from it. "
+                "What would you like to do?"
+            ),
+        })
+
+    # Duplicate detection across all proposed projects
+    all_similar = []
+    for a in create_proj_actions:
+        proposed = a.get('project_name') or ''
+        hits = _find_similar_projects(proposed, existing_projects)
+        for h in hits:
+            h['proposed_name'] = proposed
+            all_similar.append(h)
+    # Dedupe by existing_id
+    seen = set()
+    deduped_similar = []
+    for h in all_similar:
+        eid = h.get('existing_id')
+        if eid in seen:
+            continue
+        seen.add(eid)
+        deduped_similar.append(h)
+
+    if deduped_similar:
+        top = deduped_similar[0]
+        reasons.append({
+            'type': 'similar_project_exists',
+            'message': (
+                f"A project called '{top['existing_name']}' already exists — "
+                f"very similar to the proposed '{top['proposed_name']}'. "
+                "Add these tasks there instead, or create a separate project?"
+            ),
+        })
+
+    if not reasons:
+        return None
+
+    # ---- Build the options offered to the user ----
+    options = []
+    if deduped_similar:
+        top = deduped_similar[0]
+        options.append({
+            'id': 'update_existing',
+            'label': f"Add tasks to existing project '{top['existing_name']}'",
+            'hint': f"Project #{top['existing_id']}",
+            'existing_project_id': top['existing_id'],
+            'existing_project_name': top['existing_name'],
+        })
+    options.append({
+        'id': 'create_new',
+        'label': "Create a new project anyway",
+        'hint': f"'{create_proj_actions[0].get('project_name', 'New Project')}'",
+    })
+    options.append({
+        'id': 'summarize',
+        'label': "Just summarise the document",
+        'hint': "No projects or tasks created",
+    })
+    options.append({
+        'id': 'extract_tasks_only',
+        'label': "List the tasks without creating anything",
+        'hint': "See what would be created first",
+    })
+    options.append({
+        'id': 'cancel',
+        'label': "Cancel",
+        'hint': "Discard this upload",
+    })
+
+    # Compact summary of what the LLM was about to do — shown in the card.
+    proposed_summary_parts = []
+    for a in create_proj_actions:
+        proposed_summary_parts.append(f"Create project '{a.get('project_name', 'Unnamed')}'")
+    task_count = sum(1 for a in actions if isinstance(a, dict) and a.get('action') == 'create_task')
+    if task_count:
+        proposed_summary_parts.append(f"Add {task_count} task(s)")
+    proposed_summary = '. '.join(proposed_summary_parts) + '.' if proposed_summary_parts else ''
+
+    return {
+        'needs_confirmation': True,
+        'reasons': reasons,
+        'similar_projects': deduped_similar,
+        'proposed_actions_summary': proposed_summary,
+        'proposed_actions': create_proj_actions[:3],  # cap to keep payload small
+        'options': options,
+    }
+
+
 def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
                                user_prompt='', project_id=None,
-                               chat_history=None):
+                               chat_history=None, skip_confirmation=False):
     """Run the LLM + action-execution pipeline for a Project Pilot upload.
 
     Args (all keyword-only):
@@ -314,6 +482,60 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
         for i, action_data in enumerate(_create_tasks_f):
             action_data["assignee_id"] = _allowed_ids_file[i % len(_allowed_ids_file)]
         logger.info(f"Backend enforcement (from_file): restricted to only {len(_allowed_ids_file)} users")
+
+    # ---- Confirmation gate --------------------------------------------
+    # If the caller hasn't explicitly opted out (e.g. this is the follow-up
+    # after the user picked an option), check whether we should ASK before
+    # executing. Two triggers: implicit user intent + duplicate project name.
+    if not skip_confirmation:
+        existing_projects_list = [
+            {'id': p.id, 'name': p.name, 'description': (p.description or '')[:200]}
+            for p in all_projects
+        ]
+        confirmation = _check_needs_confirmation(
+            user_prompt=user_prompt,
+            actions=actions,
+            existing_projects=existing_projects_list,
+        )
+        if confirmation:
+            # Compose a natural-language answer that summarises what the LLM
+            # would have done + asks the question. This message is what the
+            # user sees in the chat AND what the LLM sees on the follow-up
+            # via chat history, so it needs enough context that a follow-up
+            # like "yes, add to existing" can regenerate the same tasks.
+            summary_lines = []
+            summary_lines.append("Before I create anything, I want to check with you.")
+            summary_lines.append("")
+            if confirmation.get('proposed_actions_summary'):
+                summary_lines.append(f"**What I was about to do:** {confirmation['proposed_actions_summary']}")
+                summary_lines.append("")
+            # List proposed tasks so a follow-up ("yes, do it") has context.
+            create_task_actions = [a for a in actions if isinstance(a, dict) and a.get('action') == 'create_task']
+            if create_task_actions:
+                summary_lines.append("**Proposed tasks:**")
+                for i, ta in enumerate(create_task_actions[:12], start=1):
+                    ttl = ta.get('task_title') or ta.get('title') or '(untitled)'
+                    prio = ta.get('priority')
+                    prio_txt = f" [{prio}]" if prio else ''
+                    summary_lines.append(f"  {i}. {ttl}{prio_txt}")
+                if len(create_task_actions) > 12:
+                    summary_lines.append(f"  … and {len(create_task_actions) - 12} more")
+                summary_lines.append("")
+            for r in confirmation.get('reasons', []):
+                summary_lines.append(f"⚠ {r.get('message')}")
+            summary_lines.append("")
+            summary_lines.append("Pick an option below to continue.")
+            answer_text = "\n".join(summary_lines)
+            logger.info("Project Pilot: confirmation gate triggered (%d reasons, %d similar projects)",
+                        len(confirmation.get('reasons') or []),
+                        len(confirmation.get('similar_projects') or []))
+            return {
+                "answer": answer_text,
+                "action_results": [],
+                "cannot_do": "",
+                "confirmation_required": confirmation,
+                "extracted_text_preview": extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text,
+            }
 
     # Process actions (reuse same logic from project_pilot)
     action_results = []

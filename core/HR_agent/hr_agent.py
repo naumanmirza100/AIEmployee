@@ -187,6 +187,160 @@ class HRAgent(BaseAgent):
                 'citations': knowledge_result.get('citations', []),
             }
 
+    # ---- Streaming Q&A ---------------------------------------------------
+
+    def answer_question_stream(self, question: str, *, asker_role: str = 'employee',
+                                asker_employee=None, max_results: int = 3):
+        """Generator variant of :meth:`answer_question`. Yields dicts:
+
+          * ``{'type': 'meta', ...}`` — first event with retrieval results
+            (citations, has_verified_info, confidence, retrieval_ms). Sent
+            before any tokens so the UI can render source metadata early.
+          * ``{'type': 'token', 'value': '...'}`` — one per LLM chunk.
+          * ``{'type': 'done', 'answer': '<full>', 'timing_ms': {...},
+             'cache_hit': bool}`` — final event with full answer + timings.
+          * ``{'type': 'error', 'message': '...'}`` — on error.
+
+        Cache hits are emitted as a single 'token' burst + 'done' so the
+        wire protocol stays uniform.
+        """
+        _t_overall = time.time()
+        timing_ms: dict = {}
+
+        # Answer cache (same rules as sync version).
+        cache_ttl = int(getattr(settings, 'HR_ANSWER_CACHE_TTL_SECONDS', 300))
+        cache_key = None
+        if cache_ttl > 0 and asker_employee is None:
+            cache_key = _answer_cache_key(self.company_id, asker_role, question)
+            cached = _answer_cache_get(cache_key, cache_ttl)
+            if cached is not None:
+                logger.info("HR streaming: cache hit for company=%s q=%r",
+                            self.company_id, question[:60])
+                answer_text = cached.get('answer') or ''
+                yield {
+                    'type': 'meta',
+                    'has_verified_info': cached.get('has_verified_info'),
+                    'confidence': cached.get('confidence'),
+                    'best_score': cached.get('best_score'),
+                    'threshold': cached.get('threshold'),
+                    'citations': cached.get('citations', []),
+                    'cache_hit': True,
+                }
+                # Emit the cached answer as one big "token" so the frontend
+                # code path is uniform.
+                if answer_text:
+                    yield {'type': 'token', 'value': answer_text}
+                yield {
+                    'type': 'done',
+                    'answer': answer_text,
+                    'timing_ms': {'total': int((time.time() - _t_overall) * 1000),
+                                  'cache': True},
+                    'cache_hit': True,
+                }
+                return
+
+        _t_retr = time.time()
+        knowledge_result = self.knowledge_service.get_answer(
+            question,
+            asker_role=asker_role,
+            asker_employee_id=getattr(asker_employee, 'id', None),
+            max_results=max_results,
+        )
+        timing_ms['retrieval'] = int((time.time() - _t_retr) * 1000)
+        try:
+            timing_ms['retrieval_breakdown'] = dict(
+                getattr(self.knowledge_service, 'last_retrieval_timing', {}) or {}
+            )
+            timing_ms['retrieval_path'] = getattr(self.knowledge_service, 'last_retrieval_path', '') or ''
+        except Exception:
+            pass
+
+        # No-verified-info path — emit fixed message and stop.
+        if not knowledge_result.get('has_verified_info'):
+            fallback = ("I don't have verified information on this in our HR "
+                        "knowledge base. I'll route this to the HR team to follow up.")
+            yield {
+                'type': 'meta',
+                'has_verified_info': False,
+                'confidence': knowledge_result.get('confidence', 'none'),
+                'best_score': knowledge_result.get('best_score'),
+                'threshold': knowledge_result.get('threshold'),
+                'citations': [],
+                'cache_hit': False,
+            }
+            yield {'type': 'token', 'value': fallback}
+            timing_ms['total'] = int((time.time() - _t_overall) * 1000)
+            yield {'type': 'done', 'answer': fallback, 'timing_ms': timing_ms,
+                   'cache_hit': False}
+            return
+
+        # Emit meta first so UI can render citations before the first token.
+        yield {
+            'type': 'meta',
+            'has_verified_info': True,
+            'confidence': knowledge_result.get('confidence'),
+            'best_score': knowledge_result.get('best_score'),
+            'threshold': knowledge_result.get('threshold'),
+            'citations': knowledge_result.get('citations', []),
+            'cache_hit': False,
+        }
+
+        # Compose prompt + stream LLM tokens.
+        employee_context = build_employee_context(asker_employee) if asker_employee else None
+        prompt = get_knowledge_prompt(question, [knowledge_result], employee_context=employee_context)
+
+        _t_llm = time.time()
+        collected = []
+        try:
+            for event in self._call_llm_stream(
+                prompt=prompt,
+                system_prompt=self.system_prompt,
+                temperature=0.3,
+                max_tokens=int(getattr(settings, 'HR_QA_MAX_TOKENS', 400)),
+            ):
+                if event.get('type') == 'token':
+                    collected.append(event['value'])
+                    yield event
+                elif event.get('type') == 'done':
+                    # Prefer accumulated over the base_agent's copy (both
+                    # should match, but ours is what we ship + cache).
+                    pass
+                elif event.get('type') == 'error':
+                    yield event
+                    return
+        except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise
+            logger.exception("HR streaming LLM error: %s", exc)
+            yield {'type': 'error', 'message': str(exc)}
+            return
+
+        full_answer = ''.join(collected).strip() or (knowledge_result.get('answer') or '')
+        timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
+        timing_ms['total'] = int((time.time() - _t_overall) * 1000)
+
+        # Cache the final answer (same shape as the sync path stores).
+        if cache_key:
+            _answer_cache_put(cache_key, {
+                'success': True,
+                'answer': full_answer,
+                'has_verified_info': True,
+                'confidence': knowledge_result.get('confidence'),
+                'best_score': knowledge_result.get('best_score'),
+                'threshold': knowledge_result.get('threshold'),
+                'citations': knowledge_result.get('citations', []),
+                'timing_ms': timing_ms,
+            })
+
+        logger.info("HR streaming done: %d chars, timing_ms=%s", len(full_answer), timing_ms)
+        yield {
+            'type': 'done',
+            'answer': full_answer,
+            'timing_ms': timing_ms,
+            'cache_hit': False,
+        }
+
     # ---- Document summarisation / extraction ------------------------------
 
     def summarize_document(self, content: str, *, max_sentences: Optional[int] = None) -> dict:

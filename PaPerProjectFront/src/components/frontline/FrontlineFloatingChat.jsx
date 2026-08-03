@@ -17,7 +17,8 @@ import {
   Upload,
 } from 'lucide-react';
 import InfoHint, { useHints } from './InfoHint';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from './FrontlineTutorial';
+import FrontlineTutorial, { resetTutorial } from './FrontlineTutorial';
+import { useTutorialNudge } from './tourUtils';
 import { FLOATING_CHAT_TOUR, HINTS } from './frontlineTutorialSteps';
 import {
   listChatHistory,
@@ -158,17 +159,17 @@ const FrontlineFloatingChat = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Auto-launch the tour the first time the chat is opened, otherwise focus
-  // the input for immediate typing.
+  // The tour is no longer auto-launched on first open — the header tour icon
+  // glows instead until the user takes it themselves. Focus the input for
+  // immediate typing whenever the chat opens.
   useEffect(() => {
     if (!open) return;
-    if (!hasSeenTutorial(FLOATING_CHAT_TOUR.key)) {
-      const t = setTimeout(() => setTourOpen(true), 500);
-      return () => clearTimeout(t);
-    }
     const f = setTimeout(() => inputRef.current?.focus(), 250);
     return () => clearTimeout(f);
   }, [open]);
+
+  // First-open nudge for the header tour icon.
+  const { glow: tourGlow, dismiss: dismissTourNudge } = useTutorialNudge(FLOATING_CHAT_TOUR.key);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -318,26 +319,61 @@ const FrontlineFloatingChat = () => {
     const startedAt = (typeof performance !== 'undefined' && performance.now)
       ? performance.now() : Date.now();
     setSendingStartedAt(startedAt);
+
+    // Streaming path — push an empty assistant placeholder that we mutate
+    // as tokens stream in.
+    pushMessage({
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      citations: [],
+    });
+    const patchLast = (updater) => setMessages((prev) => {
+      const next = prev.slice();
+      const lastIdx = next.length - 1;
+      if (lastIdx < 0) return prev;
+      next[lastIdx] = updater(next[lastIdx]);
+      return next;
+    });
+
+    let accumulated = '';
+    let metaEvent = null;
+    let doneEvent = null;
     try {
-      const res = await frontlineAgentService.knowledgeQA(q, {});
-      if (res && res.status === 'success' && res.data) {
-        const data = res.data;
-        const endedAt = (typeof performance !== 'undefined' && performance.now)
-          ? performance.now() : Date.now();
-        pushMessage({
-          role: 'assistant',
-          content: data.answer || 'No answer available.',
-          source: data.source || null,
-          has_verified_info: !!data.has_verified_info,
-          citations: data.citations || [],
-          responseTimeMs: Math.round(endedAt - startedAt),
-          cache_hit: !!data.cache_hit,
-        });
-      } else {
-        throw new Error((res && res.message) || 'Failed to get an answer');
-      }
+      await frontlineAgentService.knowledgeQAStream(q, {
+        onMeta: (meta) => {
+          metaEvent = meta;
+          patchLast((m) => ({
+            ...m,
+            source: meta.source ?? m.source,
+            has_verified_info: !!meta.has_verified_info,
+            citations: meta.citations || [],
+          }));
+        },
+        onToken: (piece) => {
+          accumulated += (piece || '');
+          patchLast((m) => ({ ...m, content: accumulated }));
+        },
+        onDone: (done) => { doneEvent = done; },
+      });
+      const endedAt = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      patchLast((m) => ({
+        ...m,
+        streaming: false,
+        content: (doneEvent && doneEvent.answer) || accumulated || 'No answer available.',
+        source: metaEvent?.source ?? m.source,
+        has_verified_info: !!(metaEvent?.has_verified_info),
+        citations: metaEvent?.citations || m.citations || [],
+        responseTimeMs: Math.round(endedAt - startedAt),
+        cache_hit: !!(doneEvent?.cache_hit),
+      }));
     } catch (e) {
-      pushMessage({ role: 'assistant', content: `Error: ${e.message || 'Something went wrong.'}`, error: true });
+      patchLast(() => ({
+        role: 'assistant',
+        content: `Error: ${e.message || 'Something went wrong.'}`,
+        error: true,
+      }));
     } finally {
       setSending(false);
       setSendingStartedAt(null);
@@ -483,6 +519,7 @@ const FrontlineFloatingChat = () => {
   }, [slashOpen, filteredCommands, slashActive]);
 
   const replayTour = () => {
+    dismissTourNudge();
     resetTutorial(FLOATING_CHAT_TOUR.key);
     setTourOpen(true);
   };
@@ -587,9 +624,16 @@ const FrontlineFloatingChat = () => {
                 <Plus className="h-4 w-4" />
               </button>
               <button type="button" onClick={replayTour} title="Take a tour of Quick Chat" aria-label="Take a tour"
-                className="p-1 rounded hover:bg-white/25 text-white transition">
+                className={`p-1 rounded hover:bg-white/25 text-white transition ${tourGlow ? 'flt-chat-tour-glow' : ''}`}>
                 <GraduationCap className="h-4 w-4" />
               </button>
+              <style>{`
+                @keyframes fltChatTourGlow {
+                  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.55); background-color: rgba(255,255,255,0.10); }
+                  50%      { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18); background-color: rgba(255,255,255,0.25); }
+                }
+                .flt-chat-tour-glow { animation: fltChatTourGlow 1.4s ease-in-out infinite; }
+              `}</style>
               <button type="button" onClick={() => setOpen(false)} title="Close (Ctrl+K)" aria-label="Close Quick Chat"
                 className="p-1 rounded hover:bg-white/25 text-white transition">
                 <X className="h-4 w-4" />
@@ -710,7 +754,15 @@ const FrontlineFloatingChat = () => {
                               : 'bg-white/[0.06] text-white/90 border border-white/10'
                       }`}
                     >
-                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                      <div className="whitespace-pre-wrap break-words">
+                        {m.content}
+                        {m.streaming && (
+                          <>
+                            {!m.content && <span className="text-white/40 italic">Thinking…</span>}
+                            <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-violet-400/70 animate-pulse align-middle" />
+                          </>
+                        )}
+                      </div>
                       {m.role === 'assistant' && !m.error && !m.system && (m.citations?.length > 0 || m.source) && (
                         <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
                           <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Sources</p>
@@ -737,7 +789,7 @@ const FrontlineFloatingChat = () => {
                   </div>
                 ))
               )}
-              {sending && !uploading && (
+              {sending && !uploading && !messages.some((m) => m.streaming) && (
                 <div className="flex justify-start">
                   <div className="bg-white/[0.06] border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-white/60" />

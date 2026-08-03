@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -77,7 +78,7 @@ import {
   Paperclip,
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
-import FrontlineTutorial, { hasSeenTutorial, resetTutorial } from './FrontlineTutorial';
+import FrontlineTutorial, { resetTutorial } from './FrontlineTutorial';
 import { TAB_TOURS, HINTS } from './frontlineTutorialSteps';
 import InfoHint, { HintsProvider, useHints } from './InfoHint';
 import { ElapsedTimer } from './chatShellUtils';
@@ -85,7 +86,7 @@ import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager
 import FrontlineFloatingChat from './FrontlineFloatingChat';
 import { trackRecentlyViewed } from './frontlineLocalStore';
 import {
-  shouldSpotlightTour, markSpotlightSeen,
+  useTutorialNudge,
   tourAvailable, makeHoverLaunchHandlers,
 } from './tourUtils';
 import { GraduationCap, Eye, EyeOff } from 'lucide-react';
@@ -2567,35 +2568,32 @@ const FrontlineDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [documents, setDocuments] = useState([]);
-  const [activeTab, setActiveTab] = useState('overview');
+  // Tab state lives in the URL as `?tab=...` so browser reload keeps you on
+  // the tab you were on. Falls back to 'overview' when the param is missing
+  // or references an unknown tab.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const validTabValues = React.useMemo(() => FRONTLINE_TAB_ITEMS.map((t) => t.value), []);
+  const rawTab = searchParams.get('tab');
+  const activeTab = validTabValues.includes(rawTab) ? rawTab : 'overview';
+  const setActiveTab = React.useCallback((v) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', v);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   // Which per-tab tour is currently open (null when none). Value = tab key.
   const [activeTabTour, setActiveTabTour] = useState(null);
 
-  // Auto-launch onboarding tutorial the first time this user lands on the dashboard.
-  useEffect(() => {
-    if (!hasSeenTutorial()) {
-      const t = setTimeout(() => setTutorialOpen(true), 600);
-      return () => clearTimeout(t);
-    }
-  }, []);
-
-  // One-time spotlight pulse on the "Take the Tour" button so users notice
-  // it after the auto-launched main tour closes. Persisted per-dashboard.
-  const [spotlightTour, setSpotlightTour] = useState(false);
-  useEffect(() => {
-    if (tutorialOpen) return;
-    if (!hasSeenTutorial()) return; // wait until main tour is done
-    if (!shouldSpotlightTour('fl')) return;
-    setSpotlightTour(true);
-    const t = setTimeout(() => { setSpotlightTour(false); markSpotlightSeen('fl'); }, 5500);
-    return () => clearTimeout(t);
-  }, [tutorialOpen]);
+  // First-login nudge: instead of auto-launching the tour (which overwhelms
+  // new users), the "Take the Tour" header button flickers with a persistent
+  // glow and a short-lived tooltip until the user takes the tour themselves.
+  const { glow: spotlightTour, tooltip: spotlightTooltip, dismiss: dismissNudge } = useTutorialNudge();
 
   const handleReplayTutorial = () => {
-    setSpotlightTour(false);
-    markSpotlightSeen('fl');
+    dismissNudge();
     resetTutorial();
     setTutorialOpen(true);
   };
@@ -2603,15 +2601,8 @@ const FrontlineDashboard = () => {
   // Sibling tab-tour keys for the "skip all" checkbox in every tour instance.
   const flTabTourKeys = React.useMemo(() => Object.values(TAB_TOURS).map((t) => t.key), []);
 
-  // Auto-launch the per-tab tour the first time the user visits a given tab.
-  useEffect(() => {
-    if (tutorialOpen) return; // don't stack with the main tour
-    const tour = TAB_TOURS[activeTab];
-    if (!tour) return;
-    if (hasSeenTutorial(tour.key)) return;
-    const t = setTimeout(() => setActiveTabTour(activeTab), 500);
-    return () => clearTimeout(t);
-  }, [activeTab, tutorialOpen]);
+  // Per-tab tours are no longer auto-launched. Each TabTourButton glows on
+  // first visit to that tab until the user takes it.
 
   const handleReplayTabTour = (tabKey) => {
     const tour = TAB_TOURS[tabKey];
@@ -2620,18 +2611,23 @@ const FrontlineDashboard = () => {
     setActiveTabTour(tabKey);
   };
 
-  // Small button rendered inside each TabsContent header
-  const TabTourButton = ({ tabKey }) => (
-    <button
-      type="button"
-      onClick={() => handleReplayTabTour(tabKey)}
-      title={`Take a guided tour of the ${TAB_TOURS[tabKey]?.label || 'this'} tab`}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-400/40 bg-amber-400/10 text-amber-300 text-xs font-semibold hover:bg-amber-400/20 hover:text-amber-200 transition"
-    >
-      <GraduationCap className="h-3.5 w-3.5" />
-      Tour this tab
-    </button>
-  );
+  // Small button rendered inside each TabsContent header. Glows on first
+  // visit to a tab whose tour hasn't been taken yet.
+  const TabTourButton = ({ tabKey }) => {
+    const tour = TAB_TOURS[tabKey];
+    const { glow, dismiss } = useTutorialNudge(tour?.key);
+    return (
+      <button
+        type="button"
+        onClick={() => { dismiss(); handleReplayTabTour(tabKey); }}
+        title={`Take a guided tour of the ${tour?.label || 'this'} tab`}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-400/40 bg-amber-400/10 text-amber-300 text-xs font-semibold hover:bg-amber-400/20 hover:text-amber-200 transition ${glow ? 'flt-tab-spotlight' : ''}`}
+      >
+        <GraduationCap className="h-3.5 w-3.5" />
+        Tour this tab
+      </button>
+    );
+  };
 
   // Toggle for showing/hiding all "!" InfoHint icons across the dashboard.
   // Reads from the same context every InfoHint consumes, so flipping this
@@ -3381,35 +3377,89 @@ const FrontlineDashboard = () => {
           throw new Error(graphRes.message || 'Failed to generate graph');
         }
       } else {
-        const response = await frontlineAgentService.knowledgeQA(q, scopeOptions);
-        if (response.status === 'success' && response.data) {
-          const data = response.data;
-          const answerText = data.answer || 'No answer available.';
-          assistantMsg = {
-            role: 'assistant',
-            content: answerText,
-            responseData: {
-              answer: answerText,
-              has_verified_info: data.has_verified_info || false,
-              source: data.source || 'Knowledge Base',
-              type: data.type || 'general',
-              document_id: data.document_id ?? null,
-              cache_hit: !!data.cache_hit,
-              // Server-side per-phase timing (retrieval / llm / total in ms).
-              // Persisted through the backend's JSON responseData field.
-              timing_ms: data.timing_ms || null,
-            },
-          };
-        } else {
-          throw new Error(response.message || 'Failed to get response');
+        // Streaming path — insert a placeholder assistant message into the
+        // current chat, mutate its `.content` as tokens arrive, then persist
+        // to backend after the stream completes. This gives sub-second time
+        // to first visible token instead of 5-10s waiting for a full reply.
+        const placeholder = {
+          role: 'assistant',
+          content: '',
+          streaming: true,
+          responseData: {},
+        };
+        // Show placeholder in the currently-selected chat so tokens render live.
+        const streamChatId = selectedChatId;
+        if (streamChatId) {
+          setChats((prev) => prev.map((c) => (
+            c.id === streamChatId
+              ? { ...c, messages: [...(c.messages || []), userMsg, placeholder] }
+              : c
+          )));
         }
+        const patchStreamingMsg = (updater) => {
+          if (!streamChatId) return;
+          setChats((prev) => prev.map((c) => {
+            if (c.id !== streamChatId) return c;
+            const msgs = c.messages ? c.messages.slice() : [];
+            const lastIdx = msgs.length - 1;
+            if (lastIdx < 0) return c;
+            msgs[lastIdx] = updater(msgs[lastIdx]);
+            return { ...c, messages: msgs };
+          }));
+        };
+
+        let accumulated = '';
+        let metaEvent = null;
+        let doneEvent = null;
+        try {
+          await frontlineAgentService.knowledgeQAStream(q, {
+            ...scopeOptions,
+            onMeta: (meta) => {
+              metaEvent = meta;
+              patchStreamingMsg((m) => ({
+                ...m,
+                responseData: {
+                  ...(m.responseData || {}),
+                  has_verified_info: meta.has_verified_info,
+                  source: meta.source || 'Knowledge Base',
+                  type: meta.type_hint || 'general',
+                  document_id: meta.document_id ?? null,
+                  citations: meta.citations || [],
+                  cache_hit: !!meta.cache_hit,
+                },
+              }));
+            },
+            onToken: (piece) => {
+              accumulated += (piece || '');
+              patchStreamingMsg((m) => ({ ...m, content: accumulated }));
+            },
+            onDone: (done) => { doneEvent = done; },
+          });
+        } catch (streamErr) {
+          throw streamErr;
+        }
+        const answerText = (doneEvent && doneEvent.answer) || accumulated || 'No answer available.';
+        assistantMsg = {
+          role: 'assistant',
+          content: answerText,
+          responseData: {
+            answer: answerText,
+            has_verified_info: metaEvent?.has_verified_info || false,
+            source: metaEvent?.source || 'Knowledge Base',
+            type: metaEvent?.type_hint || 'general',
+            document_id: metaEvent?.document_id ?? null,
+            citations: metaEvent?.citations || [],
+            cache_hit: !!(doneEvent?.cache_hit),
+            timing_ms: doneEvent?.timing_ms || null,
+          },
+        };
+        // Flip the placeholder out of streaming mode so the badge renders
+        // instead of the blinking cursor. The persist step just below will
+        // replace this chat's messages with server-normalised data anyway,
+        // but this makes the transition smoother.
+        patchStreamingMsg(() => ({ ...assistantMsg }));
       }
 
-      // Stamp the assistant message with how long the round-trip took.
-      // We store it INSIDE responseData (a JSON blob that the backend
-      // persists) so the badge survives round-tripping through the server
-      // when the chat is re-fetched — otherwise the timing would only show
-      // on the exact request-response cycle and disappear after re-render.
       const endedAt = (typeof performance !== 'undefined' && performance.now)
         ? performance.now() : Date.now();
       if (assistantMsg) {
@@ -3534,7 +3584,7 @@ const FrontlineDashboard = () => {
           <GraduationCap className="h-4 w-4" />
           Take the Tour
         </button>
-        {spotlightTour && (
+        {spotlightTooltip && (
           <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-amber-400/40 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap flt-spotlight-tip">
             👋 Take the tour anytime from here
             <span className="absolute -top-1 right-6 h-2 w-2 bg-[#161630] border-t border-l border-amber-400/40 rotate-45" />
@@ -3547,6 +3597,11 @@ const FrontlineDashboard = () => {
           50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.15), 0 0 0 12px rgba(245, 158, 11, 0.08); }
         }
         .flt-spotlight { animation: fltSpotlight 1.6s ease-in-out infinite; }
+        @keyframes fltTabSpotlight {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35), 0 0 0 0 rgba(245, 158, 11, 0.18); }
+          50%      { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14), 0 0 0 8px rgba(245, 158, 11, 0.07); }
+        }
+        .flt-tab-spotlight { animation: fltTabSpotlight 1.6s ease-in-out infinite; }
         @keyframes fltDotPulse {
           0%, 100% { transform: scale(1); opacity: 1; }
           50%      { transform: scale(1.3); opacity: 0.7; }
@@ -4348,7 +4403,13 @@ const FrontlineDashboard = () => {
                               )}
                               <div className="flex-1 min-w-0">
                                 <div className="text-sm text-foreground whitespace-pre-wrap break-words">
-                                  {msg.responseData?.answer ?? msg.content}
+                                  {msg.streaming ? msg.content : (msg.responseData?.answer ?? msg.content)}
+                                  {msg.streaming && (
+                                    <>
+                                      {!msg.content && <span className="text-muted-foreground italic">Thinking…</span>}
+                                      <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-primary/70 animate-pulse align-middle" />
+                                    </>
+                                  )}
                                 </div>
                                 {msg.responseData?.confidence === 'low' && (
                                   <div className="mt-2 text-xs rounded-md px-2 py-1 bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30">
@@ -4498,7 +4559,9 @@ const FrontlineDashboard = () => {
                       </div>
                     </div>
                   ))}
-                  {answering && (
+                  {/* Suppress spinner when a streaming assistant message is
+                      already visible — it has its own inline cursor. */}
+                  {answering && !currentMessages.some((m) => m.streaming) && (
                     <div className="flex justify-start">
                       <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />

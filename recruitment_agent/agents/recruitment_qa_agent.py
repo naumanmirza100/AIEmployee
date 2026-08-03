@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from django.db.models import Count, Avg, Max, Min, Q
+from django.db.models import Count, Avg, Max, Min
 
 from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.models import (
@@ -371,35 +371,6 @@ def _question_subjects(question: str, drop_excluded: bool = True) -> set:
     return subjects
 
 
-def _resolve_subject(question: str, known_titles: List[str], known_names: List[str]) -> Dict[str, Any]:
-    """Match the question against the company's real jobs and candidates.
-
-    This replaces guessing from hardcoded keyword lists: the database is the only
-    source of truth for what jobs and people exist, so a new technology or a new
-    hire needs no code change. Returns which subjects matched and — importantly —
-    which named subjects matched nothing, so the caller can say "no such job"
-    instead of answering with whatever unrelated records it happens to hold.
-    """
-    subjects = _question_subjects(question)
-    if not subjects:
-        return {'matched_jobs': [], 'matched_names': [], 'unmatched': []}
-
-    # Titles and names are plain labels, not questions — never strip "negations" there.
-    title_words = {w for t in known_titles for w in _question_subjects(t, drop_excluded=False)}
-    name_words = {w for n in known_names for w in _question_subjects(n, drop_excluded=False)}
-
-    matched_jobs = sorted(subjects & title_words)
-    matched_names = sorted(subjects & name_words)
-    # A subject that matches neither a job title nor a person is only interesting
-    # when it looks like the question's actual topic, not incidental prose.
-    unmatched = sorted(subjects - title_words - name_words)
-    return {
-        'matched_jobs': matched_jobs,
-        'matched_names': matched_names,
-        'unmatched': unmatched,
-    }
-
-
 # Where a job name actually appears in a question: "…for Laravel", "Laravel job",
 # "…in Laravel role". Matching on grammar rather than a technology list means a new
 # stack needs no code change, while status words ("on hold") and typos elsewhere in
@@ -495,18 +466,6 @@ def _is_comprehensive_answer(text: str) -> bool:
         return True
     # If it's long and has multiple bold sections, it's comprehensive
     if len(text) > 500 and text.count("**") >= 6:
-        return True
-    return False
-
-
-def _is_boilerplate(text: str) -> bool:
-    """True if text looks like generic Overview/Settings boilerplate we should skip."""
-    t = text.lower()
-    if "qualification settings" in t and "interview threshold" in t:
-        return True
-    if "overview" in t and "total jobs" in t and len(text) < 400:
-        return True
-    if "no jobs or candidates" in t or "no jobs, candidates" in t:
         return True
     return False
 

@@ -236,6 +236,94 @@ export const knowledgeQA = async (question, options = {}) => {
 };
 
 /**
+ * Streaming variant of knowledgeQA. Consumes an application/x-ndjson stream
+ * (one JSON event per line) and invokes callbacks as tokens/meta/done arrive.
+ * Same option shape as knowledgeQA plus {onMeta, onToken, onDone, onError,
+ * signal}.
+ */
+export const knowledgeQAStream = async (question, options = {}) => {
+  const { onMeta, onToken, onDone, onError, signal } = options;
+  const { API_BASE_URL } = await import('@/config/apiConfig');
+  const token = localStorage.getItem('company_auth_token');
+  const body = { question };
+  if (options.scope_document_type?.length) body.scope_document_type = options.scope_document_type;
+  if (options.scope_document_ids?.length) body.scope_document_ids = options.scope_document_ids;
+  if (options.chat_history) body.chat_history = options.chat_history;
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/frontline/knowledge/qa/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Token ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (err) {
+    onError?.(err);
+    throw err;
+  }
+  if (!response.ok) {
+    const errMsg = `HTTP ${response.status}`;
+    onError?.(new Error(errMsg));
+    throw new Error(errMsg);
+  }
+  if (!response.body) {
+    const text = await response.text();
+    for (const line of text.split('\n')) {
+      if (line.trim()) _dispatchFrontlineStreamEvent(JSON.parse(line), { onMeta, onToken, onDone, onError });
+    }
+    return null;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let answer = '';
+  let meta = null;
+  let doneEvent = null;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        let event;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (event.type === 'token') answer += (event.value || '');
+        if (event.type === 'meta') meta = event;
+        if (event.type === 'done') doneEvent = event;
+        _dispatchFrontlineStreamEvent(event, { onMeta, onToken, onDone, onError });
+      }
+    }
+    if (buffer.trim()) {
+      try {
+        const event = JSON.parse(buffer.trim());
+        if (event.type === 'token') answer += (event.value || '');
+        if (event.type === 'done') doneEvent = event;
+        _dispatchFrontlineStreamEvent(event, { onMeta, onToken, onDone, onError });
+      } catch {}
+    }
+  } catch (err) {
+    onError?.(err);
+    throw err;
+  }
+  return { answer, meta, doneEvent };
+};
+
+function _dispatchFrontlineStreamEvent(event, { onMeta, onToken, onDone, onError }) {
+  if (event.type === 'meta') { onMeta?.(event); return; }
+  if (event.type === 'token') { onToken?.(event.value); return; }
+  if (event.type === 'done') { onDone?.(event); return; }
+  if (event.type === 'error') { onError?.(new Error(event.message || 'Stream error')); return; }
+}
+
+/**
  * Submit helpful/not helpful feedback for a KB answer (improves docs and RAG).
  * @param {{ question: string, helpful: boolean, document_id?: number }} data
  */
@@ -1212,6 +1300,7 @@ export default {
   getDocumentStatus,
   updateDocumentMetadata,
   knowledgeQA,
+  knowledgeQAStream,
   listQAChats,
   createQAChat,
   updateQAChat,

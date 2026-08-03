@@ -16,7 +16,6 @@ from django.core.files.storage import default_storage
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
 from django.db.models import Q
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
@@ -29,7 +28,7 @@ from recruitment_agent.agents.lead_qualification import LeadQualificationAgent
 from recruitment_agent.agents.job_description_parser import JobDescriptionParserAgent
 from recruitment_agent.agents.interview_scheduling import InterviewSchedulingAgent
 from recruitment_agent.agents.recruitment_qa_agent import RecruitmentQAAgent
-from recruitment_agent.core import GroqClient, QuotaAwareGroqClient
+from recruitment_agent.core import QuotaAwareGroqClient
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
 from recruitment_agent.models import (
@@ -46,7 +45,6 @@ from recruitment_agent.models import (
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
-from core.models import CompanyUser
 from core.api_key_service import KeyServiceError
 
 logger = logging.getLogger(__name__)
