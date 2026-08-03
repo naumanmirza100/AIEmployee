@@ -105,6 +105,10 @@ const execMeetingService = {
   // Every member of the company — powers the "View all members" side panel
   // (no 2-char requirement, higher cap). Backend keys off `all=true`.
   listAllUsers:      () => companyApi.get(`${BASE}/users/search?all=true`),
+  // "Create with AI": parse a free-form prompt into meeting/task form fields
+  // (+ resolved participants/assignees) so the normal form can be pre-filled.
+  aiParseMeeting:    (prompt) => companyApi.post(`${BASE}/meetings/ai/parse-prompt`, { prompt }),
+  aiParseTask:       (prompt) => companyApi.post(`${BASE}/tasks/ai/parse-prompt`, { prompt }),
   getParticipants:   (meetingId) => companyApi.get(`${BASE}/meetings/${meetingId}/participants`),
   addParticipant:    (meetingId, userId, userType) => companyApi.post(`${BASE}/meetings/${meetingId}/participants`, { user_id: userId, user_type: userType || 'company_user' }),
   removeParticipant: (meetingId, participantId, userId) => companyApi.delete(`${BASE}/meetings/${meetingId}/participants`, { data: { participant_id: participantId, user_id: userId } }),
@@ -114,6 +118,7 @@ const execMeetingService = {
     const q = new URLSearchParams();
     if (params.unread_only) q.set('unread', 'true');
     if (params.category)    q.set('category', params.category);
+    if (params.severity)    q.set('severity', params.severity);
     if (params.search)      q.set('search', params.search);
     if (params.page)        q.set('page', params.page);
     if (params.page_size)   q.set('page_size', params.page_size);

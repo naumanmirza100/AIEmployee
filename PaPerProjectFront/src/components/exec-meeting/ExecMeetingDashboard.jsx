@@ -37,6 +37,7 @@ import {
   ScheduleMeetingDialog, MeetingEditDialog,
   AddTaskDialog, TaskEditDialog,
 } from './dialogs';
+import { CreateWithAIModal } from './CreateWithAIModal';
 import { TasksPanel } from './panels/TasksPanel';
 import { CalendarPanel } from './panels/CalendarPanel';
 import { DocumentsPanel } from './panels/DocumentsPanel';
@@ -94,7 +95,10 @@ const ExecMeetingDashboard = () => {
   const [meetingFilters, setMeetingFilters] = useState({ search: '', status: '', date: '', participant: '' });
   const [taskFilters, setTaskFilters] = useState({ search: '', status: '', priority: '', date: '' });
   const [docFilters, setDocFilters] = useState({ search: '', doc_type: '', date: '' });
-  const [notifFilters, setNotifFilters] = useState({ search: '', category: '', unread_only: false });
+  const [notifFilters, setNotifFilters] = useState({ search: '', category: '', unread_only: false, severity: '' });
+  // How many notifications to show per page (user-selectable). Separate from
+  // the shared PAGE_SIZE the other tabs use.
+  const [notifPageSize, setNotifPageSize] = useState(8);
   const [meetingFilterUsers, setMeetingFilterUsers] = useState([]); // for the "by user" dropdown
 
   // ── Pagination. `page` is the current page per tab; `*Page` meta holds the
@@ -112,6 +116,15 @@ const ExecMeetingDashboard = () => {
   // Dialogs
   const [showMeetingDialog, setShowMeetingDialog] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
+  // "Create with AI" — the prompt modal's mode (null | 'meeting' | 'task'),
+  // and the AI-parsed drafts used to pre-fill the normal dialogs once parsed.
+  const [aiCreateMode, setAiCreateMode] = useState(null);
+  const [meetingPrefill, setMeetingPrefill] = useState(null);
+  const [taskPrefill, setTaskPrefill] = useState(null);
+  // Remember the last prompt per mode so the dialog's "Edit AI prompt" button
+  // can reopen the modal pre-filled to regenerate.
+  const [meetingAiPrompt, setMeetingAiPrompt] = useState('');
+  const [taskAiPrompt, setTaskAiPrompt] = useState('');
   const [expandedTaskId, setExpandedTaskId] = useState(null); // inline-expanded task
   const [expandedSubtasksId, setExpandedSubtasksId] = useState(null); // task whose subtasks accordion is open
   const [focusMeetingId, setFocusMeetingId] = useState(null); // meeting to highlight/scroll to (from a notification)
@@ -235,9 +248,11 @@ const ExecMeetingDashboard = () => {
 
   useEffect(() => {
     if (activeTab !== 'notifications') return;
-    const t = setTimeout(() => { setNotifPage(1); loadNotifications(notifFilters, 1); }, 300);
+    // Any filter or page-size change resets to page 1 and reloads.
+    const t = setTimeout(() => { setNotifPage(1); loadNotifications(notifFilters, 1, notifPageSize); }, 300);
     return () => clearTimeout(t);
-  }, [notifFilters.search, notifFilters.category, notifFilters.unread_only]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifFilters.search, notifFilters.category, notifFilters.unread_only, notifFilters.severity, notifPageSize]);
 
   const loadStats = async () => {
     setStatsLoading(true);
@@ -313,10 +328,10 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadNotifications = async (filters = notifFilters, page = notifPage) => {
+  const loadNotifications = async (filters = notifFilters, page = notifPage, pageSize = notifPageSize) => {
     setNotifsLoading(true);
     try {
-      const data = await execMeetingService.getNotifications({ ...filters, page, page_size: PAGE_SIZE });
+      const data = await execMeetingService.getNotifications({ ...filters, page, page_size: pageSize });
       setNotifications(data.notifications || []);
       setNotifPageMeta(data.pagination || null);
     } catch {
@@ -940,20 +955,45 @@ const ExecMeetingDashboard = () => {
             ],
           },
           {
+            // Severity = the notification's importance. The backend stores
+            // info / warning / critical; we label them for clarity.
+            value: notifFilters.severity,
+            onChange: v => setNotifFilters(f => ({ ...f, severity: v })),
+            placeholder: 'Any priority', allLabel: 'Any priority',
+            options: [
+              { value: 'critical', label: 'Critical (severe)' },
+              { value: 'warning', label: 'Warning (medium)' },
+              { value: 'info', label: 'Info (low)' },
+            ],
+          },
+          {
             value: notifFilters.unread_only ? 'unread' : '',
             onChange: v => setNotifFilters(f => ({ ...f, unread_only: v === 'unread' })),
             placeholder: 'Read & unread', allLabel: 'Read & unread',
             options: [{ value: 'unread', label: 'Unread only' }],
           },
+          {
+            // How many notifications to show per page. (The auto-added
+            // "all" row maps back to the default of 8.)
+            value: String(notifPageSize),
+            onChange: v => setNotifPageSize(Number(v) || 8),
+            placeholder: 'Per page', allLabel: 'Default (8 / page)',
+            options: [
+              { value: '8', label: '8 / page' },
+              { value: '15', label: '15 / page' },
+              { value: '25', label: '25 / page' },
+              { value: '50', label: '50 / page' },
+            ],
+          },
         ]}
-        active={!!(notifFilters.search || notifFilters.category || notifFilters.unread_only)}
-        onClear={() => setNotifFilters({ search: '', category: '', unread_only: false })}
+        active={!!(notifFilters.search || notifFilters.category || notifFilters.unread_only || notifFilters.severity)}
+        onClear={() => setNotifFilters({ search: '', category: '', unread_only: false, severity: '' })}
       />
 
       {notifsLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
       ) : !Array.isArray(notifications) || notifications.length === 0 ? (
-        <EmptyState icon={Bell} label={(notifFilters.search || notifFilters.category || notifFilters.unread_only) ? 'No notifications match these filters' : 'No notifications'} />
+        <EmptyState icon={Bell} label={(notifFilters.search || notifFilters.category || notifFilters.unread_only || notifFilters.severity) ? 'No notifications match these filters' : 'No notifications'} />
       ) : (
         <>
         <BulkSelectBar
@@ -1019,6 +1059,7 @@ const ExecMeetingDashboard = () => {
         userSearchResults={userSearchResults} transcriptInput={transcriptInput}
         notesLoading={notesLoading}
         loadMeetings={refreshMeetings} setShowMeetingDialog={setShowMeetingDialog}
+        onCreateWithAI={() => setAiCreateMode('meeting')}
         setEditingMeeting={setEditingMeeting} openParticipants={openParticipants}
         openNotes={openNotes} removeParticipant={removeParticipant}
         setConfirmRemoveMap={setConfirmRemoveMap} addParticipant={addParticipant}
@@ -1041,6 +1082,7 @@ const ExecMeetingDashboard = () => {
         expandedTaskId={expandedTaskId} expandedSubtasksId={expandedSubtasksId}
         loadTasks={loadTasks}
         setShowTaskDialog={setShowTaskDialog}
+        onCreateWithAI={() => setAiCreateMode('task')}
         setExpandedTaskId={setExpandedTaskId} setExpandedSubtasksId={setExpandedSubtasksId}
         setEditingTask={setEditingTask} setSubtaskParentTask={setSubtaskParentTask}
         setConfirmDeleteTaskId={setConfirmDeleteTaskId}
@@ -1255,14 +1297,43 @@ const ExecMeetingDashboard = () => {
       />
 
       {/* Dialogs */}
+      {/* "Create with AI" prompt modal (meeting or task). On parse it closes
+          itself, stashes the draft, and opens the matching normal dialog
+          pre-filled so the user reviews before saving. */}
+      <CreateWithAIModal
+        open={!!aiCreateMode}
+        mode={aiCreateMode || 'meeting'}
+        initialPrompt={aiCreateMode === 'task' ? taskAiPrompt : meetingAiPrompt}
+        onClose={() => setAiCreateMode(null)}
+        onParsed={(data, usedPrompt) => {
+          if (aiCreateMode === 'task') {
+            setTaskPrefill(data);
+            setTaskAiPrompt(usedPrompt || '');
+            setShowTaskDialog(true);
+          } else {
+            setMeetingPrefill(data);
+            setMeetingAiPrompt(usedPrompt || '');
+            setShowMeetingDialog(true);
+          }
+          setAiCreateMode(null);
+        }}
+      />
+
       <ScheduleMeetingDialog
         open={showMeetingDialog}
-        onClose={() => setShowMeetingDialog(false)}
+        prefill={meetingPrefill}
+        // AI-opened → "Edit AI prompt"; manually-opened → "Create with AI".
+        onEditAiPrompt={meetingPrefill ? () => { setShowMeetingDialog(false); setAiCreateMode('meeting'); } : null}
+        onCreateWithAI={!meetingPrefill ? () => { setShowMeetingDialog(false); setAiCreateMode('meeting'); } : null}
+        onClose={() => { setShowMeetingDialog(false); setMeetingPrefill(null); }}
         onCreated={() => { loadMeetings(); loadStats(); }}
       />
       <AddTaskDialog
         open={showTaskDialog}
-        onClose={() => setShowTaskDialog(false)}
+        prefill={taskPrefill}
+        onEditAiPrompt={taskPrefill ? () => { setShowTaskDialog(false); setAiCreateMode('task'); } : null}
+        onCreateWithAI={!taskPrefill ? () => { setShowTaskDialog(false); setAiCreateMode('task'); } : null}
+        onClose={() => { setShowTaskDialog(false); setTaskPrefill(null); }}
         onCreated={() => { loadTasks(); loadStats(); }}
       />
 
@@ -1369,8 +1440,9 @@ const ExecMeetingDashboard = () => {
           className="max-w-3xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
+          {/* Header — pr-10 keeps the Download button clear of the dialog's
+              own close ✕ in the top-right corner. */}
+          <div className="flex items-center justify-between px-6 py-4 pr-10 border-b border-white/10 flex-shrink-0">
             <div className="flex items-center gap-3 min-w-0">
               {viewDoc && (
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border flex-shrink-0 ${{
@@ -1402,8 +1474,9 @@ const ExecMeetingDashboard = () => {
             </div>
           )}
 
-          {/* Rendered markdown content */}
-          <div className="flex-1 overflow-y-auto px-6 py-5">
+          {/* Rendered markdown content — scrollable but with the scrollbar
+              hidden (no-scrollbar) for a cleaner look. */}
+          <div className="flex-1 overflow-y-auto no-scrollbar px-6 py-5">
             {viewDoc?.content && (
               <div
                 className="prose prose-invert max-w-none"

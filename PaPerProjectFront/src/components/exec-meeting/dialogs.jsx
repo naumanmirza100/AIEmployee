@@ -15,14 +15,17 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Sparkles, Users, ChevronRight } from 'lucide-react';
+import { Loader2, Sparkles, Users, ChevronRight, Wand2 } from 'lucide-react';
 import execMeetingService from '@/services/execMeetingService';
 import { DateTimePicker, DateOnlyPicker, validateMeetingLink, isWeekend } from './shared';
 import HoverTip from '@/components/common/HoverTip';
 import { AllMembersPanel } from './AllMembersPanel';
 
 // ── Schedule meeting dialog ─────────────────────────────────────────────────
-export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
+// `prefill` (optional) seeds the form when opened from "Create with AI":
+// { title, description, scheduled_at, duration_minutes, meeting_link, agenda,
+//   participants }. Absent for the normal (blank) Schedule flow.
+export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null, onEditAiPrompt = null, onCreateWithAI = null }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
@@ -44,6 +47,30 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [participants, setParticipants] = useState([]);
+
+  // On every open, (re)initialise from the AI draft if present, else to a
+  // clean blank state. The dialog persists its local state while closed, so
+  // without clearing here, participants from a cancelled AI draft would
+  // linger and merge into the next one.
+  useEffect(() => {
+    if (!open) return;
+    if (prefill) {
+      setForm({
+        title: prefill.title || '',
+        description: prefill.description || '',
+        scheduled_at: prefill.scheduled_at || '',
+        duration_minutes: String(prefill.duration_minutes || 60),
+        meeting_link: prefill.meeting_link || '',
+      });
+      setAgenda(Array.isArray(prefill.agenda) ? prefill.agenda : []);
+      setParticipants(Array.isArray(prefill.participants) ? prefill.participants : []);
+    } else {
+      setForm({ title: '', description: '', scheduled_at: '', duration_minutes: '60', meeting_link: '' });
+      setAgenda([]);
+      setParticipants([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefill]);
 
   const searchUsers = async (q) => {
     setSearchQ(q);
@@ -165,7 +192,36 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
         <div className="flex gap-4 items-stretch">
           <div className="min-w-0 flex-1">
         <DialogHeader>
-          <DialogTitle>Schedule Meeting</DialogTitle>
+          {/* Title + an AI button sitting right after it (kept away from the
+              dialog's own close ✕ in the top-right corner, with pr-8 padding).
+              When opened from AI → "Edit AI prompt" (reopen/regenerate);
+              otherwise → "Create with AI" (switch to the prompt flow). */}
+          <div className="flex items-center gap-3 flex-wrap pr-8">
+            <DialogTitle>Schedule Meeting</DialogTitle>
+            {onEditAiPrompt ? (
+              <HoverTip tip="Edit the AI prompt and generate a new draft">
+                <button
+                  type="button"
+                  onClick={onEditAiPrompt}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-200 text-xs font-medium hover:bg-violet-400/20 hover:text-violet-100 transition"
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                  Edit AI prompt
+                </button>
+              </HoverTip>
+            ) : onCreateWithAI ? (
+              <HoverTip tip="Describe this meeting in plain language and let AI draft it">
+                <button
+                  type="button"
+                  onClick={onCreateWithAI}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-200 text-xs font-medium hover:bg-violet-400/20 hover:text-violet-100 transition"
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                  Create with AI
+                </button>
+              </HoverTip>
+            ) : null}
+          </div>
           <DialogDescription className="text-white/50">Fill in the meeting details below.</DialogDescription>
         </DialogHeader>
         {/* Two-column layout */}
@@ -289,7 +345,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
         {/* Agenda — full width below both columns so generating it doesn't
             stretch the left column and misalign the fields. */}
         {agenda.length > 0 && (
-          <div className="rounded-md border border-white/10 bg-white/[0.03] p-3 max-h-40 overflow-y-auto">
+          <div className="rounded-md border border-white/10 bg-white/[0.03] p-3 max-h-40 overflow-y-auto mt-2 mb-5">
             <p className="text-[10px] text-white/40 mb-1.5 uppercase tracking-wide">Agenda (generated)</p>
             <ul className="space-y-1">
               {agenda.map((item, i) => (
@@ -698,13 +754,39 @@ export const AssigneePicker = ({ assignees, onChange, onViewAll, viewingAll = fa
 };
 
 // ── Add task dialog ─────────────────────────────────────────────────────────
-export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
+// `prefill` (optional) seeds the form when opened from "Create with AI":
+// { title, description, priority, due_date, assignees }. Absent for the
+// normal blank Add-Task flow.
+export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = null, onEditAiPrompt = null, onCreateWithAI = null }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', priority: 'medium', due_date: '' });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const [assignees, setAssignees] = useState([]);
   const [generatingDesc, setGeneratingDesc] = useState(false);
+
+  // On every open, (re)initialise the form from the AI draft if there is one,
+  // or to a clean blank state if there isn't. The dialog is not unmounted when
+  // closed (only `open` flips), so its local state persists between opens —
+  // without this reset, assignees from a previous AI draft that was cancelled
+  // would linger and get merged into the next one.
+  useEffect(() => {
+    if (!open) return;
+    if (prefill) {
+      setForm({
+        title: prefill.title || '',
+        description: prefill.description || '',
+        priority: prefill.priority || 'medium',
+        due_date: prefill.due_date || '',
+      });
+      setAssignees(Array.isArray(prefill.assignees) ? prefill.assignees : []);
+    } else {
+      setForm({ title: '', description: '', priority: 'medium', due_date: '' });
+      setAssignees([]);
+    }
+    setShowAllMembers(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefill]);
   // "View all members" side panel (rendered at dialog level so it sits beside
   // the form, not cramped inside the Assign-To field).
   const [showAllMembers, setShowAllMembers] = useState(false);
@@ -780,7 +862,34 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
         <div className="flex gap-4 items-stretch">
           <div className="min-w-0 flex-1">
         <DialogHeader>
-          <DialogTitle>{parentTask ? `Add Subtask to "${parentTask.title}"` : 'Add Task'}</DialogTitle>
+          {/* Title + AI button after it (clear of the dialog's close ✕ via
+              pr-8). AI-opened → "Edit AI prompt"; manual → "Create with AI". */}
+          <div className="flex items-center gap-3 flex-wrap pr-8">
+            <DialogTitle>{parentTask ? `Add Subtask to "${parentTask.title}"` : 'Add Task'}</DialogTitle>
+            {onEditAiPrompt ? (
+              <HoverTip tip="Edit the AI prompt and generate a new draft">
+                <button
+                  type="button"
+                  onClick={onEditAiPrompt}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-200 text-xs font-medium hover:bg-violet-400/20 hover:text-violet-100 transition"
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                  Edit AI prompt
+                </button>
+              </HoverTip>
+            ) : onCreateWithAI ? (
+              <HoverTip tip="Describe this task in plain language and let AI draft it">
+                <button
+                  type="button"
+                  onClick={onCreateWithAI}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-200 text-xs font-medium hover:bg-violet-400/20 hover:text-violet-100 transition"
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                  Create with AI
+                </button>
+              </HoverTip>
+            ) : null}
+          </div>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1">

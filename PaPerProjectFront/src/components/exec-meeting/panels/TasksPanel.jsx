@@ -5,7 +5,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import {
-  Loader2, ListChecks, Plus, Trash2, Pencil, RefreshCw, ChevronRight,
+  Loader2, ListChecks, Plus, Trash2, Pencil, RefreshCw, ChevronRight, Wand2,
 } from 'lucide-react';
 import {
   CARD_STYLE, ROW_STYLE, priorityBadge, statusBadge, AssigneeAvatars, EmptyState,
@@ -29,7 +29,7 @@ const TASK_PRIORITY_OPTIONS = [
 export const TasksPanel = ({
   tasks, tasksLoading,
   expandedTaskId, expandedSubtasksId,
-  loadTasks, setShowTaskDialog,
+  loadTasks, setShowTaskDialog, onCreateWithAI,
   setExpandedTaskId, setExpandedSubtasksId, setEditingTask,
   setSubtaskParentTask, setConfirmDeleteTaskId,
   selectedTaskIds, toggleSelected, setSelectedTaskIds, bulkDeleteTasks, bulkDeleting,
@@ -50,6 +50,13 @@ export const TasksPanel = ({
               <RefreshCw className={`h-3.5 w-3.5 ${tasksLoading ? 'animate-spin' : ''}`} />
             </Button>
           </HoverTip>
+          {onCreateWithAI && (
+            <HoverTip tip="Describe a task in plain language and let AI draft it">
+              <Button size="sm" variant="outline" onClick={onCreateWithAI} className="border-violet-400/40 bg-violet-400/10 text-violet-200 hover:bg-violet-400/20 hover:text-violet-100">
+                <Wand2 className="h-4 w-4 mr-1" /> Create with AI
+              </Button>
+            </HoverTip>
+          )}
           <HoverTip tip="Add a new task">
             <Button size="sm" onClick={() => setShowTaskDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
               <Plus className="h-4 w-4 mr-1" /> Add Task

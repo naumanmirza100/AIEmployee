@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight, Trash2, Check, X,
+  Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight, Trash2, Check, X, Wand2,
 } from 'lucide-react';
 import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar, Pagination } from '../shared';
 import HoverTip from '@/components/common/HoverTip';
@@ -23,7 +23,7 @@ export const MeetingsPanel = ({
   meetings, meetingsLoading, notesOpenId, participantsOpenId, meetingNotes,
   participantsMap, pendingAddMap, confirmRemoveMap,
   userSearchQ, userSearchLoading, userSearchResults, transcriptInput, notesLoading,
-  loadMeetings, setShowMeetingDialog, setEditingMeeting, openParticipants, openNotes,
+  loadMeetings, setShowMeetingDialog, onCreateWithAI, setEditingMeeting, openParticipants, openNotes,
   removeParticipant, setConfirmRemoveMap, addParticipant, setPendingAddMap,
   setUserSearchQ, setUserSearchResults, searchUsers, submitTranscript, setTranscriptInput,
   convertActionItem, convertedActionItemIds, clearMeetingNotes, removeMeetingAgenda,
@@ -56,6 +56,13 @@ export const MeetingsPanel = ({
               <RefreshCw className={`h-3.5 w-3.5 ${meetingsLoading ? 'animate-spin' : ''}`} />
             </Button>
           </HoverTip>
+          {onCreateWithAI && (
+            <HoverTip tip="Describe a meeting in plain language and let AI draft it">
+              <Button size="sm" variant="outline" onClick={onCreateWithAI} className="border-violet-400/40 bg-violet-400/10 text-violet-200 hover:bg-violet-400/20 hover:text-violet-100">
+                <Wand2 className="h-4 w-4 mr-1" /> Create with AI
+              </Button>
+            </HoverTip>
+          )}
           <HoverTip tip="Schedule a new meeting">
             <Button size="sm" onClick={() => setShowMeetingDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
               <Plus className="h-4 w-4 mr-1" /> Schedule
