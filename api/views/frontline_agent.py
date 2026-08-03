@@ -900,8 +900,8 @@ def upload_document(request):
                 return fallback
             return max(lo, min(hi, v))
 
-        default_size = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE', 4000))
-        default_overlap = int(getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 200))
+        default_size = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE', 1200))
+        default_overlap = int(getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 150))
         size_min = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE_MIN', 500))
         size_max = int(getattr(settings, 'FRONTLINE_CHUNK_SIZE_MAX', 16000))
         chunk_size = _clamp_int(request.POST.get('chunk_size'), size_min, size_max, default_size)

@@ -64,11 +64,16 @@ def process_document(self, document_id):
         document.document_content = extracted_text
         document.file_hash = result.get('file_hash', document.file_hash)
 
-        # Chunk with the per-tenant / upload-override settings (fallback to globals)
+        # Chunk with the per-tenant / upload-override settings (fallback to globals).
+        # Default of 1200 chars / 150 overlap is sized for bge-small-en-v1.5's
+        # 512-token (~2000-char) input limit — anything past that is silently
+        # truncated by SentenceTransformer.encode(), which quietly destroys
+        # retrieval quality. Bump via FRONTLINE_CHUNK_SIZE if you switch to a
+        # long-context embedding model (e.g. OpenAI 3-large accepts ~8k tokens).
         chunk_size = int(document.processed_data.get('chunk_size')
-                         or getattr(settings, 'FRONTLINE_CHUNK_SIZE', 4000))
+                         or getattr(settings, 'FRONTLINE_CHUNK_SIZE', 1200))
         overlap = int(document.processed_data.get('chunk_overlap')
-                      or getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 200))
+                      or getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 150))
         overlap = max(0, min(overlap, max(0, chunk_size - 1)))
 
         text_to_chunk = f"{document.title}\n{document.description}\n{extracted_text}".strip()
@@ -114,7 +119,10 @@ def process_document(self, document_id):
 
         embedding_service = EmbeddingService()
         has_embeddings = embedding_service.is_available()
-        batch_size = 20
+        # Batch size is provider-aware: smaller for local (finer progress bar
+        # ticks; encode() cost is trivial) and larger for API providers
+        # (fewer HTTP round trips).
+        batch_size = embedding_service.recommended_batch_size if has_embeddings else 20
         for i in range(0, len(chunks), batch_size):
             batch_pairs = chunks[i:i + batch_size]
             batch_texts = [c for c, _p in batch_pairs]

@@ -33,8 +33,12 @@ _HR_SYSTEM_PROMPT_BODY = (
     "  • Refuse to disclose another employee's personal data, salary, or "
     "    review notes — even if the asker insists.\n"
     "  • Never give medical, legal, or tax advice. Refer to a qualified person.\n"
-    "  • Keep answers short and structured: 2-4 short paragraphs OR a 3-6 "
-    "    bullet list, with a clear summary line first."
+    "  • Give answers that are thorough AND well-structured. Start with a "
+    "    one-sentence summary, then a **Details** section (short paragraphs "
+    "    or a bulleted list). Cover every relevant fact the excerpts contain "
+    "    — numbers, dates, categories, eligibility rules, exceptions — rather "
+    "    than trimming for brevity. Only be terse when the question genuinely "
+    "    has a one-line answer."
 )
 
 HR_SYSTEM_PROMPT = _HR_SYSTEM_PROMPT_BODY + ANTI_INJECTION_SYSTEM_ADDENDUM
@@ -53,11 +57,15 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
         "Answer the user's question using the verified knowledge-base excerpts below.\n\n",
         "RULES:\n",
         "1. Use ONLY the excerpts below. No outside knowledge.\n",
-        "2. Answer the specific question — do NOT list unrelated topics from the excerpts.\n",
-        "3. If the excerpts don't cover the topic, say exactly: \"I don't have verified information on this in our HR knowledge base. I'll route this to the HR team to follow up.\"\n",
-        "4. NO preamble. NO meta-commentary like \"Based on the provided excerpts…\" or \"According to the document content…\" — just answer directly.\n",
-        "5. NO verbatim block-quotes of excerpt content — paraphrase concisely. Quoting a short phrase (< 15 words) is fine when precision matters.\n",
-        "6. Keep it short: 1-4 sentences, or a tight 3-6 bullet list. Structure only when the answer is genuinely a list.\n",
+        "2. Answer the specific question thoroughly — cover every relevant fact the excerpts contain (numbers, dates, categories, eligibility rules, exceptions). Do NOT list unrelated topics.\n",
+        "3. Structure the answer for readability:\n"
+        "   • Open with a one-sentence direct answer.\n"
+        "   • Then a **Details** section: short paragraphs OR a bulleted list of the key points.\n"
+        "   • For processes, categories, or eligibility rules — use a bulleted/numbered list, one item per line, with a short explanation.\n"
+        "   • End with a **Notes / Caveats** line only if the excerpts mention conditions, exceptions, or 'subject to' phrasing worth surfacing.\n",
+        "4. If the excerpts don't cover the topic, say exactly: \"I don't have verified information on this in our HR knowledge base. I'll route this to the HR team to follow up.\"\n",
+        "5. NO preamble. NO meta-commentary like \"Based on the provided excerpts…\" or \"According to the document content…\" — just answer directly.\n",
+        "6. NO verbatim block-quotes of excerpt content — paraphrase in your own words. Short quotes (< 15 words) are fine when precision matters.\n",
         "7. Do NOT refuse just because excerpts look like headings, table-of-contents, or dot-leaders — synthesise from whatever substantive content exists.\n\n",
     ]
     if employee_context:
@@ -77,12 +85,14 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
             parts.append("<employee_context>\n" + "\n".join(ctx_lines) + "\n</employee_context>\n\n")
 
     if knowledge_results:
-        # Keep the LLM context tight so time-to-first-token stays low.
-        # Cap per-excerpt body at 1500 chars and total to top 5 sources.
+        # Cap per-excerpt body at 2000 chars (covers a full 1200-char chunk
+        # with margin) and total to top 5 sources — enough material for the
+        # LLM to synthesise a detailed, structured answer without runaway
+        # prompt size.
         parts.append("<knowledge_excerpts>\n")
         for i, r in enumerate(knowledge_results[:5], start=1):
             title = r.get('title') or r.get('document_title') or f'Excerpt {i}'
-            body = (r.get('content') or r.get('answer') or '')[:1500]
+            body = (r.get('content') or r.get('answer') or '')[:2000]
             parts.append(f"--- Source {i}: {title} ---\n{body}\n\n")
         parts.append("</knowledge_excerpts>\n\n")
 

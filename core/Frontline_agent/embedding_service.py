@@ -106,6 +106,17 @@ class EmbeddingService:
                 "`pip install sentence-transformers` to enable local embeddings."
             )
             return False
+        except Exception as e:
+            # sentence-transformers imports transformers/accelerate/huggingface_hub,
+            # any of which can raise RuntimeError on version mismatch. Don't let
+            # that kill the whole EmbeddingService — fall through to the next
+            # provider so unrelated features (summarize, chat) keep working.
+            logger.warning(
+                f"sentence-transformers import failed (dependency conflict?): {e}. "
+                "Try: `pip install --upgrade huggingface_hub accelerate transformers sentence-transformers`. "
+                "Falling back to next embedding provider."
+            )
+            return False
 
         try:
             model_name = getattr(settings, 'LOCAL_EMBEDDING_MODEL', 'BAAI/bge-small-en-v1.5')
@@ -334,24 +345,44 @@ class EmbeddingService:
             logger.debug(f"Failed to initialize OpenAI embeddings: {e}")
             return False
     
-    def generate_embedding(self, text: str) -> Optional[List[float]]:
+    # BGE / E5-family instruction prefix for query-side embedding. bge-small-en-v1.5
+    # (and similar retrieval-tuned models) place queries and passages in slightly
+    # different regions of the embedding space; the query is expected to carry an
+    # instruction so cosine against un-prefixed passages lines up. Skipping this
+    # costs ~0.05–0.15 cosine on short queries — enough to trip a 0.3 confidence
+    # gate on legitimate matches.
+    _BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+    def _maybe_prefix_query(self, text: str, is_query: bool) -> str:
+        """Prepend the retrieval-instruction prefix if this is a local BGE query."""
+        if not is_query or self.provider != 'local':
+            return text
+        model_lc = (self.embedding_model or '').lower()
+        if 'bge' in model_lc or 'e5' in model_lc:
+            return self._BGE_QUERY_PREFIX + text
+        return text
+
+    def generate_embedding(self, text: str, is_query: bool = False) -> Optional[List[float]]:
         """
         Generate embedding for a single text.
-        
+
         Args:
-            text: Text to embed
-            
+            text: Text to embed.
+            is_query: True when embedding a user query (not a document chunk).
+                For local BGE/E5 models this applies the query instruction
+                prefix; a no-op for API providers.
+
         Returns:
-            Embedding vector as list of floats, or None if unavailable
+            Embedding vector as list of floats, or None if unavailable.
         """
         if not self.available or not self.client:
             logger.warning("Embedding service not available")
             return None
-        
+
         if not text or not text.strip():
             logger.warning("Empty text provided for embedding")
             return None
-        
+
         try:
             # Truncate text if too long (token limits vary by model)
             # Approximate: 1 token ≈ 4 characters, so max ~32,000 characters for most models
@@ -363,7 +394,9 @@ class EmbeddingService:
                 logger.info(f"Text too long ({original_length:,} chars) for embedding API, using first {max_chars:,} chars for embedding generation")
                 logger.info(f"NOTE: Full document content ({original_length:,} chars) will still be stored in database")
                 text = text[:max_chars]
-            
+
+            text = self._maybe_prefix_query(text, is_query)
+
             if self.provider == 'local':
                 # sentence-transformers returns a numpy array; convert to list of
                 # floats so downstream code (JSON serialization, cosine helpers)
@@ -565,4 +598,20 @@ class EmbeddingService:
     def is_available(self) -> bool:
         """Check if embedding service is available"""
         return self.available
+
+    @property
+    def recommended_batch_size(self) -> int:
+        """
+        Batch size that balances throughput vs UI progress granularity.
+
+        Local (sentence-transformers on CPU) — 5. Each batch takes ~1-2s, so
+        the progress bar ticks every ~1-2s instead of every ~5-15s. Sending
+        smaller batches to the local model has negligible overhead because
+        the model batches internally anyway.
+
+        API providers (OpenRouter/DeepSeek/OpenAI) — 20. Each batch is one
+        HTTP call, so bigger batches mean fewer round trips. Progress bar
+        ticks less often, but network cost dominates.
+        """
+        return 5 if self.provider == 'local' else 20
 

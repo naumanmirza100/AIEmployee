@@ -281,10 +281,10 @@ class FrontlineAgent(BaseAgent):
                 prompt=prompt,
                 system_prompt=self.system_prompt,
                 temperature=0.3,  # Low temperature for factual responses
-                # 250 is enough for a concise, factual answer. Larger answers
-                # correlate strongly with slower TTFT + more streaming time.
-                # Overridable via `FRONTLINE_QA_MAX_TOKENS` setting.
-                max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 250)),
+                # 900 tokens ≈ 3–5 well-structured paragraphs or a detailed
+                # bullet list — enough for thorough answers without runaway
+                # essays. Override via `FRONTLINE_QA_MAX_TOKENS` if needed.
+                max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 900)),
             )
             timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
             timing_ms['total'] = int((time.time() - _t_overall) * 1000)
@@ -469,7 +469,7 @@ class FrontlineAgent(BaseAgent):
                 prompt=prompt,
                 system_prompt=self.system_prompt,
                 temperature=0.3,
-                max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 250)),
+                max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 900)),
             ):
                 if event.get('type') == 'token':
                     collected.append(event['value'])
