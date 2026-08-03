@@ -11,6 +11,7 @@ import {
   CARD_STYLE, ROW_STYLE, priorityBadge, statusBadge, AssigneeAvatars, EmptyState,
   BulkSelectBar, SelectCheckbox, FilterBar, Pagination,
 } from '../shared';
+import HoverTip from '@/components/common/HoverTip';
 
 const TASK_STATUS_OPTIONS = [
   { value: 'todo', label: 'To Do' },
@@ -44,12 +45,16 @@ export const TasksPanel = ({
           Tasks
         </h3>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={() => loadTasks()} disabled={tasksLoading} className="text-white/40 hover:text-white">
-            <RefreshCw className={`h-3.5 w-3.5 ${tasksLoading ? 'animate-spin' : ''}`} />
-          </Button>
-          <Button size="sm" onClick={() => setShowTaskDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
-            <Plus className="h-4 w-4 mr-1" /> Add Task
-          </Button>
+          <HoverTip tip="Refresh the tasks list">
+            <Button size="sm" variant="ghost" onClick={() => loadTasks()} disabled={tasksLoading} className="text-white/40 hover:text-white">
+              <RefreshCw className={`h-3.5 w-3.5 ${tasksLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </HoverTip>
+          <HoverTip tip="Add a new task">
+            <Button size="sm" onClick={() => setShowTaskDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
+              <Plus className="h-4 w-4 mr-1" /> Add Task
+            </Button>
+          </HoverTip>
         </div>
       </div>
 
@@ -134,24 +139,30 @@ export const TasksPanel = ({
                     {statusBadge(t.status)}
                     {/* Quick actions inline with the badges */}
                     <div className="flex items-center gap-0.5">
-                      <button
-                        type="button" title="Edit"
-                        onClick={e => { e.stopPropagation(); setEditingTask(t); }}
-                        className="p-1 rounded text-white/30 hover:text-violet-300 hover:bg-violet-500/10 transition-colors">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button" title="Add subtask"
-                        onClick={e => { e.stopPropagation(); setSubtaskParentTask(t); }}
-                        className="p-1 rounded text-white/30 hover:text-sky-300 hover:bg-sky-500/10 transition-colors">
-                        <Plus className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button" title="Delete"
-                        onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(t.id); }}
-                        className="p-1 rounded text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <HoverTip tip="Edit this task">
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setEditingTask(t); }}
+                          className="p-1 rounded text-white/30 hover:text-violet-300 hover:bg-violet-500/10 transition-colors">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      </HoverTip>
+                      <HoverTip tip="Add a subtask">
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setSubtaskParentTask(t); }}
+                          className="p-1 rounded text-white/30 hover:text-sky-300 hover:bg-sky-500/10 transition-colors">
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </HoverTip>
+                      <HoverTip tip="Delete this task">
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(t.id); }}
+                          className="p-1 rounded text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </HoverTip>
                     </div>
                     <ChevronRight className={`h-4 w-4 text-white/30 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                   </div>
@@ -215,11 +226,13 @@ export const TasksPanel = ({
                                   <AssigneeAvatars assignees={st.assignees} size="sm" />
                                   {priorityBadge(st.priority)}
                                   {statusBadge(st.status)}
-                                  <button
-                                    className="text-white/20 hover:text-red-400 text-xs px-1"
-                                    onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(st.id); }}>
-                                    <Trash2 className="h-3 w-3" />
-                                  </button>
+                                  <HoverTip tip="Delete this subtask">
+                                    <button
+                                      className="text-white/20 hover:text-red-400 text-xs px-1"
+                                      onClick={e => { e.stopPropagation(); setConfirmDeleteTaskId(st.id); }}>
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </HoverTip>
                                 </div>
                               ))}
                             </div>

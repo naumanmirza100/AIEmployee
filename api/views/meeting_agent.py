@@ -985,28 +985,41 @@ def search_company_users(request):
     from core.models import CompanyUser, UserProfile
     company_user = request.user
     q = request.query_params.get('q', '').strip()
-    if len(q) < 2:
+    # `all=true` powers the "View all members" panel: return every member of
+    # the company (no 2-char requirement, a much higher cap) instead of the
+    # autocomplete's short filtered slice. When not set, behaviour is the
+    # old typeahead: nothing until 2+ chars, capped at 10 per source.
+    show_all = request.query_params.get('all', '').strip().lower() in ('1', 'true', 'yes')
+    if not show_all and len(q) < 2:
         return Response({'status': 'success', 'users': []})
+
+    limit = 500 if show_all else 10
 
     # 1. CompanyUser accounts (self-registered via invitation link)
     cu_qs = CompanyUser.objects.filter(
         company=company_user.company,
         is_active=True,
-    ).filter(
-        models.Q(full_name__icontains=q) | models.Q(email__icontains=q)
-    ).values('id', 'full_name', 'email', 'role')[:10]
+    )
+    if not show_all:
+        cu_qs = cu_qs.filter(
+            models.Q(full_name__icontains=q) | models.Q(email__icontains=q)
+        )
+    cu_qs = cu_qs.values('id', 'full_name', 'email', 'role').order_by('full_name')[:limit]
     results = list(cu_qs)
 
     # 2. UserProfile-backed users created via the admin panel
     existing_emails = {u['email'] for u in results}
     up_qs = UserProfile.objects.filter(
         company=company_user.company,
-    ).filter(
-        models.Q(user__first_name__icontains=q)
-        | models.Q(user__last_name__icontains=q)
-        | models.Q(user__email__icontains=q)
-        | models.Q(user__username__icontains=q)
-    ).select_related('user').exclude(user__email__in=existing_emails)[:10]
+    )
+    if not show_all:
+        up_qs = up_qs.filter(
+            models.Q(user__first_name__icontains=q)
+            | models.Q(user__last_name__icontains=q)
+            | models.Q(user__email__icontains=q)
+            | models.Q(user__username__icontains=q)
+        )
+    up_qs = up_qs.select_related('user').exclude(user__email__in=existing_emails)[:limit]
 
     for up in up_qs:
         u = up.user
@@ -1020,7 +1033,7 @@ def search_company_users(request):
             'user_type': 'profile',
         })
 
-    return Response({'status': 'success', 'users': results[:10]})
+    return Response({'status': 'success', 'users': results[:limit]})
 
 
 @api_view(['GET', 'POST', 'DELETE'])
@@ -1606,13 +1619,19 @@ def task_detail(request, task_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([ExecLLMThrottle])
 def generate_task_description(request):
-    """AI-expand a task title + a few rough points into a full description."""
+    """AI-expand a task title (and optional rough points) into a full description.
+
+    Only the title is required — the agent can draft a description from the
+    task name alone. Any ``points`` the user typed are passed through as extra
+    context but are optional, so "Generate with AI" works on a fresh task with
+    an empty description box.
+    """
     company_user = request.user
     title = (request.data.get('title') or '').strip()
     points = (request.data.get('points') or '').strip()
 
-    if not points:
-        return Response({'status': 'error', 'message': 'points is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not title:
+        return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         agent = _get_agent('task_prioritization', company_user)

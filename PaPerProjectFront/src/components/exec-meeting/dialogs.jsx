@@ -15,9 +15,11 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles, Users, ChevronRight } from 'lucide-react';
 import execMeetingService from '@/services/execMeetingService';
 import { DateTimePicker, DateOnlyPicker, validateMeetingLink, isWeekend } from './shared';
+import HoverTip from '@/components/common/HoverTip';
+import { AllMembersPanel } from './AllMembersPanel';
 
 // ── Schedule meeting dialog ─────────────────────────────────────────────────
 export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
@@ -61,6 +63,18 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
   };
 
   const removeUser = (id) => setParticipants(prev => prev.filter(p => p.id !== id));
+
+  // "View all members" side panel — lets the user pick from the whole roster
+  // instead of typing. Clicking a member in the panel toggles them here.
+  const [showAllMembers, setShowAllMembers] = useState(false);
+  const pKey = (u) => `${u?.user_type || 'company_user'}-${u?.id}`;
+  const toggleUser = (u) => {
+    setParticipants(prev =>
+      prev.some(p => pKey(p) === pKey(u))
+        ? prev.filter(p => pKey(p) !== pKey(u))
+        : [...prev, u]
+    );
+  };
 
   const handleGenerateDescription = async () => {
     if (!form.description.trim()) {
@@ -144,7 +158,12 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl bg-[#0d0b1f] border-white/10 text-white">
+      {/* When the members panel is open the dialog widens and lays its
+          content + the panel side by side (panel sits beside the dialog
+          body, not on top of it). */}
+      <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-5xl' : 'max-w-3xl'}`}>
+        <div className="flex gap-4 items-stretch">
+          <div className="min-w-0 flex-1">
         <DialogHeader>
           <DialogTitle>Schedule Meeting</DialogTitle>
           <DialogDescription className="text-white/50">Fill in the meeting details below.</DialogDescription>
@@ -160,15 +179,17 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <Label>Description</Label>
-                <button
-                  type="button"
-                  onClick={handleGenerateDescription}
-                  disabled={generatingDesc}
-                  className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
-                >
-                  {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                  Generate with AI
-                </button>
+                <HoverTip tip="Add little description to convert into a proper description and agenda">
+                  <button
+                    type="button"
+                    onClick={handleGenerateDescription}
+                    disabled={generatingDesc}
+                    className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
+                  >
+                    {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    Generate with AI
+                  </button>
+                </HoverTip>
               </div>
               <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Jot a few points — title + these will be expanded into a description and agenda" rows={3}
                 className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
@@ -194,7 +215,19 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
 
           {/* RIGHT column — participants */}
           <div className="space-y-3 flex flex-col">
-            <Label>Add Participants</Label>
+            <div className="flex items-center justify-between">
+              <Label>Add Participants</Label>
+              {/* Opens the "all members" side panel instead of typing. */}
+              <button
+                type="button"
+                onClick={() => setShowAllMembers(v => !v)}
+                className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200"
+              >
+                <Users className="h-3 w-3" />
+                View all members
+                <ChevronRight className={`h-3 w-3 transition-transform ${showAllMembers ? 'rotate-90' : ''}`} />
+              </button>
+            </div>
 
             {/* Added chips */}
             {participants.length > 0 && (
@@ -202,7 +235,9 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
                 {participants.map(p => (
                   <span key={p.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
                     {p.full_name}
-                    <button onClick={() => removeUser(p.id)} className="text-violet-300/60 hover:text-white leading-none">✕</button>
+                    <HoverTip tip="Remove this participant">
+                      <button onClick={() => removeUser(p.id)} className="text-violet-300/60 hover:text-white leading-none">✕</button>
+                    </HoverTip>
                   </span>
                 ))}
               </div>
@@ -269,11 +304,23 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated }) => {
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Schedule
-          </Button>
+          <HoverTip tip="Schedule this meeting">
+            <Button onClick={handleSubmit} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Schedule
+            </Button>
+          </HoverTip>
         </DialogFooter>
+          </div>
+
+          {/* Side panel — all company members, attached to the right. */}
+          <AllMembersPanel
+            open={showAllMembers}
+            onClose={() => setShowAllMembers(false)}
+            selected={participants}
+            onToggle={toggleUser}
+          />
+        </div>
       </DialogContent>
 
 
@@ -312,10 +359,12 @@ const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading }) => (
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel} className="border-white/10 text-white/70">Pick another time</Button>
-        <Button onClick={onConfirm} disabled={loading} className="bg-amber-600 hover:bg-amber-700 text-white border-0">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-          Add anyway
-        </Button>
+        <HoverTip tip="Book this slot despite the conflict">
+          <Button onClick={onConfirm} disabled={loading} className="bg-amber-600 hover:bg-amber-700 text-white border-0">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Add anyway
+          </Button>
+        </HoverTip>
       </DialogFooter>
     </DialogContent>
   </Dialog>
@@ -453,15 +502,17 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <Label>Description</Label>
-                <button
-                  type="button"
-                  onClick={handleGenerateDescription}
-                  disabled={generatingDesc}
-                  className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
-                >
-                  {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                  Generate with AI
-                </button>
+                <HoverTip tip="Add little description to convert into a proper description and agenda">
+                  <button
+                    type="button"
+                    onClick={handleGenerateDescription}
+                    disabled={generatingDesc}
+                    className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
+                  >
+                    {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    Generate with AI
+                  </button>
+                </HoverTip>
               </div>
               <Textarea value={form.description} onChange={e => set('description', e.target.value)}
                 rows={3} className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
@@ -524,10 +575,12 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
-          <Button onClick={handleSave} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Save Changes
-          </Button>
+          <HoverTip tip="Save changes and notify participants">
+            <Button onClick={handleSave} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save Changes
+            </Button>
+          </HoverTip>
         </DialogFooter>
       </DialogContent>
 
@@ -542,7 +595,11 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
 };
 
 // ── Shared: multi-assignee picker (used by Add + Detail dialogs) ────────────
-export const AssigneePicker = ({ assignees, onChange }) => {
+// `onViewAll` + `viewingAll` are optional: when provided, the picker shows a
+// "View all members" toggle whose panel is rendered by the parent dialog to
+// the side (so it isn't cramped inside this narrow field). Without them the
+// picker is just the search box + chips.
+export const AssigneePicker = ({ assignees, onChange, onViewAll, viewingAll = false }) => {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -564,6 +621,19 @@ export const AssigneePicker = ({ assignees, onChange }) => {
 
   return (
     <div className="space-y-2">
+      {/* {onViewAll && (
+        <div className="flex items-center justify-end -mb-1">
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200"
+          >
+            <Users className="h-3 w-3" />
+            View all members
+            <ChevronRight className={`h-3 w-3 transition-transform ${viewingAll ? 'rotate-90' : ''}`} />
+          </button>
+        </div>
+      )} */}
       {assignees.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {assignees.map(a => {
@@ -571,39 +641,56 @@ export const AssigneePicker = ({ assignees, onChange }) => {
             return (
               <span key={key} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs">
                 {a.full_name}
-                <button onClick={() => remove(key)} className="text-violet-300/60 hover:text-white leading-none">✕</button>
+                <HoverTip tip="Remove this assignee">
+                  <button onClick={() => remove(key)} className="text-violet-300/60 hover:text-white leading-none">✕</button>
+                </HoverTip>
               </span>
             );
           })}
         </div>
       )}
-      <div className="relative">
-        <Input
-          value={q}
-          onChange={e => search(e.target.value)}
-          placeholder="Type name or email to add…"
-          autoComplete="off"
-          className="bg-white/5 border-white/10 text-white text-sm"
-        />
-        {searching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
-        {results.length > 0 && (
-          <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
-            {results.map(u => (
-              <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => add(u)}
-                className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
-                <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
-                  {u.full_name?.[0]?.toUpperCase() || '?'}
-                </div>
-                <div>
-                  <p className="text-white text-xs font-medium">{u.full_name}</p>
-                  <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-        {q.length >= 2 && !searching && results.length === 0 && (
-          <p className="text-white/30 text-xs mt-1">No users found</p>
+      
+     <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Input
+            value={q}
+            onChange={e => search(e.target.value)}
+            placeholder="Type name or email to add…"
+            autoComplete="off"
+            className="bg-white/5 border-white/10 text-white text-sm"
+          />
+          {searching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
+          {results.length > 0 && (
+            <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+              {results.map(u => (
+                <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => add(u)}
+                  className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
+                  <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
+                    {u.full_name?.[0]?.toUpperCase() || '?'}
+                  </div>
+                  <div>
+                    <p className="text-white text-xs font-medium">{u.full_name}</p>
+                    <p className="text-white/40 text-[10px]">{u.email} · {u.role}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {q.length >= 2 && !searching && results.length === 0 && (
+            <p className="text-white/30 text-xs mt-1">No users found</p>
+          )}
+        </div>
+
+        {onViewAll && (
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 whitespace-nowrap flex-shrink-0"
+          >
+            <Users className="h-3 w-3" />
+            View all
+            <ChevronRight className={`h-3 w-3 transition-transform ${viewingAll ? 'rotate-90' : ''}`} />
+          </button>
         )}
       </div>
     </div>
@@ -618,15 +705,30 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const [assignees, setAssignees] = useState([]);
   const [generatingDesc, setGeneratingDesc] = useState(false);
+  // "View all members" side panel (rendered at dialog level so it sits beside
+  // the form, not cramped inside the Assign-To field).
+  const [showAllMembers, setShowAllMembers] = useState(false);
+  const aKey = (u) => `${u?.user_type || 'company_user'}-${u?.id}`;
+  const toggleAssignee = (u) => {
+    setAssignees(prev =>
+      prev.some(a => aKey(a) === aKey(u))
+        ? prev.filter(a => aKey(a) !== aKey(u))
+        : [...prev, u]
+    );
+  };
 
   const reset = () => {
     setForm({ title: '', description: '', priority: 'medium', due_date: '' });
     setAssignees([]);
+    setShowAllMembers(false);
   };
 
   const handleGenerateDescription = async () => {
-    if (!form.description.trim()) {
-      toast({ title: 'Add a few points first', description: 'Type what the task should cover, then generate.', variant: 'destructive' });
+    // Only the task name is required — the AI can draft a description from
+    // the title alone. Any notes already in the description box are passed
+    // along as extra context, but they're optional.
+    if (!form.title.trim()) {
+      toast({ title: 'Add a task name first', description: 'Enter the task name, then generate — the AI will draft the description from it.', variant: 'destructive' });
       return;
     }
     setGeneratingDesc(true);
@@ -674,7 +776,9 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) reset(); onClose(); }}>
-      <DialogContent className="max-w-lg bg-[#0d0b1f] border-white/10 text-white">
+      <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-3xl' : 'max-w-lg'}`}>
+        <div className="flex gap-4 items-stretch">
+          <div className="min-w-0 flex-1">
         <DialogHeader>
           <DialogTitle>{parentTask ? `Add Subtask to "${parentTask.title}"` : 'Add Task'}</DialogTitle>
         </DialogHeader>
@@ -686,17 +790,19 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <Label>Description</Label>
-              <button
-                type="button"
-                onClick={handleGenerateDescription}
-                disabled={generatingDesc}
-                className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
-              >
-                {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                Generate with AI
-              </button>
+              <HoverTip tip="Draft a description from the task name (add little description for more context)">
+                <button
+                  type="button"
+                  onClick={handleGenerateDescription}
+                  disabled={generatingDesc}
+                  className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
+                >
+                  {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                  Generate with AI
+                </button>
+              </HoverTip>
             </div>
-            <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Jot a few points — title + these will be expanded into a description" className="bg-white/5 border-white/10 text-white" rows={3} />
+            <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Optional — leave blank and Generate with AI drafts it from the task name, or jot a few points for more context" className="bg-white/5 border-white/10 text-white" rows={3} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -716,17 +822,34 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask }) => {
               )}
             </div>
           </div>
-          <div className="space-y-1">
-            <Label>Assign To</Label>
-            <AssigneePicker assignees={assignees} onChange={setAssignees} />
-          </div>
+         <div className="space-y-1">
+  <Label>Assign To</Label>
+  <AssigneePicker
+    assignees={assignees}
+    onChange={setAssignees}
+    onViewAll={() => setShowAllMembers(v => !v)}
+    viewingAll={showAllMembers}
+  />
+</div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}{parentTask ? 'Add Subtask' : 'Add Task'}
-          </Button>
+          <HoverTip tip={parentTask ? 'Create this subtask' : 'Create this task'}>
+            <Button onClick={handleSubmit} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}{parentTask ? 'Add Subtask' : 'Add Task'}
+            </Button>
+          </HoverTip>
         </DialogFooter>
+          </div>
+
+          {/* Side panel — all company members, attached to the right. */}
+          <AllMembersPanel
+            open={showAllMembers}
+            onClose={() => setShowAllMembers(false)}
+            selected={assignees}
+            onToggle={toggleAssignee}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -739,6 +862,16 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [form, setForm] = useState(null);
   const [assignees, setAssignees] = useState([]);
+  // "View all members" side panel (rendered at dialog level, beside the form).
+  const [showAllMembers, setShowAllMembers] = useState(false);
+  const aKey = (u) => `${u?.user_type || 'company_user'}-${u?.id}`;
+  const toggleAssignee = (u) => {
+    setAssignees(prev =>
+      prev.some(a => aKey(a) === aKey(u))
+        ? prev.filter(a => aKey(a) !== aKey(u))
+        : [...prev, u]
+    );
+  };
 
   useEffect(() => {
     if (task) {
@@ -750,6 +883,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
         due_date: task.due_date || '',
       });
       setAssignees((task.assignees || []).map(a => ({ ...a, user_type: 'company_user' })));
+      setShowAllMembers(false);
     }
   }, [task]);
 
@@ -757,8 +891,11 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const handleGenerateDescription = async () => {
-    if (!form.description.trim()) {
-      toast({ title: 'Add a few points first', description: 'Type what the task should cover, then generate.', variant: 'destructive' });
+    // Only the task name is required — the AI can draft a description from
+    // the title alone. Any notes already in the description box are passed
+    // along as extra context, but they're optional.
+    if (!form.title.trim()) {
+      toast({ title: 'Add a task name first', description: 'Enter the task name, then generate — the AI will draft the description from it.', variant: 'destructive' });
       return;
     }
     setGeneratingDesc(true);
@@ -795,7 +932,9 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
 
   return (
     <Dialog open={!!task} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg bg-[#0d0b1f] border-white/10 text-white">
+      <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-3xl' : 'max-w-lg'}`}>
+        <div className="flex gap-4 items-stretch">
+          <div className="min-w-0 flex-1">
         <DialogHeader>
           <DialogTitle>Edit Task</DialogTitle>
         </DialogHeader>
@@ -807,15 +946,17 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <Label>Description</Label>
-              <button
-                type="button"
-                onClick={handleGenerateDescription}
-                disabled={generatingDesc}
-                className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
-              >
-                {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                Generate with AI
-              </button>
+              <HoverTip tip="Draft a description from the task name (add little description for more context)">
+                <button
+                  type="button"
+                  onClick={handleGenerateDescription}
+                  disabled={generatingDesc}
+                  className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
+                >
+                  {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                  Generate with AI
+                </button>
+              </HoverTip>
             </div>
             <Textarea value={form.description} onChange={e => set('description', e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
           </div>
@@ -847,15 +988,32 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
           </div>
           <div className="space-y-1">
             <Label>Assigned To</Label>
-            <AssigneePicker assignees={assignees} onChange={setAssignees} />
+            <AssigneePicker
+              assignees={assignees}
+              onChange={setAssignees}
+              onViewAll={() => setShowAllMembers(v => !v)}
+              viewingAll={showAllMembers}
+            />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="border-white/10 text-white/70">Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Save
-          </Button>
+          <HoverTip tip="Save changes to this task">
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Save
+            </Button>
+          </HoverTip>
         </DialogFooter>
+          </div>
+
+          {/* Side panel — all company members, attached to the right. */}
+          <AllMembersPanel
+            open={showAllMembers}
+            onClose={() => setShowAllMembers(false)}
+            selected={assignees}
+            onToggle={toggleAssignee}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );

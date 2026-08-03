@@ -13,6 +13,7 @@ import {
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarIcon, Trash2, Loader2, Check, Search, X, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
+import HoverTip from '@/components/common/HoverTip';
 
 // ── Markdown → HTML renderer (violet theme, matches this dashboard) ─────────
 export function markdownToHtml(md) {
@@ -462,11 +463,13 @@ export const BulkSelectBar = ({ allIds, selected, onToggleAll, onDelete, deletin
         </span>
       </button>
       {count > 0 && (
-        <Button size="sm" variant="ghost" onClick={onDelete} disabled={deleting}
-          className="h-7 px-3 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1.5">
-          {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-          Delete selected ({count})
-        </Button>
+        <HoverTip tip={`Delete the ${count} selected ${label}(s)`}>
+          <Button size="sm" variant="ghost" onClick={onDelete} disabled={deleting}
+            className="h-7 px-3 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1.5">
+            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            Delete selected ({count})
+          </Button>
+        </HoverTip>
       )}
     </div>
   );
@@ -544,14 +547,15 @@ export const FilterDatePicker = ({ value, onChange, placeholder = 'Any date' }) 
         </PopoverContent>
       </Popover>
       {value && (
-        <button
-          type="button"
-          onClick={() => onChange('')}
-          title="Clear date"
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <HoverTip tip="Clear the selected date" className="absolute right-1.5 top-1/2 -translate-y-1/2">
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="text-white/40 hover:text-white/80"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </HoverTip>
       )}
     </div>
   );
@@ -583,13 +587,15 @@ export const FilterBar = ({
         className="h-9 pl-8 bg-white/5 border-white/10 text-white text-sm placeholder:text-white/30"
       />
       {search && (
-        <button
-          type="button"
-          onClick={() => onSearchChange('')}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <HoverTip tip="Clear the search box" className="absolute right-2 top-1/2 -translate-y-1/2">
+          <button
+            type="button"
+            onClick={() => onSearchChange('')}
+            className="text-white/40 hover:text-white/80"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </HoverTip>
       )}
     </div>
 
@@ -613,12 +619,14 @@ export const FilterBar = ({
     )}
 
     {active && onClear && (
-      <Button
-        size="sm" variant="ghost" onClick={onClear}
-        className="h-9 px-2.5 text-xs text-white/50 hover:text-white hover:bg-white/5 gap-1"
-      >
-        <X className="h-3.5 w-3.5" /> Clear
-      </Button>
+      <HoverTip tip="Clear all active filters">
+        <Button
+          size="sm" variant="ghost" onClick={onClear}
+          className="h-9 px-2.5 text-xs text-white/50 hover:text-white hover:bg-white/5 gap-1"
+        >
+          <X className="h-3.5 w-3.5" /> Clear
+        </Button>
+      </HoverTip>
     )}
   </div>
 );
@@ -662,15 +670,16 @@ export const Pagination = ({ meta, onChange, itemLabel = 'item' }) => {
       </p>
       {multiPage && (
       <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => has_prev && onChange(page - 1)}
-          disabled={!has_prev}
-          className={`${btn} ${has_prev ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-white/20 cursor-not-allowed'}`}
-          title="Previous page"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
+        <HoverTip tip="Previous page">
+          <button
+            type="button"
+            onClick={() => has_prev && onChange(page - 1)}
+            disabled={!has_prev}
+            className={`${btn} ${has_prev ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-white/20 cursor-not-allowed'}`}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </HoverTip>
 
         {start > 1 && (
           <>
@@ -699,15 +708,16 @@ export const Pagination = ({ meta, onChange, itemLabel = 'item' }) => {
           </>
         )}
 
-        <button
-          type="button"
-          onClick={() => has_next && onChange(page + 1)}
-          disabled={!has_next}
-          className={`${btn} ${has_next ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-white/20 cursor-not-allowed'}`}
-          title="Next page"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
+        <HoverTip tip="Next page">
+          <button
+            type="button"
+            onClick={() => has_next && onChange(page + 1)}
+            disabled={!has_next}
+            className={`${btn} ${has_next ? 'text-white/70 hover:bg-white/10 hover:text-white' : 'text-white/20 cursor-not-allowed'}`}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </HoverTip>
       </div>
       )}
     </div>

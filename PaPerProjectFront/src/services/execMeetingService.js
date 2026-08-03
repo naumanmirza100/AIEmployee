@@ -102,6 +102,9 @@ const execMeetingService = {
 
   // Participants
   searchUsers:       (q) => companyApi.get(`${BASE}/users/search?q=${encodeURIComponent(q)}`),
+  // Every member of the company — powers the "View all members" side panel
+  // (no 2-char requirement, higher cap). Backend keys off `all=true`.
+  listAllUsers:      () => companyApi.get(`${BASE}/users/search?all=true`),
   getParticipants:   (meetingId) => companyApi.get(`${BASE}/meetings/${meetingId}/participants`),
   addParticipant:    (meetingId, userId, userType) => companyApi.post(`${BASE}/meetings/${meetingId}/participants`, { user_id: userId, user_type: userType || 'company_user' }),
   removeParticipant: (meetingId, participantId, userId) => companyApi.delete(`${BASE}/meetings/${meetingId}/participants`, { data: { participant_id: participantId, user_id: userId } }),

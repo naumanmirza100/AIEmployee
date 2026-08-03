@@ -9,6 +9,7 @@ import {
   Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight, Trash2, Check, X,
 } from 'lucide-react';
 import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar, Pagination } from '../shared';
+import HoverTip from '@/components/common/HoverTip';
 
 const MEETING_STATUS_OPTIONS = [
   { value: 'scheduled', label: 'Scheduled' },
@@ -50,12 +51,16 @@ export const MeetingsPanel = ({
           All Meetings
         </h3>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={loadMeetings} disabled={meetingsLoading} className="text-white/40 hover:text-white">
-            <RefreshCw className={`h-3.5 w-3.5 ${meetingsLoading ? 'animate-spin' : ''}`} />
-          </Button>
-          <Button size="sm" onClick={() => setShowMeetingDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
-            <Plus className="h-4 w-4 mr-1" /> Schedule
-          </Button>
+          <HoverTip tip="Refresh the meetings list">
+            <Button size="sm" variant="ghost" onClick={loadMeetings} disabled={meetingsLoading} className="text-white/40 hover:text-white">
+              <RefreshCw className={`h-3.5 w-3.5 ${meetingsLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </HoverTip>
+          <HoverTip tip="Schedule a new meeting">
+            <Button size="sm" onClick={() => setShowMeetingDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
+              <Plus className="h-4 w-4 mr-1" /> Schedule
+            </Button>
+          </HoverTip>
         </div>
       </div>
 
@@ -126,14 +131,15 @@ export const MeetingsPanel = ({
                       <div className="mt-1.5">
                         <div className="flex items-center gap-2 mb-0.5">
                           <p className="text-[10px] text-white/30 uppercase tracking-wide">Agenda</p>
-                          <button
-                            type="button"
-                            onClick={() => removeMeetingAgenda(m.id)}
-                            title="Remove agenda"
-                            className="text-[10px] text-white/25 hover:text-red-400 inline-flex items-center gap-0.5 transition-colors"
-                          >
-                            <X className="h-2.5 w-2.5" /> remove
-                          </button>
+                          <HoverTip tip="Remove this agenda">
+                            <button
+                              type="button"
+                              onClick={() => removeMeetingAgenda(m.id)}
+                              className="text-[10px] text-white/25 hover:text-red-400 inline-flex items-center gap-0.5 transition-colors"
+                            >
+                              <X className="h-2.5 w-2.5" /> remove
+                            </button>
+                          </HoverTip>
                         </div>
                         <ul className="space-y-0.5">
                           {m.agenda.map((item, i) => (
@@ -147,25 +153,31 @@ export const MeetingsPanel = ({
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {statusBadge(m.status)}
-                    <Button size="sm" variant="ghost"
-                      onClick={() => setEditingMeeting(m)}
-                      className="text-white/40 hover:text-violet-300 p-1" title="Edit meeting">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="sm" variant="ghost"
-                      onClick={() => openParticipants(m.id)}
-                      className={`text-xs gap-1 ${isPartsOpen ? 'text-violet-300' : 'text-white/40 hover:text-violet-300'}`}>
-                      <span className="text-[11px]">👥</span>
-                      People
-                      <ChevronRight className={`h-3 w-3 transition-transform ${isPartsOpen ? 'rotate-90' : ''}`} />
-                    </Button>
-                    <Button size="sm" variant="ghost"
-                      onClick={() => openNotes(m.id)}
-                      className={`text-xs gap-1 ${isNotesOpen ? 'text-violet-300' : 'text-white/40 hover:text-violet-300'}`}>
-                      <FileText className="h-3.5 w-3.5" />
-                      {notes ? 'Notes' : 'Notes'}
-                      <ChevronRight className={`h-3 w-3 transition-transform ${isNotesOpen ? 'rotate-90' : ''}`} />
-                    </Button>
+                    <HoverTip tip="Edit this meeting">
+                      <Button size="sm" variant="ghost"
+                        onClick={() => setEditingMeeting(m)}
+                        className="text-white/40 hover:text-violet-300 p-1">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </HoverTip>
+                    <HoverTip tip="Manage participants">
+                      <Button size="sm" variant="ghost"
+                        onClick={() => openParticipants(m.id)}
+                        className={`text-xs gap-1 ${isPartsOpen ? 'text-violet-300' : 'text-white/40 hover:text-violet-300'}`}>
+                        <span className="text-[11px]">👥</span>
+                        People
+                        <ChevronRight className={`h-3 w-3 transition-transform ${isPartsOpen ? 'rotate-90' : ''}`} />
+                      </Button>
+                    </HoverTip>
+                    <HoverTip tip="View or add AI meeting notes">
+                      <Button size="sm" variant="ghost"
+                        onClick={() => openNotes(m.id)}
+                        className={`text-xs gap-1 ${isNotesOpen ? 'text-violet-300' : 'text-white/40 hover:text-violet-300'}`}>
+                        <FileText className="h-3.5 w-3.5" />
+                        {notes ? 'Notes' : 'Notes'}
+                        <ChevronRight className={`h-3 w-3 transition-transform ${isNotesOpen ? 'rotate-90' : ''}`} />
+                      </Button>
+                    </HoverTip>
                   </div>
                 </div>
 
@@ -213,9 +225,11 @@ export const MeetingsPanel = ({
                                     </button>
                                   </div>
                                 ) : (
-                                  <button
-                                    onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: p.id }))}
-                                    className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
+                                  <HoverTip tip="Remove this participant">
+                                    <button
+                                      onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: p.id }))}
+                                      className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
+                                  </HoverTip>
                                 )}
                               </div>
                             </div>
@@ -296,14 +310,15 @@ export const MeetingsPanel = ({
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <p className="text-white/50 text-[11px] font-semibold uppercase tracking-wide">AI Notes</p>
-                          <button
-                            type="button"
-                            onClick={() => clearMeetingNotes(m.id)}
-                            title="Clear all notes (summary, decisions, action items)"
-                            className="text-[10px] text-white/30 hover:text-red-400 inline-flex items-center gap-1 transition-colors"
-                          >
-                            <Trash2 className="h-3 w-3" /> Clear notes
-                          </button>
+                          <HoverTip tip="Clear all notes, decisions and action items">
+                            <button
+                              type="button"
+                              onClick={() => clearMeetingNotes(m.id)}
+                              className="text-[10px] text-white/30 hover:text-red-400 inline-flex items-center gap-1 transition-colors"
+                            >
+                              <Trash2 className="h-3 w-3" /> Clear notes
+                            </button>
+                          </HoverTip>
                         </div>
                         {notes.ai_summary && (
                           <div className="rounded-xl p-3 bg-violet-500/10 border-b border-violet-500/20">
@@ -341,13 +356,15 @@ export const MeetingsPanel = ({
                                     {a.id && (converted ? (
                                       <span className="text-[10px] text-violet-300/80 flex-shrink-0 flex items-center gap-1"><Check className="h-3 w-3" /> Task created</span>
                                     ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => convertActionItem(m.id, a.id)}
-                                        className="flex items-center gap-1 text-[10px] text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:bg-violet-500/10 rounded px-1.5 py-0.5 flex-shrink-0 transition-colors"
-                                      >
-                                        <Plus className="h-3 w-3" /> Convert to task
-                                      </button>
+                                      <HoverTip tip="Create a task from this action item">
+                                        <button
+                                          type="button"
+                                          onClick={() => convertActionItem(m.id, a.id)}
+                                          className="flex items-center gap-1 text-[10px] text-violet-300 hover:text-violet-200 border border-violet-500/40 hover:bg-violet-500/10 rounded px-1.5 py-0.5 flex-shrink-0 transition-colors"
+                                        >
+                                          <Plus className="h-3 w-3" /> Convert to task
+                                        </button>
+                                      </HoverTip>
                                     ))}
                                   </div>
                                 );
@@ -357,7 +374,7 @@ export const MeetingsPanel = ({
                         )}
                       </div>
                     )}
-
+                    
                     {/* Transcript input */}
                     <div className="space-y-2">
                       <Label className="text-white/60 text-xs">
@@ -370,10 +387,12 @@ export const MeetingsPanel = ({
                         placeholder="Paste the meeting transcript or key discussion notes here…"
                         className="w-full rounded-md px-3 py-2 text-xs text-white placeholder:text-white/25 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500"
                       />
-                      <Button size="sm" onClick={() => submitTranscript(m.id)} disabled={notesLoading}
-                        className="bg-violet-600 hover:bg-violet-700 text-white">
-                        {notesLoading ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Processing…</> : <><FileText className="h-3.5 w-3.5 mr-1.5" />Generate Notes with AI</>}
-                      </Button>
+                      <HoverTip tip="after adding a transcript, extract summary and action items with AI">
+                        <Button size="sm" onClick={() => submitTranscript(m.id)} disabled={notesLoading}
+                          className="bg-violet-600 hover:bg-violet-700 text-white">
+                          {notesLoading ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Processing…</> : <><FileText className="h-3.5 w-3.5 mr-1.5" />Generate Notes with AI</>}
+                        </Button>
+                      </HoverTip>
                     </div>
                   </div>
                 )}
