@@ -590,6 +590,7 @@ urlpatterns = [
 
     # Operations Knowledge Q&A endpoints
     re_path(r'^operations/qa/ask/?$', operations_agent.ask_qa_question, name='operations_qa_ask'),  # POST
+    re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/replace-last-turn/?$', operations_agent.replace_last_qa_turn, name='operations_qa_replace_last_turn'),  # POST
     re_path(r'^operations/qa/chats/?$', operations_agent.list_qa_chats, name='operations_qa_list_chats'),  # GET
     re_path(r'^operations/qa/chats/create/?$', operations_agent.create_qa_chat, name='operations_qa_create_chat'),  # POST
     re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/?$', operations_agent.get_qa_chat, name='operations_qa_get_chat'),  # GET
