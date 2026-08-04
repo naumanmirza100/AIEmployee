@@ -10,6 +10,7 @@ import {
   Loader2, Workflow, CheckSquare, Square, ArrowRight, Lightbulb,
   AlertTriangle, ChevronDown, ChevronUp, Shield, Clock, ListChecks
 } from 'lucide-react';
+import PMEmptyState from './EmptyState';
 
 const PHASES = [
   { value: 'planning', label: 'Planning' },
@@ -21,7 +22,7 @@ const PHASES = [
   { value: 'maintenance', label: 'Maintenance' },
 ];
 
-export default function WorkflowSuggestionsView() {
+export default function WorkflowSuggestionsView({ onOpenPilot }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [checklistLoading, setChecklistLoading] = useState(false);
@@ -120,6 +121,16 @@ export default function WorkflowSuggestionsView() {
   const checklistProgress = totalChecklistItems > 0 ? Math.round((checkedCount / totalChecklistItems) * 100) : 0;
 
   const anyLoading = loading || checklistLoading || validateLoading;
+
+  if (projects.length === 0) {
+    return (
+      <PMEmptyState
+        title="Create a project first"
+        subtitle="Workflow & SOP suggests phase-by-phase checklists, best practices, and validations for a project. Start one in Pilot to unlock this tool."
+        onOpenPilot={onOpenPilot}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
