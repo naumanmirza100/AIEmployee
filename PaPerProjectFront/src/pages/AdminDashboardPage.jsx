@@ -16,6 +16,7 @@ import { useAgents } from '@/hooks/useAgents';
 import adminApiKeysService from '@/services/adminApiKeysService';
 import { aiPredictorService } from '@/services/aiPredictorService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import { AgentPlansTab } from '@/components/admin/AgentPlansTab';
 import { 
   Search, 
   Mail, 
@@ -770,7 +771,7 @@ const AdminDashboardPage = () => {
           </div>
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 gap-2 mb-6 h-auto p-2">
+            <TabsList className="grid w-full grid-cols-2 md:grid-cols-6 gap-2 mb-6 h-auto p-2">
               <TabsTrigger value="contact" className="flex items-center justify-center gap-2 py-2 sm:py-3">
                 <MessageSquare className="h-4 w-4 shrink-0" />
                 <span className="text-xs sm:text-sm truncate">Contact Messages</span>
@@ -790,6 +791,10 @@ const AdminDashboardPage = () => {
               <TabsTrigger value="agents" className="flex items-center justify-center gap-2 py-2 sm:py-3">
                 <BrainCircuit className="h-4 w-4 shrink-0" />
                 <span className="text-xs sm:text-sm truncate">AI Agents</span>
+              </TabsTrigger>
+              <TabsTrigger value="agent-plans" className="flex items-center justify-center gap-2 py-2 sm:py-3">
+                <DollarSign className="h-4 w-4 shrink-0" />
+                <span className="text-xs sm:text-sm truncate">Agent Plans</span>
               </TabsTrigger>
             </TabsList>
 
@@ -1818,6 +1823,12 @@ const AdminDashboardPage = () => {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            {/* Agent Plans — admin sets per-agent subscription durations + prices.
+                Frontend-only preview (persists to localStorage for now). */}
+            <TabsContent value="agent-plans" className="space-y-6">
+              <AgentPlansTab agents={agentCatalog} loading={false} />
             </TabsContent>
           </Tabs>
         </div>

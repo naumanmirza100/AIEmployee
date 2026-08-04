@@ -16,10 +16,11 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Megaphone, Send, Upload, CheckCircle, Sparkles, Mail, AlertTriangle } from 'lucide-react';
+import { Loader2, Megaphone, Send, Upload, CheckCircle, Sparkles, Mail, AlertTriangle, Eye, X } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 import AddEmailAccountModal from './AddEmailAccountModal';
+import { CampaignAIPreviewModal } from './CampaignAIPreviewModal';
 
 const ACTIONS = [
   { value: 'create_multi_channel', label: 'Create Email Campaign' },
@@ -28,6 +29,7 @@ const ACTIONS = [
 ];
 
 const DURATION_UNITS = [
+  { value: 'day', label: 'Day(s)' },
   { value: 'week', label: 'Week(s)' },
   { value: 'month', label: 'Month(s)' },
 ];
@@ -346,6 +348,17 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   const [durationUnit, setDurationUnit] = useState('week');
   const [autoFilling, setAutoFilling] = useState(false);
   const [fieldsRevealed, setFieldsRevealed] = useState(false);
+  // When the user hits "Generate with AI" without filling name/description,
+  // we pop this quick modal to collect them (+ duration) instead of erroring.
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  // After AI fills the fields we pop an attractive preview card summarising
+  // what it generated, with "Create" (submit now) or "Edit details" (dismiss
+  // and tweak the inline form below). Purely a presentation layer over the
+  // same state the inline form edits.
+  const [aiPreviewOpen, setAiPreviewOpen] = useState(false);
+  const [aiPreviewMode, setAiPreviewMode] = useState('preview'); // 'preview' | 'edit'
+  // Free-text steer the user can give the AI when regenerating from the modal.
+  const [aiInstructions, setAiInstructions] = useState('');
 
   const [emailAccounts, setEmailAccounts] = useState([]);
   const [emailAccountsLoading, setEmailAccountsLoading] = useState(true);
@@ -485,7 +498,10 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     if (Number.isFinite(amount) && amount > 0) {
       if (durationUnit === 'month') {
         end.setMonth(end.getMonth() + amount);
+      } else if (durationUnit === 'day') {
+        end.setDate(end.getDate() + amount);
       } else {
+        // week
         end.setDate(end.getDate() + amount * 7);
       }
     }
@@ -515,7 +531,9 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     }
 
     if (!name?.trim()) {
-      toast({ title: 'Campaign name required', variant: 'destructive' });
+      // No name yet — collect name/description/duration in a quick pop-up
+      // rather than blocking with an error toast.
+      setQuickCreateOpen(true);
       return;
     }
     const nameTrimmed = name.trim();
@@ -547,6 +565,8 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
           description: description?.trim() || '',
           start_date: start || '',
           end_date: end || '',
+          // Optional user steer typed in the modal's "Regenerate" box.
+          instructions: aiInstructions?.trim() || '',
         }
       );
       if (agentResult?.success === false) {
@@ -554,6 +574,9 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
         return;
       }
       const fields = agentResult?.suggested_fields || {};
+      // The user's typed text was a hint; the AI turns it into a proper
+      // campaign description, which now replaces it in the form.
+      if (fields.description) setDescription(fields.description);
       if (fields.target_leads != null) setTargetLeads(String(fields.target_leads));
       if (fields.target_conversions != null) setTargetConversions(String(fields.target_conversions));
       if (fields.age_range) setAgeRange(fields.age_range);
@@ -563,7 +586,11 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       if (fields.interests) setInterests(fields.interests);
       if (fields.language) setLanguage(fields.language);
       setFieldsRevealed(true);
-      toast({ title: 'Suggestions ready', description: 'Review and edit the details below, then continue.' });
+      // Surface the generated details in a preview card first. The inline
+      // form is still populated underneath for anyone who hits "Edit details".
+      setAiPreviewMode('preview');
+      setAiPreviewOpen(true);
+      toast({ title: 'Campaign drafted', description: 'Review what the AI generated, then create or edit.' });
     } catch (err) {
       const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block;
       const msg = isHardBlock
@@ -574,6 +601,61 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     } finally {
       setAutoFilling(false);
     }
+  };
+
+  // From the AI preview card: close it and run the normal create flow. We
+  // pass a no-op event so handleSubmit's e.preventDefault() is safe.
+  const handleCreateFromPreview = () => {
+    setAiPreviewOpen(false);
+    handleSubmit({ preventDefault: () => {} });
+  };
+
+  // "Regenerate" inside the preview modal switches it to EDIT mode so the user
+  // can tweak the fields right there, then hit "Regenerate with AI" (below) to
+  // produce a fresh draft — all without leaving the pop-up.
+  const handleRegenerateFromPreview = () => {
+    setAiPreviewMode('edit');
+  };
+
+  // Runs the AI draft again from the current (possibly edited) name/description
+  // and keeps the modal open, landing back on preview once done.
+  const handleRegenerateAI = async () => {
+    await handleAutoFill();
+    // handleAutoFill already flips the modal to preview mode + keeps it open.
+  };
+
+  // Clear every campaign field back to blank and hide the AI "Campaign
+  // details" section — called after a successful create so the form is fresh
+  // for the next campaign.
+  const resetCampaignForm = () => {
+    setName('');
+    setDescription('');
+    setTargetLeads('');
+    setTargetConversions('');
+    setAgeRange('');
+    setLocation('');
+    setIndustry('');
+    setCompanySize('__any__');
+    setInterests('');
+    setLanguage('');
+    setStartDate('');
+    setEndDate('');
+    setDurationAmount('1');
+    setDurationUnit('week');
+    setLeadsFile(null);
+    setFieldsRevealed(false);
+    setAiPreviewOpen(false);
+    setAiInstructions('');
+  };
+
+  // From the quick-create pop-up: validate name, close, then run auto-fill.
+  const handleQuickGenerate = () => {
+    if (!name?.trim()) {
+      toast({ title: 'Campaign name required', description: 'Give the campaign a name to continue.', variant: 'destructive' });
+      return;
+    }
+    setQuickCreateOpen(false);
+    handleAutoFill();
   };
 
   const handleSubmit = async (e) => {
@@ -648,7 +730,12 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       }
       setResult(agentResult);
       if (action === 'design') setDesignReady(true);
-      if (action === 'create_multi_channel' && onCampaignCreated) onCampaignCreated();
+      if (action === 'create_multi_channel') {
+        if (onCampaignCreated) onCampaignCreated();
+        // Campaign created — clear the whole form so the "Campaign details"
+        // section collapses and every text box resets, ready for the next one.
+        resetCampaignForm();
+      }
       toast({ title: 'Success', description: agentResult?.message || 'Done' });
     } catch (err) {
       const isHardBlock = err?.status === 402 || err?.status === 403 || err?.data?.hard_block;
@@ -780,6 +867,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                         const end = new Date(today);
                         if (Number.isFinite(amount) && amount > 0) {
                           if (v === 'month') end.setMonth(end.getMonth() + amount);
+                          else if (v === 'day') end.setDate(end.getDate() + amount);
                           else end.setDate(end.getDate() + amount * 7);
                         }
                         setStartDate(formatDateLocal(today));
@@ -844,10 +932,12 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 />
               </div>
               <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="camp-desc" className="text-white/90">Description</Label>
+                <Label htmlFor="camp-desc" className="text-white/90">
+                  What's this campaign about? <span className="text-white/40 text-xs">(a brief for the AI)</span>
+                </Label>
                 <Textarea
                   id="camp-desc"
-                  placeholder="Goals and key messaging..."
+                  placeholder="A few words about goals, offer, or audience — the AI turns this into a polished description."
                   value={description}
                   onChange={(e) => { setDescription(e.target.value); setFieldsRevealed(false); }}
                   rows={2}
@@ -876,10 +966,96 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
           </div>
 
           {fieldsRevealed && (
-            <div className="space-y-5 rounded-xl border border-violet-400/20 bg-violet-500/[0.06] p-4">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-violet-400" />
-                <span className="text-sm font-medium text-white/90">Campaign details</span>
+            <div className="relative space-y-5 rounded-xl border border-violet-400/20 bg-violet-500/[0.06] p-4">
+              {/* Discard the AI draft — pinned to the section's top-right
+                  corner. Hides the section and resets all generated fields. */}
+              <HoverTip tip="Discard these details and reset" className="absolute right-2 top-2 z-10">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={resetCampaignForm}
+                  className="h-7 w-7 rounded-full text-white/50 hover:text-rose-300 hover:bg-rose-500/10"
+                  aria-label="Discard campaign details"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </HoverTip>
+              <div className="flex items-center justify-between gap-2 flex-wrap pr-8">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-violet-400" />
+                  <span className="text-sm font-medium text-white/90">Campaign details</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* View the drafted details as an attractive card/preview.
+                      (Regenerate lives inside that card's Edit mode.) */}
+                  <HoverTip tip="Preview these details as a card">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => { setAiPreviewMode('preview'); setAiPreviewOpen(true); }}
+                      className="gap-1.5 bg-violet-600 hover:bg-violet-700 text-white border-0 shadow-md shadow-violet-600/20"
+                    >
+                      <Eye className="h-4 w-4" /> View in card form
+                    </Button>
+                  </HoverTip>
+                 
+
+                           {created ? (
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.08] p-4">
+              <div className="flex items-center gap-2 text-emerald-400">
+                <CheckCircle className="h-5 w-5 shrink-0" />
+                <span className="font-medium">Created.</span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setResult(null)}
+                className="h-7 w-7 rounded-full text-emerald-300/70 hover:text-emerald-200 hover:bg-emerald-500/10"
+                aria-label="Dismiss"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : designReady ? (
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.08] p-4">
+              <div className="flex flex-col items-start gap-2">
+                <div className="flex items-center gap-2 text-emerald-400">
+                  <CheckCircle className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">Campaign design ready</span>
+                </div>
+                <p className="text-sm text-white/60">Use the form below to create, launch, or schedule this campaign.</p>
+              </div>
+              <HoverTip tip="click to create a new draft campaign record with the design suggestions pre-filled">
+              <Button
+                type="button"
+                className="bg-violet-600 hover:bg-violet-700 text-white border-0"
+                onClick={() => useDesignForAction('create_multi_channel')}
+              >
+                Create Campaign
+              </Button>
+              </HoverTip>
+            </div>
+          ) : fieldsRevealed ? (
+            <div className="flex justify-end">
+              <Button type="submit" className="bg-violet-600 hover:bg-violet-700 text-white border-0" disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-2" />
+                    Create Campaign
+                  </>
+                )}
+              </Button>
+            </div>
+          ) : null}
+
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -989,58 +1165,26 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
             </div>
           )}
 
-          {created ? (
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.08] p-4">
-              <div className="flex items-center gap-2 text-emerald-400">
-                <CheckCircle className="h-5 w-5 shrink-0" />
-                <span className="font-medium">Created.</span>
-              </div>
-              {/* Launch button removed — launching is no longer part of this form's flow. */}
-            </div>
-          ) : designReady ? (
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.08] p-4">
-              <div className="flex flex-col items-start gap-2">
-                <div className="flex items-center gap-2 text-emerald-400">
-                  <CheckCircle className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Campaign design ready</span>
-                </div>
-                <p className="text-sm text-white/60">Use the form below to create, launch, or schedule this campaign.</p>
-              </div>
-              <HoverTip tip="click to create a new draft campaign record with the design suggestions pre-filled">
-              <Button
-                type="button"
-                className="bg-violet-600 hover:bg-violet-700 text-white border-0"
-                onClick={() => useDesignForAction('create_multi_channel')}
-              >
-                Create Campaign
-              </Button>
-              </HoverTip>
-            </div>
-          ) : fieldsRevealed ? (
-            <div className="flex justify-end">
-              <Button type="submit" className="bg-violet-600 hover:bg-violet-700 text-white border-0" disabled={loading}>
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4 mr-2" />
-                    Create Campaign
-                  </>
-                )}
-              </Button>
-            </div>
-          ) : null}
+ 
 
         </form>
 
         {/* {error && <p className="text-sm text-destructive">{error}</p>} */}
 
         {result && (
-          <div className="rounded-lg border border-border bg-muted/30 p-4">
-            <h3 className="text-lg font-bold mb-3 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">
+          <div className="relative rounded-lg border border-border bg-muted/30 p-4">
+            {/* Dismiss the created/result panel. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => { setResult(null); setDesignReady(false); }}
+              className="absolute right-2 top-2 h-7 w-7 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              aria-label="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <h3 className="text-lg font-bold mb-3 pr-8 text-violet-600 dark:text-violet-400 border-b border-violet-200 dark:border-violet-800 pb-2">
               Campaign created
             </h3>
             {action === 'design' && result.campaign_design?.raw_design && (
@@ -1095,6 +1239,111 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
             if (created?.account_id) setEmailAccountId(String(created.account_id));
           });
         }}
+      />
+
+      {/* Quick-create pop-up — shown when the user hits Generate with AI
+          before filling the name. Collects name, a short brief, and the
+          duration (with a custom "days" option), then runs the AI draft. */}
+      <Dialog open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-violet-500" />
+              Create campaign with AI
+            </DialogTitle>
+            <DialogDescription>
+              Tell us the basics and the AI will draft the rest — targeting, audience, and a polished description.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-sm">Campaign name <span className="text-destructive">*</span></Label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Summer Sale Outreach"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-sm">What's it about? <span className="text-muted-foreground text-xs">(a brief for the AI)</span></Label>
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={2}
+                placeholder="A few words about the goal, offer, or audience — the AI turns this into a polished description."
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-sm">Duration</Label>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={durationAmount}
+                  onChange={(e) => setDurationAmount(e.target.value)}
+                  className="w-28 h-10 shrink-0"
+                  placeholder="1"
+                />
+                <Select value={durationUnit} onValueChange={setDurationUnit}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DURATION_UNITS.map((u) => (
+                      <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-[11px] text-muted-foreground">Pick “Day(s)” for a custom number of days.</p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setQuickCreateOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleQuickGenerate}
+              disabled={autoFilling}
+              className="bg-violet-600 hover:bg-violet-700 text-white border-0"
+            >
+              {autoFilling ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+              Generate with AI
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI campaign preview + inline edit — wide modal with Preview/Edit
+          modes. Edits the same state the page's inline form uses, so both
+          stay in sync. (See CampaignAIPreviewModal.) */}
+      <CampaignAIPreviewModal
+        open={aiPreviewOpen}
+        onOpenChange={setAiPreviewOpen}
+        mode={aiPreviewMode}
+        onModeChange={setAiPreviewMode}
+        onCreate={handleCreateFromPreview}
+        creating={loading}
+        onRegenerate={handleRegenerateFromPreview}
+        onRegenerateAI={handleRegenerateAI}
+        regenerating={autoFilling}
+        instructions={aiInstructions}
+        setInstructions={setAiInstructions}
+        name={name} setName={setName}
+        description={description} setDescription={setDescription}
+        targetLeads={targetLeads} setTargetLeads={setTargetLeads}
+        targetConversions={targetConversions} setTargetConversions={setTargetConversions}
+        ageRange={ageRange} setAgeRange={setAgeRange}
+        location={location} setLocation={setLocation}
+        industry={industry} setIndustry={setIndustry}
+        companySize={companySize} setCompanySize={setCompanySize}
+        interests={interests} setInterests={setInterests}
+        language={language} setLanguage={setLanguage}
+        startDate={startDate} setStartDate={setStartDate}
+        endDate={endDate} setEndDate={setEndDate}
       />
     </Card>
   );
