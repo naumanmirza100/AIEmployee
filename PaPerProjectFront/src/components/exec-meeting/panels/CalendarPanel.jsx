@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { CARD_STYLE } from '../shared';
 import execMeetingService from '@/services/execMeetingService';
+import HoverTip from '@/components/common/HoverTip';
 
 const WORKLOAD_COLORS = {
   light:    'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
@@ -37,21 +38,24 @@ export const CalendarPanel = ({
           </div>
           <div className="flex items-center gap-2">
             {weekPlan && (
-              <Button size="sm" variant="ghost" onClick={async () => {
-                setWeekPlanLoading(true);
-                try {
-                  const today = new Date();
-                  const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-                  const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart, work_start_hour: workStartHour, work_end_hour: workEndHour });
-                  setWeekPlan(res.plan || res);
-                  toast({ title: 'Plan refreshed!' });
-                } catch (err) {
-                  toast({ title: 'Refresh failed', description: err.message, variant: 'destructive' });
-                } finally { setWeekPlanLoading(false); }
-              }} disabled={weekPlanLoading} className="text-white/40 hover:text-white">
-                <RefreshCw className={`h-3.5 w-3.5 ${weekPlanLoading ? 'animate-spin' : ''}`} />
-              </Button>
+              <HoverTip tip="Regenerate this week's plan">
+                <Button size="sm" variant="ghost" onClick={async () => {
+                  setWeekPlanLoading(true);
+                  try {
+                    const today = new Date();
+                    const weekStart = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+                    const res = await execMeetingService.planWeek({ include_past_tasks: includePastTasks, week_start: weekStart, work_start_hour: workStartHour, work_end_hour: workEndHour });
+                    setWeekPlan(res.plan || res);
+                    toast({ title: 'Plan refreshed!' });
+                  } catch (err) {
+                    toast({ title: 'Refresh failed', description: err.message, variant: 'destructive' });
+                  } finally { setWeekPlanLoading(false); }
+                }} disabled={weekPlanLoading} className="text-white/40 hover:text-white">
+                  <RefreshCw className={`h-3.5 w-3.5 ${weekPlanLoading ? 'animate-spin' : ''}`} />
+                </Button>
+              </HoverTip>
             )}
+            <HoverTip tip="Build an AI schedule for this week">
             <Button onClick={async () => {
               setWeekPlanLoading(true);
               try {
@@ -76,6 +80,7 @@ export const CalendarPanel = ({
               {weekPlanLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarDays className="h-4 w-4 mr-2" />}
               {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
             </Button>
+            </HoverTip>
           </div>
         </div>
 
@@ -158,6 +163,7 @@ export const CalendarPanel = ({
         <div className="space-y-4">
           {/* Download button */}
           <div className="flex justify-end">
+            <HoverTip tip="Download this week's plan as PDF">
             <Button
               size="sm"
               variant="outline"
@@ -372,6 +378,7 @@ export const CalendarPanel = ({
             >
               <Download className="h-4 w-4" /> Download PDF
             </Button>
+            </HoverTip>
           </div>
 
           {/* Summary + recommendations */}

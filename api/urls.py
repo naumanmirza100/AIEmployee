@@ -580,6 +580,7 @@ urlpatterns = [
     re_path(r'^operations/documents/(?P<document_id>\d+)/status/?$', operations_agent.get_document_status, name='operations_document_status'),  # GET
     re_path(r'^operations/documents/?$', operations_agent.list_documents, name='operations_list_documents'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/?$', operations_agent.get_document, name='operations_get_document'),  # GET
+    re_path(r'^operations/documents/(?P<document_id>\d+)/reprocess/?$', operations_agent.reprocess_document, name='operations_reprocess_document'),  # POST
     re_path(r'^operations/documents/(?P<document_id>\d+)/delete/?$', operations_agent.delete_document, name='operations_delete_document'),  # DELETE
     re_path(r'^operations/summaries/upload/?$', operations_agent.upload_and_summarize, name='operations_upload_and_summarize'),  # POST
     re_path(r'^operations/summaries/(?P<summary_id>\d+)/status/?$', operations_agent.get_summary_status, name='operations_summary_status'),  # GET
@@ -589,6 +590,7 @@ urlpatterns = [
 
     # Operations Knowledge Q&A endpoints
     re_path(r'^operations/qa/ask/?$', operations_agent.ask_qa_question, name='operations_qa_ask'),  # POST
+    re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/replace-last-turn/?$', operations_agent.replace_last_qa_turn, name='operations_qa_replace_last_turn'),  # POST
     re_path(r'^operations/qa/chats/?$', operations_agent.list_qa_chats, name='operations_qa_list_chats'),  # GET
     re_path(r'^operations/qa/chats/create/?$', operations_agent.create_qa_chat, name='operations_qa_create_chat'),  # POST
     re_path(r'^operations/qa/chats/(?P<chat_id>\d+)/?$', operations_agent.get_qa_chat, name='operations_qa_get_chat'),  # GET
@@ -891,6 +893,8 @@ urlpatterns = [
     # Meetings
     re_path(r'^exec-meeting/ai/schedule/?$', exec_meeting_api.schedule_meeting_ai, name='exec_schedule_meeting_ai'),  # POST
     re_path(r'^exec-meeting/ai/generate-description/?$', exec_meeting_api.generate_meeting_description, name='exec_generate_meeting_description'),  # POST
+    re_path(r'^exec-meeting/meetings/ai/parse-prompt/?$', exec_meeting_api.meeting_ai_parse, name='exec_meeting_ai_parse'),  # POST — "Create with AI"
+    re_path(r'^exec-meeting/tasks/ai/parse-prompt/?$', exec_meeting_api.task_ai_parse, name='exec_task_ai_parse'),  # POST — "Create with AI"
     re_path(r'^exec-meeting/meetings/?$', exec_meeting_api.meeting_list, name='exec_meeting_list'),  # GET, POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/?$', exec_meeting_api.meeting_detail, name='exec_meeting_detail'),  # GET, PATCH, DELETE
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST

@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from django.db.models import Count, Avg, Max, Min, Q
+from django.db.models import Count, Avg, Max, Min
 
 from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.models import (
@@ -330,6 +330,12 @@ _NON_SUBJECT_WORDS = {
 def _shorten(text: str, limit: int) -> str:
     """Trim to a word boundary and say so, instead of cutting mid-word.
 
+    Emits an EXPLICIT, machine-readable truncation marker stating how many
+    characters were dropped. This matters for grounding: without it the model
+    treats a silently-cut field as complete and confidently answers "there is no
+    mention of X" when X sat just past the cut. The marker (paired with the
+    system-prompt rule) tells the model the field is incomplete, not absent.
+
     Used in multi-item listings only; single-item detail views show the full text.
     """
     text = (text or '').strip()
@@ -338,7 +344,12 @@ def _shorten(text: str, limit: int) -> str:
     cut = text[:limit]
     if ' ' in cut:
         cut = cut[:cut.rfind(' ')]
-    return f"{cut.rstrip()}… _(ask about this job for the full text)_"
+    omitted = len(text) - len(cut.rstrip())
+    return (
+        f"{cut.rstrip()} "
+        f"[TRUNCATED — {omitted} more characters omitted; this field is INCOMPLETE, "
+        f"not the full content. Ask about this specific job to see the full text.]"
+    )
 
 
 # "…django job not mern", "all jobs except MERN" — whatever follows these is what
@@ -369,35 +380,6 @@ def _question_subjects(question: str, drop_excluded: bool = True) -> set:
     if drop_excluded:
         subjects -= _excluded_subjects(question)
     return subjects
-
-
-def _resolve_subject(question: str, known_titles: List[str], known_names: List[str]) -> Dict[str, Any]:
-    """Match the question against the company's real jobs and candidates.
-
-    This replaces guessing from hardcoded keyword lists: the database is the only
-    source of truth for what jobs and people exist, so a new technology or a new
-    hire needs no code change. Returns which subjects matched and — importantly —
-    which named subjects matched nothing, so the caller can say "no such job"
-    instead of answering with whatever unrelated records it happens to hold.
-    """
-    subjects = _question_subjects(question)
-    if not subjects:
-        return {'matched_jobs': [], 'matched_names': [], 'unmatched': []}
-
-    # Titles and names are plain labels, not questions — never strip "negations" there.
-    title_words = {w for t in known_titles for w in _question_subjects(t, drop_excluded=False)}
-    name_words = {w for n in known_names for w in _question_subjects(n, drop_excluded=False)}
-
-    matched_jobs = sorted(subjects & title_words)
-    matched_names = sorted(subjects & name_words)
-    # A subject that matches neither a job title nor a person is only interesting
-    # when it looks like the question's actual topic, not incidental prose.
-    unmatched = sorted(subjects - title_words - name_words)
-    return {
-        'matched_jobs': matched_jobs,
-        'matched_names': matched_names,
-        'unmatched': unmatched,
-    }
 
 
 # Where a job name actually appears in a question: "…for Laravel", "Laravel job",
@@ -499,18 +481,6 @@ def _is_comprehensive_answer(text: str) -> bool:
     return False
 
 
-def _is_boilerplate(text: str) -> bool:
-    """True if text looks like generic Overview/Settings boilerplate we should skip."""
-    t = text.lower()
-    if "qualification settings" in t and "interview threshold" in t:
-        return True
-    if "overview" in t and "total jobs" in t and len(text) < 400:
-        return True
-    if "no jobs or candidates" in t or "no jobs, candidates" in t:
-        return True
-    return False
-
-
 def _get_parsed_name(parsed: Optional[Dict]) -> str:
     if not isinstance(parsed, dict):
         return "Candidate"
@@ -536,6 +506,12 @@ RULES:
 1. When asked for "details", "description", "full info", "everything", or "all" — provide COMPLETE information. Never truncate or summarise when the user wants full details.
 2. For simple count questions (e.g. "how many jobs?") — give a short direct answer.
 3. Use ONLY data provided in the context. Never invent names, numbers, or descriptions.
+3a. TRUNCATION IS NOT ABSENCE. A field ending with a "[TRUNCATED — N more characters omitted …]"
+   marker is INCOMPLETE, not empty. If the user asks about something and you do NOT see it in a
+   field that carries this marker, you MUST NOT say "there is no mention of it" or "it is not in the
+   requirements." Instead say the field was truncated and the detail may be in the omitted part, and
+   tell the user to ask about that specific job to load its full text. Only state that something is
+   absent when the relevant field is present IN FULL (no truncation marker) and still does not contain it.
 4. If a field is available in the context (description, requirements, location, department, etc.) — include it in your answer when relevant.
 5. For job details — always show: title, status, location, department, type, description, requirements, candidate count, interview count.
 6. For candidate details — always show: name, score, decision, email if available, summary if available.
@@ -1040,8 +1016,12 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                 desc = j.get("description") or ""
                 req = j.get("requirements") or ""
             else:
-                desc = _shorten(j.get("description") or "", 400)
-                req = _shorten(j.get("requirements") or "", 300)
+                # Generous per-field budget so a requirement listed past the old
+                # 300-char cut (e.g. "Cobol-on-Wheelbarrow") still reaches the LLM.
+                # When a field genuinely exceeds this, _shorten stamps an explicit
+                # [TRUNCATED …] marker so the model never mistakes a cut for absence.
+                desc = _shorten(j.get("description") or "", 900)
+                req = _shorten(j.get("requirements") or "", 900)
             ss = j.get("score_stats", {})
 
             lines.append(f"\n=== JOB: {title} (ID:{aid}) ===")
@@ -1632,9 +1612,9 @@ Be practical and specific. Give actionable lists of questions recruiters can use
                     jqc = j.get("qualification_counts", {})
                     answer += f"- **Decisions:** INTERVIEW={jqc.get('INTERVIEW',0)}, HOLD={jqc.get('HOLD',0)}, REJECT={jqc.get('REJECT',0)}\n"
                     if j.get("description"):
-                        answer += f"- **Description:** {_shorten(j['description'], 600)}\n"
+                        answer += f"- **Description:** {_shorten(j['description'], 800)}\n"
                     if j.get("requirements"):
-                        answer += f"- **Requirements:** {_shorten(j['requirements'], 400)}\n"
+                        answer += f"- **Requirements:** {_shorten(j['requirements'], 800)}\n"
                     answer += "\n"
                 return answer.strip()
             else:

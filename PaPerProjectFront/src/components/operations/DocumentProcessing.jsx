@@ -40,6 +40,29 @@ const DOC_TYPE_COLORS = {
   spreadsheet: '#14b8a6', presentation: '#f97316', policy: '#ef4444', manual: '#6366f1', other: '#6b7280',
 };
 
+// Prefer the precise processing_status; fall back to is_processed for old rows.
+const getDocStatus = (doc) => {
+  const s = doc.processing_status;
+  if (s === 'ready' || (!s && doc.is_processed)) return 'ready';
+  if (s === 'failed') return 'failed';
+  if (s === 'processing') return 'processing';
+  return 'pending';
+};
+
+const StatusPill = ({ doc }) => {
+  const s = getDocStatus(doc);
+  if (s === 'ready') {
+    return <span className="flex items-center gap-1 text-[10px] text-emerald-400/80"><CheckCircle2 className="h-3 w-3" /> Processed</span>;
+  }
+  if (s === 'failed') {
+    return <span className="flex items-center gap-1 text-[10px] text-red-400/90"><AlertCircle className="h-3 w-3" /> Failed</span>;
+  }
+  if (s === 'processing') {
+    return <span className="flex items-center gap-1 text-[10px] text-amber-400/80"><Loader2 className="h-3 w-3 animate-spin" /> Processing</span>;
+  }
+  return <span className="flex items-center gap-1 text-[10px] text-amber-400/80"><Clock className="h-3 w-3" /> Pending</span>;
+};
+
 const formatFileSize = (bytes) => {
   if (!bytes) return '0 B';
   const k = 1024;
@@ -118,7 +141,6 @@ const DocumentProcessing = () => {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadTags, setUploadTags] = useState('');
-  const [uploading, setUploading] = useState(false);
   // Id of a just-uploaded document — we point an arrow + banner at its
   // "view" action so the user opens its details.
   const [highlightDocId, setHighlightDocId] = useState(null);
@@ -190,6 +212,26 @@ const DocumentProcessing = () => {
     setUploadFile(null);
     setUploadTitle('');
     setUploadTags('');
+  };
+
+  // ─── Retry a failed/stuck document ───────────────────────────────────
+  const [retryingId, setRetryingId] = useState(null);
+
+  const handleRetry = async (doc) => {
+    try {
+      setRetryingId(doc.id);
+      await operationsService.reprocessDocument(doc.id);
+      toast({ title: 'Reprocessing', description: `"${doc.title}" is being reprocessed.` });
+      fetchDocuments();
+    } catch (e) {
+      toast({
+        title: 'Could not reprocess',
+        description: e?.message || 'This document may need to be re-uploaded.',
+        variant: 'destructive',
+      });
+    } finally {
+      setRetryingId(null);
+    }
   };
 
   // ─── Delete (confirm first — deleting a doc also drops its chunks) ─────
@@ -360,11 +402,7 @@ const DocumentProcessing = () => {
                               style={{ borderColor: `${dtColor}50`, color: dtColor, background: `${dtColor}12` }}>
                               {doc.document_type}
                             </Badge>
-                            {doc.is_processed ? (
-                              <span className="flex items-center gap-1 text-[10px] text-emerald-400/80"><CheckCircle2 className="h-3 w-3" /> Processed</span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-[10px] text-amber-400/80"><Clock className="h-3 w-3" /> Pending</span>
-                            )}
+                            <StatusPill doc={doc} />
                           </div>
                           {hasSummary && (
                             <p className="text-xs text-white/35 line-clamp-2 mb-2 leading-relaxed max-w-xl">{doc.summary}</p>
@@ -396,6 +434,14 @@ const DocumentProcessing = () => {
                             onClick={() => { setHighlightDocId(null); navigate(`/operations/documents/${doc.id}`); }}>
                             <Eye className="h-3.5 w-3.5" />View
                           </Button>
+                          {getDocStatus(doc) === 'failed' && (
+                            <Button variant="ghost" size="sm"
+                              className="h-8 px-3 rounded-lg gap-1.5 text-xs text-amber-400 hover:bg-amber-500/10"
+                              onClick={() => handleRetry(doc)} disabled={retryingId === doc.id}>
+                              {retryingId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                              Retry
+                            </Button>
+                          )}
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10"
                             onClick={() => handleDelete(doc)} disabled={deletingId === doc.id}>
                             {deletingId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -475,6 +521,12 @@ const DocumentProcessing = () => {
                                 onClick={() => { setHighlightDocId(null); navigate(`/operations/documents/${doc.id}`); }}>
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
+                              {getDocStatus(doc) === 'failed' && (
+                                <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-amber-400 hover:bg-amber-500/10"
+                                  onClick={() => handleRetry(doc)} disabled={retryingId === doc.id} title="Retry processing">
+                                  {retryingId === doc.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                                </Button>
+                              )}
                               <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/40 hover:text-red-400 hover:bg-red-500/10"
                                 onClick={() => handleDelete(doc)} disabled={deletingId === doc.id}>
                                 {deletingId === doc.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
@@ -623,18 +675,14 @@ const DocumentProcessing = () => {
             </Button>
             <Button
               onClick={handleUpload}
-              disabled={uploading || !uploadFile}
+              disabled={!uploadFile}
               className="rounded-xl border-0"
               style={{
-                background: uploading ? 'rgba(245,158,11,0.3)' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
                 color: '#fff',
               }}
             >
-              {uploading ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</>
-              ) : (
-                <><Sparkles className="mr-2 h-4 w-4" />Upload & Analyze</>
-              )}
+              <Sparkles className="mr-2 h-4 w-4" />Upload & Analyze
             </Button>
           </DialogFooter>
         </DialogContent>

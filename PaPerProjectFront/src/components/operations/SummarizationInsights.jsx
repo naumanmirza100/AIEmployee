@@ -50,7 +50,6 @@ const SummarizationInsights = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [viewMode, setViewMode] = useState('table');
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -123,7 +122,6 @@ const SummarizationInsights = () => {
 
   // Close modal
   const closeModal = () => {
-    if (uploading) return;
     setShowUploadModal(false);
     setSelectedFile(null);
   };
@@ -419,7 +417,6 @@ const SummarizationInsights = () => {
                   size="icon"
                   className="h-8 w-8 rounded-lg text-white/40 hover:text-white"
                   onClick={closeModal}
-                  disabled={uploading}
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -434,7 +431,6 @@ const SummarizationInsights = () => {
                   className="hidden"
                   accept=".pdf,.docx,.xlsx,.csv,.pptx,.txt,.md"
                   onChange={handleFileChange}
-                  disabled={uploading}
                 />
 
                 {/* Drop/Select Area */}
@@ -471,37 +467,15 @@ const SummarizationInsights = () => {
                         <p className="text-sm font-semibold text-white truncate">{selectedFile.name}</p>
                         <p className="text-[11px] text-white/30 mt-0.5">{formatFileSize(selectedFile.size)}</p>
                       </div>
-                      {!uploading && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 rounded-lg text-white/40 hover:text-white"
-                          onClick={() => setSelectedFile(null)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-lg text-white/40 hover:text-white"
+                        onClick={() => setSelectedFile(null)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
-
-                    {/* Uploading Progress */}
-                    {uploading && (
-                      <div className="mt-4 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
-                          <span className="text-xs text-amber-400 font-medium">Processing & Summarizing...</span>
-                        </div>
-                        <p className="text-[10px] text-white/25">Extracting text, generating summary & insights</p>
-                        <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
-                          <motion.div
-                            className="h-full rounded-full"
-                            style={{ background: 'linear-gradient(90deg, #f59e0b, #f97316)' }}
-                            initial={{ width: '5%' }}
-                            animate={{ width: '85%' }}
-                            transition={{ duration: 15, ease: 'easeOut' }}
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
@@ -513,12 +487,11 @@ const SummarizationInsights = () => {
                   size="sm"
                   className="text-xs text-white/40 hover:text-white"
                   onClick={closeModal}
-                  disabled={uploading}
                 >
                   Cancel
                 </Button>
                 <div className="flex items-center gap-2">
-                  {selectedFile && !uploading && (
+                  {selectedFile && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -533,19 +506,10 @@ const SummarizationInsights = () => {
                     className="gap-2 text-xs font-semibold"
                     style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff' }}
                     onClick={handleUpload}
-                    disabled={!selectedFile || uploading}
+                    disabled={!selectedFile}
                   >
-                    {uploading ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Summarize
-                      </>
-                    )}
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Summarize
                   </Button>
                 </div>
               </div>

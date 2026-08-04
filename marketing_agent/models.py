@@ -672,8 +672,17 @@ class EmailAccount(models.Model):
     imap_password = models.CharField(max_length=500, blank=True, help_text='IMAP password')
     enable_imap_sync = models.BooleanField(default=False, help_text='Enable automatic IMAP sync for reply detection')
     imap_sync_days = models.PositiveIntegerField(
-        default=30,
-        help_text='How many days of mail to pull on each IMAP sync. Used by the Reply Draft Agent inbox view.',
+        default=90,
+        help_text='How many days of mail to pull on each IMAP sync. Used by the Reply Draft Agent inbox view. One of 30 / 60 / 90.',
+    )
+    # Per-account cap on how many messages a single folder sweep fetches+stores.
+    # Chosen by the user at connect time (50 / 100 / 200, default 200). Keeps a
+    # busy mailbox from dumping thousands of rows into the Reply Draft inbox,
+    # which slowed the sync and choked the page's list render. Enforced in
+    # marketing_agent/management/commands/sync_inbox.py (_process_folder).
+    imap_sync_email_limit = models.PositiveIntegerField(
+        default=200,
+        help_text='Max emails to fetch per folder sweep on each IMAP sync (50 / 100 / 200).',
     )
 
     # Status

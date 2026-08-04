@@ -127,6 +127,34 @@ def _serialize_reply(r, *, include_body=False):
 
 _CID_REF_RE = re.compile(r'''(["'])\s*cid:\s*([^"'>\s]+)\s*\1''', re.IGNORECASE)
 
+# Matches a whole <img ...> tag so we can strip inline images out of the
+# body once they're promoted to the downloadable attachment list (we show
+# each image in exactly one place — the attachment list — not both).
+_IMG_TAG_RE = re.compile(r'<img\b[^>]*>', re.IGNORECASE)
+
+
+def _strip_inline_cid_images(html, inline_cids):
+    """Remove ``<img src="cid:…">`` tags for the given set of content-ids.
+
+    ``inline_cids`` is the set of (lowercased, bracket-stripped) content-ids
+    that are ALSO listed as downloadable attachments. Dropping their <img>
+    tags from the body means the image renders once (in the attachment
+    list) instead of twice. Any other <img> (remote images, cid: refs we
+    aren't promoting) is left untouched.
+    """
+    if not html or '<img' not in html.lower() or not inline_cids:
+        return html
+
+    def _drop(match):
+        tag = match.group(0)
+        cid_match = re.search(r'cid:\s*([^"\'>\s]+)', tag, re.IGNORECASE)
+        if not cid_match:
+            return tag
+        cid = cid_match.group(1).strip().lstrip('<').rstrip('>').lower()
+        return '' if cid in inline_cids else tag
+
+    return _IMG_TAG_RE.sub(_drop, html)
+
 
 # MIME types that are technical bounce/DSN metadata and shouldn't appear
 # as user-facing attachments. Bounce emails ("Delivery Status Notification
@@ -324,27 +352,29 @@ def _serialize_inbox_email(m, *, include_body=False):
         out['attachments_fetched'] = bool(getattr(m, 'attachments_fetched', True))
 
         # Pull attachments once — used both for the downloadable list and
-        # for cid: rewrite below. Inline parts are filtered out of the user-
-        # visible list but kept available to the rewriter so embedded images
-        # actually load.
+        # for the body_html cid handling below. Inline IMAGE parts are
+        # promoted into the visible list and stripped from the body; other
+        # inline parts stay hidden but available to the cid: rewriter.
         all_attachments = []
         try:
             all_attachments = list(m.attachments.all())
         except Exception:
             all_attachments = []
 
-        # Rewrite cid: refs inside body_html so inline images served from
-        # our attachment endpoint actually render. Falls through cleanly
-        # on emails without inline parts.
-        if body_html and all_attachments:
-            body_html = _rewrite_cid_refs(body_html, all_attachments)
-
-        out['body_html'] = body_html
-
         is_bounce = _is_bounce_email(m)
         attachments = []
+        # Content-ids of inline images we're promoting into the attachment
+        # list — their <img> tags get stripped from the body below so each
+        # image shows in exactly one place.
+        promoted_inline_cids = set()
         for att in all_attachments:
-            if att.is_inline:
+            # Inline parts (cid: images embedded in the body) are surfaced in
+            # the attachment list as downloadable files. Once promoted here
+            # their <img> is removed from body_html, so the image appears
+            # only in the list, not twice. Non-image inline parts (tracking
+            # pixels, signature glyphs) stay hidden — only promote inline
+            # parts whose content-type is an actual image.
+            if att.is_inline and not (att.content_type or '').lower().startswith('image/'):
                 continue
             # Hide bounce/DSN technical parts — rfc822-headers, delivery-
             # status, tiny status icons. MIME plumbing the email client
@@ -353,6 +383,10 @@ def _serialize_inbox_email(m, *, include_body=False):
             # bottom (icon.png + delivery-status + rfc822-headers).
             if _is_bounce_metadata(att, is_bounce_email=is_bounce):
                 continue
+            if att.is_inline:
+                cid = (att.content_id or '').strip().lstrip('<').rstrip('>').lower()
+                if cid:
+                    promoted_inline_cids.add(cid)
             attachments.append({
                 'id': att.id,
                 'filename': att.filename,
@@ -361,6 +395,21 @@ def _serialize_inbox_email(m, *, include_body=False):
                 'download_url': f'/api/reply-draft/inbox/{m.id}/attachments/{att.id}/download',
             })
         out['attachments'] = attachments
+
+        # Body_html handling, done AFTER the attachment loop so we know which
+        # inline images were promoted to the list:
+        #   1. Strip the <img cid:…> tags for promoted inline images so they
+        #      don't also render inside the body (one image, one place).
+        #   2. Rewrite any REMAINING cid: refs (inline images we didn't
+        #      promote, e.g. non-image parts) to data-URIs so they still
+        #      load. This runs on the post-strip HTML so we don't waste work
+        #      embedding images we just removed.
+        if body_html:
+            if promoted_inline_cids:
+                body_html = _strip_inline_cid_images(body_html, promoted_inline_cids)
+            if all_attachments:
+                body_html = _rewrite_cid_refs(body_html, all_attachments)
+        out['body_html'] = body_html
 
         # Surface the message this one is replying to so the UI can render
         # an "In reply to: <subject>" chip on Sent-tab rows. We look up the
@@ -826,7 +875,9 @@ def list_inbox_attachments(request, email_id):
     for att in InboxAttachment.objects.filter(inbox_email_id=email.id).only(
         'id', 'filename', 'content_type', 'size_bytes', 'is_inline', 'created_at'
     ):
-        if att.is_inline:
+        # Inline images are shown in the list too (downloadable), matching
+        # the detail serializer; non-image inline parts stay hidden.
+        if att.is_inline and not (att.content_type or '').lower().startswith('image/'):
             continue
         # Same bounce-DSN filter the detail serializer uses — kept in sync
         # so the standalone "Files" view doesn't surface plumbing.
@@ -952,7 +1003,10 @@ def fetch_inbox_attachments(request, email_id):
     def _serialize_atts(qs):
         out = []
         for att in qs:
-            if att.is_inline:
+            # Inline images are downloadable in the list too; non-image
+            # inline parts (pixels, glyphs) stay hidden. Mirrors the detail
+            # serializer above.
+            if att.is_inline and not (att.content_type or '').lower().startswith('image/'):
                 continue
             out.append({
                 'id': att.id,
@@ -1182,6 +1236,10 @@ def list_sync_accounts(request):
             'imap_port': a.imap_port,
             'imap_username': a.imap_username or '',
             'imap_use_ssl': a.imap_use_ssl,
+            # Sync window + per-sweep cap so the connect modal can prefill
+            # the user's earlier choice when they edit the account.
+            'imap_sync_days': getattr(a, 'imap_sync_days', 90) or 90,
+            'imap_sync_email_limit': getattr(a, 'imap_sync_email_limit', 200) or 200,
             'last_tested_at': a.last_tested_at.isoformat() if a.last_tested_at else None,
             'test_status': getattr(a, 'test_status', 'not_tested') or 'not_tested',
             # --- First-sync UX signals ---
@@ -1728,6 +1786,20 @@ def create_reply_account(request):
         imap_port = int(data.get('imap_port') or 993)
         imap_username = (data.get('imap_username') or '').strip() or email
         imap_password = data.get('imap_password') or ''
+
+        # Sync window + per-sweep email cap, chosen by the user in the connect
+        # modal. Clamp to the allowed presets so a hand-crafted request can't
+        # ask the sync to walk an unbounded window / pull unlimited mail. Blank
+        # / unknown values fall back to the same defaults the model declares.
+        def _one_of(raw, allowed, fallback):
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return fallback
+            return v if v in allowed else fallback
+
+        imap_sync_days = _one_of(data.get('imap_sync_days'), {30, 60, 90}, 90)
+        imap_sync_email_limit = _one_of(data.get('imap_sync_email_limit'), {50, 100, 200}, 200)
         if not imap_host or not imap_password:
             return Response(
                 {'status': 'error', 'message': 'IMAP host and password are required (the inbox syncs through IMAP).', 'error': 'validation'},
@@ -1798,6 +1870,8 @@ def create_reply_account(request):
             existing.imap_username = imap_username
             existing.imap_password = imap_password
             existing.imap_use_ssl = bool(data.get('imap_use_ssl', True))
+            existing.imap_sync_days = imap_sync_days
+            existing.imap_sync_email_limit = imap_sync_email_limit
             existing.enable_imap_sync = True
             existing.is_reply_agent_account = True
             # is_marketing_account left untouched — if the row was added
@@ -1824,6 +1898,8 @@ def create_reply_account(request):
                 imap_username=imap_username,
                 imap_password=imap_password,
                 imap_use_ssl=bool(data.get('imap_use_ssl', True)),
+                imap_sync_days=imap_sync_days,
+                imap_sync_email_limit=imap_sync_email_limit,
                 enable_imap_sync=True,
                 is_active=True,
                 is_reply_agent_account=True,

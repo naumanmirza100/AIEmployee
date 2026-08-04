@@ -985,28 +985,41 @@ def search_company_users(request):
     from core.models import CompanyUser, UserProfile
     company_user = request.user
     q = request.query_params.get('q', '').strip()
-    if len(q) < 2:
+    # `all=true` powers the "View all members" panel: return every member of
+    # the company (no 2-char requirement, a much higher cap) instead of the
+    # autocomplete's short filtered slice. When not set, behaviour is the
+    # old typeahead: nothing until 2+ chars, capped at 10 per source.
+    show_all = request.query_params.get('all', '').strip().lower() in ('1', 'true', 'yes')
+    if not show_all and len(q) < 2:
         return Response({'status': 'success', 'users': []})
+
+    limit = 500 if show_all else 10
 
     # 1. CompanyUser accounts (self-registered via invitation link)
     cu_qs = CompanyUser.objects.filter(
         company=company_user.company,
         is_active=True,
-    ).filter(
-        models.Q(full_name__icontains=q) | models.Q(email__icontains=q)
-    ).values('id', 'full_name', 'email', 'role')[:10]
+    )
+    if not show_all:
+        cu_qs = cu_qs.filter(
+            models.Q(full_name__icontains=q) | models.Q(email__icontains=q)
+        )
+    cu_qs = cu_qs.values('id', 'full_name', 'email', 'role').order_by('full_name')[:limit]
     results = list(cu_qs)
 
     # 2. UserProfile-backed users created via the admin panel
     existing_emails = {u['email'] for u in results}
     up_qs = UserProfile.objects.filter(
         company=company_user.company,
-    ).filter(
-        models.Q(user__first_name__icontains=q)
-        | models.Q(user__last_name__icontains=q)
-        | models.Q(user__email__icontains=q)
-        | models.Q(user__username__icontains=q)
-    ).select_related('user').exclude(user__email__in=existing_emails)[:10]
+    )
+    if not show_all:
+        up_qs = up_qs.filter(
+            models.Q(user__first_name__icontains=q)
+            | models.Q(user__last_name__icontains=q)
+            | models.Q(user__email__icontains=q)
+            | models.Q(user__username__icontains=q)
+        )
+    up_qs = up_qs.select_related('user').exclude(user__email__in=existing_emails)[:limit]
 
     for up in up_qs:
         u = up.user
@@ -1020,7 +1033,152 @@ def search_company_users(request):
             'user_type': 'profile',
         })
 
-    return Response({'status': 'success', 'users': results[:10]})
+    return Response({'status': 'success', 'users': results[:limit]})
+
+
+def _all_company_members(company_user):
+    """Return every member of the company in the same shape as
+    search_company_users, so hint-matching below and the "View all" panel
+    speak the same participant format."""
+    from core.models import CompanyUser, UserProfile
+    out = []
+    cu_qs = CompanyUser.objects.filter(
+        company=company_user.company, is_active=True,
+    ).values('id', 'full_name', 'email', 'role').order_by('full_name')[:500]
+    for cu in cu_qs:
+        out.append({
+            'id': cu['id'],
+            'full_name': cu['full_name'],
+            'email': cu['email'],
+            'role': cu['role'],
+            'user_type': 'company_user',
+        })
+    seen_emails = {m['email'] for m in out}
+    up_qs = UserProfile.objects.filter(
+        company=company_user.company,
+    ).select_related('user').exclude(user__email__in=seen_emails)[:500]
+    for up in up_qs:
+        u = up.user
+        full_name = f"{u.first_name} {u.last_name}".strip() or u.username
+        out.append({
+            'id': up.id,
+            'full_name': full_name,
+            'email': u.email,
+            'role': up.role or 'team_member',
+            'user_type': 'profile',
+        })
+    return out
+
+
+def _match_members_by_hints(members, hints):
+    """Resolve free-text name/email hints (from the AI) to real member rows.
+
+    Matching is intentionally strict to avoid false positives (e.g. the hint
+    "usertwo" must NOT also pull in a member literally named "user"):
+      - exact match on full_name or email, OR
+      - the hint appears as a WHOLE WORD inside the member's name (so "noor"
+        matches "Noor Fatima"), OR
+      - the email's local part (before @) equals the hint.
+    Plain substring containment is deliberately not used. A member is returned
+    once; order follows the hints so named people appear first.
+    """
+    import re as _re
+    matched = []
+    matched_keys = set()
+    for hint in (hints or []):
+        h = str(hint or '').strip().lower()
+        if not h:
+            continue
+        for m in members:
+            key = f"{m.get('user_type', 'company_user')}-{m.get('id')}"
+            if key in matched_keys:
+                continue
+            name = (m.get('full_name') or '').lower()
+            email = (m.get('email') or '').lower()
+            local = email.split('@', 1)[0] if email else ''
+            name_words = set(_re.split(r'[\s._-]+', name)) if name else set()
+            hit = (
+                h == name
+                or h == email
+                or h == local
+                or h in name_words          # whole-word match within the name
+            )
+            if hit:
+                matched.append(m)
+                matched_keys.add(key)
+    return matched
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecLLMThrottle])
+def meeting_ai_parse(request):
+    """"Create with AI" for meetings: parse a free-form prompt into fields the
+    Schedule-Meeting form can be pre-filled with, plus participants resolved
+    from any names/emails mentioned in the prompt."""
+    company_user = request.user
+    prompt = (request.data.get('prompt') or '').strip()
+    if not prompt:
+        return Response({'status': 'error', 'message': 'prompt is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        agent = _get_agent('meeting_scheduling', company_user)
+        parsed = agent.parse_meeting_request(prompt, company_user.id) or {}
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error("meeting_ai_parse error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    members = _all_company_members(company_user)
+    participants = _match_members_by_hints(members, parsed.get('participant_hints'))
+    return Response({
+        'status': 'success',
+        'data': {
+            'title': parsed.get('title') or '',
+            'description': parsed.get('description') or '',
+            'scheduled_at': parsed.get('scheduled_at') or '',
+            'duration_minutes': parsed.get('duration_minutes') or 60,
+            'agenda': parsed.get('agenda') or [],
+            'meeting_link': parsed.get('meeting_link') or '',
+            'participants': participants,
+        },
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([ExecLLMThrottle])
+def task_ai_parse(request):
+    """"Create with AI" for tasks: parse a free-form prompt into fields the
+    Add-Task form can be pre-filled with, plus assignees resolved from any
+    names/emails mentioned in the prompt."""
+    company_user = request.user
+    prompt = (request.data.get('prompt') or '').strip()
+    if not prompt:
+        return Response({'status': 'error', 'message': 'prompt is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        agent = _get_agent('task_prioritization', company_user)
+        parsed = agent.parse_task_request(prompt) or {}
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error("task_ai_parse error: %s", e)
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    members = _all_company_members(company_user)
+    assignees = _match_members_by_hints(members, parsed.get('assignee_hints'))
+    return Response({
+        'status': 'success',
+        'data': {
+            'title': parsed.get('title') or '',
+            'description': parsed.get('description') or '',
+            'priority': parsed.get('priority') or 'medium',
+            'due_date': parsed.get('due_date') or '',
+            'assignees': assignees,
+        },
+    }, status=status.HTTP_200_OK)
 
 
 @api_view(['GET', 'POST', 'DELETE'])
@@ -1606,13 +1764,19 @@ def task_detail(request, task_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([ExecLLMThrottle])
 def generate_task_description(request):
-    """AI-expand a task title + a few rough points into a full description."""
+    """AI-expand a task title (and optional rough points) into a full description.
+
+    Only the title is required — the agent can draft a description from the
+    task name alone. Any ``points`` the user typed are passed through as extra
+    context but are optional, so "Generate with AI" works on a fresh task with
+    an empty description box.
+    """
     company_user = request.user
     title = (request.data.get('title') or '').strip()
     points = (request.data.get('points') or '').strip()
 
-    if not points:
-        return Response({'status': 'error', 'message': 'points is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not title:
+        return Response({'status': 'error', 'message': 'title is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         agent = _get_agent('task_prioritization', company_user)

@@ -48,6 +48,10 @@ class OperationsDocument(models.Model):
     metadata = models.JSONField(default=dict, blank=True)
     entities = models.JSONField(default=dict, blank=True)
     tags = models.CharField(max_length=500, blank=True)
+    # SHA-256 of the uploaded bytes — used to reject duplicate uploads at the DB
+    # level (see the filtered UniqueConstraint in Meta) so two concurrent
+    # uploads of the same file can't both create a row.
+    file_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
     is_processed = models.BooleanField(default=False)
     processing_error = models.TextField(blank=True)
     processed_at = models.DateTimeField(null=True, blank=True)
@@ -84,6 +88,16 @@ class OperationsDocument(models.Model):
                 name='ops_doc_company_proc_created',
             ),
             models.Index(fields=['processing_status'], name='ops_doc_proc_status'),
+        ]
+        constraints = [
+            # One document per (company, content) — enforced only when file_hash
+            # is set, so blank hashes (legacy rows) don't collide on SQL Server
+            # where multiple NULL/'' values would otherwise clash.
+            models.UniqueConstraint(
+                fields=['company', 'file_hash'],
+                condition=models.Q(file_hash__gt=''),
+                name='uq_ops_doc_company_filehash',
+            ),
         ]
 
     def __str__(self):
