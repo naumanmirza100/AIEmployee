@@ -361,6 +361,22 @@ export const askQaQuestion = async (question, chatId = null, documentIds = []) =
   }
 };
 
+/**
+ * Edit the most recent question and resend it (ChatGPT-style, last turn only).
+ * Deletes the chat's final user+assistant pair and regenerates from the edited
+ * question. Returns the same shape as askQaQuestion.
+ * @param {number} chatId
+ * @param {string} question edited question text
+ */
+export const replaceLastQaTurn = async (chatId, question) => {
+  try {
+    return await companyApi.post(`/operations/qa/chats/${chatId}/replace-last-turn`, { question });
+  } catch (error) {
+    console.error('Replace last Q&A turn error:', error);
+    throw error;
+  }
+};
+
 // ──────────────────────────────────────────────
 // Document Authoring
 // ──────────────────────────────────────────────
@@ -571,6 +587,7 @@ export default {
   renameQaChat,
   deleteQaChat,
   askQaQuestion,
+  replaceLastQaTurn,
   // Authoring
   generateDocument,
   streamGenerateDocument,

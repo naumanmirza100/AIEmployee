@@ -10,14 +10,23 @@ import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mai
 import { processCVs, getJobDescriptions, getInterviewSettings } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
+// Module-level draft cache. Survives this component unmounting (e.g. the user
+// clicks "Fix Settings →", which navigates away and unmounts CVProcessing) and
+// is restored when they come back — so uploaded files and typed keywords are not
+// lost. Kept in memory only: File objects can't be serialised to localStorage,
+// and we don't want CV files sitting in browser storage anyway. It naturally
+// clears on a full page reload, which is the expected "fresh start" behaviour.
+let cvProcessingDraft = null;
+
 const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const { toast } = useToast();
-  const [files, setFiles] = useState([]);
+  // Restore any draft left behind before an unmount (e.g. "Fix Settings" nav).
+  const [files, setFiles] = useState(() => cvProcessingDraft?.files || []);
   const [jobDescriptions, setJobDescriptions] = useState([]);
-  const [selectedJobId, setSelectedJobId] = useState('');
-  const [jobDescriptionText, setJobDescriptionText] = useState('');
-  const [jobKeywords, setJobKeywords] = useState('');
-  const [topN, setTopN] = useState('');
+  const [selectedJobId, setSelectedJobId] = useState(() => cvProcessingDraft?.selectedJobId || '');
+  const [jobDescriptionText, setJobDescriptionText] = useState(() => cvProcessingDraft?.jobDescriptionText || '');
+  const [jobKeywords, setJobKeywords] = useState(() => cvProcessingDraft?.jobKeywords || '');
+  const [topN, setTopN] = useState(() => cvProcessingDraft?.topN || '');
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState(null);
   const [displayedKeywords, setDisplayedKeywords] = useState([]);
@@ -28,8 +37,42 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const [settingsChecked, setSettingsChecked] = useState(false);
   const jobDropdownRef = useRef(null);
 
+  // Mirror the persist-worthy fields into a ref so the unmount handler below
+  // reads their LATEST values (an unmount cleanup closes over stale state).
+  const draftRef = useRef({});
+  draftRef.current = { files, selectedJobId, jobDescriptionText, jobKeywords, topN };
+
   React.useEffect(() => {
     fetchJobDescriptions();
+  }, []);
+
+  // When a draft is restored (e.g. after "Fix Settings"), selectedJobId comes
+  // back but the job-derived UI — the extracted-keywords chips and the
+  // interview-settings banner — is not re-computed, because the user never
+  // re-picked the job. Once the job list has loaded, replay the selection for
+  // the restored job so those pieces reappear. Runs once per mount.
+  const restoredKeywordsRef = useRef(false);
+  useEffect(() => {
+    if (restoredKeywordsRef.current) return;
+    if (!selectedJobId || jobDescriptions.length === 0) return;
+    restoredKeywordsRef.current = true;
+    handleJobSelection(selectedJobId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobDescriptions, selectedJobId]);
+
+  // On unmount, stash the current draft so it can be restored if the user
+  // returns (e.g. after "Fix Settings"). Only keep it when there is something
+  // worth restoring — an empty form should not resurrect a stale draft.
+  useEffect(() => {
+    return () => {
+      const d = draftRef.current;
+      const hasContent =
+        (d.files && d.files.length > 0) ||
+        d.selectedJobId ||
+        (d.jobKeywords && d.jobKeywords.trim()) ||
+        (d.topN && String(d.topN).trim());
+      cvProcessingDraft = hasContent ? { ...d } : null;
+    };
   }, []);
 
   // Close dropdown on outside click
@@ -183,6 +226,9 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
 
       if (response.status === 'success') {
         setResults(response);
+        // Processing done — the draft has served its purpose; drop it so it
+        // won't be restored on a later visit.
+        cvProcessingDraft = null;
         toast({
           title: 'Success',
           description: `Processed ${response.results?.length || 0} CV(s) successfully`,
