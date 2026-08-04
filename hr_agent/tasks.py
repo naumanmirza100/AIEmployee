@@ -120,10 +120,12 @@ def process_hr_document(self, document_id):
         document.document_content = extracted_text
         document.file_hash = result.get('file_hash', document.file_hash)
 
+        # Default 1200/150 sized for bge-small-en-v1.5's 512-token limit.
+        # Bump via HR_CHUNK_SIZE if you switch to a long-context embedding model.
         chunk_size = int(getattr(settings, 'HR_CHUNK_SIZE',
-                                 getattr(settings, 'FRONTLINE_CHUNK_SIZE', 4000)))
+                                 getattr(settings, 'FRONTLINE_CHUNK_SIZE', 1200)))
         overlap = int(getattr(settings, 'HR_CHUNK_OVERLAP',
-                              getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 200)))
+                              getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 150)))
         overlap = max(0, min(overlap, max(0, chunk_size - 1)))
 
         text_to_chunk = f"{document.title}\n{document.description}\n{extracted_text}".strip()
@@ -193,7 +195,10 @@ def process_hr_document(self, document_id):
 
         embedding_service = EmbeddingService()
         has_embeddings = embedding_service.is_available()
-        batch_size = 20
+        # Batch size is provider-aware: smaller for local (finer progress bar
+        # ticks; encode() cost is trivial) and larger for API providers
+        # (fewer HTTP round trips).
+        batch_size = embedding_service.recommended_batch_size if has_embeddings else 20
         # Extract plain texts for embedding generation (embeddings API takes strings).
         chunk_texts = [ct for ct, _h, _p in chunk_pairs]
         for i in range(0, len(chunk_pairs), batch_size):

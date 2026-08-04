@@ -1,7 +1,7 @@
 """
 Embedding Service for Frontline Agent
 Handles generation and storage of document embeddings for semantic search
-Supports OpenRouter, DeepSeek, Groq, and OpenAI (via OpenAI-compatible endpoints)
+Supports Local (sentence-transformers), OpenRouter, DeepSeek, Groq, and OpenAI.
 """
 import logging
 import os
@@ -23,21 +23,32 @@ if not NUMPY_AVAILABLE:
 class EmbeddingService:
     """
     Service for generating and managing embeddings for semantic search.
-    Supports OpenRouter, DeepSeek, Groq, and OpenAI (via OpenAI-compatible endpoints).
-    Priority: OpenRouter > DeepSeek > Groq > OpenAI
+    Supports Local (sentence-transformers), OpenRouter, DeepSeek, Groq, and OpenAI.
+    Priority when EMBEDDING_PROVIDER='auto': Local > OpenRouter > DeepSeek > Groq > OpenAI.
+    Set EMBEDDING_PROVIDER=local to force self-hosted embeddings (recommended for
+    dev — no API keys, no rate limits, no per-token cost).
     """
-    
+
     def __init__(self):
-        """Initialize embedding service with OpenRouter, DeepSeek, Groq, or OpenAI client"""
-        self.provider = None  # 'openrouter', 'deepseek', 'groq', or 'openai'
+        """Initialize embedding service — tries providers in priority order."""
+        self.provider = None  # 'local', 'openrouter', 'deepseek', 'groq', or 'openai'
         self.client = None
         self.embedding_model = None
         self.available = False
-        
+
         # Check which provider to use
         embedding_provider = getattr(settings, 'EMBEDDING_PROVIDER', 'auto').lower()
-        
-        # Try OpenRouter first (if available and configured) - Highest Priority
+
+        # Try Local (self-hosted sentence-transformers) first - Highest Priority in auto mode.
+        # Preferred for dev because it's free, offline, and has no quota.
+        if embedding_provider in ('auto', 'local'):
+            if self._init_local():
+                self.provider = 'local'
+                self.available = True
+                logger.info(f"EmbeddingService initialized with Local sentence-transformers (model: {self.embedding_model})")
+                return
+
+        # Try OpenRouter (if available and configured)
         if embedding_provider in ('auto', 'openrouter'):
             if self._init_openrouter():
                 self.provider = 'openrouter'
@@ -70,9 +81,57 @@ class EmbeddingService:
                 return
         
         # No provider available
-        logger.warning("EmbeddingService: No embedding provider available (OpenRouter, DeepSeek, Groq, or OpenAI). Embeddings will not work.")
+        logger.warning("EmbeddingService: No embedding provider available (Local, OpenRouter, DeepSeek, Groq, or OpenAI). Embeddings will not work.")
         self.available = False
-    
+
+    def _init_local(self) -> bool:
+        """
+        Initialize a local sentence-transformers model.
+
+        Runs entirely on-machine — no API key, no network, no quota. Model is
+        downloaded on first use (~130 MB for bge-small-en-v1.5) and cached to
+        the Hugging Face cache dir (~/.cache/huggingface by default; override
+        via HF_HOME).
+
+        Config:
+          LOCAL_EMBEDDING_MODEL — HF model id. Default: 'BAAI/bge-small-en-v1.5'
+                                  (384-dim, ~90% of OpenAI 3-small quality).
+          LOCAL_EMBEDDING_DEVICE — 'cpu' (default) or 'cuda' if a GPU is available.
+        """
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            logger.debug(
+                "sentence-transformers not installed. Run "
+                "`pip install sentence-transformers` to enable local embeddings."
+            )
+            return False
+        except Exception as e:
+            # sentence-transformers imports transformers/accelerate/huggingface_hub,
+            # any of which can raise RuntimeError on version mismatch. Don't let
+            # that kill the whole EmbeddingService — fall through to the next
+            # provider so unrelated features (summarize, chat) keep working.
+            logger.warning(
+                f"sentence-transformers import failed (dependency conflict?): {e}. "
+                "Try: `pip install --upgrade huggingface_hub accelerate transformers sentence-transformers`. "
+                "Falling back to next embedding provider."
+            )
+            return False
+
+        try:
+            model_name = getattr(settings, 'LOCAL_EMBEDDING_MODEL', 'BAAI/bge-small-en-v1.5')
+            device = getattr(settings, 'LOCAL_EMBEDDING_DEVICE', 'cpu')
+
+            # First load downloads the model (~130 MB for bge-small). Subsequent
+            # loads are near-instant from the local cache.
+            logger.info(f"Loading local embedding model '{model_name}' on device '{device}'...")
+            self.client = SentenceTransformer(model_name, device=device)
+            self.embedding_model = model_name
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to load local embedding model: {e}")
+            return False
+
     def _init_openrouter(self) -> bool:
         """
         Initialize OpenRouter client for embeddings (using OpenAI-compatible endpoint).
@@ -286,24 +345,44 @@ class EmbeddingService:
             logger.debug(f"Failed to initialize OpenAI embeddings: {e}")
             return False
     
-    def generate_embedding(self, text: str) -> Optional[List[float]]:
+    # BGE / E5-family instruction prefix for query-side embedding. bge-small-en-v1.5
+    # (and similar retrieval-tuned models) place queries and passages in slightly
+    # different regions of the embedding space; the query is expected to carry an
+    # instruction so cosine against un-prefixed passages lines up. Skipping this
+    # costs ~0.05–0.15 cosine on short queries — enough to trip a 0.3 confidence
+    # gate on legitimate matches.
+    _BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+    def _maybe_prefix_query(self, text: str, is_query: bool) -> str:
+        """Prepend the retrieval-instruction prefix if this is a local BGE query."""
+        if not is_query or self.provider != 'local':
+            return text
+        model_lc = (self.embedding_model or '').lower()
+        if 'bge' in model_lc or 'e5' in model_lc:
+            return self._BGE_QUERY_PREFIX + text
+        return text
+
+    def generate_embedding(self, text: str, is_query: bool = False) -> Optional[List[float]]:
         """
         Generate embedding for a single text.
-        
+
         Args:
-            text: Text to embed
-            
+            text: Text to embed.
+            is_query: True when embedding a user query (not a document chunk).
+                For local BGE/E5 models this applies the query instruction
+                prefix; a no-op for API providers.
+
         Returns:
-            Embedding vector as list of floats, or None if unavailable
+            Embedding vector as list of floats, or None if unavailable.
         """
         if not self.available or not self.client:
             logger.warning("Embedding service not available")
             return None
-        
+
         if not text or not text.strip():
             logger.warning("Empty text provided for embedding")
             return None
-        
+
         try:
             # Truncate text if too long (token limits vary by model)
             # Approximate: 1 token ≈ 4 characters, so max ~32,000 characters for most models
@@ -315,13 +394,22 @@ class EmbeddingService:
                 logger.info(f"Text too long ({original_length:,} chars) for embedding API, using first {max_chars:,} chars for embedding generation")
                 logger.info(f"NOTE: Full document content ({original_length:,} chars) will still be stored in database")
                 text = text[:max_chars]
-            
-            response = self.client.embeddings.create(
-                model=self.embedding_model,
-                input=text
-            )
-            
-            embedding = response.data[0].embedding
+
+            text = self._maybe_prefix_query(text, is_query)
+
+            if self.provider == 'local':
+                # sentence-transformers returns a numpy array; convert to list of
+                # floats so downstream code (JSON serialization, cosine helpers)
+                # stays identical to the API-based providers.
+                vec = self.client.encode(text, normalize_embeddings=True, show_progress_bar=False)
+                embedding = vec.tolist() if hasattr(vec, 'tolist') else list(vec)
+            else:
+                response = self.client.embeddings.create(
+                    model=self.embedding_model,
+                    input=text
+                )
+                embedding = response.data[0].embedding
+
             logger.info(f"Generated embedding using {self.provider} (dimension: {len(embedding)})")
             return embedding
             
@@ -390,16 +478,28 @@ class EmbeddingService:
             if not valid_texts:
                 return [None] * len(texts)
             
-            response = self.client.embeddings.create(
-                model=self.embedding_model,
-                input=valid_texts
-            )
-            
-            # Map embeddings back to original indices
-            embeddings = [None] * len(texts)
-            for idx, embedding_data in zip(valid_indices, response.data):
-                embeddings[idx] = embedding_data.embedding
-            
+            if self.provider == 'local':
+                # sentence-transformers batches efficiently in one call; returns
+                # a 2-D numpy array of shape (N, dim).
+                vecs = self.client.encode(
+                    valid_texts,
+                    batch_size=32,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                )
+                embeddings = [None] * len(texts)
+                for idx, vec in zip(valid_indices, vecs):
+                    embeddings[idx] = vec.tolist() if hasattr(vec, 'tolist') else list(vec)
+            else:
+                response = self.client.embeddings.create(
+                    model=self.embedding_model,
+                    input=valid_texts
+                )
+                # Map embeddings back to original indices
+                embeddings = [None] * len(texts)
+                for idx, embedding_data in zip(valid_indices, response.data):
+                    embeddings[idx] = embedding_data.embedding
+
             logger.info(f"Generated {len(valid_texts)} embeddings in batch using {self.provider}")
             return embeddings
             
@@ -498,4 +598,20 @@ class EmbeddingService:
     def is_available(self) -> bool:
         """Check if embedding service is available"""
         return self.available
+
+    @property
+    def recommended_batch_size(self) -> int:
+        """
+        Batch size that balances throughput vs UI progress granularity.
+
+        Local (sentence-transformers on CPU) — 5. Each batch takes ~1-2s, so
+        the progress bar ticks every ~1-2s instead of every ~5-15s. Sending
+        smaller batches to the local model has negligible overhead because
+        the model batches internally anyway.
+
+        API providers (OpenRouter/DeepSeek/OpenAI) — 20. Each batch is one
+        HTTP call, so bigger batches mean fewer round trips. Progress bar
+        ticks less often, but network cost dominates.
+        """
+        return 5 if self.provider == 'local' else 20
 

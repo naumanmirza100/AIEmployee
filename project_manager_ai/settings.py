@@ -254,6 +254,13 @@ DEBUG = True
 ALLOWED_HOSTS = ['*']
 
 
+
+# Local sentence-transformers embedding config. To enable, also set
+# EMBEDDING_PROVIDER=local (further down in this file / in .env).
+LOCAL_EMBEDDING_MODEL = os.getenv('LOCAL_EMBEDDING_MODEL', 'BAAI/bge-small-en-v1.5')
+LOCAL_EMBEDDING_DEVICE = os.getenv('LOCAL_EMBEDDING_DEVICE', 'cpu')
+
+
 # --------------------
 # Applications
 # --------------------

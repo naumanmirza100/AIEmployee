@@ -156,7 +156,7 @@ class HRAgent(BaseAgent):
                 prompt=prompt,
                 system_prompt=self.system_prompt,
                 temperature=0.3,
-                max_tokens=int(getattr(settings, 'HR_QA_MAX_TOKENS', 400)),
+                max_tokens=int(getattr(settings, 'HR_QA_MAX_TOKENS', 900)),
             )
             timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
             timing_ms['total'] = int((time.time() - _t_overall) * 1000)
@@ -296,7 +296,7 @@ class HRAgent(BaseAgent):
                 prompt=prompt,
                 system_prompt=self.system_prompt,
                 temperature=0.3,
-                max_tokens=int(getattr(settings, 'HR_QA_MAX_TOKENS', 400)),
+                max_tokens=int(getattr(settings, 'HR_QA_MAX_TOKENS', 900)),
             ):
                 if event.get('type') == 'token':
                     collected.append(event['value'])

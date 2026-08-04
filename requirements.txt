@@ -9,6 +9,8 @@ djangorestframework-simplejwt==5.3.0
 django-cors-headers==4.3.0
 mssql-django==1.6
 pyodbc>=4.0
+sentence-transformers>=3.0.0
+
 
 # Environment
 python-dotenv==1.0.0

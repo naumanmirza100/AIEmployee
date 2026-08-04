@@ -16,6 +16,7 @@ import {
   Slash,
   Upload,
 } from 'lucide-react';
+import ChatMarkdown from '@/components/shared/ChatMarkdown';
 import InfoHint, { useHints } from './InfoHint';
 import FrontlineTutorial, { resetTutorial } from './FrontlineTutorial';
 import { useTutorialNudge } from './tourUtils';
@@ -754,15 +755,21 @@ const FrontlineFloatingChat = () => {
                               : 'bg-white/[0.06] text-white/90 border border-white/10'
                       }`}
                     >
-                      <div className="whitespace-pre-wrap break-words">
-                        {m.content}
-                        {m.streaming && (
-                          <>
-                            {!m.content && <span className="text-white/40 italic">Thinking…</span>}
-                            <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-violet-400/70 animate-pulse align-middle" />
-                          </>
-                        )}
-                      </div>
+                      {m.streaming || m.role === 'user' || m.error || m.system ? (
+                        // Plain text for streaming (avoid flicker on incomplete
+                        // markdown) and for user / error / system messages.
+                        <div className="whitespace-pre-wrap break-words">
+                          {m.content}
+                          {m.streaming && (
+                            <>
+                              {!m.content && <span className="text-white/40 italic">Thinking…</span>}
+                              <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-violet-400/70 animate-pulse align-middle" />
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <ChatMarkdown>{m.content || ''}</ChatMarkdown>
+                      )}
                       {m.role === 'assistant' && !m.error && !m.system && (m.citations?.length > 0 || m.source) && (
                         <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
                           <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Sources</p>

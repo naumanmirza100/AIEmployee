@@ -56,11 +56,15 @@ USER QUESTION: {user_question}
 
 RULES:
 1. Use ONLY the provided snippets. No outside knowledge.
-2. Answer the specific question — do NOT copy the whole document or list unrelated topics.
-3. If the snippets don't contain the answer, say exactly: "I don't have verified information about this in our knowledge base. Let me create a ticket for a human agent to assist you."
-4. NO preamble. NO meta-commentary like "Based on the provided document snippets…" or "According to the document content…" — just answer directly.
-5. NO verbatim block-quotes of the snippet content — paraphrase concisely. It's fine to quote a short phrase (< 15 words) when precision matters.
-6. Keep it short: 1-3 sentences, or a tight 3-5 bullet list. Structure only when the answer is genuinely a list.
+2. Answer the specific question thoroughly — cover every detail present in the snippets that's relevant, including numbers, dates, categories, conditions, and exceptions. Do NOT invent unrelated topics.
+3. Structure the answer for readability:
+   • Open with a one-sentence direct answer.
+   • Then a **Details** section with short paragraphs OR a bulleted list of the key points.
+   • If the snippets describe a process, categories, or eligibility rules, use a bulleted or numbered list — one bullet per item, with a short explanation.
+   • End with a **Notes / Caveats** line only if the snippets mention conditions, exceptions, or "subject to" phrasing worth surfacing.
+4. If the snippets don't contain the answer, say exactly: "I don't have verified information about this in our knowledge base. Let me create a ticket for a human agent to assist you."
+5. NO preamble. NO meta-commentary like "Based on the provided document snippets…" or "According to the document content…" — just answer directly.
+6. NO verbatim block-quotes of the snippet content — paraphrase in your own words. Short quotes (< 15 words) are fine when precision matters.
 7. Professional, empathetic tone. No slang, no robotic phrasing.
 
 RESPONSE:"""
@@ -144,11 +148,11 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
                 source = result.get('source', 'Unknown')
                 doc_type = result.get('type', 'unknown')
                 
-                # Cap at 3500 chars. Prompt size is the single biggest lever
-                # on time-to-first-token for large docs — 3500 comfortably
-                # covers 2-3 chunks of substantive content.
-                if len(answer_content) > 3500:
-                    answer_content = answer_content[:3500] + '\n\n[... content truncated ...]'
+                # Cap at 6000 chars — enough to comfortably cover 4-5 of the
+                # new 1200-char chunks so the LLM has the full picture to
+                # produce a detailed, structured answer. TTFT still under 2s.
+                if len(answer_content) > 6000:
+                    answer_content = answer_content[:6000] + '\n\n[... content truncated ...]'
 
                 item_text += f"Source: {source}\n   Type: {doc_type}\n   Content Length: {len(answer_content)} chars\n\nDocument Content:\n{answer_content}"
             
@@ -157,10 +161,10 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
                 item_text += f"Q: {result.get('question', 'N/A')}\n   A: {result.get('answer', 'N/A')}"
             elif 'title' in result:
                 content = result.get('content', 'N/A')
-                # Cap per-excerpt at 800 chars — plenty for the LLM to answer
-                # a specific question, and keeps TTFT low.
-                if len(content) > 800:
-                    content_preview = content[:800] + '...'
+                # Cap per-excerpt at 2000 chars so the LLM sees a full 1200-char
+                # chunk with margin — enough to synthesize detailed answers.
+                if len(content) > 2000:
+                    content_preview = content[:2000] + '...'
                 else:
                     content_preview = content
                 similarity = result.get('similarity_score', 'N/A')

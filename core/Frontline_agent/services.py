@@ -87,7 +87,7 @@ def _fl_cache_get_query_vec(query: str, embedding_service):
         hit = _QUERY_EMBEDDING_CACHE.get(key)
         if hit is not None:
             return hit
-    raw = embedding_service.generate_embedding(query)
+    raw = embedding_service.generate_embedding(query, is_query=True)
     if not raw:
         return None
     vec = _fl_parse_embedding(raw)
@@ -638,11 +638,14 @@ class KnowledgeService:
             if not candidates:
                 return candidates
 
-            # Keep the re-rank prompt tight. 400 chars per candidate is plenty
-            # for the model to judge relevance and keeps time-to-first-token low.
+            # Show the re-ranker enough of each chunk to actually judge it.
+            # 400 chars was too tight — with 1200-char chunks the answer often
+            # lives past the preview window, causing the model to score real
+            # matches at 0 and drop them. 1500 covers a full ~1200-char chunk
+            # with a small margin.
             chunks_text = ""
             for i, cand in enumerate(candidates):
-                chunks_text += f"\n--- Chunk {i} ---\n{(cand.get('content') or '')[:400]}\n"
+                chunks_text += f"\n--- Chunk {i} ---\n{(cand.get('content') or '')[:1500]}\n"
 
             prompt = f"""Given the user query, evaluate the following document chunks.
 For each chunk, score it from 0 to 10 on how well it directly answers or contains information highly relevant to the query.
