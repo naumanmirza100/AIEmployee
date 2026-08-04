@@ -15,6 +15,7 @@ import {
   Loader2, FileText, RefreshCw, Trash2, MoreHorizontal,
 } from 'lucide-react';
 import { CARD_STYLE, ROW_STYLE, EmptyState, fmtUtc, BulkSelectBar, SelectCheckbox, FilterBar, Pagination } from '../shared';
+import HoverTip from '@/components/common/HoverTip';
 
 const DOC_TYPE_LABELS = { agenda: 'Agenda', minutes: 'Minutes', briefing: 'Briefing', report: 'Report', other: 'Other' };
 const DOC_TYPE_FILTER_OPTIONS = [
@@ -223,10 +224,12 @@ export const DocumentsPanel = ({
         )}
 
           <div className="flex justify-end">
-            <Button onClick={generateAiDoc} disabled={aiDocLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
-              {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
-              {aiDocLoading ? 'Generating…' : 'Generate & Save'}
-            </Button>
+            <HoverTip tip="Generate the document with AI and save it">
+              <Button onClick={generateAiDoc} disabled={aiDocLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
+                {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
+                {aiDocLoading ? 'Generating…' : 'Generate & Save'}
+              </Button>
+            </HoverTip>
           </div>
         </div>
       </div>
@@ -243,9 +246,11 @@ export const DocumentsPanel = ({
               <FileText className="h-3.5 w-3.5 text-violet-400" />
               Saved Documents
             </h3>
-            <Button size="sm" variant="ghost" onClick={() => loadDocuments()} disabled={docsLoading} className="text-white/40 hover:text-white">
-              <RefreshCw className={`h-3.5 w-3.5 ${docsLoading ? 'animate-spin' : ''}`} />
-            </Button>
+            <HoverTip tip="Refresh saved documents">
+              <Button size="sm" variant="ghost" onClick={() => loadDocuments()} disabled={docsLoading} className="text-white/40 hover:text-white">
+                <RefreshCw className={`h-3.5 w-3.5 ${docsLoading ? 'animate-spin' : ''}`} />
+              </Button>
+            </HoverTip>
           </div>
 
           <div className="px-4 pt-3">
@@ -300,14 +305,18 @@ export const DocumentsPanel = ({
                 <p className="text-white/30 text-xs">{new Date(doc.created_at).toLocaleString()}</p>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
-                <Button size="sm" variant="ghost" onClick={() => setViewDoc(doc)}
-                  className="text-violet-400 hover:text-violet-300 text-xs gap-1">
-                  <FileText className="h-3.5 w-3.5" /> Open
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => downloadDocPdf(doc)}
-                  className="text-sky-400 hover:text-sky-300 text-xs">
-                  ⬇ PDF
-                </Button>
+                <HoverTip tip="Open this document">
+                  <Button size="sm" variant="ghost" onClick={() => setViewDoc(doc)}
+                    className="text-violet-400 hover:text-violet-300 text-xs gap-1">
+                    <FileText className="h-3.5 w-3.5" /> Open
+                  </Button>
+                </HoverTip>
+                <HoverTip tip="Download this document as PDF">
+                  <Button size="sm" variant="ghost" onClick={() => downloadDocPdf(doc)}
+                    className="text-sky-400 hover:text-sky-300 text-xs">
+                    ⬇ PDF
+                  </Button>
+                </HoverTip>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button size="icon" variant="ghost" className="h-7 w-7 text-white/30 hover:text-white">

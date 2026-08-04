@@ -892,6 +892,8 @@ urlpatterns = [
     # Meetings
     re_path(r'^exec-meeting/ai/schedule/?$', exec_meeting_api.schedule_meeting_ai, name='exec_schedule_meeting_ai'),  # POST
     re_path(r'^exec-meeting/ai/generate-description/?$', exec_meeting_api.generate_meeting_description, name='exec_generate_meeting_description'),  # POST
+    re_path(r'^exec-meeting/meetings/ai/parse-prompt/?$', exec_meeting_api.meeting_ai_parse, name='exec_meeting_ai_parse'),  # POST — "Create with AI"
+    re_path(r'^exec-meeting/tasks/ai/parse-prompt/?$', exec_meeting_api.task_ai_parse, name='exec_task_ai_parse'),  # POST — "Create with AI"
     re_path(r'^exec-meeting/meetings/?$', exec_meeting_api.meeting_list, name='exec_meeting_list'),  # GET, POST
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/?$', exec_meeting_api.meeting_detail, name='exec_meeting_detail'),  # GET, PATCH, DELETE
     re_path(r'^exec-meeting/meetings/(?P<meeting_id>\d+)/respond/?$', exec_meeting_api.meeting_respond, name='exec_meeting_respond'),  # POST

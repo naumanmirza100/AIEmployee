@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { format } from 'date-fns';
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
@@ -25,6 +26,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
+import HoverTip from '@/components/common/HoverTip';
 import execMeetingService from '@/services/execMeetingService';
 import {
   markdownToHtml, CARD_STYLE, ROW_STYLE, fmtUtc,
@@ -35,6 +37,7 @@ import {
   ScheduleMeetingDialog, MeetingEditDialog,
   AddTaskDialog, TaskEditDialog,
 } from './dialogs';
+import { CreateWithAIModal } from './CreateWithAIModal';
 import { TasksPanel } from './panels/TasksPanel';
 import { CalendarPanel } from './panels/CalendarPanel';
 import { DocumentsPanel } from './panels/DocumentsPanel';
@@ -57,18 +60,22 @@ const HOWITWORKS_STEPS = EXEC_MEETING_HOWITWORKS_STEPS.map((s) => ({
 }));
 
 const TAB_ITEMS = [
-  { value: 'overview',      label: 'Overview',      icon: LayoutDashboard },
-  { value: 'meetings',      label: 'Meetings',       icon: CalendarClock },
-  { value: 'tasks',         label: 'Tasks',          icon: ListChecks },
-  { value: 'calendar',      label: 'Calendar',       icon: CalendarDays },
-  { value: 'documents',     label: 'Documents',      icon: FileText },
-  { value: 'notifications', label: 'Notifications',  icon: Bell },
+  { value: 'overview',      label: 'Overview',      icon: LayoutDashboard, tip: 'Your dashboard at a glance — key stats and recent activity.' },
+  { value: 'meetings',      label: 'Meetings',       icon: CalendarClock,  tip: 'Schedule meetings, manage participants, and generate notes.' },
+  { value: 'tasks',         label: 'Tasks',          icon: ListChecks,     tip: 'Track action items, set deadlines, and add subtasks.' },
+  { value: 'calendar',      label: 'Calendar',       icon: CalendarDays,   tip: 'See your schedule and let AI plan your week.' },
+  { value: 'documents',     label: 'Documents',      icon: FileText,       tip: 'Generate and store meeting documents and summaries.' },
+  { value: 'notifications', label: 'Notifications',  icon: Bell,           tip: 'Meeting reminders, task updates, and alerts.' },
 ];
 
 // ── Main dashboard ──────────────────────────────────────────────────────────
 const ExecMeetingDashboard = () => {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('overview');
+  // Themed hover tooltip for the tab bar. Handlers live on the TabsTrigger
+  // itself (not a HoverTip wrapper) because wrapping a Radix TabsTrigger
+  // breaks the tab grid + keyboard nav. { text, top, left } or null.
+  const [tabTip, setTabTip] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Data state
@@ -88,7 +95,10 @@ const ExecMeetingDashboard = () => {
   const [meetingFilters, setMeetingFilters] = useState({ search: '', status: '', date: '', participant: '' });
   const [taskFilters, setTaskFilters] = useState({ search: '', status: '', priority: '', date: '' });
   const [docFilters, setDocFilters] = useState({ search: '', doc_type: '', date: '' });
-  const [notifFilters, setNotifFilters] = useState({ search: '', category: '', unread_only: false });
+  const [notifFilters, setNotifFilters] = useState({ search: '', category: '', unread_only: false, severity: '' });
+  // How many notifications to show per page (user-selectable). Separate from
+  // the shared PAGE_SIZE the other tabs use.
+  const [notifPageSize, setNotifPageSize] = useState(8);
   const [meetingFilterUsers, setMeetingFilterUsers] = useState([]); // for the "by user" dropdown
 
   // ── Pagination. `page` is the current page per tab; `*Page` meta holds the
@@ -106,6 +116,15 @@ const ExecMeetingDashboard = () => {
   // Dialogs
   const [showMeetingDialog, setShowMeetingDialog] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
+  // "Create with AI" — the prompt modal's mode (null | 'meeting' | 'task'),
+  // and the AI-parsed drafts used to pre-fill the normal dialogs once parsed.
+  const [aiCreateMode, setAiCreateMode] = useState(null);
+  const [meetingPrefill, setMeetingPrefill] = useState(null);
+  const [taskPrefill, setTaskPrefill] = useState(null);
+  // Remember the last prompt per mode so the dialog's "Edit AI prompt" button
+  // can reopen the modal pre-filled to regenerate.
+  const [meetingAiPrompt, setMeetingAiPrompt] = useState('');
+  const [taskAiPrompt, setTaskAiPrompt] = useState('');
   const [expandedTaskId, setExpandedTaskId] = useState(null); // inline-expanded task
   const [expandedSubtasksId, setExpandedSubtasksId] = useState(null); // task whose subtasks accordion is open
   const [focusMeetingId, setFocusMeetingId] = useState(null); // meeting to highlight/scroll to (from a notification)
@@ -229,9 +248,11 @@ const ExecMeetingDashboard = () => {
 
   useEffect(() => {
     if (activeTab !== 'notifications') return;
-    const t = setTimeout(() => { setNotifPage(1); loadNotifications(notifFilters, 1); }, 300);
+    // Any filter or page-size change resets to page 1 and reloads.
+    const t = setTimeout(() => { setNotifPage(1); loadNotifications(notifFilters, 1, notifPageSize); }, 300);
     return () => clearTimeout(t);
-  }, [notifFilters.search, notifFilters.category, notifFilters.unread_only]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifFilters.search, notifFilters.category, notifFilters.unread_only, notifFilters.severity, notifPageSize]);
 
   const loadStats = async () => {
     setStatsLoading(true);
@@ -307,10 +328,10 @@ const ExecMeetingDashboard = () => {
     }
   };
 
-  const loadNotifications = async (filters = notifFilters, page = notifPage) => {
+  const loadNotifications = async (filters = notifFilters, page = notifPage, pageSize = notifPageSize) => {
     setNotifsLoading(true);
     try {
-      const data = await execMeetingService.getNotifications({ ...filters, page, page_size: PAGE_SIZE });
+      const data = await execMeetingService.getNotifications({ ...filters, page, page_size: pageSize });
       setNotifications(data.notifications || []);
       setNotifPageMeta(data.pagination || null);
     } catch {
@@ -819,9 +840,11 @@ const ExecMeetingDashboard = () => {
             <LayoutDashboard className="h-4 w-4 text-violet-400" />
             Daily Digest
           </h3>
-          <Button size="sm" variant="ghost" onClick={loadDigest} disabled={digestLoading} className="text-white/50 hover:text-white">
-            <RefreshCw className={`h-4 w-4 ${digestLoading ? 'animate-spin' : ''}`} />
-          </Button>
+          <HoverTip tip="Regenerate today's digest">
+            <Button size="sm" variant="ghost" onClick={loadDigest} disabled={digestLoading} className="text-white/50 hover:text-white">
+              <RefreshCw className={`h-4 w-4 ${digestLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </HoverTip>
         </div>
         {digestLoading ? (
           <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-violet-400" /></div>
@@ -880,9 +903,11 @@ const ExecMeetingDashboard = () => {
             <CalendarClock className="h-4 w-4 text-sky-400" />
             Recent Meetings
           </h3>
-          <Button size="sm" variant="ghost" onClick={() => setActiveTab('meetings')} className="text-white/50 hover:text-white text-xs">
-            View all <ChevronRight className="h-3 w-3 ml-1" />
-          </Button>
+          <HoverTip tip="View all meetings">
+            <Button size="sm" variant="ghost" onClick={() => setActiveTab('meetings')} className="text-white/50 hover:text-white text-xs">
+              View all <ChevronRight className="h-3 w-3 ml-1" />
+            </Button>
+          </HoverTip>
         </div>
         {meetingsLoading ? (
           <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-violet-400" /></div>
@@ -910,9 +935,9 @@ const ExecMeetingDashboard = () => {
           <Bell className="h-4 w-4 text-amber-400" />
           Notifications
         </h3>
-        <Button size="sm" variant="ghost" onClick={() => loadNotifications()} disabled={notifsLoading} className="text-white/50 hover:text-white">
-          <RefreshCw className={`h-4 w-4 ${notifsLoading ? 'animate-spin' : ''}`} />
-        </Button>
+          <Button size="sm" variant="ghost" onClick={() => loadNotifications()} disabled={notifsLoading} className="text-white/50 hover:text-white">
+            <RefreshCw className={`h-4 w-4 ${notifsLoading ? 'animate-spin' : ''}`} />
+          </Button>
       </div>
 
       <FilterBar
@@ -930,20 +955,45 @@ const ExecMeetingDashboard = () => {
             ],
           },
           {
+            // Severity = the notification's importance. The backend stores
+            // info / warning / critical; we label them for clarity.
+            value: notifFilters.severity,
+            onChange: v => setNotifFilters(f => ({ ...f, severity: v })),
+            placeholder: 'Any priority', allLabel: 'Any priority',
+            options: [
+              { value: 'critical', label: 'Critical (severe)' },
+              { value: 'warning', label: 'Warning (medium)' },
+              { value: 'info', label: 'Info (low)' },
+            ],
+          },
+          {
             value: notifFilters.unread_only ? 'unread' : '',
             onChange: v => setNotifFilters(f => ({ ...f, unread_only: v === 'unread' })),
             placeholder: 'Read & unread', allLabel: 'Read & unread',
             options: [{ value: 'unread', label: 'Unread only' }],
           },
+          {
+            // How many notifications to show per page. (The auto-added
+            // "all" row maps back to the default of 8.)
+            value: String(notifPageSize),
+            onChange: v => setNotifPageSize(Number(v) || 8),
+            placeholder: 'Per page', allLabel: 'Default (8 / page)',
+            options: [
+              { value: '8', label: '8 / page' },
+              { value: '15', label: '15 / page' },
+              { value: '25', label: '25 / page' },
+              { value: '50', label: '50 / page' },
+            ],
+          },
         ]}
-        active={!!(notifFilters.search || notifFilters.category || notifFilters.unread_only)}
-        onClear={() => setNotifFilters({ search: '', category: '', unread_only: false })}
+        active={!!(notifFilters.search || notifFilters.category || notifFilters.unread_only || notifFilters.severity)}
+        onClear={() => setNotifFilters({ search: '', category: '', unread_only: false, severity: '' })}
       />
 
       {notifsLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-violet-400" /></div>
       ) : !Array.isArray(notifications) || notifications.length === 0 ? (
-        <EmptyState icon={Bell} label={(notifFilters.search || notifFilters.category || notifFilters.unread_only) ? 'No notifications match these filters' : 'No notifications'} />
+        <EmptyState icon={Bell} label={(notifFilters.search || notifFilters.category || notifFilters.unread_only || notifFilters.severity) ? 'No notifications match these filters' : 'No notifications'} />
       ) : (
         <>
         <BulkSelectBar
@@ -1009,6 +1059,7 @@ const ExecMeetingDashboard = () => {
         userSearchResults={userSearchResults} transcriptInput={transcriptInput}
         notesLoading={notesLoading}
         loadMeetings={refreshMeetings} setShowMeetingDialog={setShowMeetingDialog}
+        onCreateWithAI={() => setAiCreateMode('meeting')}
         setEditingMeeting={setEditingMeeting} openParticipants={openParticipants}
         openNotes={openNotes} removeParticipant={removeParticipant}
         setConfirmRemoveMap={setConfirmRemoveMap} addParticipant={addParticipant}
@@ -1031,6 +1082,7 @@ const ExecMeetingDashboard = () => {
         expandedTaskId={expandedTaskId} expandedSubtasksId={expandedSubtasksId}
         loadTasks={loadTasks}
         setShowTaskDialog={setShowTaskDialog}
+        onCreateWithAI={() => setAiCreateMode('task')}
         setExpandedTaskId={setExpandedTaskId} setExpandedSubtasksId={setExpandedSubtasksId}
         setEditingTask={setEditingTask} setSubtaskParentTask={setSubtaskParentTask}
         setConfirmDeleteTaskId={setConfirmDeleteTaskId}
@@ -1096,27 +1148,29 @@ const ExecMeetingDashboard = () => {
           </div>
           <div className="flex items-center gap-2">
             {/* How it works — re-open the onboarding summary any time */}
-            <button
-              type="button"
-              onClick={handleShowHowItWorks}
-              title="How this agent works"
-              className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-white/15 bg-white/5 text-white/70 text-sm font-semibold hover:bg-white/10 hover:text-white transition"
-            >
-              <Sparkles className="h-4 w-4" />
-              How it works
-            </button>
-            {/* Take the Tour — flickers until user takes the tour */}
-            <div className="relative hidden sm:block">
+            <HoverTip tip="See how this agent works">
               <button
                 type="button"
-                onClick={handleReplayTour}
-                data-tour-em="replay"
-                title="Replay the guided tour"
-                className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-300 text-sm font-semibold hover:bg-violet-400/20 hover:text-violet-200 transition ${spotlightTour ? 'em-spotlight' : ''}`}
+                onClick={handleShowHowItWorks}
+                className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-white/15 bg-white/5 text-white/70 text-sm font-semibold hover:bg-white/10 hover:text-white transition"
               >
-                <GraduationCap className="h-4 w-4" />
-                Take the Tour
+                <Sparkles className="h-4 w-4" />
+                How it works
               </button>
+            </HoverTip>
+            {/* Take the Tour — spotlight-pulses until the user takes the tour */}
+            <div className="relative hidden sm:block">
+              <HoverTip tip="Replay the guided tour">
+                <button
+                  type="button"
+                  onClick={handleReplayTour}
+                  data-tour-em="replay"
+                  className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-violet-400/40 bg-violet-400/10 text-violet-300 text-sm font-semibold hover:bg-violet-400/20 hover:text-violet-200 transition ${spotlightTour ? 'em-spotlight' : ''}`}
+                >
+                  <GraduationCap className="h-4 w-4" />
+                  Take the Tour
+                </button>
+              </HoverTip>
               {spotlightTooltip && (
                 <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-violet-400/40 bg-[#0d0b1f] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
                   👋 Take the tour anytime from here
@@ -1167,6 +1221,14 @@ const ExecMeetingDashboard = () => {
               <TabsTrigger
                 key={t.value}
                 value={t.value}
+                // Hover hint: anchor a themed tooltip above this tab. Handlers
+                // live on the trigger itself (not a HoverTip wrapper) so Radix's
+                // tab keyboard nav and the grid layout stay intact.
+                onMouseEnter={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setTabTip({ text: t.tip, top: r.top - 8, left: r.left + r.width / 2 });
+                }}
+                onMouseLeave={() => setTabTip(null)}
                 className="flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 data-[state=inactive]:text-white/50 data-[state=inactive]:hover:text-white/80 data-[state=active]:text-white data-[state=active]:border-none data-[state=inactive]:border-[#2d2342] data-[state=inactive]:border"
                 style={activeTab === t.value ? {
                   background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
@@ -1184,6 +1246,26 @@ const ExecMeetingDashboard = () => {
               </TabsTrigger>
             ))}
           </TabsList>
+
+          {/* Tab hover tooltip — portalled, fixed above the hovered tab. Same
+              approach MarketingDashboard uses; sidesteps the "don't wrap a
+              TabsTrigger in HoverTip" limitation. */}
+          {tabTip && createPortal(
+            <div
+              role="tooltip"
+              className="fixed z-[10000] pointer-events-none -translate-x-1/2 -translate-y-full"
+              style={{ top: tabTip.top, left: tabTip.left }}
+            >
+              <div className="relative max-w-[220px] rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl">
+                {tabTip.text}
+                <span
+                  className="absolute left-1/2 top-full -translate-x-1/2 h-2 w-2 rotate-45 border-b border-r border-[#3a295a] bg-[#161630]"
+                  style={{ marginTop: '-4px' }}
+                />
+              </div>
+            </div>,
+            document.body,
+          )}
 
           {TAB_ITEMS.map(t => (
             <TabsContent key={t.value} value={t.value} className="mt-0" data-tour-em={`tab-${t.value}`}>
@@ -1215,14 +1297,43 @@ const ExecMeetingDashboard = () => {
       />
 
       {/* Dialogs */}
+      {/* "Create with AI" prompt modal (meeting or task). On parse it closes
+          itself, stashes the draft, and opens the matching normal dialog
+          pre-filled so the user reviews before saving. */}
+      <CreateWithAIModal
+        open={!!aiCreateMode}
+        mode={aiCreateMode || 'meeting'}
+        initialPrompt={aiCreateMode === 'task' ? taskAiPrompt : meetingAiPrompt}
+        onClose={() => setAiCreateMode(null)}
+        onParsed={(data, usedPrompt) => {
+          if (aiCreateMode === 'task') {
+            setTaskPrefill(data);
+            setTaskAiPrompt(usedPrompt || '');
+            setShowTaskDialog(true);
+          } else {
+            setMeetingPrefill(data);
+            setMeetingAiPrompt(usedPrompt || '');
+            setShowMeetingDialog(true);
+          }
+          setAiCreateMode(null);
+        }}
+      />
+
       <ScheduleMeetingDialog
         open={showMeetingDialog}
-        onClose={() => setShowMeetingDialog(false)}
+        prefill={meetingPrefill}
+        // AI-opened → "Edit AI prompt"; manually-opened → "Create with AI".
+        onEditAiPrompt={meetingPrefill ? () => { setShowMeetingDialog(false); setAiCreateMode('meeting'); } : null}
+        onCreateWithAI={!meetingPrefill ? () => { setShowMeetingDialog(false); setAiCreateMode('meeting'); } : null}
+        onClose={() => { setShowMeetingDialog(false); setMeetingPrefill(null); }}
         onCreated={() => { loadMeetings(); loadStats(); }}
       />
       <AddTaskDialog
         open={showTaskDialog}
-        onClose={() => setShowTaskDialog(false)}
+        prefill={taskPrefill}
+        onEditAiPrompt={taskPrefill ? () => { setShowTaskDialog(false); setAiCreateMode('task'); } : null}
+        onCreateWithAI={!taskPrefill ? () => { setShowTaskDialog(false); setAiCreateMode('task'); } : null}
+        onClose={() => { setShowTaskDialog(false); setTaskPrefill(null); }}
         onCreated={() => { loadTasks(); loadStats(); }}
       />
 
@@ -1261,19 +1372,23 @@ const ExecMeetingDashboard = () => {
               </p>
             </div>
             <div className="flex gap-3 w-full mt-2">
-              <Button
-                variant="outline"
-                className="flex-1 border-white/10 text-white/60 hover:bg-white/5"
-                onClick={() => setShowPastTasksConfirm(false)}
-              >
-                No, keep default
-              </Button>
-              <Button
-                className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
-                onClick={() => { setIncludePastTasks(true); setShowPastTasksConfirm(false); }}
-              >
-                Yes, include all
-              </Button>
+              <HoverTip tip="Only include tasks due this week or later" className="flex-1">
+                <Button
+                  variant="outline"
+                  className="w-full border-white/10 text-white/60 hover:bg-white/5"
+                  onClick={() => setShowPastTasksConfirm(false)}
+                >
+                  No, keep default
+                </Button>
+              </HoverTip>
+              <HoverTip tip="Include all overdue / older tasks too" className="flex-1">
+                <Button
+                  className="w-full bg-violet-600 hover:bg-violet-700 text-white"
+                  onClick={() => { setIncludePastTasks(true); setShowPastTasksConfirm(false); }}
+                >
+                  Yes, include all
+                </Button>
+              </HoverTip>
             </div>
           </div>
         </DialogContent>
@@ -1301,17 +1416,19 @@ const ExecMeetingDashboard = () => {
               >
                 Cancel
               </Button>
-              <Button
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white"
-                disabled={!!deletingTaskId}
-                onClick={() => { deleteTask(confirmDeleteTaskId); setConfirmDeleteTaskId(null); }}
-              >
-                {deletingTaskId ? (
-                  <><span className="h-4 w-4 mr-2 rounded-full border-2 border-white/30 border-t-white animate-spin inline-block" /> Deleting…</>
-                ) : (
-                  <><Trash2 className="h-4 w-4 mr-1" /> Delete</>
-                )}
-              </Button>
+              <HoverTip tip="Permanently delete this task" className="flex-1">
+                <Button
+                  className="w-full bg-red-500 hover:bg-red-600 text-white"
+                  disabled={!!deletingTaskId}
+                  onClick={() => { deleteTask(confirmDeleteTaskId); setConfirmDeleteTaskId(null); }}
+                >
+                  {deletingTaskId ? (
+                    <><span className="h-4 w-4 mr-2 rounded-full border-2 border-white/30 border-t-white animate-spin inline-block" /> Deleting…</>
+                  ) : (
+                    <><Trash2 className="h-4 w-4 mr-1" /> Delete</>
+                  )}
+                </Button>
+              </HoverTip>
             </div>
           </div>
         </DialogContent>
@@ -1323,8 +1440,9 @@ const ExecMeetingDashboard = () => {
           className="max-w-3xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
+          {/* Header — pr-10 keeps the Download button clear of the dialog's
+              own close ✕ in the top-right corner. */}
+          <div className="flex items-center justify-between px-6 py-4 pr-10 border-b border-white/10 flex-shrink-0">
             <div className="flex items-center gap-3 min-w-0">
               {viewDoc && (
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border flex-shrink-0 ${{
@@ -1340,10 +1458,12 @@ const ExecMeetingDashboard = () => {
               <h3 className="text-white font-semibold truncate text-sm">{viewDoc?.title}</h3>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0 ml-4">
-              <Button size="sm" variant="ghost" onClick={() => viewDoc && downloadDocPdf(viewDoc)}
-                className="text-sky-400 hover:text-sky-300 gap-1.5 text-xs">
-                <Download className="h-3.5 w-3.5" /> Download PDF
-              </Button>
+              <HoverTip tip="Download this document as PDF">
+                <Button size="sm" variant="ghost" onClick={() => viewDoc && downloadDocPdf(viewDoc)}
+                  className="text-sky-400 hover:text-sky-300 gap-1.5 text-xs">
+                  <Download className="h-3.5 w-3.5" /> Download PDF
+                </Button>
+              </HoverTip>
             </div>
           </div>
 
@@ -1354,8 +1474,9 @@ const ExecMeetingDashboard = () => {
             </div>
           )}
 
-          {/* Rendered markdown content */}
-          <div className="flex-1 overflow-y-auto px-6 py-5">
+          {/* Rendered markdown content — scrollable but with the scrollbar
+              hidden (no-scrollbar) for a cleaner look. */}
+          <div className="flex-1 overflow-y-auto no-scrollbar px-6 py-5">
             {viewDoc?.content && (
               <div
                 className="prose prose-invert max-w-none"

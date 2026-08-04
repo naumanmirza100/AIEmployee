@@ -151,6 +151,54 @@ Return ONLY the JSON object."""
         raw = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=500)
         return self._extract_json(raw)
 
+    def parse_task_request(self, message: str) -> dict:
+        """Parse a natural-language task request into structured JSON.
+
+        Powers the "Create with AI" flow: the user types a free-form prompt
+        ("Ask Noor to review the Q3 report by Friday, high priority") and we
+        return fields to pre-fill the Add-Task form. assignee_hints are name/
+        email fragments the caller resolves against the company roster.
+        """
+        from django.utils import timezone
+        self.log_action("parse_task_request", {"message_len": len(message)})
+        today = timezone.now().strftime('%Y-%m-%d')
+        prompt = f"""Parse this task request and return ONLY valid JSON:
+
+Request: "{message}"
+
+Return JSON with these fields:
+{{
+  "title": "a short, clear task title",
+  "description": "a clear, actionable 2-4 sentence description",
+  "priority": "low|medium|high",
+  "due_date": "YYYY-MM-DD or null",
+  "assignee_hints": ["name or email fragments of people to assign, if any"]
+}}
+
+Use today's date as reference: {today}.
+Rules:
+- Infer a sensible title from the request even if none is stated explicitly.
+- priority MUST be one of low, medium, high (default "medium" if unclear).
+- due_date must be a weekday (Mon-Fri) if a date is implied; null if none.
+- assignee_hints: extract any people mentioned ("ask Noor", "assign to ali@x.com"); empty list if none.
+- Return ONLY the JSON object, no explanation, no markdown fences."""
+
+        raw = self._call_llm(prompt, self.system_prompt, temperature=0.2, max_tokens=500)
+        parsed = self._extract_json(raw) or {}
+        prio = str(parsed.get('priority') or 'medium').lower()
+        if prio not in ('low', 'medium', 'high'):
+            prio = 'medium'
+        hints = parsed.get('assignee_hints') or []
+        if not isinstance(hints, list):
+            hints = []
+        return {
+            'title': (parsed.get('title') or '').strip(),
+            'description': (parsed.get('description') or '').strip(),
+            'priority': prio,
+            'due_date': parsed.get('due_date') or None,
+            'assignee_hints': [str(h).strip() for h in hints if str(h).strip()],
+        }
+
     def generate_description(self, title: str, points: str) -> dict:
         """
         Expand a task title + a few free-form points into a proper task
