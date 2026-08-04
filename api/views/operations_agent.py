@@ -1062,6 +1062,128 @@ def ask_qa_question(request):
         )
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def replace_last_qa_turn(request, chat_id):
+    """Edit-and-resend the most recent question (ChatGPT-style, last turn only).
+
+    Deletes the chat's final user+assistant pair and regenerates an answer for the
+    edited question, so the corrected exchange replaces the old one in place. Only
+    the last turn is editable — the history that precedes it is untouched and is
+    what the agent uses as context, exactly as if the user had asked the new
+    question at the end of the (now trimmed) conversation.
+    """
+    try:
+        user = request.user
+        company = user.company
+
+        question = (request.data.get('question') or '').strip()
+        if not question:
+            return Response(
+                {'status': 'error', 'message': 'Question is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        chat = OperationsChat.objects.filter(
+            company=company, user=user, pk=chat_id,
+        ).first()
+        if not chat:
+            return Response(
+                {'status': 'error', 'message': 'Chat not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # The last turn is the trailing user message + everything after it
+        # (normally just its assistant reply). Refuse if there is no user turn
+        # to replace.
+        ordered = list(chat.messages.order_by('created_at'))
+        last_user_idx = None
+        for idx in range(len(ordered) - 1, -1, -1):
+            if ordered[idx].role == 'user':
+                last_user_idx = idx
+                break
+        if last_user_idx is None:
+            return Response(
+                {'status': 'error', 'message': 'There is no question to edit in this chat.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # History = everything BEFORE the turn being replaced. This is the same
+        # context ask_qa_question would build, minus the message we're editing.
+        history_msgs = [
+            {'role': m.role, 'content': m.content}
+            for m in ordered[:last_user_idx]
+        ]
+        # Messages that make up the turn we're about to drop (the edited user
+        # message and any assistant reply that followed it).
+        turn_to_remove = ordered[last_user_idx:]
+
+        # Regenerate BEFORE deleting anything, so a failure leaves the old turn
+        # intact (never destroy the previous answer for a generation that errored).
+        from operations_agent.agents.knowledge_qa_agent import OperationsKnowledgeQAAgent
+        agent = OperationsKnowledgeQAAgent()
+        agent.company_id = company.id
+        agent.agent_key_name = 'operations_agent'
+        result = agent.answer(
+            question=question,
+            company_id=company.id,
+            chat_history=history_msgs,
+            document_ids=None,
+        )
+
+        answer_text = result.get('answer') or 'Sorry, I could not produce an answer.'
+        sources = result.get('sources') or []
+
+        with transaction.atomic():
+            OperationsChatMessage.objects.filter(
+                id__in=[m.id for m in turn_to_remove]
+            ).delete()
+
+            OperationsChatMessage.objects.create(
+                chat=chat, role='user', content=question,
+            )
+            assistant_msg = OperationsChatMessage.objects.create(
+                chat=chat,
+                role='assistant',
+                content=answer_text,
+                sources=sources,
+                response_data={
+                    'success': bool(result.get('success')),
+                    'timing_ms': result.get('timing_ms') or {},
+                    'cache_hit': bool(result.get('cache_hit')),
+                },
+            )
+            chat.save(update_fields=['updated_at'])
+
+        return Response({
+            'status': 'success',
+            'chat_id': chat.id,
+            'chat_title': chat.title,
+            'message': {
+                'id': assistant_msg.id,
+                'role': 'assistant',
+                'content': answer_text,
+                'sources': sources,
+                'created_at': assistant_msg.created_at.isoformat(),
+                'responseData': assistant_msg.response_data,
+            },
+            'success': bool(result.get('success')),
+            'error': result.get('error'),
+            'timing_ms': result.get('timing_ms') or {},
+            'cache_hit': bool(result.get('cache_hit')),
+        })
+
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error(f'replace_last_qa_turn error: {e}', exc_info=True)
+        return Response(
+            {'status': 'error', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
 # ──────────────────────────────────────────────
 # Document Authoring Endpoints
 # ──────────────────────────────────────────────

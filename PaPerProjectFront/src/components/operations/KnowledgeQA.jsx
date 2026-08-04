@@ -9,6 +9,7 @@ import {
   Loader2, Send, MessageSquare, Plus, Trash2, Bot, Search,
   ChevronsLeft, ChevronsRight, FileText, Pencil, Check, X,
   HelpCircle, Upload, Sparkles, MessageSquareText, Quote, Lightbulb,
+  Copy,
 } from 'lucide-react';
 import operationsService from '@/services/operationsAgentService';
 import { ElapsedTimer } from '@/components/frontline/chatShellUtils';
@@ -190,11 +191,26 @@ const KnowledgeQA = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const scrollRef = useRef(null);
+  // Ref to the most recent assistant answer, so we can scroll the user to the
+  // START of a fresh answer (where it begins) instead of the container bottom
+  // (its end) — the user wants to read from the top.
+  const lastAnswerRef = useRef(null);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+  }, []);
+
+  // Scroll so the top of the latest assistant answer sits near the top of the
+  // viewport. Used when a new answer arrives so the user starts reading from the
+  // beginning of the response, not scrolled past to its end.
+  const scrollToAnswerTop = useCallback(() => {
+    requestAnimationFrame(() => {
+      if (lastAnswerRef.current) {
+        lastAnswerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     });
   }, []);
@@ -341,7 +357,8 @@ const KnowledgeQA = () => {
     } finally {
       setSending(false);
       setSendStartedAt(null);
-      setTimeout(scrollToBottom, 50);
+      // Land the user at the START of the new answer, not the container bottom.
+      setTimeout(scrollToAnswerTop, 60);
     }
   };
 
@@ -412,6 +429,80 @@ const KnowledgeQA = () => {
         description: err?.message || 'Could not rename chat',
         variant: 'destructive',
       });
+    }
+  };
+
+  // ── Edit & resend the most recent question (ChatGPT-style, last turn only) ──
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState('');
+
+  const startEdit = (msg) => {
+    setEditingId(msg.id);
+    setEditValue(msg.content || '');
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
+
+  const submitEdit = async () => {
+    const edited = (editValue || '').trim();
+    if (!edited || sending) return;
+    if (!selectedChatId) { cancelEdit(); return; }
+
+    cancelEdit();
+    setSending(true);
+    setSendStartedAt(performance.now());
+
+    // Optimistically drop the old last turn (trailing user msg + everything
+    // after it) so the UI reflects the replace immediately.
+    setMessages((prev) => {
+      let cut = prev.length;
+      for (let i = prev.length - 1; i >= 0; i -= 1) {
+        if (prev[i].role === 'user') { cut = i; break; }
+      }
+      const trimmed = prev.slice(0, cut);
+      return [
+        ...trimmed,
+        { id: `tmp-${Date.now()}`, role: 'user', content: edited, created_at: new Date().toISOString() },
+      ];
+    });
+    setTimeout(scrollToBottom, 10);
+
+    try {
+      const res = await operationsService.replaceLastQaTurn(selectedChatId, edited);
+      if (res?.status === 'success' && res.message) {
+        const assistantMsg = {
+          ...res.message,
+          responseData: {
+            ...(res.message.responseData || {}),
+            timing_ms: res.timing_ms || res.message.responseData?.timing_ms || {},
+            cache_hit: res.cache_hit ?? res.message.responseData?.cache_hit ?? false,
+          },
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+        loadChats();
+      } else {
+        throw new Error(res?.message || 'Failed to get a response');
+      }
+    } catch (err) {
+      console.error('Edit & resend failed:', err);
+      // Re-sync from the server so the UI matches the persisted state after a
+      // failed replace (the old turn was never deleted server-side).
+      try {
+        const chatRes = await operationsService.getQaChat(selectedChatId);
+        if (chatRes?.status === 'success') setMessages(chatRes.chat?.messages || []);
+      } catch { /* leave optimistic state as-is */ }
+      toast({
+        title: 'Error',
+        description: err?.message || 'Could not resend the edited question.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSending(false);
+      setSendStartedAt(null);
+      setTimeout(scrollToAnswerTop, 60);
     }
   };
 
@@ -653,9 +744,31 @@ const KnowledgeQA = () => {
               <EmptyState onPick={(q) => setQuestion(q)} />
             ) : (
               <div className="max-w-4xl mx-auto space-y-5">
-                {messages.map((m) => (
-                  <Message key={m.id} message={m} />
-                ))}
+                {(() => {
+                  // Index of the last user message (only that one is editable)
+                  // and the last assistant message (target for scroll-to-top).
+                  let lastUserIdx = -1;
+                  let lastAssistantIdx = -1;
+                  messages.forEach((m, idx) => {
+                    if (m.role === 'user') lastUserIdx = idx;
+                    else if (m.role === 'assistant') lastAssistantIdx = idx;
+                  });
+                  return messages.map((m, idx) => (
+                    <Message
+                      key={m.id}
+                      message={m}
+                      isLastUser={idx === lastUserIdx}
+                      answerRef={idx === lastAssistantIdx ? lastAnswerRef : null}
+                      isEditing={editingId === m.id}
+                      editValue={editValue}
+                      onEditChange={setEditValue}
+                      onStartEdit={() => startEdit(m)}
+                      onCancelEdit={cancelEdit}
+                      onSubmitEdit={submitEdit}
+                      editDisabled={sending}
+                    />
+                  ));
+                })()}
                 {sending && (
                   <div className="flex items-start gap-3">
                     <div
@@ -849,10 +962,102 @@ const EmptyState = ({ onPick }) => (
   </div>
 );
 
-const Message = ({ message }) => {
+// Small hover-reveal copy button; flips to a check for 2s on success.
+const CopyButton = ({ text, title = 'Copy' }) => {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text || '');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked — silently ignore */
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title={copied ? 'Copied' : title}
+      className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+    >
+      {copied
+        ? <Check className="h-3.5 w-3.5 text-green-400" />
+        : <Copy className="h-3.5 w-3.5 text-white/50 hover:text-amber-300" />}
+    </button>
+  );
+};
+
+const Message = ({
+  message,
+  isLastUser = false,
+  answerRef = null,
+  isEditing = false,
+  editValue = '',
+  onEditChange = () => {},
+  onStartEdit = () => {},
+  onCancelEdit = () => {},
+  onSubmitEdit = () => {},
+  editDisabled = false,
+}) => {
   if (message.role === 'user') {
+    // Inline edit mode (only reachable for the last user message).
+    if (isEditing) {
+      return (
+        <div className="flex justify-end">
+          <div
+            className="w-full max-w-[78%] rounded-2xl px-3 py-3"
+            style={{ backgroundColor: 'rgba(245,158,11,0.10)', border: `1px solid ${ACCENT_BORDER}` }}
+          >
+            <Textarea
+              value={editValue}
+              onChange={(e) => onEditChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSubmitEdit(); }
+                if (e.key === 'Escape') onCancelEdit();
+              }}
+              rows={2}
+              autoFocus
+              className="w-full resize-none bg-black/30 border border-amber-500/30 rounded-lg text-white/95 text-[14px] leading-relaxed focus:outline-none focus-visible:ring-0 px-3 py-2 min-h-[44px] max-h-[160px]"
+            />
+            <div className="flex items-center justify-end gap-2 mt-2">
+              <button
+                type="button"
+                onClick={onCancelEdit}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-white/70 hover:bg-white/10 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" /> Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onSubmitEdit}
+                disabled={editDisabled || !editValue.trim()}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40 transition-transform active:scale-95"
+                style={{ backgroundColor: ACCENT, color: '#1a0e00' }}
+              >
+                <Send className="h-3.5 w-3.5" /> Save &amp; resend
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
-      <div className="flex justify-end">
+      <div className="group flex justify-end items-start gap-1.5">
+        {/* Hover actions sit to the LEFT of the right-aligned bubble */}
+        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 mt-1 shrink-0">
+          <CopyButton text={message.content} title="Copy question" />
+          {isLastUser && (
+            <button
+              type="button"
+              onClick={onStartEdit}
+              title="Edit & resend"
+              className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+            >
+              <Pencil className="h-3.5 w-3.5 text-white/50 hover:text-amber-300" />
+            </button>
+          )}
+        </div>
         <div
           className="max-w-[78%] rounded-2xl px-4 py-3 text-[14px] leading-relaxed"
           style={{
@@ -874,7 +1079,7 @@ const Message = ({ message }) => {
   const cacheHit = message.responseData?.cache_hit ?? message.cache_hit ?? false;
   const totalMs = timing?.total;
   return (
-    <div className="flex items-start gap-3">
+    <div ref={answerRef} className="group flex items-start gap-3 scroll-mt-6">
       <div
         className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0 mt-0.5"
         style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}
@@ -923,6 +1128,10 @@ const Message = ({ message }) => {
             )}
           </div>
         )}
+        {/* Hover-reveal copy for the answer text */}
+        <div className="mt-2 -mb-1 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <CopyButton text={message.content} title="Copy answer" />
+        </div>
       </div>
     </div>
   );

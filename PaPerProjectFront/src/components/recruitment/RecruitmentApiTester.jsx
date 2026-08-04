@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,6 +47,14 @@ const RecruitmentApiTester = () => {
   const { toast } = useToast();
   const [cvFile, setCvFile] = useState(null);
   const [cvText, setCvText] = useState('');
+  // Ref to the native file input so we can reset its value — clearing state
+  // alone leaves the browser still showing the old filename.
+  const fileInputRef = useRef(null);
+
+  const clearCvFile = () => {
+    setCvFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
   const [jobKeywords, setJobKeywords] = useState('');
   const [loadingStep, setLoadingStep] = useState(null);
   // Step-by-step hints banner, toggled by the info button in the header.
@@ -265,6 +273,7 @@ const RecruitmentApiTester = () => {
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="flex items-center gap-2">
                   <Input
+                    ref={fileInputRef}
                     type="file"
                     accept=".pdf,.docx,.txt"
                     onChange={(e) => {
@@ -273,7 +282,20 @@ const RecruitmentApiTester = () => {
                     }}
                     className="max-w-xs bg-black/30 border-white/20 text-white"
                   />
-                  {cvFile && <Badge variant="secondary">{cvFile.name}</Badge>}
+                  {cvFile && (
+                    <Badge variant="secondary" className="flex items-center gap-1 pr-1">
+                      <span className="max-w-[160px] truncate">{cvFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={clearCvFile}
+                        title="Remove file"
+                        aria-label="Remove selected file"
+                        className="flex items-center justify-center h-4 w-4 rounded-full hover:bg-red-500/25 transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  )}
                 </div>
                 <span className="text-sm text-white/60 self-center">or paste text below</span>
               </div>

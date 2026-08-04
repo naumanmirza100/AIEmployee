@@ -99,7 +99,7 @@ def _cache_get_query_vec(query, embedding_service):
         hit = _QUERY_EMBEDDING_CACHE.get(key)
         if hit is not None:
             return hit
-    raw = embedding_service.generate_embedding(query)
+    raw = embedding_service.generate_embedding(query, is_query=True)
     vec = _parse_embedding(raw)
     if vec is None:
         return None
@@ -299,10 +299,28 @@ def _score_chunk(chunk_text: str, question_tokens: List[str]) -> int:
 class OperationsKnowledgeQAAgent(MarketingBaseAgent):
     """Answer questions against operations documents using RAG-style keyword retrieval + Groq."""
 
-    MAX_CONTEXT_CHARS = 12000           # how much doc text we pass to the LLM
-    MAX_CHUNKS = 8                      # top-K retrieved chunks
+    # Retrieval budget. Catalog-style documents (a prospectus, a price list,
+    # a policy manual) spread the answer across many chunks — e.g. "list all
+    # data-science courses" needs far more than the old top-8, which cut the
+    # list short and let the LLM stitch the wrong details together.
+    #
+    # But the ceiling is the LLM's tokens-per-minute limit, not its context
+    # window: Groq's free-tier llama-3.1-8b-instant caps at 6000 TPM (input +
+    # output combined). Two things go wrong as the context grows: (1) a single
+    # request can exceed 6000 tokens and Groq rejects it with HTTP 413, and
+    # (2) even under the cap, a bigger prompt is slower to process AND burns the
+    # per-minute budget faster, so back-to-back questions hit the 429 rate limit
+    # and fall into the retry/sleep loop — that's what pushed one answer to ~40s.
+    #
+    # 10 chunks / ~11k chars ≈ 2.7k tokens of context. With the system prompt +
+    # a little history + a 1200-token reply the request lands around ~4.5k tokens
+    # — comfortably under 6000, leaves headroom for a couple of quick follow-up
+    # questions before the rate limit bites, and is noticeably faster to answer.
+    # Still well above the old top-8, so catalog answers stay complete.
+    MAX_CONTEXT_CHARS = 11000           # how much doc text we pass to the LLM (~2.7k tokens)
+    MAX_CHUNKS = 10                     # top-K retrieved chunks
     MAX_HISTORY = 6                     # last N messages for context
-    MAX_TOKENS_RESPONSE = 1400
+    MAX_TOKENS_RESPONSE = 1200
 
     def __init__(self):
         try:

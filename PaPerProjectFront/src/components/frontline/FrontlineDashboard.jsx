@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import ChatMarkdown from '@/components/shared/ChatMarkdown';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -4402,15 +4403,22 @@ const FrontlineDashboard = () => {
                                 <XCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                               )}
                               <div className="flex-1 min-w-0">
-                                <div className="text-sm text-foreground whitespace-pre-wrap break-words">
-                                  {msg.streaming ? msg.content : (msg.responseData?.answer ?? msg.content)}
-                                  {msg.streaming && (
-                                    <>
-                                      {!msg.content && <span className="text-muted-foreground italic">Thinking…</span>}
-                                      <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-primary/70 animate-pulse align-middle" />
-                                    </>
-                                  )}
-                                </div>
+                                {msg.streaming ? (
+                                  // While streaming, render as plain text with a
+                                  // blinking cursor — markdown parsing on every
+                                  // token would produce flicker on incomplete
+                                  // headers/lists/bold. Flip to rendered markdown
+                                  // once the stream completes.
+                                  <div className="text-sm text-foreground whitespace-pre-wrap break-words">
+                                    {msg.content}
+                                    {!msg.content && <span className="text-muted-foreground italic">Thinking…</span>}
+                                    <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-primary/70 animate-pulse align-middle" />
+                                  </div>
+                                ) : (
+                                  <ChatMarkdown className="text-sm text-foreground">
+                                    {msg.responseData?.answer ?? msg.content ?? ''}
+                                  </ChatMarkdown>
+                                )}
                                 {msg.responseData?.confidence === 'low' && (
                                   <div className="mt-2 text-xs rounded-md px-2 py-1 bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30">
                                     Low-confidence match{typeof msg.responseData?.best_score === 'number' ? ` (score ${msg.responseData.best_score})` : ''}. Consider escalating to a human agent.

@@ -142,9 +142,10 @@ const SavedPrompts = () => {
                 variant={filterFavorites ? "default" : "outline"}
                 size="sm"
                 onClick={() => setFilterFavorites(!filterFavorites)}
+                title={filterFavorites ? 'Show all prompts' : 'Show favorites only'}
               >
-                <Star className={`h-4 w-4 ${filterFavorites ? '' : 'mr-2'}`} />
-                {!filterFavorites && <span className="hidden sm:inline">Favorites</span>}
+                <Star className={`h-4 w-4 mr-2 ${filterFavorites ? 'fill-current' : ''}`} />
+                <span>{filterFavorites ? 'Show all prompts' : 'Favorites'}</span>
               </Button>
               <Button
                 variant="outline"

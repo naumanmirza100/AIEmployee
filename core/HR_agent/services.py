@@ -96,7 +96,7 @@ def _cache_get_query_vec(query: str, embedding_service):
         hit = _QUERY_EMBEDDING_CACHE.get(key)
         if hit is not None:
             return hit
-    raw = embedding_service.generate_embedding(query)
+    raw = embedding_service.generate_embedding(query, is_query=True)
     if not raw:
         return None
     vec = _parse_embedding(raw)
