@@ -819,7 +819,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
                     : <span className="text-white/30">None</span>
                   }
                 </span>
-                {/* Weekly reset history — opens a pop-up for this agent. */}
+                {/* Reset-history pop-up for this agent. */}
                 {managedKey.renewal_period && managedKey.renewal_period !== 'none' && (
                   <>
                     <span className="text-white/15 text-sm">·</span>
@@ -828,7 +828,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
                       onClick={(e) => { e.stopPropagation(); setResetLogsOpen(true); }}
                       className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-300 hover:text-violet-200 hover:underline"
                     >
-                      <History className="h-3 w-3" /> Weekly
+                      <History className="h-3 w-3" /> Reset history
                     </button>
                   </>
                 )}
@@ -836,7 +836,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
                   <>
                     <span className="text-white/15 text-sm">·</span>
                     <span className="text-[11px] text-white/40">
-                      <span className="text-white/25">Tokens/wk: </span>
+                      <span className="text-white/25">Tokens/reset: </span>
                       <span className="text-violet-300 font-medium">{Number(managedKey.tokens_per_period).toLocaleString()}</span>
                     </span>
                   </>
