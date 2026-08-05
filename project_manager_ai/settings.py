@@ -678,12 +678,23 @@ RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
 
 
 # --------------------
-# Email Tracking Configuration
+# Public URLs (email links, tracking, meeting approval)
 # --------------------
-# Base URL for email tracking (opens/clicks)
-# For local testing with ngrok, use your ngrok URL
-# For production, use your actual domain
-SITE_URL = os.getenv('SITE_URL', 'https://fiddly-uncouth-ryan.ngrok-free.dev')
+# SITE_URL / BACKEND_URL — where the Django backend is reachable. Used for
+#   links the BACKEND handles directly: email open/click tracking, the meeting
+#   yes/suggest approval endpoints, unsubscribe, etc.
+# FRONTEND_URL — where the React app is served. Used for links a BROWSER should
+#   land on: the /book/<token> meeting booking page.
+#
+# In production set SITE_URL (or BACKEND_URL) and FRONTEND_URL in the
+# environment to your real domains. The default falls back to BACKEND_URL and
+# then localhost — NOT a hard-coded ngrok tunnel, which goes dead and silently
+# broke every meeting link that pointed at it.
+SITE_URL = (
+    os.getenv('SITE_URL')
+    or os.getenv('BACKEND_URL')
+    or 'http://localhost:8000'
+).rstrip('/')
 
 
 # --------------------

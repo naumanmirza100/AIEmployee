@@ -167,14 +167,16 @@ export default function MeetingBookingPage() {
     getBookingInfo(token)
       .then(data => {
         setInfo(data);
-        // Lead clicked "Yes" in approval email — show confirmed state directly
-        if (isApproved) {
+        // Show the confirmed state directly when the meeting is already booked
+        // (lead clicked "Yes" in the approval email, then opened this page) —
+        // either via the ?approved=1 flag or the server's already_booked signal.
+        if (isApproved || data.already_booked) {
           setConfirmed({
             title: data.title,
-            scheduled_at: null,   // already confirmed server-side
+            scheduled_at: data.scheduled_at || null,
             duration_minutes: data.duration_minutes,
             sender_name: data.sender_name,
-            meet_link: null,
+            meet_link: data.meet_link || null,
           });
         }
       })
