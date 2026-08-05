@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import adminApiKeysService from '@/services/adminApiKeysService';
+import { ResetLogsTab } from '@/components/admin/ResetLogsTab';
 
 const GRADIENT_BG = 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)';
 const CARD_CLASS = 'bg-[#120d22] border border-[#2d2342]';
@@ -1521,6 +1522,7 @@ const SuperAdminApiKeysPage = () => {
                 { value: 'keys', icon: Key, label: 'Per-Company Keys' },
                 { value: 'pricing', icon: DollarSign, label: 'Pricing' },
                 { value: 'quotas', icon: Gauge, label: 'Quotas' },
+                { value: 'reset-logs', icon: RefreshCw, label: 'Reset Logs' },
                 { value: 'requests', icon: Inbox, label: 'Requests', badge: stats.pending_requests },
               ].map(t => (
                 <TabsTrigger
@@ -1574,6 +1576,9 @@ const SuperAdminApiKeysPage = () => {
             </TabsContent>
             <TabsContent value="quotas">
               <QuotasTab quotas={quotas} onAdjust={openAdjust} filter={quotaFilter} setFilter={setQuotaFilter} onRefresh={reloadQuotas} loading={loading} agentOptions={agentOptions} />
+            </TabsContent>
+            <TabsContent value="reset-logs">
+              <ResetLogsTab agentOptions={agentOptions} />
             </TabsContent>
             <TabsContent value="requests">
               <RequestsTab
