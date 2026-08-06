@@ -380,10 +380,14 @@ const ExecMeetingDashboard = () => {
   // fetch them here. Falls back to the meeting's description if there are no
   // notes yet.
   const applyMeetingNotesToDoc = async (meetingId, docType) => {
-    if (docType !== 'minutes') return;
-    // Always clear first so switching to a meeting with no notes doesn't leave
-    // the previous meeting's summary sitting in the box.
-    setAiDocSummary('');
+    // Minutes → fills the discussion-summary box; Briefing → fills the
+    // context box (both editable, capped at 800 chars). Other types don't
+    // auto-pull notes.
+    if (docType !== 'minutes' && docType !== 'briefing') return;
+    // Always clear the target box first so switching to a meeting with no
+    // notes doesn't leave the previous meeting's text sitting in it.
+    if (docType === 'minutes') setAiDocSummary('');
+    else setAiDocContext('');
     try {
       const res = await execMeetingService.getMeetingNotes(meetingId);
       const n = res.notes;
@@ -397,7 +401,10 @@ const ExecMeetingDashboard = () => {
         parts.push('Action Items:\n' + n.action_items.map(a => `- ${a.title}`).join('\n'));
       }
       const text = parts.join('\n\n').trim();
-      if (text) setAiDocSummary(text.slice(0, 800));
+      if (text) {
+        if (docType === 'minutes') setAiDocSummary(text.slice(0, 800));
+        else setAiDocContext(text.slice(0, 800));
+      }
     } catch { /* no notes yet — box already cleared above */ }
   };
 

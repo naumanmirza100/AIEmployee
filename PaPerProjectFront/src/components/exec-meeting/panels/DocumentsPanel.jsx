@@ -69,6 +69,9 @@ export const DocumentsPanel = ({
               if (aiDocMeetingId) {
                 if (v === 'minutes') {
                   applyMeetingNotesToDoc(aiDocMeetingId, 'minutes');
+                } else if (v === 'briefing') {
+                  // Briefing pulls the meeting's notes into its context box.
+                  applyMeetingNotesToDoc(aiDocMeetingId, 'briefing');
                 } else if (v === 'agenda') {
                   const m = meetings.find(x => String(x.id) === String(aiDocMeetingId));
                   if (m) {
@@ -110,6 +113,10 @@ export const DocumentsPanel = ({
                 // decisions, action items) into the discussion-summary box.
                 if (aiDocType === 'minutes') {
                   applyMeetingNotesToDoc(val, 'minutes');
+                }
+                // For a Briefing, pull those same notes into the context box.
+                if (aiDocType === 'briefing') {
+                  applyMeetingNotesToDoc(val, 'briefing');
                 }
               }
             }}>

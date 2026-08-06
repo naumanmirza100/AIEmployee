@@ -156,17 +156,23 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         description = (campaign_data.get('description') or '').strip()
         start_date = campaign_data.get('start_date') or ''
         end_date = campaign_data.get('end_date') or ''
+        # Optional free-text steer from the user on a re-generate ("focus on
+        # the Pakistan finance sector, aim for higher leads", etc.).
+        instructions = (campaign_data.get('instructions') or '').strip()
 
         self.log_action("Auto-filling campaign fields", {"user_id": user_id})
+
+        instructions_line = f"\nExtra instructions from the user (follow these): {instructions}\n" if instructions else ''
 
         prompt = f"""Based on this email marketing campaign, infer reasonable targeting values.
 
 Campaign name: {name}
-Description: {description or 'Not provided'}
+User's brief / hint (may be rough — treat it as guidance, NOT the final description): {description or 'Not provided'}
 Duration: {start_date or 'Not specified'} to {end_date or 'Not specified'}
-
+{instructions_line}
 Respond with ONLY a single JSON object (no markdown, no commentary) with exactly these keys:
 {{
+  "description": "<a clear, professional 1-2 sentence campaign description written FROM the name and the user's hint. Do NOT just copy the hint — turn it into a proper description. If the hint is empty, infer a sensible one from the campaign name>",
   "target_leads": <integer, realistic number of qualified leads for this duration>,
   "target_conversions": <integer, realistic number of conversions, smaller than target_leads>,
   "age_range": "<e.g. 25-45, or empty string if not applicable>",
@@ -201,6 +207,7 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
     def _parse_auto_fill_json(self, raw_text: str) -> Dict:
         """Parse the LLM's JSON response for auto_fill_campaign, tolerating stray text/markdown fences."""
         defaults = {
+            'description': '',
             'target_leads': None,
             'target_conversions': None,
             'age_range': '',
@@ -233,7 +240,7 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
                 result[int_key] = int(result[int_key]) if result[int_key] not in (None, '') else None
             except (ValueError, TypeError):
                 result[int_key] = None
-        for str_key in ('age_range', 'location', 'industry', 'company_size', 'interests', 'language'):
+        for str_key in ('description', 'age_range', 'location', 'industry', 'company_size', 'interests', 'language'):
             result[str_key] = str(result[str_key]).strip() if result[str_key] else ''
         return result
 

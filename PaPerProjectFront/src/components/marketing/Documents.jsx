@@ -49,7 +49,8 @@ import {
   FolderOpen,
   BookOpen,
   PenTool,
-  FileOutput
+  FileOutput,
+  Sparkles
 } from 'lucide-react';
 import marketingAgentService from '@/services/marketingAgentService';
 import { cn } from '@/lib/utils';
@@ -457,41 +458,41 @@ const Documents = () => {
         <div className="absolute inset-0 bg-grid-white/5 [mask-image:radial-gradient(ellipse_at_center,white,transparent)]" />
       </motion.div>
 
-      {/* Create form (animated) */}
-      <AnimatePresence>
-        {createExpanded && (
-          <motion.div
-            initial={{ opacity: 0, y: -20, height: 0 }}
-            animate={{ opacity: 1, y: 0, height: 'auto' }}
-            exit={{ opacity: 0, y: -20, height: 0 }}
-            transition={{ duration: 0.3 }}
-            className="overflow-hidden"
-          >
-            <Card className="relative border-white/10 bg-black/20 backdrop-blur-sm overflow-hidden">
-              <div className="absolute inset-0" />
+      {/* Create form — now a pop-up dialog (was an inline expanding card). */}
+      <Dialog open={createExpanded} onOpenChange={(o) => { if (!o) closeCreateForm(); }}>
+        <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar p-0 border-white/10 bg-black/40 backdrop-blur-sm">
+          <div className="relative">
+              {/* Close button */}
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute right-4 top-4 h-8 w-8 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive z-10"
                 onClick={closeCreateForm}
+                className="absolute right-3 top-3 z-20 h-8 w-8 rounded-full text-white/80 hover:text-white hover:bg-white/20"
+                aria-label="Close"
               >
                 <X className="h-4 w-4" />
               </Button>
-              
-              <CardHeader className="relative pb-2">
-                <CardTitle className="text-xl flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                    <FileOutput className="h-4 w-4 text-primary" />
+              {/* Gradient header — gives the plain form some colour + polish. */}
+              <div className="relative overflow-hidden px-6 py-6 bg-gradient-to-br from-violet-600 via-fuchsia-600 to-indigo-600 text-white">
+                <div className="absolute inset-0 bg-grid-white/10 [mask-image:radial-gradient(ellipse_at_top,white,transparent_70%)]" />
+                <div className="relative flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm">
+                    <FileOutput className="h-5 w-5 text-white" />
                   </div>
-                  Generate New Document
-                </CardTitle>
-                <CardDescription>
-                  Our AI will help you create professional marketing documents based on your requirements
-                </CardDescription>
-              </CardHeader>
-              
-              <CardContent className="relative">
+                  <div>
+                    <h2 className="text-xl font-bold leading-tight flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-white/90" />
+                      Generate New Document
+                    </h2>
+                    <p className="text-sm text-white/80 mt-0.5">
+                      Our AI creates professional marketing documents from your requirements.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <CardContent className="relative pt-6">
                 <form onSubmit={handleCreate} className="space-y-6">
                   <div className="grid gap-6 md:grid-cols-2">
                     <div className="space-y-2">
@@ -597,10 +598,10 @@ const Documents = () => {
                     >
                       Cancel
                     </Button>
-                    <Button 
-                      type="submit" 
+                    <Button
+                      type="submit"
                       disabled={loadingCreate}
-                      className="gap-2 min-w-[120px]"
+                      className="gap-2 min-w-[120px] bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white border-0 shadow-md shadow-violet-600/25"
                     >
                       {loadingCreate ? (
                         <>
@@ -617,10 +618,9 @@ const Documents = () => {
                   </div>
                 </form>
               </CardContent>
-            </Card>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Search and filters */}
       <motion.div variants={itemVariants}>
