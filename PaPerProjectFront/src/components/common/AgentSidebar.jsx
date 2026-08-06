@@ -69,12 +69,23 @@ const AgentSidebar = ({
     return true;
   };
 
-  // A child that itself has sub-items (e.g. Settings → Email/Interview/…) is
-  // "active" when the current URL falls under its basePath.
+  // A child that itself has sub-items (e.g. Settings → Email/Interview/…, or
+  // Frontline's Knowledge → Documents/Q&A) is "active" when the current URL
+  // matches it. Two shapes:
+  //   basePath   — path-based group (URL falls under that path)
+  //   basePathTab — ?tab=-based group: active when the current ?tab= equals the
+  //     parent's own tab OR any of its grandchildren's tabs.
   const isChildGroupActive = (child) => {
-    if (!child.basePath) return false;
-    const here = location.pathname.replace(/\/$/, '');
-    return here === child.basePath || here.startsWith(child.basePath + '/');
+    if (child.basePath) {
+      const here = location.pathname.replace(/\/$/, '');
+      return here === child.basePath || here.startsWith(child.basePath + '/');
+    }
+    if (child.basePathTab != null) {
+      const cur = searchParams.get('tab') || defaultTabFor(child.path);
+      if (cur === child.basePathTab) return true;
+      return (child.children || []).some((gc) => gc.tab === cur);
+    }
+    return false;
   };
 
   const goToChild = (child) => {

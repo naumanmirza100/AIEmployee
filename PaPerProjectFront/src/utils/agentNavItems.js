@@ -95,14 +95,50 @@ const ALL_AGENTS = [
   {
     key: 'frontline_agent', label: 'Frontline Agent', icon: Headphones,
     section: 'frontline', path: '/frontline/dashboard', basePath: '/frontline',
-    // Matches the restructured Frontline (6 visible tabs, ?tab=-driven).
+    // Matches the restructured Frontline (?tab=-driven). Parent tabs carry their
+    // own sub-items (which route to the legacy hidden tabs via ?tab=), so the
+    // former inner FrontlineSidebar is folded into this one global sidebar.
     children: [
-      { label: 'Queue',      icon: Headphones,      path: '/frontline/dashboard', tab: 'queue' },
-      { label: 'Knowledge',  icon: FileText,        path: '/frontline/dashboard', tab: 'knowledge' },
-      { label: 'Insights',   icon: BarChart3,       path: '/frontline/dashboard', tab: 'insights' },
-      { label: 'Automation', icon: GitBranch,       path: '/frontline/dashboard', tab: 'automation' },
-      { label: 'Settings',   icon: Monitor,         path: '/frontline/dashboard', tab: 'settings' },
-      { label: 'Overview',   icon: LayoutDashboard, path: '/frontline/dashboard', tab: 'overview' },
+      {
+        label: 'Queue', icon: Headphones, path: '/frontline/dashboard', tab: 'queue',
+        basePathTab: 'queue',
+        children: [
+          { label: 'Hand-offs', icon: Headphones, path: '/frontline/dashboard', tab: 'handoffs' },
+          { label: 'Tickets',   icon: Ticket,     path: '/frontline/dashboard', tab: 'tickets' },
+        ],
+      },
+      {
+        label: 'Knowledge', icon: FileText, path: '/frontline/dashboard', tab: 'knowledge',
+        basePathTab: 'knowledge',
+        children: [
+          { label: 'Documents',     icon: FileText,      path: '/frontline/dashboard', tab: 'documents' },
+          { label: 'Knowledge Q&A', icon: MessageSquare, path: '/frontline/dashboard', tab: 'qa' },
+        ],
+      },
+      {
+        label: 'Insights', icon: BarChart3, path: '/frontline/dashboard', tab: 'insights',
+        basePathTab: 'insights',
+        children: [
+          { label: 'Analytics', icon: BarChart3, path: '/frontline/dashboard', tab: 'analytics' },
+          { label: 'AI Graphs', icon: Sparkles,  path: '/frontline/dashboard', tab: 'ai-graphs' },
+        ],
+      },
+      {
+        label: 'Automation', icon: GitBranch, path: '/frontline/dashboard', tab: 'automation',
+        basePathTab: 'automation',
+        children: [
+          { label: 'Workflows',     icon: GitBranch, path: '/frontline/dashboard', tab: 'workflows' },
+          { label: 'Notifications', icon: Bell,      path: '/frontline/dashboard', tab: 'notifications' },
+        ],
+      },
+      {
+        label: 'Settings', icon: Monitor, path: '/frontline/dashboard', tab: 'settings',
+        basePathTab: 'settings',
+        children: [
+          { label: 'Chat widget', icon: Monitor, path: '/frontline/dashboard', tab: 'widget' },
+        ],
+      },
+      { label: 'Overview', icon: LayoutDashboard, path: '/frontline/dashboard', tab: 'overview' },
     ],
   },
   {
