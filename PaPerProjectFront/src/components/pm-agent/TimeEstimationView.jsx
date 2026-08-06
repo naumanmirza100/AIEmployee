@@ -7,6 +7,7 @@ import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import { Loader2, Clock, AlertTriangle, CheckCircle, Timer } from 'lucide-react';
+import PMEmptyState from './EmptyState';
 
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -34,7 +35,7 @@ const complexityColors = {
   critical: 'bg-red-900/30 text-red-400 border-red-700',
 };
 
-export default function TimeEstimationView() {
+export default function TimeEstimationView({ onOpenPilot }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState([]);
@@ -69,6 +70,16 @@ export default function TimeEstimationView() {
       setLoading(false);
     }
   };
+
+  if (projects.length === 0) {
+    return (
+      <PMEmptyState
+        title="Create a project first"
+        subtitle="Time Estimation calculates AI-powered task durations with complexity analysis for a project's backlog. Start one in Pilot to unlock this tool."
+        onOpenPilot={onOpenPilot}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

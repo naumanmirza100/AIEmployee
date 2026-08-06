@@ -7,6 +7,7 @@ import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import { Loader2, Activity, TrendingUp, AlertTriangle, CheckCircle, Clock, FileText } from 'lucide-react';
+import PMEmptyState from './EmptyState';
 
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -41,7 +42,7 @@ function getScoreBg(score) {
   return 'bg-red-900/30 border-red-700';
 }
 
-export default function ProjectHealthDashboard() {
+export default function ProjectHealthDashboard({ onOpenPilot }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
@@ -99,6 +100,18 @@ export default function ProjectHealthDashboard() {
   };
 
   const score = health?.health_score ?? health?.overall_score ?? null;
+
+  // No projects → nothing to score. Show a clear CTA to Pilot instead of
+  // an empty dropdown + disabled buttons.
+  if (projects.length === 0) {
+    return (
+      <PMEmptyState
+        title="Create a project first"
+        subtitle="Project Health scores risk, progress, and delivery outlook for an active project. Start one in Pilot to unlock this tool."
+        onOpenPilot={onOpenPilot}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

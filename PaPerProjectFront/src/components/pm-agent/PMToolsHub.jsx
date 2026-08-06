@@ -109,7 +109,7 @@ const TOOLS = [
   },
 ];
 
-export default function PMToolsHub() {
+export default function PMToolsHub({ onOpenPilot }) {
   const [activeTool, setActiveTool] = useState(null);
 
   const selected = TOOLS.find((t) => t.key === activeTool);
@@ -133,7 +133,10 @@ export default function PMToolsHub() {
           </div>
           <h3 className="text-lg font-semibold text-white">{selected.title}</h3>
         </div>
-        <ToolComponent />
+        {/* Forward the parent's "open Project Pilot" callback — sub-tools
+            that require projects use it in their empty state. Tools that
+            don't care simply ignore the prop. */}
+        <ToolComponent onOpenPilot={onOpenPilot} />
       </div>
     );
   }

@@ -9,6 +9,7 @@ import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Calendar, BarChart3, Clock, AlertCircle, Settings, Layers, ChevronDown, ChevronUp, BrainCircuit, TrendingUp } from 'lucide-react';
 import InfoHint from '../frontline/InfoHint';
+import PMEmptyState from './EmptyState';
 import { PM_HINTS } from './pmTutorialSteps';
 import {
   PieChart,
@@ -26,7 +27,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
-const TimelineGanttAgent = ({ projects = [] }) => {
+const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [action, setAction] = useState('create_timeline');
   const [daysAhead, setDaysAhead] = useState(7);
@@ -114,6 +115,20 @@ const TimelineGanttAgent = ({ projects = [] }) => {
   };
 
   const charts = getCharts();
+
+  // No projects → nothing to schedule. Steer the user to Pilot instead of
+  // showing a disabled dropdown + six dead buttons.
+  if (safeProjects.length === 0) {
+    return (
+      <div className="space-y-6">
+        <PMEmptyState
+          title="Create a project first"
+          subtitle="Timeline & Gantt draws schedules and Gantt charts from a project's tasks. Start one in Pilot to unlock this tab."
+          onOpenPilot={onOpenPilot}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

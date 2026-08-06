@@ -7,6 +7,7 @@ import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import { Loader2, CalendarDays, AlertTriangle, Clock, User } from 'lucide-react';
+import PMEmptyState from './EmptyState';
 
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -33,7 +34,7 @@ const priorityColors = {
   low: 'border-l-green-500',
 };
 
-export default function CalendarScheduleView() {
+export default function CalendarScheduleView({ onOpenPilot }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState([]);
@@ -68,6 +69,16 @@ export default function CalendarScheduleView() {
       setLoading(false);
     }
   };
+
+  if (projects.length === 0) {
+    return (
+      <PMEmptyState
+        title="Create a project first"
+        subtitle="Calendar & Schedule plans a day-by-day timeline with conflict detection for a project's tasks. Start one in Pilot to unlock this tool."
+        onOpenPilot={onOpenPilot}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

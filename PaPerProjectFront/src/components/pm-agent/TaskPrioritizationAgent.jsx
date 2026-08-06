@@ -9,6 +9,7 @@ import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { Loader2, Target, ListChecks, AlertTriangle, Users } from 'lucide-react';
 import ProgressLoader from '@/components/common/ProgressLoader';
 import InfoHint from '../frontline/InfoHint';
+import PMEmptyState from './EmptyState';
 import { PM_HINTS } from './pmTutorialSteps';
 import {
   PieChart,
@@ -69,7 +70,7 @@ const PROGRESS_PRESETS = {
   },
 };
 
-const TaskPrioritizationAgent = ({ projects = [] }) => {
+const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [action, setAction] = useState('prioritize');
   const [loading, setLoading] = useState(false);
@@ -174,6 +175,21 @@ const TaskPrioritizationAgent = ({ projects = [] }) => {
       setRunningAction(null);
     }
   };
+
+  // Nothing on this tab works without at least one project — the dropdown is
+  // empty, every action button stays disabled. Instead of a dead form, show
+  // a clear CTA to create a project via Pilot first.
+  if (safeProjects.length === 0) {
+    return (
+      <div className="space-y-6">
+        <PMEmptyState
+          title="Create a project first"
+          subtitle="Task Prioritization ranks, finds bottlenecks in, and suggests delegation for tasks inside a project. Start one in Pilot to unlock this tab."
+          onOpenPilot={onOpenPilot}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
