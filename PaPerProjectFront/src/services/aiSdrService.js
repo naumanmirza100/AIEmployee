@@ -132,6 +132,24 @@ export const bulkDeleteLeads = async (ids) => {
   }
 };
 
+export const restoreLead = async (id) => {
+  try {
+    return await companyApi.post(`/sdr/leads/${id}/restore/`);
+  } catch (error) {
+    console.error('Restore lead error:', error);
+    throw error;
+  }
+};
+
+export const bulkRestoreLeads = async (ids) => {
+  try {
+    return await companyApi.post('/sdr/leads/bulk-restore/', { ids });
+  } catch (error) {
+    console.error('Bulk restore leads error:', error);
+    throw error;
+  }
+};
+
 // --------------------------------------------------------------------------
 // Qualification
 // --------------------------------------------------------------------------

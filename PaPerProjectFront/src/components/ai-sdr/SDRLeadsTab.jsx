@@ -15,10 +15,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
   researchLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
-  bulkDeleteLeads, getSdrSettings,
+  bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads,
 } from '@/services/aiSdrService';
 
 // --------------------------------------------------------------------------
@@ -480,6 +481,26 @@ const ConfidenceBadge = ({ score }) => {
   );
 };
 
+// Shimmer placeholder rows shown while leads load — conveys the table shape
+// (and that data is coming) better than a bare spinner.
+const LeadTableSkeleton = ({ rows = 8 }) => (
+  <div style={{ padding: '8px 0' }}>
+    <style>{`@keyframes sdrShimmer{0%{opacity:.45}50%{opacity:.9}100%{opacity:.45}}`}</style>
+    {Array.from({ length: rows }).map((_, i) => (
+      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderBottom: '1px solid #160b2e' }}>
+        <div style={{ width: 16, height: 16, borderRadius: 4, background: '#241638', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+        <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ width: '55%', height: 11, borderRadius: 4, background: '#241638', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+          <div style={{ width: '35%', height: 9, borderRadius: 4, background: '#1c1030', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06 + 0.1}s` }} />
+        </div>
+        <div style={{ flex: 1, height: 10, borderRadius: 4, background: '#1c1030', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+        <div style={{ width: 60, height: 20, borderRadius: 10, background: '#241638', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+        <div style={{ width: 70, height: 10, borderRadius: 4, background: '#1c1030', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+      </div>
+    ))}
+  </div>
+);
+
 // --------------------------------------------------------------------------
 // Main Component
 // --------------------------------------------------------------------------
@@ -514,6 +535,9 @@ const SDRLeadsTab = () => {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  // Single-lead delete confirmation: holds the lead pending deletion (or null).
+  const [pendingDeleteLead, setPendingDeleteLead] = useState(null);
+  const [deletingSingle, setDeletingSingle] = useState(false);
 
   const [showGenModal, setShowGenModal] = useState(false);
   const [genSource, setGenSource] = useState('apollo');
@@ -572,15 +596,39 @@ const SDRLeadsTab = () => {
     setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   };
 
+  // Show a toast with an Undo action that restores the just-deleted lead(s).
+  const showUndoToast = (ids, label) => {
+    const undo = async () => {
+      try {
+        if (ids.length === 1) await restoreLead(ids[0]);
+        else await bulkRestoreLeads(ids);
+        toast({ title: 'Restored', description: `${label} restored.` });
+        loadLeads();
+      } catch (e) {
+        toast({ title: 'Restore failed', description: e.message, variant: 'destructive' });
+      }
+    };
+    toast({
+      title: `${label} deleted`,
+      description: 'You can undo this.',
+      action: (
+        <ToastAction altText="Undo delete" onClick={undo}>
+          Undo
+        </ToastAction>
+      ),
+    });
+  };
+
   const handleBulkDelete = async () => {
     setBulkDeleting(true);
     try {
       const ids = [...selectedIds];
       const resp = await bulkDeleteLeads(ids);
-      toast({ title: `Deleted ${resp?.deleted ?? ids.length} lead(s)` });
+      const restoreIds = resp?.deleted_ids?.length ? resp.deleted_ids : ids;
       setShowBulkDeleteConfirm(false);
       setSelectedIds(new Set());
       loadLeads();
+      showUndoToast(restoreIds, `${resp?.deleted ?? ids.length} lead(s)`);
     } catch (e) {
       toast({ title: 'Bulk delete failed', description: e.message, variant: 'destructive' });
     } finally { setBulkDeleting(false); }
@@ -618,16 +666,23 @@ const SDRLeadsTab = () => {
     } finally { setGenerating(false); }
   };
 
-  const handleDelete = async (lead) => {
+  // Ask for confirmation before deleting a single lead (was a one-click delete).
+  const requestDelete = (lead) => setPendingDeleteLead(lead);
+
+  const confirmDelete = async () => {
+    const lead = pendingDeleteLead;
+    if (!lead) return;
+    setDeletingSingle(true);
     try {
       await deleteLead(lead.id);
       if (selectedLead?.id === lead.id) setSelectedLead(null);
       setSelectedIds(prev => { const n = new Set(prev); n.delete(lead.id); return n; });
-      toast({ title: 'Lead removed' });
+      setPendingDeleteLead(null);
       loadLeads();
+      showUndoToast([lead.id], lead.display_name || lead.full_name || 'Lead');
     } catch (e) {
       toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
-    }
+    } finally { setDeletingSingle(false); }
   };
 
   const handleQualifyOne = async (lead) => {
@@ -862,15 +917,37 @@ const SDRLeadsTab = () => {
       {/* Lead table */}
       <div style={{ ...cardStyle, overflow: 'hidden' }}>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>
-            <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 12px', color: '#a855f7' }} />
-            <p>Loading leads…</p>
-          </div>
+          <LeadTableSkeleton />
         ) : leads.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 60 }}>
-            <Users size={40} style={{ color: '#1e0f38', margin: '0 auto 12px' }} />
-            <p style={{ color: '#6b7280', marginBottom: 6 }}>No leads found.</p>
-            <p style={{ color: '#4b5563', fontSize: 13 }}>Generate leads from Apollo.io / Apify, or import a CSV file.</p>
+          <div style={{ textAlign: 'center', padding: '56px 24px' }}>
+            <div style={{ width: 64, height: 64, borderRadius: 16, margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}>
+              <Users size={30} style={{ color: '#a855f7' }} />
+            </div>
+            <p style={{ color: '#e2d9f3', fontWeight: 600, marginBottom: 6, fontSize: 15 }}>
+              {(search || activeFiltersCount > 0) ? 'No leads match your filters' : 'No leads yet'}
+            </p>
+            <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 20, maxWidth: 360, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
+              {(search || activeFiltersCount > 0)
+                ? 'Try clearing your search or filters to see more leads.'
+                : 'Generate leads from Apollo.io / Apify, import a CSV, or add one manually to get started.'}
+            </p>
+            {(search || activeFiltersCount > 0) ? (
+              <Button onClick={() => { setSearchRaw(''); setFilterTemp(''); setFilterStatus(''); setFilterSource(''); }} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>
+                Clear filters
+              </Button>
+            ) : (
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,#7c3aed 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Zap size={15} /> Generate Leads
+                </Button>
+                <Button onClick={() => fileInputRef.current?.click()} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Upload size={15} /> Import CSV
+                </Button>
+                <Button onClick={() => setShowAddModal(true)} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Plus size={15} /> Add Lead
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -955,7 +1032,7 @@ const SDRLeadsTab = () => {
                         <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="AI Score" style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#c084fc' }}>
                           {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <Brain size={12} />}
                         </button>
-                        <button onClick={() => handleDelete(lead)} title="Delete" style={{ background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#f87171' }}>
+                        <button onClick={() => requestDelete(lead)} title="Delete" style={{ background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#f87171' }}>
                           <Trash2 size={12} />
                         </button>
                       </div>
@@ -1196,7 +1273,7 @@ const SDRLeadsTab = () => {
                 {qualifyingId === selectedLead.id ? <Loader2 size={13} className="animate-spin" /> : <Brain size={13} />}
                 {selectedLead.score != null ? 'Re-score with AI' : 'Score with AI'}
               </Button>
-              <Button onClick={() => handleDelete(selectedLead)} variant="outline" style={{ border: '1px solid rgba(244,63,94,0.4)', color: '#f87171', borderRadius: 8 }}>
+              <Button onClick={() => requestDelete(selectedLead)} variant="outline" style={{ border: '1px solid rgba(244,63,94,0.4)', color: '#f87171', borderRadius: 8 }}>
                 <Trash2 size={13} />
               </Button>
             </div>
@@ -1213,14 +1290,38 @@ const SDRLeadsTab = () => {
             </DialogTitle>
           </DialogHeader>
           <div style={{ padding: '8px 0', lineHeight: 1.6 }}>
-            <p style={{ color: '#e2d9f3', marginBottom: 8 }}>Delete <strong style={{ color: '#f87171' }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''}</strong> permanently?</p>
-            <p style={{ color: '#6b7280', fontSize: 13 }}>This cannot be undone. Campaign enrollments will also be affected.</p>
+            <p style={{ color: '#e2d9f3', marginBottom: 8 }}>Delete <strong style={{ color: '#f87171' }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''}</strong>?</p>
+            <p style={{ color: '#6b7280', fontSize: 13 }}>You can undo this from the notification right after.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowBulkDeleteConfirm(false)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleBulkDelete} disabled={bulkDeleting} style={{ background: 'linear-gradient(90deg,#dc2626,#f43f5e)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {bulkDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
               {bulkDeleting ? 'Deleting…' : `Delete ${selectedIds.size}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Single Delete Confirmation Dialog */}
+      <Dialog open={!!pendingDeleteLead} onOpenChange={(open) => { if (!open) setPendingDeleteLead(null); }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 420 }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Trash2 size={18} /> Confirm Delete
+            </DialogTitle>
+          </DialogHeader>
+          <div style={{ padding: '8px 0', lineHeight: 1.6 }}>
+            <p style={{ color: '#e2d9f3', marginBottom: 8 }}>
+              Delete <strong style={{ color: '#f87171' }}>{pendingDeleteLead?.display_name || pendingDeleteLead?.full_name || 'this lead'}</strong>?
+            </p>
+            <p style={{ color: '#6b7280', fontSize: 13 }}>You can undo this from the notification right after.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDeleteLead(null)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button onClick={confirmDelete} disabled={deletingSingle} style={{ background: 'linear-gradient(90deg,#dc2626,#f43f5e)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {deletingSingle ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              {deletingSingle ? 'Deleting…' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>

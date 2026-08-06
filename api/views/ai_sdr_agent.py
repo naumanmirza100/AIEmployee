@@ -383,8 +383,8 @@ def lead_detail(request, lead_id):
         except Exception as exc:
             return Response({'status': 'error', 'message': str(exc)}, status=500)
 
-    # DELETE
-    lead.delete()
+    # DELETE — soft delete so the client can offer an Undo (restore).
+    lead.soft_delete()
     return Response({'status': 'success', 'message': 'Lead deleted.'})
 
 
@@ -769,17 +769,67 @@ def sdr_bulk_delete_leads(request):
         if not isinstance(ids, list) or not ids:
             return Response({'status': 'error', 'message': 'Provide a non-empty "ids" list.'}, status=400)
 
-        # Safety: only delete leads that belong to this company_user
+        # Safety: only delete leads that belong to this company_user.
+        # Soft delete (mark hidden) so the client can offer an Undo. Capture the
+        # ids that were actually affected so the restore call targets exactly
+        # those rows.
         qs = SDRLead.objects.filter(company_user=company_user, id__in=ids)
-        deleted_count, _ = qs.delete()
+        affected_ids = list(qs.values_list('id', flat=True))
+        deleted_count = qs.update(is_deleted=True, deleted_at=timezone.now())
 
         return Response({
             'status': 'success',
             'message': f'Deleted {deleted_count} lead(s).',
             'deleted': deleted_count,
+            'deleted_ids': affected_ids,
         })
     except Exception as exc:
         logger.error("SDR bulk delete error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Restore soft-deleted leads (Undo)
+# ==========================================================================
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def restore_lead(request, lead_id):
+    """Undo a single soft-deleted lead. Uses all_objects since the default
+    manager hides deleted rows."""
+    company_user = request.user
+    try:
+        lead = SDRLead.all_objects.get(id=lead_id, company_user=company_user)
+    except SDRLead.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Lead not found.'}, status=404)
+
+    lead.restore()
+    return Response({'status': 'success', 'message': 'Lead restored.', 'data': _serialize_lead(lead)})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_bulk_restore_leads(request):
+    """Undo a bulk soft-delete. Body: { "ids": [1, 2, 3, ...] }.
+    Only restores leads belonging to the authenticated company_user."""
+    company_user = request.user
+    try:
+        ids = request.data.get('ids', [])
+        if not isinstance(ids, list) or not ids:
+            return Response({'status': 'error', 'message': 'Provide a non-empty "ids" list.'}, status=400)
+
+        qs = SDRLead.all_objects.filter(company_user=company_user, id__in=ids, is_deleted=True)
+        restored_count = qs.update(is_deleted=False, deleted_at=None)
+
+        return Response({
+            'status': 'success',
+            'message': f'Restored {restored_count} lead(s).',
+            'restored': restored_count,
+        })
+    except Exception as exc:
+        logger.error("SDR bulk restore error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
 
 
@@ -2095,81 +2145,145 @@ def sdr_confirm_meeting(request, meeting_id):
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
+
+def _booking_page_url(meeting):
+    """Browser-facing /book/<token> page — the React FRONTEND_URL, not the
+    Django backend. Returns '' when no frontend URL is configured (so callers
+    can omit the link rather than point at a dead host)."""
+    from django.conf import settings as _settings
+    base = (
+        getattr(_settings, 'FRONTEND_URL', None)
+        or os.environ.get('FRONTEND_URL', '')
+    ).rstrip('/')
+    if not base:
+        return ''
+    return f"{base}/book/{meeting.booking_token}/"
+
+
+def _approval_result_page(*, ok, title, heading, message, booking_url='', accent='#16a34a'):
+    """Self-contained HTML shown to a lead after they click Yes / Suggest.
+
+    Deliberately depends on NOTHING external (no redirect to the frontend, no
+    ngrok tunnel, no CSS/JS host) so the lead always sees a clear confirmation
+    even if the React app is unreachable — the previous redirect-to-SITE_URL
+    approach broke exactly there. If a frontend booking URL exists we still offer
+    it as an optional link.
+    """
+    from django.http import HttpResponse
+    safe_msg = (message or '').replace('\n', '<br>')
+    link_html = (
+        f'<a href="{booking_url}" style="display:inline-block;margin-top:22px;padding:11px 22px;'
+        f'background:{accent};color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">'
+        f'View meeting details</a>'
+        if booking_url else ''
+    )
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title></head>
+<body style="margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0f172a;color:#e2e8f0;">
+  <div style="max-width:480px;margin:8vh auto;padding:40px 32px;background:#1e293b;border-radius:16px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.4);">
+    <div style="width:64px;height:64px;border-radius:50%;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;background:{accent}22;font-size:32px;">
+      {'✅' if ok else '📅'}
+    </div>
+    <h1 style="margin:0 0 12px;font-size:22px;color:#f8fafc;">{heading}</h1>
+    <p style="margin:0;font-size:15px;line-height:1.6;color:#94a3b8;">{safe_msg}</p>
+    {link_html}
+  </div>
+</body></html>"""
+    return HttpResponse(html, status=200 if ok else 200, content_type='text/html')
+
+
 @csrf_exempt
 @require_GET
 def sdr_meeting_lead_approve(request, approval_token):
-    """
-    Lead clicks 'Yes, this time works' link from approval email.
-    Marks meeting as scheduled, sends confirmation email, redirects to booking page confirmed state.
-    """
-    from django.http import HttpResponseRedirect, HttpResponse
-    from django.conf import settings as _settings
-
-    def _site_url():
-        return (
-            getattr(_settings, 'SITE_URL', None)
-            or os.environ.get('SITE_URL', 'http://localhost:8000')
-        ).rstrip('/')
+    """Lead clicks 'Yes, confirm this time'. Confirms the meeting, sends the
+    confirmation email, and shows a self-contained success page (no external
+    redirect — so it works even if the frontend/ngrok is down)."""
+    from django.http import HttpResponse
 
     try:
         meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
             approval_token=approval_token
         )
     except SDRMeeting.DoesNotExist:
-        return HttpResponse('Invalid or expired link.', status=404, content_type='text/plain')
+        return _approval_result_page(
+            ok=False, accent='#dc2626',
+            title='Link expired',
+            heading='This link is no longer valid',
+            message='The meeting link is invalid or has expired. Please reply to the original email and we will help you reschedule.',
+        )
 
-    # Already confirmed — redirect to confirmed state on booking page
-    if meeting.status not in ('awaiting_approval', 'pending'):
-        return HttpResponseRedirect(f"{_site_url()}/book/{meeting.booking_token}/?approved=1")
+    # Idempotent: if already confirmed, still show the success page (a lead may
+    # click Yes twice) rather than an error.
+    already = meeting.status not in ('awaiting_approval', 'pending')
+    if not already:
+        meeting.status = 'scheduled'
+        meeting.confirmed_at = timezone.now()
+        meeting.save(update_fields=['status', 'confirmed_at'])
 
-    meeting.status = 'scheduled'
-    meeting.confirmed_at = timezone.now()
-    meeting.save(update_fields=['status', 'confirmed_at'])
+        lead = meeting.lead
+        lead.status = 'meeting_scheduled'
+        lead.save(update_fields=['status'])
 
-    lead = meeting.lead
-    lead.status = 'meeting_scheduled'
-    lead.save(update_fields=['status'])
+        if meeting.enrollment and meeting.enrollment.campaign:
+            try:
+                from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                MeetingSchedulingAgent(company=meeting.company_user.company).send_confirmation_email(
+                    meeting.enrollment.campaign, meeting.lead, meeting
+                )
+            except Exception as exc:
+                logger.warning("Confirmation email after approval failed for meeting %s: %s", meeting.id, exc)
 
-    if meeting.enrollment and meeting.enrollment.campaign:
-        campaign = meeting.enrollment.campaign
-        try:
-            from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
-            MeetingSchedulingAgent(company=meeting.company_user.company).send_confirmation_email(
-                campaign, lead, meeting
-            )
-        except Exception as exc:
-            logger.warning("Confirmation email after approval failed for meeting %s: %s", meeting.id, exc)
-
-    from django.http import HttpResponseRedirect
-    from django.conf import settings as _settings
-    site_url = (
-        getattr(_settings, 'SITE_URL', None)
-        or os.environ.get('SITE_URL', 'http://localhost:8000')
-    ).rstrip('/')
-    return HttpResponseRedirect(f"{site_url}/book/{meeting.booking_token}/?approved=1")
+    return _approval_result_page(
+        ok=True, accent='#16a34a',
+        title='Meeting confirmed',
+        heading="You're all set! 🎉",
+        message=(
+            'Your meeting time is confirmed. A confirmation email with the '
+            'details is on its way to your inbox.'
+            if not already else
+            'This meeting is already confirmed. A confirmation email with the details is in your inbox.'
+        ),
+        booking_url=_booking_page_url(meeting),
+    )
 
 
 @csrf_exempt
 @require_GET
 def sdr_meeting_lead_suggest(request, approval_token):
-    """
-    Lead clicks 'Suggest another time' link — redirect them to the Django booking page.
-    """
-    from django.http import HttpResponse, HttpResponseRedirect
-
+    """Lead clicks 'Suggest another time'. Records that they declined the
+    proposed slot and points them at the booking page to pick another (with a
+    graceful self-contained fallback when no frontend URL is set)."""
     try:
         meeting = SDRMeeting.objects.get(approval_token=approval_token)
     except SDRMeeting.DoesNotExist:
-        return HttpResponse('Invalid or expired link.', status=404)
+        return _approval_result_page(
+            ok=False, accent='#dc2626',
+            title='Link expired',
+            heading='This link is no longer valid',
+            message='The meeting link is invalid or has expired. Please reply to the original email and we will help you reschedule.',
+        )
 
-    from django.conf import settings as _settings
-    site_url = (
-        getattr(_settings, 'SITE_URL', None)
-        or os.environ.get('SITE_URL', 'http://localhost:8000')
-    ).rstrip('/')
-    booking_url = f"{site_url}/book/{meeting.booking_token}/"
+    # Mark the proposed slot as declined so the SDR side knows to follow up.
+    # Only downgrade a meeting that was awaiting approval — never override a
+    # slot the lead already confirmed.
+    if meeting.status in ('awaiting_approval', 'pending'):
+        meeting.status = 'pending'
+        meeting.save(update_fields=['status'])
 
-    return HttpResponseRedirect(booking_url)
+    booking_url = _booking_page_url(meeting)
+    if booking_url:
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect(booking_url)
+
+    # No frontend configured — show a clear message instead of a broken redirect.
+    return _approval_result_page(
+        ok=True, accent='#7c3aed',
+        title='Let’s find another time',
+        heading='No problem — let’s reschedule',
+        message='Thanks for letting us know. Please reply to the original email with a few times that work for you, and we’ll get it set up.',
+    )
 
 
 # ==========================================================================
@@ -2421,61 +2535,43 @@ def sdr_google_auth_callback(request):
     })
 
 
-def _create_google_meet_link(meeting, scheduled_at, duration_minutes=30):
-    """Create a Google Calendar event with a Meet link. Returns the meet URL or None."""
+def _company_for_meeting(meeting):
+    """Resolve the Company that owns this SDR meeting, so we use its connected
+    Google Calendar."""
     try:
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-        from datetime import timedelta
-        import uuid as _uuid
+        cu = getattr(meeting, 'company_user', None)
+        if cu and getattr(cu, 'company', None):
+            return cu.company
+    except Exception:
+        pass
+    try:
+        lead = getattr(meeting, 'lead', None)
+        lead_cu = getattr(lead, 'company_user', None) if lead else None
+        if lead_cu and getattr(lead_cu, 'company', None):
+            return lead_cu.company
+    except Exception:
+        pass
+    return None
 
-        client_id     = settings.GOOGLE_CLIENT_ID
-        client_secret = settings.GOOGLE_CLIENT_SECRET
-        refresh_token = settings.GOOGLE_REFRESH_TOKEN
 
-        if not all([client_id, client_secret, refresh_token]):
-            logger.warning("Google Meet not configured — missing GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN")
-            return None
+def _create_google_meet_link(meeting, scheduled_at, duration_minutes=30):
+    """Create a Google Meet link on the meeting's *company's* connected calendar.
 
-        creds = Credentials(
-            token=None,
-            refresh_token=refresh_token,
-            client_id=client_id,
-            client_secret=client_secret,
-            token_uri='https://oauth2.googleapis.com/token',
-            scopes=['https://www.googleapis.com/auth/calendar'],
-        )
-
-        service = build('calendar', 'v3', credentials=creds, cache_discovery=False)
-        end_time = scheduled_at + timedelta(minutes=duration_minutes)
-
-        event = {
-            'summary': meeting.title or 'Meeting',
-            'start': {'dateTime': scheduled_at.isoformat(), 'timeZone': 'UTC'},
-            'end':   {'dateTime': end_time.isoformat(),   'timeZone': 'UTC'},
-            'conferenceData': {
-                'createRequest': {
-                    'requestId': str(_uuid.uuid4()),
-                    'conferenceSolutionKey': {'type': 'hangoutsMeet'},
-                }
-            },
-        }
-
-        created = service.events().insert(
-            calendarId='primary',
-            body=event,
-            conferenceDataVersion=1,
-        ).execute()
-
-        meet_url = created.get('hangoutLink') or ''
-        logger.info("Google Meet created: %s for meeting %d", meet_url, meeting.id)
-        return meet_url or None
-
-    except KeyServiceError:
-        raise
-    except Exception as exc:
-        logger.warning("Google Meet creation failed for meeting %d: %s", meeting.id, exc)
-        return None
+    Uses the shared per-company helper (Company.google_calendar_config), the same
+    connection recruitment uses — so a company that connected Google once gets
+    Meet links for SDR meetings too. Returns None when not connected, and the
+    caller falls back to Jitsi.
+    """
+    from core.google_calendar import create_google_meet_link
+    company = _company_for_meeting(meeting)
+    return create_google_meet_link(
+        company,
+        start_dt=scheduled_at,
+        duration_minutes=duration_minutes,
+        summary=meeting.title or 'Meeting',
+        description=(f"Meeting with {meeting.lead.display_name}" if getattr(meeting, 'lead', None) else ''),
+        attendee_email=(meeting.lead.email if getattr(meeting, 'lead', None) and meeting.lead.email else ''),
+    )
 
 
 # ==========================================================================
@@ -2548,15 +2644,15 @@ def sdr_booking_info(request, token):
     except SDRMeeting.DoesNotExist:
         return Response({'error': 'Booking link not found.'}, status=404)
 
-    if meeting.status not in ('pending', 'awaiting_approval'):
-        return Response({
-            'error': 'already_booked',
-            'message': 'This meeting has already been scheduled.',
-            'status': meeting.status,
-            'scheduled_at': meeting.scheduled_at.isoformat() if meeting.scheduled_at else None,
-        }, status=400)
-
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None
+
+    # A meeting that is no longer awaiting a slot is CONFIRMED, not an error.
+    # Return its details with already_booked=True so the booking page can show
+    # the confirmed state (this is what "View meeting details" from the approval
+    # email lands on). Returning a 400 here made a successfully-confirmed meeting
+    # render as "Link unavailable".
+    already_booked = meeting.status not in ('pending', 'awaiting_approval')
+
     return Response({
         'title': meeting.title,
         'duration_minutes': meeting.duration_minutes or 30,
@@ -2566,6 +2662,9 @@ def sdr_booking_info(request, token):
         'sender_title': campaign.sender_title if campaign else '',
         'sender_company': campaign.sender_company if campaign else '',
         'status': meeting.status,
+        'already_booked': already_booked,
+        'scheduled_at': meeting.scheduled_at.isoformat() if meeting.scheduled_at else None,
+        'meet_link': meeting.calendar_link or (campaign.calendar_link if campaign else '') or '',
     })
 
 

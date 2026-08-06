@@ -3,9 +3,11 @@ import {
   Key, Eye, EyeOff, Save, CheckCircle2, AlertCircle,
   Loader2, RefreshCw, ExternalLink, ChevronDown, ChevronUp,
   Database, Zap, Settings, Wifi, WifiOff, Trash2, Plus,
+  Video, Link2,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { getSdrSettings, saveSdrSettings, listCrmIntegrations, createCrmIntegration, updateCrmIntegration, deleteCrmIntegration, pingCrmIntegration } from '@/services/aiSdrService';
+import { getGoogleCalendarStatus, connectGoogleCalendar, disconnectGoogleCalendar } from '@/services/companyAuthService';
 
 // ---------------------------------------------------------------------------
 // Shared styles (dark theme, matches rest of SDR tabs)
@@ -471,6 +473,127 @@ const CRMConnectForm = ({ provider, onSaved }) => {
 };
 
 // ---------------------------------------------------------------------------
+// Google Meet connection card — reuses the shared per-company Google Calendar
+// integration (same one recruitment uses). When connected, SDR meetings get a
+// Google Meet link; otherwise they fall back to Jitsi.
+// ---------------------------------------------------------------------------
+const GoogleMeetCard = () => {
+  const { toast } = useToast();
+  const [status, setStatus] = useState(null);   // { connected, googleEmail, configured }
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await getGoogleCalendarStatus();
+      setStatus(res?.data || res || {});
+    } catch {
+      setStatus({ connected: false, configured: false });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Surface the OAuth-redirect result (?gcal=connected / ?gcal_error=...).
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('gcal') === 'connected') {
+      toast({ title: '✅ Google connected', description: 'Meetings will now use Google Meet links.' });
+      window.history.replaceState({}, '', window.location.pathname);
+      load();
+    } else if (p.get('gcal_error')) {
+      toast({ title: 'Google connection failed', description: p.get('gcal_error'), variant: 'destructive' });
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [load, toast]);
+
+  const handleConnect = async () => {
+    setBusy(true);
+    try {
+      // Come back to this SDR settings page after the Google round-trip.
+      const returnTo = window.location.pathname + (window.location.search || '');
+      const res = await connectGoogleCalendar(returnTo);
+      const authUrl = res?.data?.authUrl || res?.authUrl;
+      if (authUrl) window.location.href = authUrl;
+      else throw new Error('Could not start Google connection.');
+    } catch (e) {
+      toast({ title: 'Error', description: e?.message || 'Could not start Google connection.', variant: 'destructive' });
+      setBusy(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setBusy(true);
+    try {
+      await disconnectGoogleCalendar();
+      toast({ title: 'Disconnected', description: 'Meetings will use Jitsi links again.' });
+      load();
+    } catch (e) {
+      toast({ title: 'Error', description: e?.message || 'Could not disconnect.', variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const connected  = !!status?.connected;
+  const configured = status?.configured !== false; // server has the OAuth app set up
+
+  return (
+    <div style={{ ...card }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 14 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: connected ? 'rgba(16,185,129,0.12)' : 'rgba(168,85,247,0.1)', border: `1px solid ${connected ? 'rgba(16,185,129,0.3)' : 'rgba(168,85,247,0.25)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Video size={20} color={connected ? '#34d399' : '#a855f7'} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 16, margin: 0 }}>Google Meet</h3>
+              {connected
+                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#34d399', fontSize: 11, fontWeight: 600, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 20, padding: '2px 10px' }}><Wifi size={11} /> Connected</span>
+                : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: 600, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 20, padding: '2px 10px' }}><WifiOff size={11} /> Not connected</span>}
+            </div>
+            <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13, margin: '6px 0 0', maxWidth: 460, lineHeight: 1.5 }}>
+              {connected
+                ? <>Connected as <span style={{ color: 'rgba(255,255,255,0.8)' }}>{status?.googleEmail || 'your Google account'}</span>. New meetings generate a <b style={{ color: '#e2d9f3' }}>Google Meet</b> link automatically.</>
+                : <>Connect your Google account so meeting invites use <b style={{ color: '#e2d9f3' }}>Google Meet</b> instead of the default <b style={{ color: '#e2d9f3' }}>Jitsi</b> link.</>}
+            </p>
+          </div>
+        </div>
+
+        <div style={{ flexShrink: 0 }}>
+          {loading ? (
+            <Loader2 size={20} color="#a855f7" style={{ animation: 'spin 1s linear infinite' }} />
+          ) : connected ? (
+            <button onClick={handleDisconnect} disabled={busy}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>
+              {busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={13} />} Disconnect
+            </button>
+          ) : (
+            <button onClick={handleConnect} disabled={busy || !configured}
+              title={!configured ? 'Google integration is not configured on the server.' : ''}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: configured ? 'linear-gradient(90deg,#7c3aed,#a855f7)' : 'rgba(255,255,255,0.06)', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: (busy || !configured) ? 'default' : 'pointer', opacity: (busy || !configured) ? 0.5 : 1 }}>
+              {busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Link2 size={14} />} Connect with Google
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!configured && !loading && (
+        <div style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
+            Google integration isn’t configured on the server yet. Meetings will use Jitsi links until an administrator sets it up.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 const SDRSettingsTab = () => {
@@ -496,11 +619,19 @@ const SDRSettingsTab = () => {
   // CRM integrations
   const [crmIntegrations, setCrmIntegrations] = useState([]);
 
+  // Google Meet connection (for the Meetings tab badge). The card itself
+  // re-fetches its own status; this is just for the sidebar badge.
+  const [googleConnected, setGoogleConnected] = useState(false);
+
   // -----------------------------------------------------------------------
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const [sdrRes, crmRes] = await Promise.allSettled([getSdrSettings(), listCrmIntegrations()]);
+      const [sdrRes, crmRes, gcalRes] = await Promise.allSettled([getSdrSettings(), listCrmIntegrations(), getGoogleCalendarStatus()]);
+      if (gcalRes.status === 'fulfilled') {
+        const g = gcalRes.value?.data || gcalRes.value || {};
+        setGoogleConnected(!!g.connected);
+      }
       const res = sdrRes.status === 'fulfilled' ? sdrRes.value : null;
       if (!res) throw new Error('Could not load settings');
       const d = res?.data || res;
@@ -582,6 +713,14 @@ const SDRSettingsTab = () => {
       sublabel: 'HubSpot · Salesforce · Pipedrive',
       badge: crmIntegrations.length > 0 ? `${crmIntegrations.length} connected` : null,
       badgeColor: '#4ade80',
+    },
+    {
+      key: 'meetings',
+      icon: Video,
+      label: 'Meetings',
+      sublabel: 'Google Meet · Jitsi',
+      badge: googleConnected ? 'Google' : null,
+      badgeColor: '#34d399',
     },
   ];
 
@@ -781,6 +920,38 @@ const SDRSettingsTab = () => {
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ════ Meetings panel ════ */}
+        {activePanel === 'meetings' && (
+          <div>
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Meeting Links</h3>
+              <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>
+                Choose how video links are generated for meetings you schedule with leads.
+              </p>
+            </div>
+
+            <GoogleMeetCard />
+
+            {/* Jitsi (default) — informational */}
+            <div style={{ ...card, marginTop: 16, opacity: 0.9 }}>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Link2 size={20} color="rgba(255,255,255,0.5)" />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 16, margin: 0 }}>Jitsi</h3>
+                    <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 20, padding: '2px 10px' }}>Default</span>
+                  </div>
+                  <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13, margin: '6px 0 0', maxWidth: 460, lineHeight: 1.5 }}>
+                    Used automatically when Google isn’t connected. No setup needed — a unique room is created for each meeting.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

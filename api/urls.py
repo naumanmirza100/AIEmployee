@@ -697,6 +697,7 @@ urlpatterns = [
     # AI SDR Agent endpoints
     re_path(r'^sdr/scheduler-status/?$', sdr_api.sdr_scheduler_status, name='sdr_scheduler_status'),  # GET
     re_path(r'^sdr/leads/bulk-delete/?$', sdr_api.sdr_bulk_delete_leads, name='sdr_bulk_delete_leads'),  # POST
+    re_path(r'^sdr/leads/bulk-restore/?$', sdr_api.sdr_bulk_restore_leads, name='sdr_bulk_restore_leads'),  # POST
     re_path(r'^sdr/dashboard/?$', sdr_api.sdr_dashboard, name='sdr_dashboard'),  # GET
     re_path(r'^sdr/analytics/?$', sdr_api.sdr_analytics, name='sdr_analytics'),  # GET
     re_path(r'^sdr/analytics/send-summary/?$', sdr_api.sdr_send_daily_summary, name='sdr_send_daily_summary'),  # POST
@@ -706,6 +707,7 @@ urlpatterns = [
     re_path(r'^sdr/leads/research/?$', sdr_api.research_leads, name='sdr_research_leads'),  # POST
     re_path(r'^sdr/leads/import/?$', sdr_api.import_leads_csv, name='sdr_import_leads_csv'),  # POST
     re_path(r'^sdr/leads/qualify-all/?$', sdr_api.qualify_all_leads, name='sdr_qualify_all_leads'),  # POST
+    re_path(r'^sdr/leads/(?P<lead_id>\d+)/restore/?$', sdr_api.restore_lead, name='sdr_restore_lead'),  # POST
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/?$', sdr_api.lead_detail, name='sdr_lead_detail'),  # GET, PUT, DELETE
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/qualify/?$', sdr_api.qualify_lead, name='sdr_qualify_lead'),  # POST
     # Campaigns

@@ -67,85 +67,25 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
     Create a Google Calendar event with a Meet link on the *company's* connected
     calendar. Returns the Google Meet URL, or None if the company hasn't
     connected Google Calendar (there is no global env fallback).
+
+    Delegates to the shared per-company helper so recruitment and SDR share one
+    implementation of the Calendar/Meet call.
     """
-    try:
-        from google.oauth2.credentials import Credentials
-        from google.auth.transport.requests import Request
-        from googleapiclient.discovery import build
-
-        # Platform OAuth app credentials (same app all companies connect through).
-        client_id     = getattr(settings, 'GOOGLE_CLIENT_ID', '')
-        client_secret = getattr(settings, 'GOOGLE_CLIENT_SECRET', '')
-
-        company = _company_for_interview(interview)
-        cfg = (getattr(company, 'google_calendar_config', None) or {}) if company else {}
-        refresh_token = cfg.get('refresh_token', '')
-        calendar_id   = cfg.get('calendar_id') or 'primary'
-
-        if not cfg.get('connected') or not refresh_token:
-            logger.info(
-                f"Company for interview {interview.id} has not connected Google Calendar — skipping Meet link."
-            )
-            return None
-        if not all([client_id, client_secret]):
-            logger.warning("Google OAuth app not configured on server — skipping Meet link creation.")
-            return None
-
-        creds = Credentials(
-            token=None,
-            refresh_token=refresh_token,
-            client_id=client_id,
-            client_secret=client_secret,
-            token_uri='https://oauth2.googleapis.com/token',
-            scopes=['https://www.googleapis.com/auth/calendar'],
-        )
-
-        # Explicitly refresh to get a valid access token before making API calls
-        creds.refresh(Request())
-
-        service = build('calendar', 'v3', credentials=creds, cache_discovery=False)
-
-        start_dt = interview.scheduled_datetime
-        end_dt   = start_dt + timedelta(minutes=duration_minutes)
-
-        job_title = getattr(interview, 'job_role', '') or getattr(interview, 'job_title', '') or 'Interview'
-
-        event = {
-            'summary': f"Interview – {interview.candidate_name} for {job_title}",
-            'description': (
-                f"Interview with {interview.candidate_name}\n"
-                f"Position: {job_title}\n"
-                f"Candidate email: {interview.candidate_email}"
-            ),
-            'start': {'dateTime': start_dt.isoformat(), 'timeZone': 'UTC'},
-            'end':   {'dateTime': end_dt.isoformat(),   'timeZone': 'UTC'},
-            'attendees': [{'email': interview.candidate_email}],
-            'conferenceData': {
-                'createRequest': {
-                    'requestId': str(uuid.uuid4()),
-                    'conferenceSolutionKey': {'type': 'hangoutsMeet'},
-                }
-            },
-        }
-
-        created  = service.events().insert(
-            calendarId=calendar_id,
-            body=event,
-            conferenceDataVersion=1,
-            sendUpdates='none',
-        ).execute()
-
-        meet_url = created.get('hangoutLink') or ''
-        logger.info(f"Google Meet link created for interview {interview.id}: {meet_url}")
-        return meet_url or None
-
-    except ImportError:
-        logger.warning("google-auth / google-api-python-client not installed — skipping Meet link.")
-        return None
-    except Exception as exc:
-        logger.error(f"Failed to create Google Meet link for interview {interview.id}: {exc}", exc_info=True)
-        logger.error("The company may need to reconnect Google Calendar, or the Calendar API may be disabled in the Google Cloud project.")
-        return None
+    from core.google_calendar import create_google_meet_link
+    company = _company_for_interview(interview)
+    job_title = getattr(interview, 'job_role', '') or getattr(interview, 'job_title', '') or 'Interview'
+    return create_google_meet_link(
+        company,
+        start_dt=interview.scheduled_datetime,
+        duration_minutes=duration_minutes,
+        summary=f"Interview – {interview.candidate_name} for {job_title}",
+        description=(
+            f"Interview with {interview.candidate_name}\n"
+            f"Position: {job_title}\n"
+            f"Candidate email: {interview.candidate_email}"
+        ),
+        attendee_email=interview.candidate_email or '',
+    )
 
 
 class InterviewSchedulingAgent:

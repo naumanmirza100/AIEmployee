@@ -35,6 +35,20 @@ class SDRIcpProfile(models.Model):
         return f"{self.company_user} — {self.name}"
 
 
+class SDRLeadManager(models.Manager):
+    """Default manager that hides soft-deleted leads.
+
+    Every list, stats, CRM-sync and analytics query goes through ``objects``,
+    so filtering here means a deleted lead disappears everywhere at once without
+    having to remember ``is_deleted=False`` at each of the ~27 call sites. Use
+    ``SDRLead.all_objects`` when you genuinely need deleted rows too (e.g. the
+    restore endpoint).
+    """
+
+    def get_queryset(self):
+        return super().get_queryset().filter(is_deleted=False)
+
+
 class SDRLead(models.Model):
     """Individual sales lead with enrichment and AI qualification data."""
 
@@ -125,12 +139,36 @@ class SDRLead(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Soft delete — a deleted lead is hidden by the default manager but kept in
+    # the table so it can be restored (the "Undo" after a delete).
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = SDRLeadManager()      # hides soft-deleted rows (the default everywhere)
+    all_objects = models.Manager()  # includes soft-deleted rows (for restore)
+
     class Meta:
         db_table = 'sdr_lead'
         ordering = ['-score', '-created_at']
+        # Django uses the base manager for related-object lookups and
+        # serialization; point it at the unfiltered manager so those internals
+        # never silently drop a soft-deleted row they legitimately need.
+        base_manager_name = 'all_objects'
 
     def __str__(self):
         return f"{self.display_name} — {self.company_name} ({self.temperature or 'unscored'})"
+
+    def soft_delete(self):
+        """Mark as deleted without removing the row, so it can be restored."""
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
+
+    def restore(self):
+        """Undo a soft delete."""
+        self.is_deleted = False
+        self.deleted_at = None
+        self.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])
 
     @property
     def display_name(self):

@@ -23,6 +23,40 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Public-URL resolution for email links
+# ---------------------------------------------------------------------------
+# Two distinct bases, so a link always points at whoever actually serves it:
+#   * booking page  (/book/<token>) is a React page  → FRONTEND_URL
+#   * yes / suggest approval links are Django endpoints → SITE_URL / BACKEND_URL
+# A dead ngrok tunnel used to be the hard-coded default and silently broke both.
+def _backend_base() -> str:
+    """Base URL for links the Django backend handles directly."""
+    return (
+        getattr(settings, 'SDR_BOOKING_URL', None)
+        or os.environ.get('SDR_BOOKING_URL', '')
+        or getattr(settings, 'SITE_URL', None)
+        or os.environ.get('SITE_URL', '')
+        or getattr(settings, 'BACKEND_URL', None)
+        or os.environ.get('BACKEND_URL', '')
+        or 'http://localhost:8000'
+    ).rstrip('/')
+
+
+def _booking_base() -> str:
+    """Base URL for the browser-facing /book/<token> page.
+
+    Prefer the React FRONTEND_URL; fall back to the backend base (which serves a
+    booking page too) so the link is never empty.
+    """
+    return (
+        getattr(settings, 'FRONTEND_URL', None)
+        or os.environ.get('FRONTEND_URL', '')
+        or _backend_base()
+    ).rstrip('/')
+
+
 # ---------------------------------------------------------------------------
 # Timezone utility — maps location strings to IANA timezone names
 # ---------------------------------------------------------------------------
@@ -778,18 +812,8 @@ Return exactly this JSON:
         subject = f"Let's find a time to connect, {first_name}!"
 
         if meeting and getattr(meeting, 'booking_token', None):
-            # SDR_BOOKING_URL points to wherever /book/<token>/ is served.
-            # Defaults to SITE_URL (Django backend) so the link works even
-            # without a separate React frontend.
-            base_url = (
-                getattr(settings, 'SDR_BOOKING_URL', None)
-                or os.environ.get('SDR_BOOKING_URL', '')
-                or getattr(settings, 'SITE_URL', None)
-                or os.environ.get('SITE_URL', '')
-                or getattr(settings, 'FRONTEND_URL', None)
-                or os.environ.get('FRONTEND_URL', 'http://localhost:8000')
-            ).rstrip('/')
-            booking_url = f"{base_url}/book/{meeting.booking_token}"
+            # /book/<token> is the browser-facing React page → FRONTEND_URL.
+            booking_url = f"{_booking_base()}/book/{meeting.booking_token}"
         elif campaign.calendar_link:
             booking_url = campaign.calendar_link
         else:
@@ -836,15 +860,7 @@ Return exactly this JSON:
 
         booking_url = None
         if getattr(meeting, 'booking_token', None):
-            base_url = (
-                getattr(settings, 'SDR_BOOKING_URL', None)
-                or os.environ.get('SDR_BOOKING_URL', '')
-                or getattr(settings, 'SITE_URL', None)
-                or os.environ.get('SITE_URL', '')
-                or getattr(settings, 'FRONTEND_URL', None)
-                or os.environ.get('FRONTEND_URL', 'http://localhost:8000')
-            ).rstrip('/')
-            booking_url = f"{base_url}/book/{meeting.booking_token}"
+            booking_url = f"{_booking_base()}/book/{meeting.booking_token}"
 
         subject = f"Confirmed: {title} on {scheduled_str}"
 
@@ -893,15 +909,7 @@ Return exactly this JSON:
 
         booking_url = None
         if getattr(meeting, 'booking_token', None):
-            base_url = (
-                getattr(settings, 'SDR_BOOKING_URL', None)
-                or os.environ.get('SDR_BOOKING_URL', '')
-                or getattr(settings, 'SITE_URL', None)
-                or os.environ.get('SITE_URL', '')
-                or getattr(settings, 'FRONTEND_URL', None)
-                or os.environ.get('FRONTEND_URL', 'http://localhost:8000')
-            ).rstrip('/')
-            booking_url = f"{base_url}/book/{meeting.booking_token}"
+            booking_url = f"{_booking_base()}/book/{meeting.booking_token}"
 
         subject = f"Reminder: {title} is tomorrow — {scheduled_str}"
 
@@ -990,12 +998,7 @@ Return exactly this JSON:
 
         # Links must point to the BACKEND (Django) — yes/ confirms directly,
         # suggest/ redirects to the React booking page.
-        backend_url = (
-            getattr(settings, 'SITE_URL', None)
-            or os.environ.get('SITE_URL', '')
-            or getattr(settings, 'BACKEND_URL', None)
-            or os.environ.get('BACKEND_URL', 'http://localhost:8000')
-        ).rstrip('/')
+        backend_url = _backend_base()
 
         approval_token = str(meeting.approval_token)
         yes_url = f"{backend_url}/api/sdr/meeting-approval/{approval_token}/yes/"
