@@ -204,8 +204,9 @@ const ProjectManagerDashboardPage = () => {
   const sidebarItems = React.useMemo(() => {
     const subsByTab = {
       'project-pilot': [
-        { value: 'pilot', label: 'Project Pilot', icon: Target },
-        { value: 'kqa', label: 'Knowledge Q&A', icon: MessageSquare },
+        { value: 'pilot',    label: 'Project Pilot',      icon: Target },
+        { value: 'kqa',      label: 'Knowledge Q&A',      icon: MessageSquare },
+        { value: 'meetings', label: 'Meeting Scheduler',  icon: CalendarPlus },
       ],
       tasks: [
         { value: 'list', label: 'List', icon: CheckSquare },

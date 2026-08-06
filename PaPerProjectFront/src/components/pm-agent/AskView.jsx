@@ -1,21 +1,25 @@
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Target, MessageSquare } from 'lucide-react';
+import { Target, MessageSquare, CalendarPlus } from 'lucide-react';
 import ProjectPilotAgent from './ProjectPilotAgent';
 import KnowledgeQAAgent from './KnowledgeQAAgent';
+import MeetingScheduler from './MeetingScheduler';
 
-// AskView — the top-level "Ask" tab body. Groups the two conversational
-// surfaces (Project Pilot for actions, Knowledge Q&A for grounded lookups)
-// under one tab so users don't have to hunt for Q&A after the PM UX
-// consolidation. Nested sub-tabs mirror the pattern used by Tasks and
-// Insights so the whole dashboard reads uniformly.
+// AskView — the top-level "Ask" tab body. Groups the THREE conversational
+// surfaces under one tab so users don't have to hunt for them after the PM
+// UX consolidation:
+//   • Project Pilot   — natural-language project & task management (actions)
+//   • Knowledge Q&A   — grounded lookups over your project data
+//   • Meeting Scheduler — schedule meetings via chat + browse meetings list
+//
+// Nested sub-tabs mirror the pattern used by Tasks and Insights so the
+// whole dashboard reads uniformly.
 //
 // Pilot is the default sub-tab because it's what the vast majority of
-// user intents map to (create / update / analyze). KQA is one click away
-// when someone specifically wants to look something up.
+// user intents map to (create / update / analyze).
 // Valid sub-tab values so an out-of-band `?sub=…` doesn't render a blank
 // panel (which is what shadcn does when `value` doesn't match any content).
-const ASK_SUB_VALUES = ['pilot', 'kqa'];
+const ASK_SUB_VALUES = ['pilot', 'kqa', 'meetings'];
 const ASK_DEFAULT_SUB = 'pilot';
 
 export default function AskView({
@@ -39,14 +43,15 @@ export default function AskView({
     <div className="space-y-6">
       <Tabs value={active} onValueChange={setActive} className="w-full">
         <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-          <SubTabTrigger value="pilot" active={active} icon={Target} label="Project Pilot" />
-          <SubTabTrigger value="kqa" active={active} icon={MessageSquare} label="Knowledge Q&A" />
+          <SubTabTrigger value="pilot"    active={active} icon={Target}         label="Project Pilot" />
+          <SubTabTrigger value="kqa"      active={active} icon={MessageSquare}  label="Knowledge Q&A" />
+          <SubTabTrigger value="meetings" active={active} icon={CalendarPlus}   label="Meeting Scheduler" />
         </TabsList>
 
-        {/* Both sub-tabs mount their component. shadcn's TabsContent hides
-            inactive panels via CSS, which keeps conversation state (chat
-            history, selected chat, in-progress draft) intact when the user
-            flips back and forth between Pilot and KQA. */}
+        {/* All three sub-tabs mount their component. shadcn's TabsContent
+            hides inactive panels via CSS, which keeps conversation state
+            (chat history, selected chat, in-progress draft) intact when
+            the user flips between Pilot / KQA / Meetings. */}
         <TabsContent value="pilot" className="mt-6">
           <ProjectPilotAgent
             projects={projects || []}
@@ -56,6 +61,9 @@ export default function AskView({
         </TabsContent>
         <TabsContent value="kqa" className="mt-6">
           <KnowledgeQAAgent projects={projects || []} onOpenPilot={onOpenPilot} />
+        </TabsContent>
+        <TabsContent value="meetings" className="mt-6">
+          <MeetingScheduler />
         </TabsContent>
       </Tabs>
     </div>
