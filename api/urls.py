@@ -667,6 +667,8 @@ urlpatterns = [
     re_path(r'^company/agent-keys/byok/(?P<agent_name>[a-z_]+)/?$', company_api_keys.revoke_byok_key, name='revoke_byok_key'),  # DELETE
     re_path(r'^company/agent-keys/pool/?$', company_api_keys.set_token_pool, name='set_token_pool'),  # POST
     re_path(r'^company/agent-keys/byok-limit/?$', company_api_keys.set_byok_limit, name='set_byok_limit'),  # POST
+    re_path(r'^company/agent-keys/reset-logs/?$', company_api_keys.company_reset_logs, name='company_reset_logs'),  # GET
+    re_path(r'^company/agent-keys/plans/?$', company_api_keys.agent_plans, name='company_agent_plans'),  # GET ?agent_name=
     re_path(r'^company/key-requests/?$', company_api_keys.list_key_requests, name='list_key_requests'),  # GET
     re_path(r'^company/key-requests/create/?$', company_api_keys.create_key_request, name='create_key_request'),  # POST
     re_path(r'^company/key-requests/(?P<request_id>\d+)/pay/?$', company_api_keys.pay_for_key_request, name='pay_for_key_request'),  # POST
@@ -681,6 +683,9 @@ urlpatterns = [
     re_path(r'^admin/pricing-config/?$', admin_api_keys.list_pricing, name='admin_list_pricing'),  # GET
     re_path(r'^admin/pricing-config/(?P<agent_name>[a-z_]+)/?$', admin_api_keys.update_pricing, name='admin_update_pricing'),  # PUT
     re_path(r'^admin/token-quotas/?$', admin_api_keys.list_quotas, name='admin_list_quotas'),  # GET
+    re_path(r'^admin/weekly-reset-logs/?$', admin_api_keys.weekly_reset_logs, name='admin_weekly_reset_logs'),  # GET
+    re_path(r'^admin/agent-plans/?$', admin_api_keys.list_agent_plans, name='admin_list_agent_plans'),  # GET ?agent_name=
+    re_path(r'^admin/agent-plans/save/?$', admin_api_keys.save_agent_plans, name='admin_save_agent_plans'),  # POST
     re_path(r'^admin/token-quotas/(?P<quota_id>\d+)/?$', admin_api_keys.adjust_quota, name='admin_adjust_quota'),  # PATCH
     re_path(r'^admin/key-requests/?$', admin_api_keys.list_requests, name='admin_list_requests'),  # GET
     re_path(r'^admin/key-requests/(?P<request_id>\d+)/approve/?$', admin_api_keys.approve_key_request, name='admin_approve_request'),  # POST

@@ -4,6 +4,7 @@ All endpoints require IsAuthenticated + IsAdmin (staff/superuser). This is the
 control panel backend for the Super Admin Dashboard.
 """
 import logging
+from datetime import timedelta as _td
 
 from django.db import transaction
 from django.utils import timezone
@@ -25,6 +26,8 @@ from core.models import (
     CompanyModulePurchase,
     KeyRequest,
     PlatformAPIKey,
+    WeeklyResetLog,
+    AgentPlan,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,6 +57,7 @@ def _serialize_admin_key(key: CompanyAPIKey):
         'renewal_period': key.renewal_period,
         'valid_until': key.valid_until.isoformat() if key.valid_until else None,
         'tokens_per_period': key.tokens_per_period,
+        'reset_interval_days': getattr(key, 'reset_interval_days', 7),
         'created_at': key.created_at.isoformat(),
         'updated_at': key.updated_at.isoformat(),
     }
@@ -180,11 +184,27 @@ def _assign_managed_key_impl(request):
     if renewal_period not in ('none', 'monthly', 'yearly'):
         renewal_period = 'none'
 
+    # How often the token quota resets (days). Admin-chosen; default 7 = weekly.
+    # Clamped to a sane 1..365 range.
+    try:
+        reset_interval_days = int(request.data.get('reset_interval_days') or 7)
+    except (TypeError, ValueError):
+        reset_interval_days = 7
+    reset_interval_days = max(1, min(reset_interval_days, 365))
+
     # duration_months: how long the key is valid (admin input)
     try:
         duration_months = int(request.data.get('duration_months') or 0)
     except (TypeError, ValueError):
         duration_months = 0
+
+    # duration_days: exact validity in days — takes precedence over
+    # duration_months. Used when honouring an arbitrary AgentPlan the company
+    # picked (e.g. 45 / 90 days) that doesn't map cleanly to whole months.
+    try:
+        duration_days = int(request.data.get('duration_days') or 0)
+    except (TypeError, ValueError):
+        duration_days = 0
 
     if not company_id or agent_name not in VALID_AGENTS or provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Missing or invalid fields'},
@@ -235,9 +255,11 @@ def _assign_managed_key_impl(request):
     else:
         token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
 
-    # Compute valid_until from duration_months (or from renewal_period default)
+    # Compute valid_until from duration_days / duration_months (or renewal default)
     now = timezone.now()
-    if duration_months > 0:
+    if duration_days > 0:
+        valid_until = now + _td(days=duration_days)
+    elif duration_months > 0:
         # Approximate: 30 days per month
         valid_until = now + _td(days=duration_months * 30)
     elif renewal_period == 'monthly':
@@ -247,8 +269,8 @@ def _assign_managed_key_impl(request):
     else:
         valid_until = None  # one-time, never expires
 
-    # next weekly reset = 7 days from now (only when renewal active)
-    next_reset_at = (now + _td(days=7)) if renewal_period != 'none' else None
+    # next reset = reset_interval_days from now (only when renewal active)
+    next_reset_at = (now + _td(days=reset_interval_days)) if renewal_period != 'none' else None
 
     with transaction.atomic():
         key, _ = CompanyAPIKey.objects.get_or_create(
@@ -262,6 +284,7 @@ def _assign_managed_key_impl(request):
         key.renewal_period = renewal_period
         key.valid_until = valid_until
         key.tokens_per_period = token_limit
+        key.reset_interval_days = reset_interval_days
         key.save()
 
         # Set managed token quota on the AgentTokenQuota row
@@ -635,6 +658,7 @@ def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None, linked_ke
         'provider': r.provider,
         'status': r.status,
         'preferred_duration': r.preferred_duration,
+        'plan_days': r.plan_days,
         'is_renewal': r.is_renewal,
         'was_assigned': was_assigned,
         'revoked_at': r.updated_at.isoformat() if was_assigned else None,
@@ -964,3 +988,154 @@ def admin_overview(request):
         'provider_totals': provider_totals,
     }
     return Response({'status': 'success', 'stats': stats})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def weekly_reset_logs(request):
+    """History of weekly managed-token resets.
+
+    Query params (all optional):
+      company_id   — filter to one company
+      agent_name   — filter to one agent
+      page, page_size — pagination (defaults 1 / 25, max 100)
+
+    Returns newest-first log rows with company/agent labels.
+    """
+    qs = WeeklyResetLog.objects.select_related('company').all()
+
+    company_id = request.query_params.get('company_id')
+    if company_id:
+        qs = qs.filter(company_id=company_id)
+    agent_name = (request.query_params.get('agent_name') or '').strip()
+    if agent_name:
+        qs = qs.filter(agent_name=agent_name)
+
+    try:
+        page = max(int(request.query_params.get('page', 1)), 1)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = min(max(int(request.query_params.get('page_size', 25)), 1), 100)
+    except (TypeError, ValueError):
+        page_size = 25
+
+    total = qs.count()
+    start = (page - 1) * page_size
+    rows = list(qs[start:start + page_size])
+
+    agent_labels = dict(AGENT_CHOICES)
+    logs = [{
+        'id': r.id,
+        'company_id': r.company_id,
+        'company_name': r.company.name if r.company_id else '',
+        'agent_name': r.agent_name,
+        'agent_label': agent_labels.get(r.agent_name, r.agent_name),
+        'reset_at': r.reset_at.isoformat() if r.reset_at else None,
+        'tokens_used_before_reset': r.tokens_used_before_reset,
+        'new_included_limit': r.new_included_limit,
+        'next_reset_at': r.next_reset_at.isoformat() if r.next_reset_at else None,
+    } for r in rows]
+
+    # Upcoming resets — active managed keys with a recurring reset scheduled.
+    # Lets the UI show "next reset: <date>" even before any reset has happened.
+    up_keys = CompanyAPIKey.objects.filter(
+        mode='managed', status='active',
+    ).exclude(renewal_period='none').select_related('company')
+    if company_id:
+        up_keys = up_keys.filter(company_id=company_id)
+    if agent_name:
+        up_keys = up_keys.filter(agent_name=agent_name)
+
+    quota_next = {
+        (q.company_id, q.agent_name): q.next_reset_at
+        for q in AgentTokenQuota.objects.filter(next_reset_at__isnull=False)
+    }
+    upcoming = []
+    for k in up_keys[:500]:
+        nra = quota_next.get((k.company_id, k.agent_name))
+        if not nra:
+            continue
+        upcoming.append({
+            'company_id': k.company_id,
+            'company_name': k.company.name if k.company_id else '',
+            'agent_name': k.agent_name,
+            'agent_label': agent_labels.get(k.agent_name, k.agent_name),
+            'next_reset_at': nra.isoformat(),
+            'reset_interval_days': getattr(k, 'reset_interval_days', 7),
+            'tokens_per_period': k.tokens_per_period,
+        })
+    upcoming.sort(key=lambda x: x['next_reset_at'])
+
+    return Response({
+        'status': 'success',
+        'logs': logs,
+        'upcoming': upcoming,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'total_pages': max((total + page_size - 1) // page_size, 1),
+        },
+    })
+
+
+def _serialize_plan(p):
+    return {
+        'id': p.id,
+        'agent_name': p.agent_name,
+        'label': p.display_label,
+        'duration_days': p.duration_days,
+        'price_usd': float(p.price_usd),
+        'is_active': p.is_active,
+        'sort_order': p.sort_order,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def list_agent_plans(request):
+    """All agent subscription plans (optionally filtered by ?agent_name=)."""
+    qs = AgentPlan.objects.all()
+    agent_name = (request.query_params.get('agent_name') or '').strip()
+    if agent_name:
+        qs = qs.filter(agent_name=agent_name)
+    return Response({'status': 'success', 'plans': [_serialize_plan(p) for p in qs]})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def save_agent_plans(request):
+    """Replace the full set of plans for ONE agent.
+
+    Body: { agent_name, plans: [{ duration_days, price_usd, label?, is_active? }] }
+    Simplest reliable sync: delete the agent's existing plans and recreate from
+    the payload (small lists, admin-edited).
+    """
+    agent_name = (request.data.get('agent_name') or '').strip()
+    if agent_name not in {name for name, _ in AGENT_CHOICES}:
+        return Response({'status': 'error', 'message': 'Invalid agent_name.'}, status=status.HTTP_400_BAD_REQUEST)
+    plans = request.data.get('plans') or []
+    if not isinstance(plans, list):
+        return Response({'status': 'error', 'message': 'plans must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        AgentPlan.objects.filter(agent_name=agent_name).delete()
+        created = []
+        for i, p in enumerate(plans):
+            try:
+                days = int(p.get('duration_days') or 0)
+                price = float(p.get('price_usd') or 0)
+            except (TypeError, ValueError):
+                continue
+            if days <= 0 or price < 0:
+                continue
+            created.append(AgentPlan.objects.create(
+                agent_name=agent_name,
+                duration_days=days,
+                price_usd=price,
+                label=(p.get('label') or '').strip()[:80],
+                is_active=bool(p.get('is_active', True)),
+                sort_order=int(p.get('sort_order', i)) if str(p.get('sort_order', i)).isdigit() else i,
+            ))
+    return Response({'status': 'success', 'plans': [_serialize_plan(p) for p in created]})

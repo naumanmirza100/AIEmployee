@@ -48,6 +48,13 @@ export const listWeeklyResetLogs = (params = {}) => {
   return req(`/admin/weekly-reset-logs${qs ? `?${qs}` : ''}`);
 };
 
+// Agent subscription plans (admin-managed).
+export const listAgentPlans = (agentName = '') =>
+  req(`/admin/agent-plans${agentName ? `?agent_name=${encodeURIComponent(agentName)}` : ''}`);
+
+export const saveAgentPlans = (agentName, plans) =>
+  req('/admin/agent-plans/save', { method: 'POST', body: JSON.stringify({ agent_name: agentName, plans }) });
+
 export const listRequests = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
   return req(`/admin/key-requests${qs ? `?${qs}` : ''}`);
@@ -89,6 +96,8 @@ export default {
   listQuotas,
   adjustQuota,
   listWeeklyResetLogs,
+  listAgentPlans,
+  saveAgentPlans,
   listRequests,
   approveRequest,
   rejectRequest,

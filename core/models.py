@@ -2088,7 +2088,14 @@ class CompanyAPIKey(models.Model):
     )
     tokens_per_period = models.BigIntegerField(
         default=0,
-        help_text='Tokens to grant at each weekly reset. 0 = use managed_included_tokens as a one-time set.',
+        help_text='Tokens to grant at each reset cycle. 0 = use managed_included_tokens as a one-time set.',
+    )
+    # How many days between automatic token resets (default 7 = weekly). Admin
+    # can set 10 / 14 / 30 / custom per (company, agent) at assign time. Only
+    # matters when renewal_period != 'none'.
+    reset_interval_days = models.PositiveIntegerField(
+        default=7,
+        help_text='Days between automatic token resets (default 7). Used when renewal is active.',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2211,6 +2218,39 @@ class AgentTokenQuota(models.Model):
         return self.used_tokens >= self.included_tokens
 
 
+class WeeklyResetLog(models.Model):
+    """One row per weekly managed-token reset for a (company, agent).
+
+    Written by core.api_key_service._apply_weekly_reset_if_due each time a
+    renewal key's used-token counter is zeroed on its 7-day cycle. Gives admins
+    a queryable history of when each company's agent quota reset, how much was
+    used that week, and the limit/next-reset it rolled into.
+    """
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='weekly_reset_logs')
+    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
+    # When the reset happened.
+    reset_at = models.DateTimeField(default=timezone.now, db_index=True)
+    # Managed tokens the company had used that week, captured just before the
+    # counter was zeroed.
+    tokens_used_before_reset = models.BigIntegerField(default=0)
+    # The included (weekly) limit the counter was reset to.
+    new_included_limit = models.BigIntegerField(default=0)
+    # When the next reset is scheduled (7 days later).
+    next_reset_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-reset_at']
+        indexes = [
+            models.Index(fields=['company', 'agent_name', '-reset_at']),
+        ]
+        verbose_name = 'Weekly Reset Log'
+        verbose_name_plural = 'Weekly Reset Logs'
+
+    def __str__(self):
+        return f"{self.company_id}/{self.agent_name} reset @ {self.reset_at:%Y-%m-%d %H:%M} (used {self.tokens_used_before_reset})"
+
+
 class AgentProviderUsage(models.Model):
     """Per-provider token usage for one (company, agent) quota row.
 
@@ -2260,6 +2300,12 @@ class KeyRequest(models.Model):
         help_text='Duration company is requesting: monthly or yearly.',
     )
     is_renewal = models.BooleanField(default=False, help_text='True when this request is a renewal of an expired key.')
+    # The admin-defined AgentPlan duration (in days) the company picked at request
+    # time. 0/None means no specific plan was chosen (legacy monthly default).
+    plan_days = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Duration (days) of the AgentPlan the company selected when requesting.',
+    )
     key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount_pct_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)
@@ -2401,6 +2447,50 @@ class PlatformAPIKey(models.Model):
         if not self.key_prefix and not self.key_suffix:
             return ''
         return f"{self.key_prefix}{'*' * 8}{self.key_suffix}"
+
+
+class AgentPlan(models.Model):
+    """A subscription plan an admin defines for an agent, that companies pick
+    from when buying it. Each plan = a duration (days) + price. An agent can
+    have several plans (e.g. 30 days / $X, 90 days / $Y).
+
+    Admin manages these in the "Agent Plans" tab; companies see the active
+    ones for an agent in the key-request/buy flow.
+    """
+    agent_name = models.CharField(max_length=50, choices=get_agent_choices, db_index=True)
+    # Human label (auto-derived from days if blank, e.g. "1 month").
+    label = models.CharField(max_length=80, blank=True, default='')
+    duration_days = models.PositiveIntegerField(help_text='How long the purchase stays active, in days.')
+    price_usd = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    is_active = models.BooleanField(default=True, help_text='Only active plans are shown to companies.')
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['agent_name', 'sort_order', 'duration_days']
+        indexes = [models.Index(fields=['agent_name', 'is_active'])]
+        verbose_name = 'Agent Plan'
+        verbose_name_plural = 'Agent Plans'
+
+    def __str__(self):
+        return f"{self.agent_name}: {self.duration_days}d / ${self.price_usd}"
+
+    @property
+    def display_label(self) -> str:
+        if self.label:
+            return self.label
+        d = self.duration_days
+        if d % 365 == 0:
+            n = d // 365
+            return f"{n} year{'s' if n > 1 else ''}"
+        if d % 30 == 0:
+            n = d // 30
+            return f"{n} month{'s' if n > 1 else ''}"
+        if d % 7 == 0:
+            n = d // 7
+            return f"{n} week{'s' if n > 1 else ''}"
+        return f"{d} day{'s' if d > 1 else ''}"
 
 
 # Per-agent default provider — which PlatformAPIKey to use as the fallback.
