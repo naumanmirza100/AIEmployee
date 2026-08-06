@@ -9,31 +9,172 @@ import {
   Target,
   Users,
   CalendarClock,
+  // inner-item icons
+  LayoutDashboard,
+  BarChart3,
+  Briefcase,
+  Upload,
+  HelpCircle,
+  Calendar,
+  Star,
+  FlaskConical,
+  Settings,
+  FileText,
+  MessageSquareText,
+  PenTool,
+  Bell,
+  Mail,
+  RefreshCw,
+  MessageSquare,
+  Monitor,
+  Ticket,
+  GitBranch,
+  Sparkles,
+  Network,
+  ClipboardList,
+  AlertTriangle,
+  ListChecks,
+  CalendarDays,
 } from 'lucide-react';
 
 /**
  * All agent modules with their nav config.
  * To add a new agent, just add an entry here — every dashboard picks it up automatically.
+ *
+ * `children` are the agent's inner navigation items, shown nested in the sidebar
+ * under the active agent. Two link shapes:
+ *   - path  : { label, icon, path: '/ai-sdr/leads' }
+ *   - query : { label, icon, path: '/frontline/dashboard', tab: 'documents' }
+ *             → navigates to '/frontline/dashboard?tab=documents'
+ * `basePath` is the URL prefix used to tell which agent is active.
+ * Mirrors each dashboard's TAB_ITEMS (verified against the components).
  */
 const ALL_AGENTS = [
-  { key: 'project_manager_agent', label: 'Project Manager Agent', icon: BrainCircuit, section: 'project-manager', path: '/project-manager/dashboard' },
-  { key: 'recruitment_agent',     label: 'Recruitment Agent',     icon: UserCheck,    section: 'recruitment',      path: '/recruitment/job-descriptions' },
-  { key: 'marketing_agent',       label: 'Marketing Agent',       icon: Megaphone,    section: 'marketing',        path: '/marketing/dashboard' },
-  { key: 'frontline_agent',       label: 'Frontline Agent',       icon: Headphones,   section: 'frontline',        path: '/frontline/dashboard' },
-  { key: 'operations_agent',      label: 'Operations Agent',      icon: FileSearch,   section: 'operations',       path: '/operations/documents' },
-  { key: 'reply_draft_agent',     label: 'Reply Draft Agent',     icon: Reply,        section: 'reply-draft',      path: '/reply-draft/dashboard' },
-  { key: 'ai_sdr_agent',          label: 'AI SDR Agent',          icon: Target,       section: 'ai-sdr',           path: '/ai-sdr/dashboard' },
-  { key: 'hr_agent',              label: 'HR Support Agent',      icon: Users,        section: 'hr',               path: '/hr/dashboard' },
-  { key: 'exec_meeting_agent',   label: 'AI Executive Meeting Assistant', icon: CalendarClock, section: 'exec-meeting', path: '/exec-meeting/dashboard' },
+  {
+    key: 'project_manager_agent', label: 'Project Manager Agent', icon: BrainCircuit,
+    section: 'project-manager', path: '/project-manager/dashboard', basePath: '/project-manager',
+  },
+  {
+    key: 'recruitment_agent', label: 'Recruitment Agent', icon: UserCheck,
+    section: 'recruitment', path: '/recruitment/job-descriptions', basePath: '/recruitment',
+    children: [
+      { label: 'Dashboard',        icon: LayoutDashboard, path: '/recruitment/dashboard' },
+      { label: 'Analytics',        icon: BarChart3,       path: '/recruitment/analytics' },
+      { label: 'Job Descriptions', icon: Briefcase,       path: '/recruitment/job-descriptions' },
+      { label: 'CV Processing',    icon: Upload,          path: '/recruitment/cvprocessing' },
+      { label: 'AI Questions',     icon: HelpCircle,      path: '/recruitment/ai-interview-questions' },
+      { label: 'Candidates',       icon: Users,           path: '/recruitment/candidates' },
+      { label: 'Interviews',       icon: Calendar,        path: '/recruitment/interviews' },
+      { label: 'Saved Prompts',    icon: Star,            path: '/recruitment/saved-prompts' },
+      { label: 'API Tester',       icon: FlaskConical,    path: '/recruitment/api-tester' },
+      {
+        label: 'Settings', icon: Settings, path: '/recruitment/settings/email',
+        basePath: '/recruitment/settings',
+        children: [
+          { label: 'Email',         icon: Mail,     path: '/recruitment/settings/email' },
+          { label: 'Interview',     icon: Calendar, path: '/recruitment/settings/interview' },
+          { label: 'Qualification', icon: Target,   path: '/recruitment/settings/qualification' },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'marketing_agent', label: 'Marketing Agent', icon: Megaphone,
+    section: 'marketing', path: '/marketing/dashboard', basePath: '/marketing',
+    children: [
+      { label: 'Dashboard',     icon: BarChart3,   path: '/marketing/dashboard', tab: 'dashboard' },
+      { label: 'Campaigns',     icon: Megaphone,   path: '/marketing/dashboard', tab: 'campaigns' },
+      { label: 'Email',         icon: Mail,        path: '/marketing/dashboard', tab: 'email' },
+      { label: 'Q&A',           icon: MessageSquare, path: '/marketing/dashboard', tab: 'qa' },
+      { label: 'Research',      icon: Sparkles,    path: '/marketing/dashboard', tab: 'research' },
+      { label: 'Documents',     icon: FileText,    path: '/marketing/dashboard', tab: 'documents' },
+      { label: 'Notifications', icon: Bell,        path: '/marketing/dashboard', tab: 'notifications' },
+      { label: 'Saved Graphs',  icon: Sparkles,    path: '/marketing/dashboard', tab: 'saved-graphs' },
+    ],
+  },
+  {
+    key: 'frontline_agent', label: 'Frontline Agent', icon: Headphones,
+    section: 'frontline', path: '/frontline/dashboard', basePath: '/frontline',
+    children: [
+      { label: 'Overview',      icon: LayoutDashboard, path: '/frontline/dashboard', tab: 'overview' },
+      { label: 'Documents',     icon: FileText,        path: '/frontline/dashboard', tab: 'documents' },
+      { label: 'Knowledge Q&A', icon: MessageSquare,   path: '/frontline/dashboard', tab: 'qa' },
+      { label: 'Chat widget',   icon: Monitor,         path: '/frontline/dashboard', tab: 'widget' },
+      { label: 'Tickets',       icon: Ticket,          path: '/frontline/dashboard', tab: 'tickets' },
+      { label: 'Hand-offs',     icon: Headphones,      path: '/frontline/dashboard', tab: 'handoffs' },
+      { label: 'Notifications', icon: Bell,            path: '/frontline/dashboard', tab: 'notifications' },
+      { label: 'Workflows',     icon: GitBranch,       path: '/frontline/dashboard', tab: 'workflows' },
+      { label: 'Analytics',     icon: BarChart3,       path: '/frontline/dashboard', tab: 'analytics' },
+      { label: 'AI Graphs',     icon: Sparkles,        path: '/frontline/dashboard', tab: 'ai-graphs' },
+    ],
+  },
+  {
+    key: 'operations_agent', label: 'Operations Agent', icon: FileSearch,
+    section: 'operations', path: '/operations/documents', basePath: '/operations',
+    children: [
+      { label: 'Dashboard',     icon: LayoutDashboard,   path: '/operations/dashboard' },
+      { label: 'Documents',     icon: Upload,            path: '/operations/documents' },
+      { label: 'Summarization', icon: FileText,          path: '/operations/summarization' },
+      { label: 'Analytics',     icon: BarChart3,         path: '/operations/analytics' },
+      { label: 'Knowledge Q&A', icon: MessageSquareText, path: '/operations/knowledge-qa' },
+      { label: 'Authoring',     icon: PenTool,           path: '/operations/authoring' },
+      { label: 'Notifications', icon: Bell,              path: '/operations/notifications' },
+    ],
+  },
+  {
+    key: 'reply_draft_agent', label: 'Reply Draft Agent', icon: Reply,
+    section: 'reply-draft', path: '/reply-draft/dashboard', basePath: '/reply-draft',
+  },
+  {
+    key: 'ai_sdr_agent', label: 'AI SDR Agent', icon: Target,
+    section: 'ai-sdr', path: '/ai-sdr/dashboard', basePath: '/ai-sdr',
+    children: [
+      { label: 'Dashboard', icon: LayoutDashboard, path: '/ai-sdr/dashboard' },
+      { label: 'Leads',     icon: Users,           path: '/ai-sdr/leads' },
+      { label: 'Outreach',  icon: Mail,            path: '/ai-sdr/outreach' },
+      { label: 'Meetings',  icon: Calendar,        path: '/ai-sdr/meetings' },
+      { label: 'Analytics', icon: BarChart3,       path: '/ai-sdr/analytics' },
+      { label: 'CRM Sync',  icon: RefreshCw,       path: '/ai-sdr/crm-sync' },
+      { label: 'Settings',  icon: Settings,        path: '/ai-sdr/settings' },
+    ],
+  },
+  {
+    key: 'hr_agent', label: 'HR Support Agent', icon: Users,
+    section: 'hr', path: '/hr/dashboard', basePath: '/hr',
+    children: [
+      { label: 'Overview',      icon: LayoutDashboard, path: '/hr/dashboard', tab: 'overview' },
+      { label: 'Knowledge Q&A', icon: MessageSquare,   path: '/hr/dashboard', tab: 'qa' },
+      { label: 'Employees',     icon: Users,           path: '/hr/dashboard', tab: 'employees' },
+      { label: 'My team',       icon: UserCheck,       path: '/hr/dashboard', tab: 'my_team' },
+      { label: 'Org chart',     icon: Network,         path: '/hr/dashboard', tab: 'org_chart' },
+      { label: 'Documents',     icon: FileText,        path: '/hr/dashboard', tab: 'documents' },
+      { label: 'Workflows',     icon: GitBranch,       path: '/hr/dashboard', tab: 'workflows' },
+      { label: 'Meetings',      icon: CalendarClock,   path: '/hr/dashboard', tab: 'meetings' },
+      { label: 'Leave',         icon: ClipboardList,   path: '/hr/dashboard', tab: 'leave' },
+      { label: 'Notifications', icon: AlertTriangle,   path: '/hr/dashboard', tab: 'notifications' },
+    ],
+  },
+  {
+    key: 'exec_meeting_agent', label: 'AI Executive Meeting Assistant', icon: CalendarClock,
+    section: 'exec-meeting', path: '/exec-meeting/dashboard', basePath: '/exec-meeting',
+    children: [
+      { label: 'Overview',      icon: LayoutDashboard, path: '/exec-meeting/dashboard', tab: 'overview' },
+      { label: 'Meetings',      icon: CalendarClock,   path: '/exec-meeting/dashboard', tab: 'meetings' },
+      { label: 'Tasks',         icon: ListChecks,      path: '/exec-meeting/dashboard', tab: 'tasks' },
+      { label: 'Calendar',      icon: CalendarDays,    path: '/exec-meeting/dashboard', tab: 'calendar' },
+      { label: 'Documents',     icon: FileText,        path: '/exec-meeting/dashboard', tab: 'documents' },
+      { label: 'Notifications', icon: Bell,            path: '/exec-meeting/dashboard', tab: 'notifications' },
+    ],
+  },
 ];
 
 /**
- * Build the navItems array for DashboardNavbar.
+ * Build the navItems array for DashboardNavbar / AgentSidebar.
  *
  * @param {string[]} purchasedModules - list of purchased module keys
  * @param {string}   currentSection   - the section key of the current page (e.g. 'marketing')
  * @param {Function} navigate         - react-router navigate function
- * @returns {Array}  navItems ready for DashboardNavbar
+ * @returns {Array}  navItems ready for the sidebar (each may carry `children`)
  */
 export const getAgentNavItems = (purchasedModules, currentSection, navigate) => {
   const items = [
@@ -52,6 +193,8 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
         label: agent.label,
         icon: agent.icon,
         section: agent.section,
+        basePath: agent.basePath,
+        children: agent.children || null,
         onClick: () => navigate(agent.path),
       });
     }
