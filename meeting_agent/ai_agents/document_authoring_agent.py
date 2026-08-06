@@ -421,7 +421,7 @@ Return ONLY this JSON (no markdown):
 
 ## Key Points
 
-{points_for_prompt}
+{points_for_prompt if has_points else ('Extract 3-5 key points (findings, risks, or important facts) from the context above. Format each as a "- " bullet.' if has_context else '- [Key finding or point 1]\n- [Key finding or point 2]\n- [Key finding or point 3]')}
 
 ---
 
@@ -433,8 +433,7 @@ Return ONLY this JSON (no markdown):
 
 ## Recommended Actions
 
-1. [Action 1 — Owner — Due date]
-2. [Action 2 — Owner — Due date]
+{'List the concrete next actions implied by the context above. Format each as a numbered "1. Action — Owner — Due date" line; use the owners/dates from the context where available, otherwise omit them.' if has_context else '1. [Action 1 — Owner — Due date]\n2. [Action 2 — Owner — Due date]'}
 
 ---
 

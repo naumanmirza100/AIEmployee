@@ -12,7 +12,7 @@ import { DateTimePicker } from '@/components/common/DatePicker';
 import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 
-const ManualTaskCreation = ({ onTaskCreated }) => {
+const ManualTaskCreation = ({ onTaskCreated, onSuccess, defaultProjectId }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState([]);
@@ -20,7 +20,10 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [formData, setFormData] = useState({
-    project_id: '',
+    // Pre-fill the project when the caller (e.g. Tasks tab's "New Task"
+    // dialog opened from within a project row) already knows which project
+    // to add to. Empty string when not provided → user picks from dropdown.
+    project_id: defaultProjectId ? String(defaultProjectId) : '',
     title: '',
     description: '',
     status: 'todo',
@@ -165,9 +168,14 @@ const ManualTaskCreation = ({ onTaskCreated }) => {
           estimated_hours: '',
         });
 
-        // Notify parent component
+        // Notify parent component. `onTaskCreated` = legacy (parent
+        // re-fetches its list). `onSuccess` = newer dialog wrapper hook so
+        // it can close on submit. Both optional.
         if (onTaskCreated) {
           onTaskCreated();
+        }
+        if (onSuccess) {
+          onSuccess();
         }
       } else {
         throw new Error(response.message || 'Failed to create task');

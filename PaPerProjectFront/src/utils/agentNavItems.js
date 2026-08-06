@@ -95,17 +95,14 @@ const ALL_AGENTS = [
   {
     key: 'frontline_agent', label: 'Frontline Agent', icon: Headphones,
     section: 'frontline', path: '/frontline/dashboard', basePath: '/frontline',
+    // Matches the restructured Frontline (6 visible tabs, ?tab=-driven).
     children: [
-      { label: 'Overview',      icon: LayoutDashboard, path: '/frontline/dashboard', tab: 'overview' },
-      { label: 'Documents',     icon: FileText,        path: '/frontline/dashboard', tab: 'documents' },
-      { label: 'Knowledge Q&A', icon: MessageSquare,   path: '/frontline/dashboard', tab: 'qa' },
-      { label: 'Chat widget',   icon: Monitor,         path: '/frontline/dashboard', tab: 'widget' },
-      { label: 'Tickets',       icon: Ticket,          path: '/frontline/dashboard', tab: 'tickets' },
-      { label: 'Hand-offs',     icon: Headphones,      path: '/frontline/dashboard', tab: 'handoffs' },
-      { label: 'Notifications', icon: Bell,            path: '/frontline/dashboard', tab: 'notifications' },
-      { label: 'Workflows',     icon: GitBranch,       path: '/frontline/dashboard', tab: 'workflows' },
-      { label: 'Analytics',     icon: BarChart3,       path: '/frontline/dashboard', tab: 'analytics' },
-      { label: 'AI Graphs',     icon: Sparkles,        path: '/frontline/dashboard', tab: 'ai-graphs' },
+      { label: 'Queue',      icon: Headphones,      path: '/frontline/dashboard', tab: 'queue' },
+      { label: 'Knowledge',  icon: FileText,        path: '/frontline/dashboard', tab: 'knowledge' },
+      { label: 'Insights',   icon: BarChart3,       path: '/frontline/dashboard', tab: 'insights' },
+      { label: 'Automation', icon: GitBranch,       path: '/frontline/dashboard', tab: 'automation' },
+      { label: 'Settings',   icon: Monitor,         path: '/frontline/dashboard', tab: 'settings' },
+      { label: 'Overview',   icon: LayoutDashboard, path: '/frontline/dashboard', tab: 'overview' },
     ],
   },
   {

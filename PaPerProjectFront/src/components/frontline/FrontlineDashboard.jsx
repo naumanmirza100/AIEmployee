@@ -6,6 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import FrontlineInsightsPanel from './FrontlineInsightsPanel';
+import FrontlinePlaceholderView from './FrontlinePlaceholderView';
+import FrontlineSidebar from './FrontlineSidebar';
+import FrontlineDocumentsTab from './FrontlineDocumentsTab';
+import FrontlineKnowledgeQATab from './FrontlineKnowledgeQATab';
+import KnowledgeView from './KnowledgeView';
+import QueueView from './QueueView';
+import InsightsView from './InsightsView';
+import AutomationView from './AutomationView';
+import SettingsView from './SettingsView';
 import MacroPickerDialog from './MacroPickerDialog';
 import {
   DropdownMenu,
@@ -139,7 +148,7 @@ const PREFERENCES_DEFAULT = {
   workflow_email_enabled: true,
 };
 
-function FrontlineNotificationsTab() {
+export function FrontlineNotificationsTab() {
   const { toast } = useToast();
   const [templates, setTemplates] = useState([]);
   const [scheduled, setScheduled] = useState([]);
@@ -504,7 +513,7 @@ function FrontlineNotificationsTab() {
   );
 }
 
-function FrontlineWorkflowsTab() {
+export function FrontlineWorkflowsTab() {
   const { toast } = useToast();
   const [workflows, setWorkflows] = useState([]);
   const [executions, setExecutions] = useState([]);
@@ -1267,17 +1276,38 @@ function FrontlineWorkflowsTab() {
 
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
+// Tab bar restructure (FRONTLINE_AGENT_UX_REDESIGN.md):
+//   * Visible surface = 6 tabs — Queue (agent day-to-day), Knowledge
+//     (Documents + QA), Insights (Overview + Analytics + AI Graphs),
+//     Automation (Workflows + notification templates), Settings (Widget +
+//     preferences), plus Overview kept as its own tab for now until we
+//     verify Insights covers what admins actually watch.
+//   * `hidden: true` tabs are FILTERED out of the visible tab bar (both
+//     desktop and mobile hamburger) but their TabsContent is still
+//     rendered, so `?tab=qa` deep-links / bookmarks still work.
+//   * Un-hiding a tab is a one-line flip. That's why we hide instead of
+//     delete during the rollout — nothing is destroyed.
 const FRONTLINE_TAB_ITEMS = [
+  // Visible — the new 6-tab shape
+  { value: 'queue', label: 'Queue', icon: Headphones },
+  { value: 'knowledge', label: 'Knowledge', icon: FileText },
+  { value: 'insights', label: 'Insights', icon: BarChart3 },
+  { value: 'automation', label: 'Automation', icon: GitBranch },
+  { value: 'settings', label: 'Settings', icon: Monitor },
   { value: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { value: 'documents', label: 'Documents', icon: FileText },
-  { value: 'qa', label: 'Knowledge Q&A', icon: MessageSquare },
-  { value: 'widget', label: 'Chat widget', icon: Monitor },
-  { value: 'tickets', label: 'Tickets', icon: Ticket },
-  { value: 'handoffs', label: 'Hand-offs', icon: Headphones },
-  { value: 'notifications', label: 'Notifications', icon: Bell },
-  { value: 'workflows', label: 'Workflows', icon: GitBranch },
-  { value: 'analytics', label: 'Analytics', icon: BarChart3 },
-  { value: 'ai-graphs', label: 'AI Graphs', icon: Sparkles },
+
+  // Hidden — content still renders on direct URL navigation. Do NOT
+  // reorder — visible tabs come first so the bar reads left-to-right in
+  // intended priority.
+  { value: 'documents', label: 'Documents', icon: FileText, hidden: true },
+  { value: 'qa', label: 'Knowledge Q&A', icon: MessageSquare, hidden: true },
+  { value: 'widget', label: 'Chat widget', icon: Monitor, hidden: true },
+  { value: 'tickets', label: 'Tickets', icon: Ticket, hidden: true },
+  { value: 'handoffs', label: 'Hand-offs', icon: Headphones, hidden: true },
+  { value: 'notifications', label: 'Notifications', icon: Bell, hidden: true },
+  { value: 'workflows', label: 'Workflows', icon: GitBranch, hidden: true },
+  { value: 'analytics', label: 'Analytics', icon: BarChart3, hidden: true },
+  { value: 'ai-graphs', label: 'AI Graphs', icon: Sparkles, hidden: true },
 ];
 
 // ============================================================================
@@ -1285,7 +1315,7 @@ const FRONTLINE_TAB_ITEMS = [
 // Lists pending + accepted hand-offs, opens a drawer with the ticket thread,
 // an LLM-drafted reply button, and "Send reply" / "Accept hand-off" actions.
 // ============================================================================
-function HandoffQueueTab() {
+export function HandoffQueueTab() {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState('pending');
   const [rows, setRows] = useState([]);
@@ -1940,7 +1970,7 @@ function HandoffQueueTab() {
 }
 
 
-function FrontlineAnalyticsTab() {
+export function FrontlineAnalyticsTab() {
   const { toast } = useToast();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -2570,19 +2600,118 @@ const FrontlineDashboard = () => {
   const [stats, setStats] = useState(null);
   const [documents, setDocuments] = useState([]);
   // Tab state lives in the URL as `?tab=...` so browser reload keeps you on
-  // the tab you were on. Falls back to 'overview' when the param is missing
-  // or references an unknown tab.
+  // the tab you were on. Falls back to 'queue' (agent's day-to-day work) when
+  // the param is missing or references an unknown tab — Overview is a menu,
+  // Queue is where support agents actually work.
   const [searchParams, setSearchParams] = useSearchParams();
   const validTabValues = React.useMemo(() => FRONTLINE_TAB_ITEMS.map((t) => t.value), []);
   const rawTab = searchParams.get('tab');
-  const activeTab = validTabValues.includes(rawTab) ? rawTab : 'overview';
+  const activeTab = validTabValues.includes(rawTab) ? rawTab : 'queue';
   const setActiveTab = React.useCallback((v) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('tab', v);
+      // Switching top-level tab clears any nested sub-tab — otherwise
+      // ?sub=tickets set on Queue would leak into Knowledge (which has
+      // its own sub-tabs) and render a blank panel.
+      next.delete('sub');
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+
+  // Sub-tab state — Queue/Knowledge/Insights/Automation/Settings each have
+  // nested sub-tabs. Same URL-based approach as PM: `?tab=X&sub=Y`. Sub-views
+  // read `activeSubTab` and fall back to their own default when it's unset.
+  const rawSubTab = searchParams.get('sub');
+  const activeSubTab = rawSubTab || null;
+  const setSubTab = React.useCallback((tabValue, subValue) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tabValue);
+      if (subValue) next.set('sub', subValue);
+      else next.delete('sub');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  // Hidden-tab set — filters tour steps and (later) drives the sidebar's
+  // visible-items list.
+  const hiddenTabValues = React.useMemo(
+    () => new Set(FRONTLINE_TAB_ITEMS.filter((t) => t.hidden).map((t) => t.value)),
+    []
+  );
+
+  // Sidebar collapsed state — persisted per browser so the user's preference
+  // survives reloads. Read once on init (localStorage is sync).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('frontline_sidebar_collapsed_v1') === '1'; }
+    catch (_) { return false; }
+  });
+  const toggleSidebar = React.useCallback(() => {
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      try { localStorage.setItem('frontline_sidebar_collapsed_v1', next ? '1' : '0'); }
+      catch (_) { /* ignore */ }
+      return next;
+    });
+  }, []);
+
+  // Sidebar items — top-level tabs with nested sub-items pointing to the
+  // (currently hidden) legacy tabs that own the actual content. Once Chunks
+  // B–F extract that content into the new views, sub-item values will move
+  // from legacy hidden values (e.g. 'handoffs') to `?sub=handoffs` on the
+  // parent — that swap is a one-liner per sub-item.
+  const sidebarItems = React.useMemo(() => [
+    {
+      value: 'queue',
+      label: 'Queue',
+      icon: Headphones,
+      subItems: [
+        { value: 'handoffs', label: 'Hand-offs', icon: Headphones },
+        { value: 'tickets',  label: 'Tickets',   icon: Ticket },
+      ],
+    },
+    {
+      value: 'knowledge',
+      label: 'Knowledge',
+      icon: FileText,
+      subItems: [
+        { value: 'documents', label: 'Documents',     icon: FileText },
+        { value: 'qa',        label: 'Knowledge Q&A', icon: MessageSquare },
+      ],
+    },
+    {
+      value: 'insights',
+      label: 'Insights',
+      icon: BarChart3,
+      subItems: [
+        { value: 'analytics', label: 'Analytics', icon: BarChart3 },
+        { value: 'ai-graphs', label: 'AI Graphs', icon: Sparkles },
+      ],
+    },
+    {
+      value: 'automation',
+      label: 'Automation',
+      icon: GitBranch,
+      subItems: [
+        { value: 'workflows',     label: 'Workflows',     icon: GitBranch },
+        { value: 'notifications', label: 'Notifications', icon: Bell },
+      ],
+    },
+    {
+      value: 'settings',
+      label: 'Settings',
+      icon: Monitor,
+      subItems: [
+        { value: 'widget', label: 'Chat widget', icon: Monitor },
+      ],
+    },
+    {
+      value: 'overview',
+      label: 'Overview',
+      icon: LayoutDashboard,
+    },
+  ], []);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   // Which per-tab tour is currently open (null when none). Value = tab key.
@@ -3565,10 +3694,45 @@ const FrontlineDashboard = () => {
     );
   }
 
+  // Prop-bundle for the extracted FrontlineKnowledgeQATab. Bundled here so
+  // the two mount points (KnowledgeView's Q&A sub-tab AND the hidden legacy
+  // `?tab=qa` TabsContent) stay identical — one change fixes both places.
+  // Deliberately NOT memoised: React only re-renders the QA tree when the
+  // parent re-renders anyway, and the bundle object is cheap to build.
+  const qaProps = {
+    chats, selectedChatId, question, answering, answeringStartedAt, loadingChats,
+    inputMode, expandedGraph, showSidebarSearch, sidebarSearch, showChatHistory,
+    qaScopeMode, qaScopeDocumentTypes, qaScopeDocumentIds,
+    qaDocumentsList, qaDocumentsLoading, feedbackSent, feedbackSubmitting,
+    documents,
+    setSelectedChatId, setQuestion, setInputMode, setExpandedGraph,
+    setShowSidebarSearch, setSidebarSearch, setShowChatHistory,
+    setQaScopeMode, setQaScopeDocumentTypes, setQaScopeDocumentIds,
+    setFeedbackSent, setFeedbackSubmitting,
+    onNewChat: newChat,
+    onDeleteChat: deleteChat,
+    onAskQuestion: handleAskQuestion,
+    messagesEndRef,
+  };
+
   return (
     <HintsProvider>
+    <div className="flex gap-4 items-start w-full">
+      {/* Left sidebar — hidden below lg (mobile uses the hamburger inside
+          the content area). Kept in a plain <div> for now so we can freely
+          scope styling without fighting the existing rounded-2xl wrapper. */}
+      <div data-tour-fl="tabs">
+        <FrontlineSidebar
+          items={sidebarItems}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={toggleSidebar}
+        />
+      </div>
+
     <div
-      className="w-full rounded-2xl border border-white/[0.06] p-0"
+      className="flex-1 min-w-0 w-full rounded-2xl border border-white/[0.06] p-0"
       style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
     >
     <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
@@ -3681,8 +3845,146 @@ const FrontlineDashboard = () => {
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
-        {/* The tab BAR now lives in the left sidebar; this keeps the
-            ?tab=-driven content switching. */}
+        {/* Mobile & Tablet: Hamburger menu (below lg) */}
+        <div className="lg:hidden w-full mb-4">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-full justify-between h-11 border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white">
+                <div className="flex items-center gap-2 min-w-0">
+                  <currentTab.icon className="h-4 w-4 shrink-0 text-violet-400" />
+                  <span className="font-medium truncate">{currentTab.label}</span>
+                </div>
+                <Menu className="h-5 w-5 text-white/40 shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[#3a295a] bg-[#161630]">
+              {FRONTLINE_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
+                const isActive = item.value === activeTab;
+                const ItemIcon = item.icon;
+                return (
+                  <DropdownMenuItem
+                    key={item.value}
+                    onClick={() => setActiveTab(item.value)}
+                    className={`flex items-center justify-between py-3 cursor-pointer ${isActive ? 'bg-violet-600/20' : 'hover:bg-white/5'}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <ItemIcon className={`h-4 w-4 shrink-0 ${isActive ? 'text-violet-400' : 'text-white/40'}`} />
+                      <span className={isActive ? 'font-medium text-violet-300' : 'text-white/70'}>{item.label}</span>
+                    </div>
+                    {isActive && <Check className="h-4 w-4 text-violet-400 shrink-0" />}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* Desktop tab bar replaced by FrontlineSidebar (outside main flow).
+            Kept in DOM but permanently hidden so any existing tour selectors
+            targeting `[data-tour="tabs"]` still resolve without visual junk.
+            Mobile users continue using the hamburger dropdown above. */}
+        <div data-tour="tabs" className="hidden">
+          <TabsList
+            className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
+            style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+          >
+            {FRONTLINE_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
+              const TabIcon = item.icon;
+              const tour = TAB_TOURS[item.value];
+              const showBadge = tour && tourAvailable(tour.key);
+              const hoverHandlers = tour ? makeHoverLaunchHandlers({
+                tourStorageKey: tour.key,
+                onLaunch: () => setActiveTabTour(item.value),
+              }) : {};
+              return (
+                <TabsTrigger
+                  key={item.value}
+                  value={item.value}
+                  data-tour-tab={item.value}
+                  {...hoverHandlers}
+                  className="relative whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+                  style={activeTab === item.value
+                    ? {
+                        background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
+                        color: '#fff',
+                        border: '1.5px solid #f59e0b',
+                        boxShadow: '0 0 8px 0 #f59e0b55',
+                      }
+                    : {
+                        background: 'rgba(60, 30, 90, 0.22)',
+                        color: '#cfc6e6',
+                        border: '1.5px solid #2d2342',
+                        boxShadow: 'none',
+                      }
+                  }
+                >
+                  <TabIcon className="h-4 w-4 mr-2" />
+                  {item.label}
+                  {showBadge && (
+                    <span
+                      title="Tour available — hover to launch or click 'Tour this tab' inside"
+                      className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[#1a1333]"
+                      style={{ animation: 'fltDotPulse 2s ease-in-out infinite' }}
+                    />
+                  )}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </div>
+
+        {/* ── NEW consolidated tabs (Chunk A of FRONTLINE_AGENT_UX_REDESIGN.md).
+              Each renders FrontlinePlaceholderView with click-to-open cards
+              that navigate to the hidden legacy tab where the actual feature
+              lives. Chunks B–F extract the legacy content into these views
+              as proper nested sub-tabs. Until then, sub-tab feel = one click
+              away, not zero — but nothing is broken or unreachable. */}
+        <TabsContent value="queue" className="mt-6">
+          <QueueView
+            activeSubTab={activeSubTab}
+            onSubTabChange={(sub) => setSubTab('queue', sub)}
+            onNavigateToTab={setActiveTab}
+          />
+        </TabsContent>
+
+        <TabsContent value="knowledge" className="mt-6">
+          <KnowledgeView
+            documents={documents}
+            docSummaries={docSummaries}
+            onOpenUpload={() => setShowUploadDialog(true)}
+            onToggleSummary={toggleDocSummary}
+            onSummarize={handleSummarizeDocument}
+            onExtract={handleExtractDocument}
+            onToggleOutdated={handleToggleDocOutdated}
+            onDelete={handleDeleteDocument}
+            qa={qaProps}
+            onNavigateToTab={setActiveTab}
+            activeSubTab={activeSubTab}
+            onSubTabChange={(sub) => setSubTab('knowledge', sub)}
+          />
+        </TabsContent>
+
+        <TabsContent value="insights" className="mt-6">
+          <InsightsView
+            activeSubTab={activeSubTab}
+            onSubTabChange={(sub) => setSubTab('insights', sub)}
+          />
+        </TabsContent>
+
+        <TabsContent value="automation" className="mt-6">
+          <AutomationView
+            activeSubTab={activeSubTab}
+            onSubTabChange={(sub) => setSubTab('automation', sub)}
+          />
+        </TabsContent>
+
+        <TabsContent value="settings" className="mt-6">
+          <SettingsView
+            activeSubTab={activeSubTab}
+            onSubTabChange={(sub) => setSubTab('settings', sub)}
+            onNavigateToTab={setActiveTab}
+          />
+        </TabsContent>
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="mt-6">
@@ -3691,7 +3993,7 @@ const FrontlineDashboard = () => {
           {/* Admin insights — SLA / KB / DLQ / audit log tiles. Lazy-fetched. */}
           <div data-tour-ov="insights" className="mb-5 relative">
             <div className="absolute -top-1 right-1 z-10"><InfoHint {...HINTS.ovInsights} /></div>
-            <FrontlineInsightsPanel />
+            <FrontlineInsightsPanel onNavigateToTab={setActiveTab} />
           </div>
           <div className="flex items-center gap-2 mb-2">
             <span className="text-xs uppercase tracking-wider text-white/40 font-semibold">Quick jump</span>
@@ -3753,6 +4055,33 @@ const FrontlineDashboard = () => {
                 bgColor: 'rgba(244,114,182,0.15)',
                 borderHover: 'rgba(244,114,182,0.4)',
               },
+              {
+                title: 'Hand-offs',
+                desc: 'Reply to tickets escalated to human agents with AI-drafted responses',
+                icon: Headphones,
+                tab: 'handoffs',
+                color: '#fb923c',
+                bgColor: 'rgba(251,146,60,0.15)',
+                borderHover: 'rgba(251,146,60,0.4)',
+              },
+              {
+                title: 'Notifications',
+                desc: 'Manage notification preferences, templates, and scheduled alerts',
+                icon: Bell,
+                tab: 'notifications',
+                color: '#22d3ee',
+                bgColor: 'rgba(34,211,238,0.15)',
+                borderHover: 'rgba(34,211,238,0.4)',
+              },
+              {
+                title: 'AI Graphs',
+                desc: 'Generate charts from natural-language prompts and save your favourites',
+                icon: Sparkles,
+                tab: 'ai-graphs',
+                color: '#c084fc',
+                bgColor: 'rgba(192,132,252,0.15)',
+                borderHover: 'rgba(192,132,252,0.4)',
+              },
             ].map((card) => (
               <button
                 key={card.title}
@@ -3802,10 +4131,29 @@ const FrontlineDashboard = () => {
           </ErrorBoundary>
         </TabsContent>
 
-        {/* Documents Tab */}
+        {/* Documents Tab — legacy standalone URL (?tab=documents). Content
+            extracted to FrontlineDocumentsTab; also rendered inside the
+            new KnowledgeView. Kept here so bookmarks still work. */}
         <TabsContent value="documents" className="space-y-4 mt-4">
           <ErrorBoundary>
           <div className="flex justify-end"><TabTourButton tabKey="documents" /></div>
+          <FrontlineDocumentsTab
+            documents={documents}
+            docSummaries={docSummaries}
+            onOpenUpload={() => setShowUploadDialog(true)}
+            onToggleSummary={toggleDocSummary}
+            onSummarize={handleSummarizeDocument}
+            onExtract={handleExtractDocument}
+            onToggleOutdated={handleToggleDocOutdated}
+            onDelete={handleDeleteDocument}
+          />
+          </ErrorBoundary>
+        </TabsContent>
+
+        {/* — DEAD CODE below (kept until we verify extraction, then delete
+            in a cleanup pass). Original inline JSX removed to avoid double
+            render. — */}
+        <div className="hidden">
           <Card className="w-full min-w-0">
             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
@@ -3971,13 +4319,23 @@ const FrontlineDashboard = () => {
               )}
             </CardContent>
           </Card>
-          </ErrorBoundary>
-        </TabsContent>
+        </div>{/* end DEAD CODE hidden wrapper */}
 
         {/* Knowledge Q&A Tab - Chat UI with sidebar */}
+        {/* Knowledge Q&A Tab — legacy standalone URL (?tab=qa). Content
+            extracted to FrontlineKnowledgeQATab; also rendered inside the
+            new KnowledgeView. Kept here so bookmarks still work. */}
         <TabsContent value="qa" className="space-y-4 mt-4">
           <ErrorBoundary>
           <div className="flex justify-end mb-2"><TabTourButton tabKey="qa" /></div>
+          <FrontlineKnowledgeQATab {...qaProps} />
+          </ErrorBoundary>
+        </TabsContent>
+
+        {/* — DEAD CODE below (kept until we verify QA extraction, then delete
+            in a cleanup pass). Original 720-line inline JSX removed to avoid
+            double render but preserved verbatim in this hidden wrapper. — */}
+        <div className="hidden">
           <div
             className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
             style={{
@@ -4695,8 +5053,7 @@ const FrontlineDashboard = () => {
               </Card>
             </div>
           </div>
-          </ErrorBoundary>
-        </TabsContent>
+        </div>{/* end DEAD CODE hidden wrapper for QA */}
 
         {/* Chat widget tab */}
         <TabsContent value="widget" className="space-y-4 mt-4">
@@ -5587,6 +5944,7 @@ const FrontlineDashboard = () => {
       )}
     </div>
     </div>
+    </div>{/* flex row (sidebar + content) */}
     {/* Floating quick-chat launcher — pinned bottom-right of the viewport,
         rendered via portal so it stays put across every tab. */}
     <FrontlineFloatingChat />

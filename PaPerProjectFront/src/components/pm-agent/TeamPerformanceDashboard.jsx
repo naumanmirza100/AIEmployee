@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { companyApi } from '@/services/companyAuthService';
 import { Loader2, Users, Trophy, TrendingUp, AlertTriangle, BarChart3 } from 'lucide-react';
+import PMEmptyState from './EmptyState';
 
 function markdownToHtml(markdown) {
   if (!markdown || typeof markdown !== 'string') return '';
@@ -26,7 +27,7 @@ function markdownToHtml(markdown) {
   return out.join('\n');
 }
 
-export default function TeamPerformanceDashboard() {
+export default function TeamPerformanceDashboard({ onOpenPilot }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState([]);
@@ -61,6 +62,16 @@ export default function TeamPerformanceDashboard() {
       setLoading(false);
     }
   };
+
+  if (projects.length === 0) {
+    return (
+      <PMEmptyState
+        title="Create a project first"
+        subtitle="Team Performance analyzes workload, productivity, and delivery across an active project's team. Start one in Pilot to unlock this tool."
+        onOpenPilot={onOpenPilot}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

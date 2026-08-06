@@ -14,6 +14,12 @@ export const setTokenPool = ({ agent_name, preferred_pool }) =>
 export const setByokLimit = ({ agent_name, limit }) =>
   companyApi.post('/company/agent-keys/byok-limit', { agent_name, limit });
 
+// This company's weekly managed-token reset history (own data only).
+export const listResetLogs = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return companyApi.get(`/company/agent-keys/reset-logs${qs ? `?${qs}` : ''}`);
+};
+
 export const listKeyRequests = () => companyApi.get('/company/key-requests');
 
 export const createKeyRequest = ({ agent_name, provider, note }) =>
@@ -34,6 +40,7 @@ export default {
   revokeByokKey,
   setTokenPool,
   setByokLimit,
+  listResetLogs,
   listKeyRequests,
   createKeyRequest,
   payForRequest,

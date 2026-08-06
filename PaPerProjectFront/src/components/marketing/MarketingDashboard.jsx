@@ -643,20 +643,32 @@ const MarketingDashboard = () => {
           chart: d.chart || null,
           title: d.chart?.title || d.chartTitle || d.title || prompt?.title || 'Saved Graph',
           insights: d.insights || [],
+          // If the backend returned success but no chart (e.g. no matching
+          // data), surface its own message rather than a generic failure.
+          error: d.chart ? null : (d.message || response.message || 'No chart data was returned for this prompt.'),
         });
       } else {
         setViewingGraphResult({
           title: prompt?.title || 'Saved Graph',
           insights: [],
           chart: null,
+          error: response?.message || response?.error || 'The chart could not be built for this prompt.',
         });
       }
     } catch (error) {
       console.error('Error generating graph:', error);
+      // Preserve the real reason (rate limit, API key, no data, network, …)
+      // so the user sees something actionable instead of a blank failure.
+      const msg =
+        error?.data?.message ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Something went wrong while building this chart.';
       setViewingGraphResult({
         title: prompt?.title || 'Saved Graph',
         insights: [],
         chart: null,
+        error: msg,
       });
     } finally {
       setViewingGraphLoading(false);
@@ -1918,56 +1930,38 @@ const MarketingDashboard = () => {
                     </div>
                   )}
 
-                  {/* Loading state while generating graph */}
-                  {viewingGraphLoading && (
-                    <Card className="border-primary/20 bg-primary/5 backdrop-blur-sm">
-                      <CardContent className="flex flex-col items-center justify-center py-16">
-                        <div className="relative">
-                          <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
-                          <Loader2 className="h-8 w-8 animate-spin text-primary relative" />
-                        </div>
-                        <p className="text-sm text-white/60 mt-4">Generating graph from saved prompt...</p>
-                      </CardContent>
-                    </Card>
-                  )}
+                  {/* Saved-graph view now opens in a pop-up dialog instead of
+                      rendering inline below the prompt list. */}
+                  <Dialog
+                    open={!!viewingGraphId && (viewingGraphLoading || !!viewingGraphResult)}
+                    onOpenChange={(o) => { if (!o) { setViewingGraphId(null); setViewingGraphResult(null); } }}
+                  >
+                    <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar bg-[#0d0b1f] border-white/10 text-white">
+                      <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2.5">
+                          <span className="p-2 rounded-lg bg-primary/10 border border-primary/20">
+                            <BarChart3 className="h-5 w-5 text-primary" />
+                          </span>
+                          {viewingGraphResult?.title || 'Saved Graph'}
+                        </DialogTitle>
+                        {viewingGraphResult?.insights && viewingGraphResult.insights.length > 0 && (
+                          <DialogDescription className="text-white/50">
+                            {Array.isArray(viewingGraphResult.insights)
+                              ? viewingGraphResult.insights.join(' • ')
+                              : viewingGraphResult.insights}
+                          </DialogDescription>
+                        )}
+                      </DialogHeader>
 
-                  {/* Show saved graph preview */}
-                  {!viewingGraphLoading && viewingGraphResult && (
-                    <Card className="border-primary/20 bg-gradient-to-b from-primary/5 to-transparent backdrop-blur-sm">
-                      <CardHeader>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
-                              <BarChart3 className="h-5 w-5 text-primary" />
-                            </div>
-                            <div>
-                              <CardTitle className="text-base">
-                                {viewingGraphResult.title || 'Saved Graph'}
-                              </CardTitle>
-                              {viewingGraphResult.insights && viewingGraphResult.insights.length > 0 && (
-                                <CardDescription className="mt-1 text-white/50">
-                                  {Array.isArray(viewingGraphResult.insights)
-                                    ? viewingGraphResult.insights.join(' • ')
-                                    : viewingGraphResult.insights
-                                  }
-                                </CardDescription>
-                              )}
-                            </div>
+                      {viewingGraphLoading ? (
+                        <div className="flex flex-col items-center justify-center py-16">
+                          <div className="relative">
+                            <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
+                            <Loader2 className="h-8 w-8 animate-spin text-primary relative" />
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-white/40 hover:text-white hover:bg-white/10"
-                            onClick={() => {
-                              setViewingGraphId(null);
-                              setViewingGraphResult(null);
-                            }}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
+                          <p className="text-sm text-white/60 mt-4">Generating graph from saved prompt...</p>
                         </div>
-                      </CardHeader>
-                      <CardContent className="pt-0">
+                      ) : viewingGraphResult && (
                         <div className="bg-black/20 rounded-xl p-6 border border-white/5">
                           {viewingGraphResult.chart ? (
                             <div className="w-full overflow-hidden">
@@ -1988,12 +1982,17 @@ const MarketingDashboard = () => {
                               )}
                             </div>
                           ) : (
-                            <div className="text-center text-white/40 py-8">Failed to generate chart. Please try again.</div>
+                            <div className="text-center py-8 px-4">
+                              <div className="text-sm font-medium text-white/70">Couldn't build this chart</div>
+                              <div className="text-xs text-white/40 mt-1 max-w-md mx-auto break-words">
+                                {viewingGraphResult.error || 'Please try again.'}
+                              </div>
+                            </div>
                           )}
                         </div>
-                      </CardContent>
-                    </Card>
-                  )}
+                      )}
+                    </DialogContent>
+                  </Dialog>
                 </>
               )}
             </CardContent>

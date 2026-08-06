@@ -14,10 +14,11 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
   Send, Trash2, ChevronLeft, RefreshCw, Sparkles, Activity, Clock,BrainCircuit, 
-  Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight,Zap, Coins, Settings
+  Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight,Zap, Coins, Settings, History
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import agentKeysService from '@/services/agentKeysService';
+import { CompanyResetLogs } from '@/components/marketing/CompanyResetLogs';
 
 const GRADIENT_BG = 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)';
 
@@ -762,6 +763,8 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
   const entries = useMemo(() => expandRequestEntries(group.requests), [group.requests]);
   const hasPending = group.requests.some(r => ['pending', 'payment_pending', 'payment_received'].includes(r.status));
   const [expanded, setExpanded] = useState(hasPending);
+  // "Weekly" reset-history pop-up for this agent.
+  const [resetLogsOpen, setResetLogsOpen] = useState(false);
 
   const latest = entries[entries.length - 1];
   const latestReal = [...entries].reverse().find(e => !e._synthetic) || latest;
@@ -816,11 +819,24 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
                     : <span className="text-white/30">None</span>
                   }
                 </span>
+                {/* Reset-history pop-up for this agent. */}
+                {managedKey.renewal_period && managedKey.renewal_period !== 'none' && (
+                  <>
+                    <span className="text-white/15 text-sm">·</span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setResetLogsOpen(true); }}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-300 hover:text-violet-200 hover:underline"
+                    >
+                      <History className="h-3 w-3" /> Reset history
+                    </button>
+                  </>
+                )}
                 {managedKey.tokens_per_period > 0 && (
                   <>
                     <span className="text-white/15 text-sm">·</span>
                     <span className="text-[11px] text-white/40">
-                      <span className="text-white/25">Tokens/wk: </span>
+                      <span className="text-white/25">Tokens/reset: </span>
                       <span className="text-violet-300 font-medium">{Number(managedKey.tokens_per_period).toLocaleString()}</span>
                     </span>
                   </>
@@ -864,6 +880,22 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
           ))}
         </div>
       )}
+
+      {/* Weekly reset-history pop-up for this agent */}
+      <Dialog open={resetLogsOpen} onOpenChange={setResetLogsOpen}>
+        <DialogContent className="max-w-2xl bg-[#120d22] border border-[#2d2342] text-white">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <History className="w-5 h-5 text-violet-400" />
+              Weekly Reset History — {group.agent_label}
+            </DialogTitle>
+            <DialogDescription className="text-white/50">
+              When this agent's weekly managed-token quota reset, and how much was used each cycle.
+            </DialogDescription>
+          </DialogHeader>
+          <CompanyResetLogs agentName={group.agent_name} agentLabel={group.agent_label} bare />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

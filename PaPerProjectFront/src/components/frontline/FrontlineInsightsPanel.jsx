@@ -61,7 +61,7 @@ function TileShell({ icon: Icon, title, color, accent, isLoading, onRefresh, chi
 }
 
 
-export default function FrontlineInsightsPanel() {
+export default function FrontlineInsightsPanel({ onNavigateToTab }) {
   const { toast } = useToast();
   const [sla, setSla] = useState({ data: null, loading: true });
   const [kb, setKb] = useState({ data: null, loading: true });
@@ -199,8 +199,11 @@ export default function FrontlineInsightsPanel() {
       description: 'Paste it as the doc title after uploading.',
     });
     // Give the toast a beat to render before the tab swap wipes state.
+    // Use the parent-provided `onNavigateToTab` callback (URL-query-param
+    // based) instead of `window.location.hash` — the dashboard is
+    // ?tab=…-driven, so setting `#documents` silently did nothing.
     setTimeout(() => {
-      window.location.hash = 'documents';
+      if (onNavigateToTab) onNavigateToTab('documents');
     }, 80);
   };
 

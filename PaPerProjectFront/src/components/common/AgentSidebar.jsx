@@ -284,7 +284,7 @@ const AgentSidebar = ({
 // Default tab when the URL has no ?tab= yet, so the first child highlights on a
 // bare /marketing/dashboard or /frontline/dashboard.
 function defaultTabFor(path) {
-  if (path?.startsWith('/frontline')) return 'overview';
+  if (path?.startsWith('/frontline')) return 'queue';
   if (path?.startsWith('/marketing')) return 'dashboard';
   return '';
 }

@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,11 +20,11 @@ import pmAgentService from '@/services/pmAgentService';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
-import { 
-  BrainCircuit, 
-  Target, 
-  MessageSquare, 
-  Calendar, 
+import {
+  BrainCircuit,
+  Target,
+  MessageSquare,
+  Calendar,
   ListChecks,
   Loader2,
   FolderKanban,
@@ -39,8 +39,15 @@ import {
   Check,
   Workflow,
   CalendarPlus,
+  CheckSquare,
+  LineChart,
 } from 'lucide-react';
-import ProjectPilotAgent from '@/components/pm-agent/ProjectPilotAgent';
+import PMEmptyState from '@/components/pm-agent/EmptyState';
+import AskView from '@/components/pm-agent/AskView';
+import InsightsView from '@/components/pm-agent/InsightsView';
+import ProjectsListView from '@/components/pm-agent/ProjectsListView';
+import TasksListView from '@/components/pm-agent/TasksListView';
+import PMSidebar from '@/components/pm-agent/PMSidebar';
 import TaskPrioritizationAgent from '@/components/pm-agent/TaskPrioritizationAgent';
 import KnowledgeQAAgent from '@/components/pm-agent/KnowledgeQAAgent';
 import TimelineGanttAgent from '@/components/pm-agent/TimelineGanttAgent';
@@ -63,32 +70,58 @@ import {
 } from '@/components/frontline/tourUtils';
 import { GraduationCap, Eye, EyeOff } from 'lucide-react';
 
+// Tab bar restructure (Chunk A of PM_AGENT_UX_REDESIGN.md):
+//   * Visible surface = 5 tabs — Pilot (default landing), Projects, Tasks,
+//     Insights, Overview. Pilot first because it's what new + returning users
+//     both hit; Overview is kept for now as a stats-and-nav home.
+//   * `hidden: true` tabs are FILTERED out of the visible tab bar (both
+//     desktop tabs and mobile hamburger) but their TabsContent is still
+//     rendered, so `?tab=create-project` deep-links / bookmarks still work.
+//   * Un-hiding a tab is a one-line change: flip `hidden` off. That's why we
+//     hide instead of delete during the rollout.
+//   * The 3 NEW tabs (projects/tasks/insights) render placeholders in
+//     Chunk A; real content lands in Chunks C/D/B.
 const PM_TAB_ITEMS = [
+  // Visible — the new 5-tab shape
+  { value: 'project-pilot', label: 'Ask (Pilot)', icon: Target },
+  { value: 'projects', label: 'Projects', icon: FolderKanban },
+  { value: 'tasks', label: 'Tasks', icon: CheckSquare },
+  { value: 'insights', label: 'Insights', icon: LineChart },
   { value: 'overview', label: 'Overview', icon: BrainCircuit },
-  { value: 'create-project', label: 'Create Project', icon: Plus },
-  { value: 'create-task', label: 'Create Task', icon: Plus },
-  { value: 'project-pilot', label: 'Project Pilot', icon: Target },
-  { value: 'task-prioritization', label: 'Task Prioritization', icon: ListChecks },
-  { value: 'knowledge-qa', label: 'Knowledge Q&A', icon: MessageSquare },
-  { value: 'timeline-gantt', label: 'Timeline & Gantt', icon: Calendar },
-  { value: 'meeting-scheduler', label: 'Meeting Scheduler', icon: CalendarPlus },
-  { value: 'ai-tools', label: 'AI Tools', icon: Workflow },
+
+  // Hidden — kept for URL/deep-link compatibility, content still renders when
+  // navigated to directly. Do NOT reorder — hidden tabs sit at the end so the
+  // visible tab bar reads left-to-right in intended priority order.
+  { value: 'create-project', label: 'Create Project', icon: Plus, hidden: true },
+  { value: 'create-task', label: 'Create Task', icon: Plus, hidden: true },
+  { value: 'task-prioritization', label: 'Task Prioritization', icon: ListChecks, hidden: true },
+  { value: 'knowledge-qa', label: 'Knowledge Q&A', icon: MessageSquare, hidden: true },
+  { value: 'timeline-gantt', label: 'Timeline & Gantt', icon: Calendar, hidden: true },
+  { value: 'meeting-scheduler', label: 'Meeting Scheduler', icon: CalendarPlus, hidden: true },
+  { value: 'ai-tools', label: 'AI Tools', icon: Workflow, hidden: true },
 ];
 
 const ProjectManagerDashboardPage = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   // Tab state lives in the URL as `?tab=...` so browser reload keeps you on
-  // the tab you were on. Falls back to 'overview' when the param is missing
-  // or references an unknown tab.
+  // the tab you were on. Falls back to 'project-pilot' when the param is
+  // missing or references an unknown tab — Pilot is the one place that
+  // works for both new users (upload/describe → get a project) and returning
+  // users (ask about existing projects). Overview is a menu-of-menus that
+  // adds a click before the user gets to actual work.
   const [searchParams, setSearchParams] = useSearchParams();
   const validTabValues = React.useMemo(() => PM_TAB_ITEMS.map((t) => t.value), []);
   const rawTab = searchParams.get('tab');
-  const activeTab = validTabValues.includes(rawTab) ? rawTab : 'overview';
+  const activeTab = validTabValues.includes(rawTab) ? rawTab : 'project-pilot';
   const setActiveTab = React.useCallback((v) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('tab', v);
+      // Switching top-level tab clears any nested sub-tab — otherwise
+      // `?sub=timeline` set on Tasks would leak into Insights (whose
+      // sub-tabs are different) and render a blank panel.
+      next.delete('sub');
       return next;
     }, { replace: true });
   }, [setSearchParams]);
@@ -110,6 +143,112 @@ const ProjectManagerDashboardPage = () => {
     resetTutorial(PM_MAIN_TOUR_KEY);
     setTutorialOpen(true);
   };
+
+  // Empty-state helpers shared with every sub-tab. Tabs that can't do anything
+  // useful with 0 projects render an EmptyState card that calls openPilot() to
+  // steer users to the one place that always works.
+  const openPilot = React.useCallback(() => {
+    setActiveTab('project-pilot');
+  }, [setActiveTab]);
+
+  // Sub-tab state — some top-level tabs (Ask, Tasks, Insights) have nested
+  // sub-tabs. We URL-encode as `?sub=<value>` so the sidebar can drive the
+  // sub-view directly AND deep-links / bookmarks include the sub-tab. Each
+  // parent tab defines its own default in DEFAULT_SUBTABS; when the URL has
+  // no `sub` param (or has one that doesn't belong to the current parent),
+  // the default kicks in.
+  const rawSubTab = searchParams.get('sub');
+  const activeSubTab = rawSubTab || null;
+  const setSubTab = React.useCallback((tabValue, subValue) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tabValue);
+      if (subValue) next.set('sub', subValue);
+      else next.delete('sub');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+
+  // Hidden-tab set drives two filters below: the main tour steps (skip steps
+  // that target a tab that isn't in the visible bar — otherwise the tour
+  // renders blank overlays / crashes on missing selectors) and the
+  // notification dispatch (route notifications to a visible tab, not a
+  // hidden one). Kept as a memoised Set so both consumers stay in sync
+  // when PM_TAB_ITEMS is edited.
+  const hiddenTabValues = React.useMemo(
+    () => new Set(PM_TAB_ITEMS.filter((t) => t.hidden).map((t) => t.value)),
+    []
+  );
+
+  // Sidebar collapsed state — persisted per browser so the user's preference
+  // survives reloads. Read on first render only (localStorage is sync, no
+  // effect needed for hydration).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('pm_sidebar_collapsed_v1') === '1'; }
+    catch (_) { return false; }
+  });
+  const toggleSidebar = React.useCallback(() => {
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      try { localStorage.setItem('pm_sidebar_collapsed_v1', next ? '1' : '0'); }
+      catch (_) { /* ignore */ }
+      return next;
+    });
+  }, []);
+
+  // Sidebar items — top-level tabs with nested sub-items where applicable.
+  // Sourced from PM_TAB_ITEMS so hiding/un-hiding a tab up top propagates
+  // here automatically. Sub-item metadata is inline because it's tightly
+  // coupled to the specific view components' sub-tab values.
+  const sidebarItems = React.useMemo(() => {
+    const subsByTab = {
+      'project-pilot': [
+        { value: 'pilot', label: 'Project Pilot', icon: Target },
+        { value: 'kqa', label: 'Knowledge Q&A', icon: MessageSquare },
+      ],
+      tasks: [
+        { value: 'list', label: 'List', icon: CheckSquare },
+        { value: 'prioritize', label: 'Prioritize', icon: Target },
+        { value: 'timeline', label: 'Timeline', icon: Calendar },
+      ],
+      insights: [
+        { value: 'health', label: 'Project Health', icon: TrendingUp },
+        { value: 'standup', label: 'Daily Standup', icon: Calendar },
+        { value: 'team', label: 'Team Performance', icon: Sparkles },
+      ],
+    };
+    return PM_TAB_ITEMS
+      .filter((t) => !t.hidden)
+      .map((t) => ({
+        value: t.value,
+        label: t.label,
+        icon: t.icon,
+        subItems: subsByTab[t.value],
+      }));
+  }, []);
+
+  // Variant used by sample-prompt chips on the Overview hero: switches to
+  // Pilot AND stashes the prompt in the URL as `?prompt=...`, which
+  // ProjectPilotAgent reads on mount to pre-fill its input. Using a URL param
+  // (vs component state) means it survives reload and is bookmarkable.
+  const openPilotWithPrompt = React.useCallback((prompt) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', 'project-pilot');
+      if (prompt) next.set('prompt', prompt);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+  // Main-tour steps have `tab: '<value>'` on the per-tab entries. Steps whose
+  // tab is hidden would target `[data-tour-pm-tab="…"]` selectors that no
+  // longer exist in the DOM → blank overlays. Filter them at consumption
+  // time (constant stays untouched so it stays accurate for future un-hides).
+  const visiblePmMainTourSteps = React.useMemo(
+    () => PM_MAIN_TOUR_STEPS.filter((step) => !step.tab || !hiddenTabValues.has(step.tab)),
+    [hiddenTabValues]
+  );
+
   const pmTabTourKeys = React.useMemo(() => Object.values(PM_TAB_TOURS).map((t) => t.key), []);
   const handleReplayTabTour = (tabKey) => {
     const tour = PM_TAB_TOURS[tabKey];
@@ -356,24 +495,47 @@ const ProjectManagerDashboardPage = () => {
           onNotificationClick={(n) => {
             const type = n.type || n.notification_type || '';
             const data = n.data || {};
+            // Route to visible tabs first. Meeting Scheduler was hidden in
+            // Chunk A but Pilot handles meetings via natural language, so we
+            // send meeting notifs to Pilot for now. Task-related notifs go
+            // to the new Tasks tab (placeholder in Chunk A, real content
+            // in Chunk D). Project-related go to the new Projects tab.
             if (type.includes('meeting') || data.type?.includes('meeting')) {
-              setActiveTab('meeting-scheduler');
+              setActiveTab('project-pilot');
             } else if (type.includes('task') || type.includes('overdue') || type.includes('blocked') || type.includes('unassigned') || type.includes('sprint')) {
-              setActiveTab('task-prioritization');
+              setActiveTab('tasks');
             } else if (type.includes('deadline') || type.includes('milestone')) {
-              setActiveTab('timeline-gantt');
+              setActiveTab('tasks');
             } else if (type.includes('project') || type.includes('workload')) {
-              setActiveTab('overview');
+              setActiveTab('projects');
             } else {
-              setActiveTab('overview');
+              setActiveTab('project-pilot');
             }
           }}
         />
 
-        {/* Main Content */}
+        {/* Main Content — flex row on lg+ so the sidebar sits alongside.
+            Below lg the sidebar is display:none and the existing hamburger
+            (inside the content area, further down) is the only nav. */}
         <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 w-full max-w-full overflow-x-hidden">
+          <div className="flex gap-4 items-start">
+            {/* Sidebar wrapper carries the main-tour selector so the tour
+                still points at the primary nav after we replaced the
+                horizontal desktop tab bar with the sidebar. */}
+            <div data-tour-pm="tabs">
+              <PMSidebar
+                items={sidebarItems}
+                activeTab={activeTab}
+                activeSubTab={activeSubTab}
+                onTabChange={setActiveTab}
+                onSubTabChange={(tabValue, subValue) => setSubTab(tabValue, subValue)}
+                collapsed={sidebarCollapsed}
+                onToggleCollapsed={toggleSidebar}
+              />
+            </div>
+
           <div
-            className="w-full rounded-2xl border border-white/[0.06] p-0"
+            className="flex-1 min-w-0 w-full rounded-2xl border border-white/[0.06] p-0"
             style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
           >
           <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
@@ -422,7 +584,10 @@ const ProjectManagerDashboardPage = () => {
             </div>
           )}
 
-          {/* Stats Overview */}
+          {/* Stats Overview — hidden entirely for first-time users with 0
+              projects. A grid of "0 / 0 / 0 / 0" cards adds noise, not value;
+              the empty-state hero on the Overview tab is the useful signal. */}
+          {(loading || projects.length > 0) && (
           <div data-tour-pm="stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 sm:mb-8 w-full">
             {[
               {
@@ -491,6 +656,7 @@ const ProjectManagerDashboardPage = () => {
               </div>
             ))}
           </div>
+          )}
 
           {/* AI Agents Tabs */}
           <div className="w-full min-w-0">
@@ -508,7 +674,7 @@ const ProjectManagerDashboardPage = () => {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[#3a295a] bg-[#161630]">
-                      {PM_TAB_ITEMS.map((item) => {
+                      {PM_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
                         const isActive = item.value === activeTab;
                         const ItemIcon = item.icon;
                         return (
@@ -529,62 +695,38 @@ const ProjectManagerDashboardPage = () => {
                   </DropdownMenu>
                 </div>
 
-                {/* Desktop: Regular tabs (lg and above) with horizontal scroll */}
-                <div data-tour-pm="tabs" className="hidden lg:block overflow-x-auto pb-1">
-                  <TabsList
-                    className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
-                    style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
-                  >
-                    {PM_TAB_ITEMS.map((item) => {
-                      const TabIcon = item.icon;
-                      const tour = PM_TAB_TOURS[item.value];
-                      const showBadge = tour && tourAvailable(tour.key);
-                      const hoverHandlers = tour ? makeHoverLaunchHandlers({
-                        tourStorageKey: tour.key,
-                        onLaunch: () => setActiveTabTour(item.value),
-                      }) : {};
-                      return (
-                        <TabsTrigger
-                          key={item.value}
-                          value={item.value}
-                          data-tour-pm-tab={item.value}
-                          {...hoverHandlers}
-                          className="relative whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
-                          style={activeTab === item.value
-                            ? {
-                                background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
-                                color: '#fff',
-                                border: '1.5px solid #f59e0b',
-                                boxShadow: '0 0 8px 0 #f59e0b55',
-                              }
-                            : {
-                                background: 'rgba(60, 30, 90, 0.22)',
-                                color: '#cfc6e6',
-                                border: '1.5px solid #2d2342',
-                                boxShadow: 'none',
-                              }
-                          }
-                        >
-                          <TabIcon className="h-4 w-4 mr-2" />
-                          {item.label}
-                          {showBadge && (
-                            <span
-                              title="Tour available — hover to launch or click 'Tour this tab' inside"
-                              className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-cyan-400 ring-2 ring-[#1a1333]"
-                              style={{ animation: 'pmDotPulse 2s ease-in-out infinite' }}
-                            />
-                          )}
-                        </TabsTrigger>
-                      );
-                    })}
-                  </TabsList>
-                </div>
+                {/* Desktop tab bar was replaced by PMSidebar (outside the
+                    <main> flow, on the left). The `data-tour-pm="tabs"`
+                    selector moved to the sidebar wrapper so the main tour
+                    still resolves. Mobile users still use the hamburger
+                    dropdown above. */}
 
                 <TabsContent value="overview" className="mt-6">
                   <div className="flex items-center gap-2 justify-end mb-3">
                     <InfoHint {...PM_HINTS.pmOvQuicknav} />
                     <TabTourButton tabKey="overview" />
                   </div>
+
+                  {/* First-time users land here with 0 projects. Instead of a
+                      grid of nav cards to tabs that also have no data, show a
+                      single hero card that steers them straight to Pilot —
+                      the one place that always works. Grid returns once
+                      projects exist. */}
+                  {projects.length === 0 && !loading && (
+                    <PMEmptyState
+                      className="mb-6"
+                      title="Start with Project Pilot"
+                      subtitle="Describe your project in plain English or upload a spec — Pilot will set it up for you with tasks, timeline, and team assignments."
+                      samplePrompts={[
+                        'Plan a 3-week website redesign',
+                        'Break down the checkout flow into tasks',
+                        'Import from PRD',
+                      ]}
+                      onOpenPilot={openPilot}
+                      onSamplePrompt={openPilotWithPrompt}
+                    />
+                  )}
+
                   <div data-tour-pm-ov="quicknav" className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 w-full min-w-0">
                     {[
                       {
@@ -664,22 +806,66 @@ const ProjectManagerDashboardPage = () => {
 
                 <TabsContent value="project-pilot" className="mt-6">
                   <div className="flex justify-end mb-3"><TabTourButton tabKey="project-pilot" /></div>
-                  <ErrorBoundary><ProjectPilotAgent projects={projects || []} onProjectUpdate={fetchProjects} onNavigate={setActiveTab} /></ErrorBoundary>
+                  <ErrorBoundary>
+                    <AskView
+                      projects={projects || []}
+                      onProjectUpdate={fetchProjects}
+                      onNavigate={setActiveTab}
+                      onOpenPilot={openPilot}
+                      activeSubTab={activeSubTab}
+                      onSubTabChange={(sub) => setSubTab('project-pilot', sub)}
+                    />
+                  </ErrorBoundary>
+                </TabsContent>
+
+                {/* NEW tab scaffolds (Chunk A). Each one still points users to
+                    the hidden legacy tab that currently owns the feature, so
+                    nothing is inaccessible. Real content lands in Chunks B/C/D. */}
+                <TabsContent value="projects" className="mt-6">
+                  <ErrorBoundary>
+                    <ProjectsListView
+                      projects={projects || []}
+                      loading={loading}
+                      onProjectCreated={fetchProjects}
+                      onOpenPilot={openPilot}
+                    />
+                  </ErrorBoundary>
+                </TabsContent>
+
+                <TabsContent value="tasks" className="mt-6">
+                  <ErrorBoundary>
+                    <TasksListView
+                      projects={projects || []}
+                      onOpenPilot={openPilot}
+                      activeSubTab={activeSubTab}
+                      onSubTabChange={(sub) => setSubTab('tasks', sub)}
+                    />
+                  </ErrorBoundary>
+                </TabsContent>
+
+                <TabsContent value="insights" className="mt-6">
+                  <ErrorBoundary>
+                    <InsightsView
+                      onOpenPilot={openPilot}
+                      activeSubTab={activeSubTab}
+                      onSubTabChange={(sub) => setSubTab('insights', sub)}
+                    />
+                  </ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="task-prioritization" className="mt-6">
                   <div className="flex justify-end mb-3"><TabTourButton tabKey="task-prioritization" /></div>
-                  <ErrorBoundary><TaskPrioritizationAgent projects={projects || []} /></ErrorBoundary>
+                  <ErrorBoundary><TaskPrioritizationAgent projects={projects || []} onOpenPilot={openPilot} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="knowledge-qa" className="mt-6">
                   <div className="flex justify-end mb-3"><TabTourButton tabKey="knowledge-qa" /></div>
-                  <ErrorBoundary><KnowledgeQAAgent projects={projects || []} /></ErrorBoundary>
+                  <ErrorBoundary><KnowledgeQAAgent projects={projects || []} onOpenPilot={openPilot} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="timeline-gantt" className="mt-6">
                   <div className="flex justify-end mb-3"><TabTourButton tabKey="timeline-gantt" /></div>
-                  <ErrorBoundary><TimelineGanttAgent projects={projects || []} /></ErrorBoundary>
+                  <ErrorBoundary><TimelineGanttAgent projects={projects || []} onOpenPilot={openPilot} /></ErrorBoundary>
                 </TabsContent>
 
                 <TabsContent value="meeting-scheduler" className="mt-6">
@@ -689,12 +875,13 @@ const ProjectManagerDashboardPage = () => {
 
                 <TabsContent value="ai-tools" className="mt-6">
                   <div className="flex justify-end mb-3"><TabTourButton tabKey="ai-tools" /></div>
-                  <ErrorBoundary><PMToolsHub /></ErrorBoundary>
+                  <ErrorBoundary><PMToolsHub onOpenPilot={openPilot} /></ErrorBoundary>
                 </TabsContent>
               </Tabs>
           </div>
           </div>
           </div>
+          </div>{/* flex row (sidebar + content) */}
 
         </main>
       </div>
@@ -704,7 +891,7 @@ const ProjectManagerDashboardPage = () => {
         open={tutorialOpen}
         onClose={() => setTutorialOpen(false)}
         setActiveTab={setActiveTab}
-        steps={PM_MAIN_TOUR_STEPS}
+        steps={visiblePmMainTourSteps}
         storageKey={PM_MAIN_TOUR_KEY}
         siblingKeys={pmTabTourKeys}
       />

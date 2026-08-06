@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -27,6 +28,22 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Pre-fill from `?prompt=...` — set by the Overview hero's sample-prompt
+  // chips. We consume the param and clear it so a browser refresh doesn't
+  // keep pre-filling the same text. Runs once on first landing with a param.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const preset = searchParams.get('prompt');
+    if (!preset) return;
+    setQuestion(preset);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('prompt');
+      return next;
+    }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // NOTE: `fileLoading` used to live here. File uploads are now handled by
   // the global BackgroundUploadManager (see `handleFileUpload`), so the UI
   // no longer needs to block on them.
