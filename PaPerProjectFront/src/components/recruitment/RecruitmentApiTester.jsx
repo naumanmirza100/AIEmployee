@@ -28,13 +28,23 @@ import {
 
 const STEP = { PARSE: 1, SUMMARIZE: 2, ENRICH: 3, QUALIFY: 4 };
 
-function ResultBlock({ title, data, onCopy }) {
+function ResultBlock({ title, data, onCopy, testId }) {
   const str = typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data);
   return (
-    <div className="mt-2 rounded-md border bg-muted/30 p-3">
+    <div
+      id={testId ? `REC-apitester-${testId}-result` : undefined}
+      data-testid={testId ? `REC-apitester-${testId}-result` : undefined}
+      className="mt-2 rounded-md border bg-muted/30 p-3"
+    >
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium text-muted-foreground">{title}</span>
-        <Button variant="ghost" size="sm" onClick={() => onCopy(str)}>
+        <Button
+          id={testId ? `REC-apitester-${testId}-copy-btn` : undefined}
+          data-testid={testId ? `REC-apitester-${testId}-copy-btn` : undefined}
+          variant="ghost"
+          size="sm"
+          onClick={() => onCopy(str)}
+        >
           <Copy className="h-4 w-4" />
         </Button>
       </div>
@@ -185,6 +195,8 @@ const RecruitmentApiTester = () => {
 
   return (
     <div
+      id="REC-apitester-root"
+      data-testid="REC-apitester-root"
       className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
       style={{
         background:
@@ -192,7 +204,7 @@ const RecruitmentApiTester = () => {
       }}
     >
       <div className="p-4 md:p-6 lg:p-8 space-y-6 w-full max-w-full">
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-apitester-card" data-testid="REC-apitester-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-white">
               <FileText className="h-5 w-5" />
@@ -200,6 +212,8 @@ const RecruitmentApiTester = () => {
 
               {/* Info button + hint text */}
               <button
+                id="REC-apitester-hints-toggle-btn"
+                data-testid="REC-apitester-hints-toggle-btn"
                 type="button"
                 onClick={() => setShowHints((v) => !v)}
                 aria-expanded={showHints}
@@ -217,6 +231,8 @@ const RecruitmentApiTester = () => {
             {/* Steps banner */}
             {showHints && (
               <div
+                id="REC-apitester-hints-banner"
+                data-testid="REC-apitester-hints-banner"
                 className="mt-4 rounded-xl px-4 py-3.5"
                 style={{
                   background: 'linear-gradient(90deg, rgba(167,139,250,0.10) 0%, rgba(96,165,250,0.07) 100%)',
@@ -255,6 +271,8 @@ const RecruitmentApiTester = () => {
                     </p>
                   </div>
                   <button
+                    id="REC-apitester-hints-dismiss-btn"
+                    data-testid="REC-apitester-hints-dismiss-btn"
                     type="button"
                     onClick={() => setShowHints(false)}
                     aria-label="Dismiss hints"
@@ -274,6 +292,8 @@ const RecruitmentApiTester = () => {
                 <div className="flex items-center gap-2">
                   <Input
                     ref={fileInputRef}
+                    id="REC-apitester-cv-file"
+                    data-testid="REC-apitester-cv-file"
                     type="file"
                     accept=".pdf,.docx,.txt"
                     onChange={(e) => {
@@ -286,6 +306,8 @@ const RecruitmentApiTester = () => {
                     <Badge variant="secondary" className="flex items-center gap-1 pr-1">
                       <span className="max-w-[160px] truncate">{cvFile.name}</span>
                       <button
+                        id="REC-apitester-cv-file-remove-btn"
+                        data-testid="REC-apitester-cv-file-remove-btn"
                         type="button"
                         onClick={clearCvFile}
                         title="Remove file"
@@ -300,6 +322,8 @@ const RecruitmentApiTester = () => {
                 <span className="text-sm text-white/60 self-center">or paste text below</span>
               </div>
               <Textarea
+                id="REC-apitester-cv-text"
+                data-testid="REC-apitester-cv-text"
                 placeholder="Paste raw CV text here if not using a file..."
                 value={cvText}
                 onChange={(e) => setCvText(e.target.value)}
@@ -312,6 +336,8 @@ const RecruitmentApiTester = () => {
             <div className="space-y-2">
               <Label className="text-white">Job keywords (optional, comma-separated)</Label>
               <Input
+                id="REC-apitester-keywords-input"
+                data-testid="REC-apitester-keywords-input"
                 placeholder="e.g. React, Node.js, Python"
                 value={jobKeywords}
                 onChange={(e) => setJobKeywords(e.target.value)}
@@ -320,13 +346,15 @@ const RecruitmentApiTester = () => {
             </div>
 
             {/* Step 1: Parse */}
-            <div className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
+            <div id="REC-apitester-parse-step" data-testid="REC-apitester-parse-step" className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">1. CV Parse</span>
                 {parsed && <CheckCircle2 className="h-5 w-5 text-green-600" />}
               </div>
               <Button
+                id="REC-apitester-parse-btn"
+                data-testid="REC-apitester-parse-btn"
                 onClick={runParse}
                 disabled={loadingStep !== null}
               >
@@ -336,8 +364,10 @@ const RecruitmentApiTester = () => {
             </div>
             {parsed && (
               <>
-                <ResultBlock title="Parsed result" data={parsed} onCopy={copyToClipboard} />
+                <ResultBlock title="Parsed result" data={parsed} onCopy={copyToClipboard} testId="parse" />
                 <Button
+                  id="REC-apitester-next-summarize-btn"
+                  data-testid="REC-apitester-next-summarize-btn"
                   variant="outline"
                   size="sm"
                   onClick={runSummarize}
@@ -352,13 +382,15 @@ const RecruitmentApiTester = () => {
             </div>
 
             {/* Step 2: Summarize */}
-            <div className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
+            <div id="REC-apitester-summarize-step" data-testid="REC-apitester-summarize-step" className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">2. Summarize</span>
                 {insights && <CheckCircle2 className="h-5 w-5 text-green-600" />}
               </div>
               <Button
+                id="REC-apitester-summarize-btn"
+                data-testid="REC-apitester-summarize-btn"
                 onClick={runSummarize}
                 disabled={!parsed || loadingStep !== null}
               >
@@ -368,8 +400,10 @@ const RecruitmentApiTester = () => {
             </div>
             {insights && (
               <>
-                <ResultBlock title="Insights" data={insights} onCopy={copyToClipboard} />
+                <ResultBlock title="Insights" data={insights} onCopy={copyToClipboard} testId="summarize" />
                 <Button
+                  id="REC-apitester-next-enrich-btn"
+                  data-testid="REC-apitester-next-enrich-btn"
                   variant="outline"
                   size="sm"
                   onClick={runEnrich}
@@ -384,13 +418,15 @@ const RecruitmentApiTester = () => {
             </div>
 
             {/* Step 3: Enrich */}
-            <div className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
+            <div id="REC-apitester-enrich-step" data-testid="REC-apitester-enrich-step" className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">3. Enrich</span>
                 {enrichment && <CheckCircle2 className="h-5 w-5 text-green-600" />}
               </div>
               <Button
+                id="REC-apitester-enrich-btn"
+                data-testid="REC-apitester-enrich-btn"
                 onClick={runEnrich}
                 disabled={!parsed || !insights || loadingStep !== null}
               >
@@ -400,8 +436,10 @@ const RecruitmentApiTester = () => {
             </div>
             {enrichment && (
               <>
-                <ResultBlock title="Enrichment" data={enrichment} onCopy={copyToClipboard} />
+                <ResultBlock title="Enrichment" data={enrichment} onCopy={copyToClipboard} testId="enrich" />
                 <Button
+                  id="REC-apitester-next-qualify-btn"
+                  data-testid="REC-apitester-next-qualify-btn"
                   variant="outline"
                   size="sm"
                   onClick={runQualify}
@@ -416,13 +454,15 @@ const RecruitmentApiTester = () => {
             </div>
 
             {/* Step 4: Qualify */}
-            <div className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
+            <div id="REC-apitester-qualify-step" data-testid="REC-apitester-qualify-step" className="rounded-lg border border-white/15 bg-black/30 p-4 space-y-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-semibold">4. Qualify</span>
                 {qualification && <CheckCircle2 className="h-5 w-5 text-green-600" />}
               </div>
               <Button
+                id="REC-apitester-qualify-btn"
+                data-testid="REC-apitester-qualify-btn"
                 onClick={runQualify}
                 disabled={!parsed || !insights || loadingStep !== null}
               >
@@ -431,7 +471,7 @@ const RecruitmentApiTester = () => {
               </Button>
             </div>
             {qualification && (
-              <div className="space-y-2">
+              <div id="REC-apitester-qualify-result" data-testid="REC-apitester-qualify-result" className="space-y-2">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant={qualification.decision === 'INTERVIEW' ? 'default' : qualification.decision === 'HOLD' ? 'secondary' : 'destructive'}>
                     {qualification.decision}
@@ -444,7 +484,7 @@ const RecruitmentApiTester = () => {
                 {qualification.reasoning && (
                   <p className="text-sm text-muted-foreground">{qualification.reasoning}</p>
                 )}
-                <ResultBlock title="Full qualification" data={qualification} onCopy={copyToClipboard} />
+                <ResultBlock title="Full qualification" data={qualification} onCopy={copyToClipboard} testId="qualify-full" />
               </div>
             )}
             </div>

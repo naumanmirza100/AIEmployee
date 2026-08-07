@@ -544,6 +544,8 @@ const AiInterviewQuestions = () => {
             <div className="flex items-center justify-between mb-1">
               <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
               <button
+                id="REC-aiquestions-close-sidebar-btn"
+                data-testid="REC-aiquestions-close-sidebar-btn"
                 onClick={() => setShowChatHistory(false)}
                 title="Close sidebar"
                 className="h-8 w-8 flex items-center justify-center rounded-full border border-white/20 hover:border-violet-400/60 bg-black/30 hover:bg-violet-700/20 transition-all duration-150"
@@ -564,6 +566,8 @@ const AiInterviewQuestions = () => {
                 }}
               >
                 <input
+                  id="REC-aiquestions-sidebar-search-input"
+                  data-testid="REC-aiquestions-sidebar-search-input"
                   autoFocus
                   value={sidebarSearch}
                   onChange={e => setSidebarSearch(e.target.value)}
@@ -572,6 +576,8 @@ const AiInterviewQuestions = () => {
                   style={{ minWidth: 0 }}
                 />
                 <button
+                  id="REC-aiquestions-close-search-btn"
+                  data-testid="REC-aiquestions-close-search-btn"
                   title="Close search"
                   onClick={() => { setSidebarSearch(''); setShowSidebarSearch(false); }}
                   className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
@@ -592,13 +598,15 @@ const AiInterviewQuestions = () => {
               >
                 <span className="text-sm font-medium text-white/80 flex-1">Conversation</span>
                 <button
+                  id="REC-aiquestions-open-search-btn"
+                  data-testid="REC-aiquestions-open-search-btn"
                   title="Search"
                   onClick={() => setShowSidebarSearch(true)}
                   className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150"
                 >
                   <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/70"><circle cx="7" cy="7" r="5"/><line x1="15" y1="15" x2="11" y2="11"/></svg>
                 </button>
-                <button onClick={newChat} title="New chat" className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150">
+                <button id="REC-aiquestions-new-chat-btn" data-testid="REC-aiquestions-new-chat-btn" onClick={newChat} title="New chat" className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150">
                   <Plus className="h-4 w-4 text-white/80" />
                 </button>
               </div>
@@ -606,13 +614,13 @@ const AiInterviewQuestions = () => {
           </div>
           <div className="overflow-y-auto custom-sidebar-scroll" style={{ maxHeight: 'calc(100vh - 200px)' }}>
             {loadingChats ? (
-              <div className="p-4 flex justify-center">
+              <div id="REC-aiquestions-chats-loading" data-testid="REC-aiquestions-chats-loading" className="p-4 flex justify-center">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
             ) : chats.length === 0 ? (
-              <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
+              <div id="REC-aiquestions-chats-empty" data-testid="REC-aiquestions-chats-empty" className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
             ) : (
-              <div className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)', borderRadius: 12 }}>
+              <div id="REC-aiquestions-chats-list" data-testid="REC-aiquestions-chats-list" className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)', borderRadius: 12 }}>
                 {(() => {
                   const searchTerm = sidebarSearch.trim().toLowerCase();
                   const filteredChats = searchTerm
@@ -623,11 +631,13 @@ const AiInterviewQuestions = () => {
                       })
                     : chats;
                   if (searchTerm && filteredChats.length === 0) {
-                    return <div className="p-4 text-center text-sm text-muted-foreground">No matching conversations found.</div>;
+                    return <div id="REC-aiquestions-chats-no-match" data-testid="REC-aiquestions-chats-no-match" className="p-4 text-center text-sm text-muted-foreground">No matching conversations found.</div>;
                   }
                   return filteredChats.map((c) => (
                   <div
                     key={c.id}
+                    id={`REC-aiquestions-chat-item-${c.id}`}
+                    data-testid={`REC-aiquestions-chat-item-${c.id}`}
                     className={`flex items-center gap-1 rounded-lg border text-sm transition-all duration-200 ${
                       selectedChatId === c.id
                         ? 'border-violet-500/60 bg-gradient-to-r from-violet-900/40 to-violet-700/20 shadow-[0_0_12px_rgba(139,92,246,0.18)]'
@@ -642,6 +652,8 @@ const AiInterviewQuestions = () => {
                   >
                     <button
                       type="button"
+                      id={`REC-aiquestions-chat-select-${c.id}`}
+                      data-testid={`REC-aiquestions-chat-select-${c.id}`}
                       onClick={() => setSelectedChatId(c.id)}
                       className="flex-1 min-w-0 text-left p-3 rounded-lg"
                     >
@@ -650,6 +662,8 @@ const AiInterviewQuestions = () => {
                     </button>
                     <Button
                       type="button"
+                      id={`REC-aiquestions-chat-delete-${c.id}`}
+                      data-testid={`REC-aiquestions-chat-delete-${c.id}`}
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 shrink-0 opacity-60 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
@@ -669,7 +683,7 @@ const AiInterviewQuestions = () => {
 
       {/* Delete chat confirmation modal */}
       <Dialog open={!!deleteConfirmChatId} onOpenChange={(open) => !open && setDeleteConfirmChatId(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent id="REC-aiquestions-delete-dialog" data-testid="REC-aiquestions-delete-dialog" className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Delete chat?</DialogTitle>
             <DialogDescription>
@@ -677,10 +691,12 @@ const AiInterviewQuestions = () => {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteConfirmChatId(null)}>
+            <Button id="REC-aiquestions-delete-cancel-btn" data-testid="REC-aiquestions-delete-cancel-btn" variant="outline" onClick={() => setDeleteConfirmChatId(null)}>
               Cancel
             </Button>
             <Button
+              id="REC-aiquestions-delete-confirm-btn"
+              data-testid="REC-aiquestions-delete-confirm-btn"
               variant="destructive"
               onClick={() => deleteConfirmChatId && deleteChat(null, deleteConfirmChatId)}
             >
@@ -720,6 +736,8 @@ const AiInterviewQuestions = () => {
             </div>
           </div>
           <Button
+            id="REC-aiquestions-toggle-history-btn"
+            data-testid="REC-aiquestions-toggle-history-btn"
             variant={showChatHistory ? 'ghost' : 'outline'}
             size="sm"
             onClick={() => setShowChatHistory((v) => !v)}
@@ -739,9 +757,9 @@ const AiInterviewQuestions = () => {
         </CardHeader>
         <CardContent className="p-0 flex flex-col flex-1 min-h-0 ">
           {/* Messages area - scrollable when content is long */}
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 custom-sidebar-scroll">
+          <div id="REC-aiquestions-messages-area" data-testid="REC-aiquestions-messages-area" className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 custom-sidebar-scroll">
             {currentMessages.length === 0 && !loading && (
-              <div className="flex flex-col items-center justify-center min-h-[420px] text-center px-4">
+              <div id="REC-aiquestions-messages-empty" data-testid="REC-aiquestions-messages-empty" className="flex flex-col items-center justify-center min-h-[420px] text-center px-4">
                 <div className="h-20 w-20 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'rgba(124, 58, 237, 0.12)' }}>
                   <Bot className="h-10 w-10" style={{ color: '#a78bfa' }} />
                 </div>
@@ -755,6 +773,8 @@ const AiInterviewQuestions = () => {
                     return (
                       <button
                         key={topic.label}
+                        id={`REC-aiquestions-hero-topic-${topic.label}`}
+                        data-testid={`REC-aiquestions-hero-topic-${topic.label}`}
                         type="button"
                         onClick={() => setQuestion(topic.prompt)}
                         className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-left transition-all duration-200 text-white/90 hover:text-white"
@@ -773,6 +793,8 @@ const AiInterviewQuestions = () => {
             {currentMessages.map((msg, i) => (
               <div
                 key={i}
+                id={`REC-aiquestions-message-${i}`}
+                data-testid={`REC-aiquestions-message-${i}`}
                 className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
               >
                 <div
@@ -795,6 +817,8 @@ const AiInterviewQuestions = () => {
                           <div className="relative w-full rounded-xl border border-border bg-card p-2 shadow-sm">
                             <Button
                               type="button"
+                              id={`REC-aiquestions-expand-graph-btn-${i}`}
+                              data-testid={`REC-aiquestions-expand-graph-btn-${i}`}
                               variant="ghost"
                               size="icon"
                               className="absolute top-1.5 right-1.5 h-7 w-7 rounded-md opacity-70 hover:opacity-100 text-muted-foreground hover:text-foreground"
@@ -826,6 +850,8 @@ const AiInterviewQuestions = () => {
                         <div className="flex flex-wrap gap-2 pt-2">
                           <Button
                             type="button"
+                            id={`REC-aiquestions-save-prompt-btn-${i}`}
+                            data-testid={`REC-aiquestions-save-prompt-btn-${i}`}
                             variant="outline"
                             size="sm"
                             onClick={() => openSaveModal(
@@ -843,6 +869,8 @@ const AiInterviewQuestions = () => {
                             return (
                               <Button
                                 type="button"
+                                id={`REC-aiquestions-add-dashboard-btn-${i}`}
+                                data-testid={`REC-aiquestions-add-dashboard-btn-${i}`}
                                 size="sm"
                                 disabled={_isAdded}
                                 onClick={() => handleAddToDashboard(
@@ -899,7 +927,7 @@ const AiInterviewQuestions = () => {
               </div>
             ))}
             {loading && (
-              <div className="flex justify-start">
+              <div id="REC-aiquestions-messages-loading" data-testid="REC-aiquestions-messages-loading" className="flex justify-start">
                 <div className="rounded-2xl px-4 py-3 flex items-center gap-2" style={{ background: 'rgba(18,12,40,0.97)', border: '1px solid rgba(167,139,250,0.2)' }}>
                   <Loader2 className="h-4 w-4 animate-spin" style={{ color: '#a78bfa' }} />
                   <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }}>Analyzing...</span>
@@ -923,7 +951,7 @@ const AiInterviewQuestions = () => {
                 background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
               }}
             />
-            <form onSubmit={handleSubmit} className="shrink-0" style={{ position: 'relative', zIndex: 2 }}>
+            <form id="REC-aiquestions-form" data-testid="REC-aiquestions-form" onSubmit={handleSubmit} className="shrink-0" style={{ position: 'relative', zIndex: 2 }}>
               <div
                 className="mx-4 mb-4 flex items-center gap-2.5 rounded-[28px] px-2.5 py-2.5"
                 style={{
@@ -935,6 +963,8 @@ const AiInterviewQuestions = () => {
               {/* Dropdown selector – pill with violet glow border */}
               <Select value={inputMode} onValueChange={setInputMode}>
                 <SelectTrigger
+                  id="REC-aiquestions-mode-trigger"
+                  data-testid="REC-aiquestions-mode-trigger"
                   className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
                   style={{
                     background: '#111118',
@@ -949,6 +979,8 @@ const AiInterviewQuestions = () => {
                   </div>
                 </SelectTrigger>
                 <SelectContent
+                  id="REC-aiquestions-mode-content"
+                  data-testid="REC-aiquestions-mode-content"
                   style={{
                     background: '#161630',
                     border: '1px solid rgba(139, 92, 246, 0.25)',
@@ -960,6 +992,8 @@ const AiInterviewQuestions = () => {
                     return (
                       <SelectItem
                         key={mode.value}
+                        id={`REC-aiquestions-mode-item-${mode.value}`}
+                        data-testid={`REC-aiquestions-mode-item-${mode.value}`}
                         value={mode.value}
                         className="focus:bg-violet-600/20 focus:text-white"
                       >
@@ -984,6 +1018,8 @@ const AiInterviewQuestions = () => {
                 }}
               >
                 <Textarea
+                  id="REC-aiquestions-question-input"
+                  data-testid="REC-aiquestions-question-input"
                   placeholder={selectedMode.placeholder}
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
@@ -998,6 +1034,8 @@ const AiInterviewQuestions = () => {
               {/* Send button – purple circle */}
               <Button
                 type="submit"
+                id="REC-aiquestions-send-btn"
+                data-testid="REC-aiquestions-send-btn"
                 disabled={loading}
                 size="icon"
                 className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
@@ -1015,7 +1053,7 @@ const AiInterviewQuestions = () => {
 
       {/* Expand graph modal - full width */}
       <Dialog open={!!expandedGraph} onOpenChange={(open) => !open && setExpandedGraph(null)}>
-        <DialogContent className="max-w-[95vw] w-full max-h-[90vh] overflow-auto">
+        <DialogContent id="REC-aiquestions-expand-dialog" data-testid="REC-aiquestions-expand-dialog" className="max-w-[95vw] w-full max-h-[90vh] overflow-auto">
           <DialogHeader className="shrink-0">
             <DialogTitle>{expandedGraph?.chartTitle || 'Graph'}</DialogTitle>
           </DialogHeader>
@@ -1027,7 +1065,7 @@ const AiInterviewQuestions = () => {
 
       {/* Save Prompt modal (for graph messages) */}
       <Dialog open={saveModalOpen} onOpenChange={(open) => { if (!open) { setSaveModalOpen(false); setSaveContext(null); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent id="REC-aiquestions-save-dialog" data-testid="REC-aiquestions-save-dialog" className="max-w-md">
           <DialogHeader>
             <DialogTitle>Save Prompt</DialogTitle>
             <DialogDescription>Save this graph prompt for quick access in AI Graphs.</DialogDescription>
@@ -1037,6 +1075,7 @@ const AiInterviewQuestions = () => {
               <Label htmlFor="save-title">Title</Label>
               <Input
                 id="save-title"
+                data-testid="REC-aiquestions-save-title-input"
                 value={saveTitle}
                 onChange={(e) => setSaveTitle(e.target.value)}
                 placeholder="e.g. Monthly CV Trends"
@@ -1046,6 +1085,7 @@ const AiInterviewQuestions = () => {
               <Label htmlFor="save-tags">Tags (comma-separated)</Label>
               <Input
                 id="save-tags"
+                data-testid="REC-aiquestions-save-tags-input"
                 value={saveTags}
                 onChange={(e) => setSaveTags(e.target.value)}
                 placeholder="e.g. analytics, monthly"
@@ -1053,8 +1093,8 @@ const AiInterviewQuestions = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setSaveModalOpen(false); setSaveContext(null); }}>Cancel</Button>
-            <Button onClick={handleSavePromptSubmit} disabled={saving}>
+            <Button id="REC-aiquestions-save-cancel-btn" data-testid="REC-aiquestions-save-cancel-btn" variant="outline" onClick={() => { setSaveModalOpen(false); setSaveContext(null); }}>Cancel</Button>
+            <Button id="REC-aiquestions-save-submit-btn" data-testid="REC-aiquestions-save-submit-btn" onClick={handleSavePromptSubmit} disabled={saving}>
               {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : <><Save className="h-4 w-4 mr-2" /> Save Prompt</>}
             </Button>
           </DialogFooter>

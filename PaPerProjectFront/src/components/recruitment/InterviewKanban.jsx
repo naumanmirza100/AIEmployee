@@ -95,6 +95,8 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
+          id={`REC-kanban-card-menu-trigger-${interview.id}`}
+          data-testid={`REC-kanban-card-menu-trigger-${interview.id}`}
           className="p-1 rounded text-white/30 hover:text-white/70 hover:bg-white/10 transition-colors focus:outline-none"
           onClick={(e) => e.stopPropagation()}
         >
@@ -109,7 +111,11 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
       >
         {/* Change Status submenu */}
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer">
+          <DropdownMenuSubTrigger
+            id={`REC-kanban-change-status-trigger-${interview.id}`}
+            data-testid={`REC-kanban-change-status-trigger-${interview.id}`}
+            className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer"
+          >
             <RefreshCw className="h-3.5 w-3.5 text-white/50" />
             <span className="text-sm">Change Status</span>
           </DropdownMenuSubTrigger>
@@ -120,6 +126,8 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
               return (
                 <DropdownMenuItem
                   key={col.id}
+                  id={`REC-kanban-status-item-${interview.id}-${col.id}`}
+                  data-testid={`REC-kanban-status-item-${interview.id}-${col.id}`}
                   className={`gap-2 cursor-pointer focus:bg-white/10 ${active ? 'text-white' : 'text-white/60'}`}
                   onClick={() => !active && onStatusChange(interview, col.id)}
                 >
@@ -134,7 +142,11 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
 
         {/* Change Decision submenu */}
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer">
+          <DropdownMenuSubTrigger
+            id={`REC-kanban-change-decision-trigger-${interview.id}`}
+            data-testid={`REC-kanban-change-decision-trigger-${interview.id}`}
+            className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer"
+          >
             <Award className="h-3.5 w-3.5 text-white/50" />
             <span className="text-sm">Change Decision</span>
             {interview.status !== 'COMPLETED' && <Lock className="h-3 w-3 text-white/30 ml-auto" />}
@@ -157,6 +169,8 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
                 return (
                   <DropdownMenuItem
                     key={col.id || 'none'}
+                    id={`REC-kanban-decision-item-${interview.id}-${col.id || 'none'}`}
+                    data-testid={`REC-kanban-decision-item-${interview.id}-${col.id || 'none'}`}
                     className={`gap-2 cursor-pointer focus:bg-white/10 ${active ? 'text-white' : 'text-white/60'}`}
                     onClick={() => !active && onOutcomeChange(interview, col.id)}
                   >
@@ -175,6 +189,8 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
         {/* Reschedule */}
         {(interview.status === 'PENDING' || interview.status === 'SCHEDULED') && (
           <DropdownMenuItem
+            id={`REC-kanban-reschedule-item-${interview.id}`}
+            data-testid={`REC-kanban-reschedule-item-${interview.id}`}
             className="gap-2 cursor-pointer text-amber-300/80 focus:bg-white/10 focus:text-amber-300"
             onClick={() => onReschedule(interview)}
           >
@@ -186,6 +202,8 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
         {/* Feedback */}
         {interview.status === 'COMPLETED' && (
           <DropdownMenuItem
+            id={`REC-kanban-feedback-item-${interview.id}`}
+            data-testid={`REC-kanban-feedback-item-${interview.id}`}
             className="gap-2 cursor-pointer text-blue-300/80 focus:bg-white/10 focus:text-blue-300"
             onClick={() => onFeedback(interview)}
           >
@@ -215,6 +233,8 @@ function KanbanCard({ interview, isDragOverlay, onStatusChange, onOutcomeChange,
   return (
     <div ref={isDragOverlay ? undefined : setNodeRef} style={style}>
       <div
+        id={`REC-kanban-card-${interview.id}`}
+        data-testid={`REC-kanban-card-${interview.id}`}
         className={`
           rounded-xl border bg-black/40 backdrop-blur-sm p-3 space-y-2 select-none
           transition-shadow duration-150
@@ -309,7 +329,11 @@ function KanbanColumn({ column, interviews, onStatusChange, onOutcomeChange, onR
   const Icon = column.icon;
 
   return (
-    <div className="flex flex-col min-w-[260px] w-[260px] xl:w-[280px] shrink-0">
+    <div
+      id={`REC-kanban-column-${column.id || 'none'}`}
+      data-testid={`REC-kanban-column-${column.id || 'none'}`}
+      className="flex flex-col min-w-[260px] w-[260px] xl:w-[280px] shrink-0"
+    >
       {/* Column header */}
       <div className={`flex items-center justify-between rounded-t-xl border px-3 py-2.5 ${style.header}`}>
         <div className="flex items-center gap-2">
@@ -324,6 +348,8 @@ function KanbanColumn({ column, interviews, onStatusChange, onOutcomeChange, onR
       {/* Drop zone */}
       <div
         ref={setNodeRef}
+        id={`REC-kanban-dropzone-${column.id || 'none'}`}
+        data-testid={`REC-kanban-dropzone-${column.id || 'none'}`}
         className={`
           flex-1 min-h-[400px] rounded-b-xl border-x border-b p-2 space-y-2 overflow-y-auto
           transition-colors duration-150
@@ -334,7 +360,11 @@ function KanbanColumn({ column, interviews, onStatusChange, onOutcomeChange, onR
         `}
       >
         {interviews.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-24 text-white/20 text-xs gap-1.5">
+          <div
+            id={`REC-kanban-empty-${column.id || 'none'}`}
+            data-testid={`REC-kanban-empty-${column.id || 'none'}`}
+            className="flex flex-col items-center justify-center h-24 text-white/20 text-xs gap-1.5"
+          >
             <AlertCircle className="h-5 w-5" />
             <span>Drop here</span>
           </div>
@@ -415,6 +445,8 @@ export default function InterviewKanban({
         <span className="text-xs text-white/40 font-medium uppercase tracking-wider">View by</span>
         <div className="flex rounded-lg border border-white/15 overflow-hidden">
           <button
+            id="REC-kanban-view-status-btn"
+            data-testid="REC-kanban-view-status-btn"
             onClick={() => onGroupByChange('status')}
             className={`px-4 py-1.5 text-xs font-medium transition-colors ${
               groupBy === 'status'
@@ -425,6 +457,8 @@ export default function InterviewKanban({
             Status
           </button>
           <button
+            id="REC-kanban-view-decision-btn"
+            data-testid="REC-kanban-view-decision-btn"
             onClick={() => onGroupByChange('decision')}
             className={`px-4 py-1.5 text-xs font-medium border-l border-white/15 transition-colors ${
               groupBy === 'decision'
@@ -448,7 +482,11 @@ export default function InterviewKanban({
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-        <div className="flex gap-3 overflow-x-auto pb-4 -mx-1 px-1">
+        <div
+          id="REC-kanban-board"
+          data-testid="REC-kanban-board"
+          className="flex gap-3 overflow-x-auto pb-4 -mx-1 px-1"
+        >
           {columns.map((col) => (
             <KanbanColumn
               key={col.id}
