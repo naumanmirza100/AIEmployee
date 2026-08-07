@@ -159,9 +159,15 @@ const defaultEmailForm = () => ({
 
 const MarketingDashboard = () => {
   const { toast } = useToast();
-  const [searchParams] = useSearchParams();
-  const tabFromUrl = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(tabFromUrl || 'dashboard');
+  // Tab is URL-backed (?tab=) so the left sidebar can drive it and it survives
+  // reloads / deep links — same pattern as Frontline.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'dashboard';
+  const setActiveTab = (v) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set('tab', v);
+    return next;
+  }, { replace: true });
   const [tourOpen, setTourOpen] = useState(false);
   const [howItWorksOpen, setHowItWorksOpen] = useState(false);
   // Tab hover tooltip: { text, top, left } anchored above the hovered tab, or null.
@@ -246,11 +252,8 @@ const MarketingDashboard = () => {
   // Let users re-open the "How it works" summary from the header any time.
   const handleShowHowItWorks = () => setHowItWorksOpen(true);
 
-  // Deep-link support: /marketing/dashboard?tab=email jumps straight to that tab,
-  // including when navigating here again while already mounted on this route.
-  useEffect(() => {
-    if (tabFromUrl) setActiveTab(tabFromUrl);
-  }, [tabFromUrl]);
+  // Deep-link support is now inherent: activeTab derives from ?tab= directly,
+  // so /marketing/dashboard?tab=email jumps straight there with no sync effect.
 
   const fetchSavedGraphPrompts = async (page = savedGraphsPage) => {
     try {
@@ -640,20 +643,32 @@ const MarketingDashboard = () => {
           chart: d.chart || null,
           title: d.chart?.title || d.chartTitle || d.title || prompt?.title || 'Saved Graph',
           insights: d.insights || [],
+          // If the backend returned success but no chart (e.g. no matching
+          // data), surface its own message rather than a generic failure.
+          error: d.chart ? null : (d.message || response.message || 'No chart data was returned for this prompt.'),
         });
       } else {
         setViewingGraphResult({
           title: prompt?.title || 'Saved Graph',
           insights: [],
           chart: null,
+          error: response?.message || response?.error || 'The chart could not be built for this prompt.',
         });
       }
     } catch (error) {
       console.error('Error generating graph:', error);
+      // Preserve the real reason (rate limit, API key, no data, network, …)
+      // so the user sees something actionable instead of a blank failure.
+      const msg =
+        error?.data?.message ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Something went wrong while building this chart.';
       setViewingGraphResult({
         title: prompt?.title || 'Saved Graph',
         insights: [],
         chart: null,
+        error: msg,
       });
     } finally {
       setViewingGraphLoading(false);
@@ -989,85 +1004,9 @@ const MarketingDashboard = () => {
           </div>
         ))}
       </div>
-      {/* Tabs */}
+      {/* Tabs — the tab BAR now lives in the left sidebar; this keeps the
+          ?tab=-driven content switching. */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="pb-1">
-          <TabsList
-            data-tour-mkt="tabs"
-            className="grid w-full grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
-            style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
-          >
-            {[
-              { value: 'dashboard', label: 'Dashboard', icon: BarChart3, tip: 'Your overview — stats and your list of campaigns.' },
-              { value: 'campaigns', label: 'Campaigns', icon: Megaphone, tip: 'Create campaigns with AI and manage your whole list.' },
-              { value: 'email', label: 'Email', icon: Mail, tip: 'Connect and manage the accounts your campaigns send from.' },
-              { value: 'qa', label: 'Q&A', icon: MessageSquare, tip: 'Ask AI about your campaign results, or generate a chart.' },
-              { value: 'research', label: 'Research', icon: Sparkles, tip: 'Run AI market research to shape your next campaign.' },
-              { value: 'documents', label: 'Documents', icon: FileText, tip: 'Generate and store marketing documents with AI.' },
-              { value: 'notifications', label: 'Notifications', icon: Bell, badge: notificationUnreadCount, tip: 'Alerts and AI health checks for your campaigns.' },
-              { value: 'saved-graphs', label: 'Saved Graphs', icon: Sparkles, tip: 'Charts you saved from Q&A — reuse or pin them here.' },
-            ].map((item) => (
-              <TabsTrigger
-                key={item.value}
-                value={item.value}
-                data-tour-mkt={`tab-${item.value}`}
-                // Hover hint: anchor a themed tooltip above this tab. Handlers live
-                // on the trigger itself (not a wrapper) so Radix's tab keyboard
-                // nav and the grid layout stay intact.
-                onMouseEnter={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  setTabTip({ text: item.tip, top: r.top - 8, left: r.left + r.width / 2 });
-                }}
-                onMouseLeave={() => setTabTip(null)}
-                className="w-full min-w-0 px-2 sm:px-3 py-2 text-sm font-medium rounded-md border transition-all duration-150 relative flex items-center justify-center gap-2"
-                style={activeTab === item.value
-                  ? {
-                      background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
-                      color: '#fff',
-                      border: '1.5px solid #a259ff',
-                      boxShadow: '0 0 8px 0 #a259ff55',
-                    }
-                  : {
-                      background: 'rgba(60, 30, 90, 0.22)',
-                      color: '#cfc6e6',
-                      border: '1.5px solid #2d2342',
-                      boxShadow: 'none',
-                    }
-                }
-              >
-                <item.icon className="h-4 w-4" />
-                <span className="truncate">{item.label}</span>
-                {item.badge > 0 && (
-                  <span
-                    className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground"
-                    title={`${item.badge} unread`}
-                  >
-                    {item.badge > 99 ? '99+' : item.badge}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* Tab hover tooltip — portalled, fixed above the hovered tab */}
-          {tabTip && createPortal(
-            <div
-              role="tooltip"
-              className="fixed z-[10000] pointer-events-none -translate-x-1/2 -translate-y-full"
-              style={{ top: tabTip.top, left: tabTip.left }}
-            >
-              <div className="relative max-w-[220px] rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl">
-                {tabTip.text}
-                <span
-                  className="absolute left-1/2 top-full -translate-x-1/2 h-2 w-2 rotate-45 border-b border-r border-[#3a295a] bg-[#161630]"
-                  style={{ marginTop: '-4px' }}
-                />
-              </div>
-            </div>,
-            document.body,
-          )}
-        </div>
-
         <TabsContent value="dashboard" data-tour-mkt="page-dashboard" className="space-y-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">
@@ -1991,56 +1930,38 @@ const MarketingDashboard = () => {
                     </div>
                   )}
 
-                  {/* Loading state while generating graph */}
-                  {viewingGraphLoading && (
-                    <Card className="border-primary/20 bg-primary/5 backdrop-blur-sm">
-                      <CardContent className="flex flex-col items-center justify-center py-16">
-                        <div className="relative">
-                          <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
-                          <Loader2 className="h-8 w-8 animate-spin text-primary relative" />
-                        </div>
-                        <p className="text-sm text-white/60 mt-4">Generating graph from saved prompt...</p>
-                      </CardContent>
-                    </Card>
-                  )}
+                  {/* Saved-graph view now opens in a pop-up dialog instead of
+                      rendering inline below the prompt list. */}
+                  <Dialog
+                    open={!!viewingGraphId && (viewingGraphLoading || !!viewingGraphResult)}
+                    onOpenChange={(o) => { if (!o) { setViewingGraphId(null); setViewingGraphResult(null); } }}
+                  >
+                    <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar bg-[#0d0b1f] border-white/10 text-white">
+                      <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2.5">
+                          <span className="p-2 rounded-lg bg-primary/10 border border-primary/20">
+                            <BarChart3 className="h-5 w-5 text-primary" />
+                          </span>
+                          {viewingGraphResult?.title || 'Saved Graph'}
+                        </DialogTitle>
+                        {viewingGraphResult?.insights && viewingGraphResult.insights.length > 0 && (
+                          <DialogDescription className="text-white/50">
+                            {Array.isArray(viewingGraphResult.insights)
+                              ? viewingGraphResult.insights.join(' • ')
+                              : viewingGraphResult.insights}
+                          </DialogDescription>
+                        )}
+                      </DialogHeader>
 
-                  {/* Show saved graph preview */}
-                  {!viewingGraphLoading && viewingGraphResult && (
-                    <Card className="border-primary/20 bg-gradient-to-b from-primary/5 to-transparent backdrop-blur-sm">
-                      <CardHeader>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
-                              <BarChart3 className="h-5 w-5 text-primary" />
-                            </div>
-                            <div>
-                              <CardTitle className="text-base">
-                                {viewingGraphResult.title || 'Saved Graph'}
-                              </CardTitle>
-                              {viewingGraphResult.insights && viewingGraphResult.insights.length > 0 && (
-                                <CardDescription className="mt-1 text-white/50">
-                                  {Array.isArray(viewingGraphResult.insights)
-                                    ? viewingGraphResult.insights.join(' • ')
-                                    : viewingGraphResult.insights
-                                  }
-                                </CardDescription>
-                              )}
-                            </div>
+                      {viewingGraphLoading ? (
+                        <div className="flex flex-col items-center justify-center py-16">
+                          <div className="relative">
+                            <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
+                            <Loader2 className="h-8 w-8 animate-spin text-primary relative" />
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-white/40 hover:text-white hover:bg-white/10"
-                            onClick={() => {
-                              setViewingGraphId(null);
-                              setViewingGraphResult(null);
-                            }}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
+                          <p className="text-sm text-white/60 mt-4">Generating graph from saved prompt...</p>
                         </div>
-                      </CardHeader>
-                      <CardContent className="pt-0">
+                      ) : viewingGraphResult && (
                         <div className="bg-black/20 rounded-xl p-6 border border-white/5">
                           {viewingGraphResult.chart ? (
                             <div className="w-full overflow-hidden">
@@ -2061,12 +1982,17 @@ const MarketingDashboard = () => {
                               )}
                             </div>
                           ) : (
-                            <div className="text-center text-white/40 py-8">Failed to generate chart. Please try again.</div>
+                            <div className="text-center py-8 px-4">
+                              <div className="text-sm font-medium text-white/70">Couldn't build this chart</div>
+                              <div className="text-xs text-white/40 mt-1 max-w-md mx-auto break-words">
+                                {viewingGraphResult.error || 'Please try again.'}
+                              </div>
+                            </div>
                           )}
                         </div>
-                      </CardContent>
-                    </Card>
-                  )}
+                      )}
+                    </DialogContent>
+                  </Dialog>
                 </>
               )}
             </CardContent>

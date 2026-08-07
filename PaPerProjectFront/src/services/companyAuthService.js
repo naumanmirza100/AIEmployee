@@ -262,9 +262,10 @@ export const updateCompanyProfile = async (data) =>
 export const getGoogleCalendarStatus = async () =>
   companyApi.get('/company/integrations/google-calendar');
 
-/** Start the OAuth connect flow — returns { authUrl } to redirect the browser to. */
-export const connectGoogleCalendar = async () =>
-  companyApi.post('/company/integrations/google-calendar/connect', {});
+/** Start the OAuth connect flow — returns { authUrl } to redirect the browser to.
+ *  Pass a same-site relative `returnTo` path to land back where Connect was clicked. */
+export const connectGoogleCalendar = async (returnTo = '') =>
+  companyApi.post('/company/integrations/google-calendar/connect', returnTo ? { return_to: returnTo } : {});
 
 /** Disconnect the company's Google Calendar. */
 export const disconnectGoogleCalendar = async () =>

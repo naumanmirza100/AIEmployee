@@ -1036,7 +1036,16 @@ const HRDashboard = () => {
 
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            {/* Mobile: Hamburger menu (below lg) */}
+            {/* Merge resolution note: the incoming change from main removed
+                both the mobile hamburger AND the hidden desktop tab bar,
+                assuming the new company-level sidebar (agent switcher)
+                covers all navigation. But PM + Frontline dashboards both
+                kept their mobile hamburger for tab-within-dashboard
+                navigation (the company sidebar switches AGENTS, not tabs
+                inside an agent). Keeping HR consistent with them below. */}
+
+            {/* Mobile: Hamburger menu (below lg) — switches HR tabs, not
+                agents. Company-level agent switcher lives outside this file. */}
             <div className="lg:hidden w-full mb-4">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1070,12 +1079,11 @@ const HRDashboard = () => {
               </DropdownMenu>
             </div>
 
-            {/* Desktop: Pill tabs (lg and above) */}
-            {/* Desktop tab bar replaced by HRSidebar (outside main flow).
-                Kept in DOM but permanently hidden so any existing tour
-                selectors targeting `[data-tour-hr="tabs"]` still resolve
-                without visual junk. Mobile users continue using the
-                hamburger dropdown above. */}
+            {/* Desktop tab bar replaced by HRSidebar (outside main flow, in
+                the parent JSX above). Kept in DOM but permanently hidden so
+                any existing tour selectors targeting `[data-tour-hr-tab="…"]`
+                still resolve without visual junk. Mobile users continue
+                using the hamburger dropdown above. */}
             <div className="hidden">
               <TabsList
                 className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"

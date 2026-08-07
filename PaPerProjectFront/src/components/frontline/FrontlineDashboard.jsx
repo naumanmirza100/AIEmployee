@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import FrontlineInsightsPanel from './FrontlineInsightsPanel';
 import FrontlinePlaceholderView from './FrontlinePlaceholderView';
-import FrontlineSidebar from './FrontlineSidebar';
+// FrontlineSidebar removed — its navigation now lives in the global app sidebar.
 import FrontlineDocumentsTab from './FrontlineDocumentsTab';
 import FrontlineKnowledgeQATab from './FrontlineKnowledgeQATab';
 import KnowledgeView from './KnowledgeView';
@@ -3717,19 +3717,11 @@ const FrontlineDashboard = () => {
 
   return (
     <HintsProvider>
-    <div className="flex gap-4 items-start w-full">
-      {/* Left sidebar — hidden below lg (mobile uses the hamburger inside
-          the content area). Kept in a plain <div> for now so we can freely
-          scope styling without fighting the existing rounded-2xl wrapper. */}
-      <div data-tour-fl="tabs">
-        <FrontlineSidebar
-          items={sidebarItems}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          collapsed={sidebarCollapsed}
-          onToggleCollapsed={toggleSidebar}
-        />
-      </div>
+    <div className="w-full">
+      {/* The inner Frontline sidebar has been folded into the global app
+          sidebar (each parent tab + its sub-items are nested there). A hidden
+          anchor keeps any tour selector targeting [data-tour-fl="tabs"] valid. */}
+      <div data-tour-fl="tabs" className="hidden" />
 
     <div
       className="flex-1 min-w-0 w-full rounded-2xl border border-white/[0.06] p-0"

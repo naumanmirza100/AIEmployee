@@ -46,24 +46,21 @@ import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
 import NotificationsPage from '@/pages/NotificationsPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
 import UserDashboardPage from '@/pages/UserDashboardPage';
-import MarketingAgentPage from '@/pages/MarketingAgentPage';
 import MarketingDashboard from '@/components/marketing/MarketingDashboard';
 import CampaignDetail from '@/components/marketing/CampaignDetail';
 import SequenceManagementPage from '@/components/marketing/SequenceManagementPage';
 import EmailSendingStatusPage from '@/components/marketing/EmailSendingStatusPage';
 import EmailAccountsPage from '@/components/marketing/EmailAccountsPage';
-import RecruitmentAgentPage from '@/pages/RecruitmentAgentPage';
 import CandidateDetailPage from '@/pages/CandidateDetailPage';
-import FrontlineAgentPage from '@/pages/FrontlineAgentPage';
 import FrontlineDashboard from '@/components/frontline/FrontlineDashboard';
-import HRAgentPage from '@/pages/HRAgentPage';
 import HRDashboard from '@/components/hr/HRDashboard';
 import HRMyProfilePage from '@/components/hr/HRMyProfilePage';
-import OperationsAgentPage from '@/pages/OperationsAgentPage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
-import AiSdrAgentPage from '@/pages/AiSdrAgentPage';
-import ExecMeetingAgentPage from '@/pages/ExecMeetingAgentPage';
 import ExecMeetingDashboard from '@/components/exec-meeting/ExecMeetingDashboard';
+import AgentLayout from '@/components/common/AgentLayout';
+import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
+import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
+import OperationsDashboard from '@/components/operations/OperationsDashboard';
 import JobApplicationPage from '@/pages/JobApplicationPage';
 import ApplicationTrackerPage from '@/pages/ApplicationTrackerPage';
 import CandidatePortalPage from '@/pages/CandidatePortalPage';
@@ -143,15 +140,6 @@ import { useTranslation } from 'react-i18next';
               } 
             />
             
-            {/* Marketing Agent routes without header/footer */}
-            <Route path="/marketing/dashboard" element={<MarketingAgentPage />}>
-              <Route index element={<MarketingDashboard />} />
-              <Route path="campaign/:id" element={<CampaignDetail />} />
-              <Route path="campaign/:id/sequences" element={<SequenceManagementPage />} />
-              <Route path="campaign/:id/email-status" element={<EmailSendingStatusPage />} />
-              <Route path="email-accounts" element={<EmailAccountsPage />} />
-            </Route>
-            
             {/* Public job application (no auth) */}
             <Route path="/jobs/apply/:jobId" element={<JobApplicationPage />} />
             {/* Public application tracker — candidate tracks status via magic link */}
@@ -160,70 +148,77 @@ import { useTranslation } from 'react-i18next';
             <Route path="/candidate-portal" element={<CandidatePortalPage />} />
             <Route path="/candidate-portal/:token" element={<CandidatePortalPage />} />
 
-            {/* Recruitment Agent routes without header/footer */}
-            <Route path="/recruitment" element={<Navigate to="/recruitment/job-descriptions" replace />} />
-            <Route path="/recruitment/dashboard" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/cvprocessing" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/analytics" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/ai-graphs" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/api-tester" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/ai-interview-questions" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/saved-prompts" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/job-descriptions" element={<RecruitmentAgentPage />} />
+            {/* Candidate detail is a standalone full page (outside the agent shell) */}
             <Route path="/recruitment/candidates/:id" element={<CandidateDetailPage />} />
-            <Route path="/recruitment/candidates" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/interviews" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/settings" element={<Navigate to="/recruitment/settings/email" replace />} />
-            <Route path="/recruitment/settings/email" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/settings/interview" element={<RecruitmentAgentPage />} />
-            <Route path="/recruitment/settings/qualification" element={<RecruitmentAgentPage />} />
-            
-            {/* Frontline Agent routes without header/footer */}
-            <Route path="/frontline/dashboard" element={<FrontlineAgentPage />}>
-              <Route index element={<FrontlineDashboard />} />
+
+            {/* ── Shared agent shell: navbar + left sidebar mount ONCE; only the
+                 routed content below swaps when moving between agents. ── */}
+            <Route element={<AgentLayout />}>
+              {/* Marketing */}
+              <Route path="/marketing" element={<Navigate to="/marketing/dashboard" replace />} />
+              <Route path="/marketing/dashboard" element={<MarketingDashboard />} />
+              <Route path="/marketing/dashboard/campaign/:id" element={<CampaignDetail />} />
+              <Route path="/marketing/dashboard/campaign/:id/sequences" element={<SequenceManagementPage />} />
+              <Route path="/marketing/dashboard/campaign/:id/email-status" element={<EmailSendingStatusPage />} />
+              <Route path="/marketing/dashboard/email-accounts" element={<EmailAccountsPage />} />
+
+              {/* Recruitment */}
+              <Route path="/recruitment" element={<Navigate to="/recruitment/job-descriptions" replace />} />
+              <Route path="/recruitment/dashboard" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/cvprocessing" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/analytics" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/ai-graphs" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/api-tester" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/ai-interview-questions" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/saved-prompts" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/job-descriptions" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/candidates" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/interviews" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/settings" element={<Navigate to="/recruitment/settings/email" replace />} />
+              <Route path="/recruitment/settings/email" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/settings/interview" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/settings/qualification" element={<RecruitmentDashboard />} />
+
+              {/* Frontline */}
+              <Route path="/frontline/dashboard" element={<FrontlineDashboard />} />
+
+              {/* HR */}
+              <Route path="/hr" element={<Navigate to="/hr/dashboard" replace />} />
+              <Route path="/hr/dashboard" element={<HRDashboard />} />
+              <Route path="/hr/me" element={<HRMyProfilePage />} />
+
+              {/* Operations */}
+              <Route path="/operations" element={<Navigate to="/operations/documents" replace />} />
+              <Route path="/operations/dashboard" element={<OperationsDashboard />} />
+              <Route path="/operations/documents" element={<OperationsDashboard />} />
+              <Route path="/operations/documents/:id" element={<OperationsDashboard />} />
+              <Route path="/operations/summarization" element={<OperationsDashboard />} />
+              <Route path="/operations/summarization/:id" element={<OperationsDashboard />} />
+              <Route path="/operations/analytics" element={<OperationsDashboard />} />
+              <Route path="/operations/knowledge-qa" element={<OperationsDashboard />} />
+              <Route path="/operations/authoring" element={<OperationsDashboard />} />
+              <Route path="/operations/notifications" element={<OperationsDashboard />} />
+
+              {/* AI SDR */}
+              <Route path="/ai-sdr" element={<Navigate to="/ai-sdr/dashboard" replace />} />
+              <Route path="/ai-sdr/dashboard" element={<SDRDashboard />} />
+              <Route path="/ai-sdr/leads" element={<SDRDashboard />} />
+              <Route path="/ai-sdr/outreach" element={<SDRDashboard />} />
+              <Route path="/ai-sdr/meetings" element={<SDRDashboard />} />
+              <Route path="/ai-sdr/analytics" element={<SDRDashboard />} />
+              <Route path="/ai-sdr/email-assistant" element={<SDRDashboard />} />
+              <Route path="/ai-sdr/crm-sync" element={<SDRDashboard />} />
+              <Route path="/ai-sdr/settings" element={<SDRDashboard />} />
+
+              {/* AI Executive Meeting Assistant */}
+              <Route path="/exec-meeting" element={<Navigate to="/exec-meeting/dashboard" replace />} />
+              <Route path="/exec-meeting/dashboard" element={<ExecMeetingDashboard />} />
             </Route>
 
-            {/* HR Support Agent routes */}
-            <Route path="/hr" element={<Navigate to="/hr/dashboard" replace />} />
-            <Route path="/hr/dashboard" element={<HRAgentPage />}>
-              <Route index element={<HRDashboard />} />
-            </Route>
-            <Route path="/hr/me" element={<HRAgentPage />}>
-              <Route index element={<HRMyProfilePage />} />
-            </Route>
-
-            {/* Operations Agent routes without header/footer */}
-            <Route path="/operations" element={<Navigate to="/operations/documents" replace />} />
-            <Route path="/operations/dashboard" element={<OperationsAgentPage />} />
-            <Route path="/operations/documents" element={<OperationsAgentPage />} />
-            <Route path="/operations/documents/:id" element={<OperationsAgentPage />} />
-            <Route path="/operations/summarization" element={<OperationsAgentPage />} />
-            <Route path="/operations/summarization/:id" element={<OperationsAgentPage />} />
-            <Route path="/operations/analytics" element={<OperationsAgentPage />} />
-            <Route path="/operations/knowledge-qa" element={<OperationsAgentPage />} />
-            <Route path="/operations/authoring" element={<OperationsAgentPage />} />
-            <Route path="/operations/notifications" element={<OperationsAgentPage />} />
-
-            {/* Reply Draft Agent routes without header/footer */}
+            {/* Reply Draft keeps its own standalone shell for now (large stateful
+                inline workspace); it still shows the same sidebar via DashboardNavbar. */}
             <Route path="/reply-draft" element={<Navigate to="/reply-draft/dashboard" replace />} />
             <Route path="/reply-draft/dashboard" element={<ReplyDraftAgentPage />} />
-
-            {/* AI SDR Agent routes without header/footer */}
-            <Route path="/ai-sdr" element={<Navigate to="/ai-sdr/dashboard" replace />} />
-            <Route path="/ai-sdr/dashboard" element={<AiSdrAgentPage />} />
-            <Route path="/ai-sdr/leads" element={<AiSdrAgentPage />} />
-            <Route path="/ai-sdr/outreach" element={<AiSdrAgentPage />} />
-            <Route path="/ai-sdr/meetings" element={<AiSdrAgentPage />} />
-            <Route path="/ai-sdr/analytics" element={<AiSdrAgentPage />} />
-            <Route path="/ai-sdr/email-assistant" element={<AiSdrAgentPage />} />
-            <Route path="/ai-sdr/crm-sync" element={<AiSdrAgentPage />} />
-            <Route path="/ai-sdr/settings" element={<AiSdrAgentPage />} />
-
-            {/* AI Executive Meeting Assistant routes */}
-            <Route path="/exec-meeting" element={<Navigate to="/exec-meeting/dashboard" replace />} />
-            <Route path="/exec-meeting/dashboard" element={<ExecMeetingAgentPage />}>
-              <Route index element={<ExecMeetingDashboard />} />
-            </Route>
 
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />

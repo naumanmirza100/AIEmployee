@@ -42,6 +42,12 @@ export const listQuotas = (params = {}) => {
 export const adjustQuota = (quotaId, payload) =>
   req(`/admin/token-quotas/${quotaId}`, { method: 'PATCH', body: JSON.stringify(payload) });
 
+// Weekly managed-token reset history (optionally filtered by company/agent).
+export const listWeeklyResetLogs = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return req(`/admin/weekly-reset-logs${qs ? `?${qs}` : ''}`);
+};
+
 export const listRequests = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
   return req(`/admin/key-requests${qs ? `?${qs}` : ''}`);
@@ -82,6 +88,7 @@ export default {
   updatePricing,
   listQuotas,
   adjustQuota,
+  listWeeklyResetLogs,
   listRequests,
   approveRequest,
   rejectRequest,

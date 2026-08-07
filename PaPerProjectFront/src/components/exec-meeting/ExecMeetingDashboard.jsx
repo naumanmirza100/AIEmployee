@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { format } from 'date-fns';
 import {
@@ -71,7 +72,17 @@ const TAB_ITEMS = [
 // ── Main dashboard ──────────────────────────────────────────────────────────
 const ExecMeetingDashboard = () => {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('overview');
+  // Tab is URL-backed (?tab=) so the left sidebar can drive it and it survives
+  // reloads / deep links.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const _validTabs = React.useMemo(() => TAB_ITEMS.map((t) => t.value), []);
+  const _rawTab = searchParams.get('tab');
+  const activeTab = _validTabs.includes(_rawTab) ? _rawTab : 'overview';
+  const setActiveTab = React.useCallback((v) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set('tab', v);
+    return next;
+  }, { replace: true }), [setSearchParams]);
   // Themed hover tooltip for the tab bar. Handlers live on the TabsTrigger
   // itself (not a HoverTip wrapper) because wrapping a Radix TabsTrigger
   // breaks the tab grid + keyboard nav. { text, top, left } or null.
@@ -380,10 +391,14 @@ const ExecMeetingDashboard = () => {
   // fetch them here. Falls back to the meeting's description if there are no
   // notes yet.
   const applyMeetingNotesToDoc = async (meetingId, docType) => {
-    if (docType !== 'minutes') return;
-    // Always clear first so switching to a meeting with no notes doesn't leave
-    // the previous meeting's summary sitting in the box.
-    setAiDocSummary('');
+    // Minutes → fills the discussion-summary box; Briefing → fills the
+    // context box (both editable, capped at 800 chars). Other types don't
+    // auto-pull notes.
+    if (docType !== 'minutes' && docType !== 'briefing') return;
+    // Always clear the target box first so switching to a meeting with no
+    // notes doesn't leave the previous meeting's text sitting in it.
+    if (docType === 'minutes') setAiDocSummary('');
+    else setAiDocContext('');
     try {
       const res = await execMeetingService.getMeetingNotes(meetingId);
       const n = res.notes;
@@ -397,7 +412,10 @@ const ExecMeetingDashboard = () => {
         parts.push('Action Items:\n' + n.action_items.map(a => `- ${a.title}`).join('\n'));
       }
       const text = parts.join('\n\n').trim();
-      if (text) setAiDocSummary(text.slice(0, 800));
+      if (text) {
+        if (docType === 'minutes') setAiDocSummary(text.slice(0, 800));
+        else setAiDocContext(text.slice(0, 800));
+      }
     } catch { /* no notes yet — box already cleared above */ }
   };
 
@@ -1185,88 +1203,13 @@ const ExecMeetingDashboard = () => {
                 .em-spotlight { animation: emSpotlight 1.6s ease-in-out infinite; }
               `}</style>
             </div>
-          {/* Mobile tab menu */}
-          <div className="md:hidden">
-            <DropdownMenu open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <Button size="icon" variant="ghost" className="text-white/70 hover:text-white">
-                  <Menu className="h-5 w-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-[#0d0b1f] border-white/10">
-                {TAB_ITEMS.map(t => (
-                  <DropdownMenuItem
-                    key={t.value}
-                    className={`text-white/70 hover:text-white cursor-pointer ${activeTab === t.value ? 'text-violet-400' : ''}`}
-                    onClick={() => { setActiveTab(t.value); setMobileMenuOpen(false); }}
-                  >
-                    <t.icon className="h-4 w-4 mr-2" />{t.label}
-                    {t.value === 'notifications' && stats?.unread_notifications > 0 && (
-                      <span className="ml-auto inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
-                        {stats.unread_notifications > 99 ? '99+' : stats.unread_notifications}
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          {/* Mobile tab menu removed — agent tabs now live in the left sidebar. */}
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs — the tab BAR now lives in the left sidebar; this keeps the
+            ?tab=-driven content switching. */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList data-tour-em="tabs" className="hidden md:flex w-full gap-1.5 h-auto p-1.5 mb-6 bg-[#1a1333] border border-[#3a295a] rounded-xl">
-            {TAB_ITEMS.map(t => (
-              <TabsTrigger
-                key={t.value}
-                value={t.value}
-                // Hover hint: anchor a themed tooltip above this tab. Handlers
-                // live on the trigger itself (not a HoverTip wrapper) so Radix's
-                // tab keyboard nav and the grid layout stay intact.
-                onMouseEnter={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  setTabTip({ text: t.tip, top: r.top - 8, left: r.left + r.width / 2 });
-                }}
-                onMouseLeave={() => setTabTip(null)}
-                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 data-[state=inactive]:text-white/50 data-[state=inactive]:hover:text-white/80 data-[state=active]:text-white data-[state=active]:border-none data-[state=inactive]:border-[#2d2342] data-[state=inactive]:border"
-                style={activeTab === t.value ? {
-                  background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
-                  boxShadow: '0 0 12px 0 rgba(162,89,255,0.45)',
-                } : {
-                  background: 'rgba(60,30,90,0.22)',
-                }}
-              >
-                <t.icon className="h-3.5 w-3.5" />{t.label}
-                {t.value === 'notifications' && stats?.unread_notifications > 0 && (
-                  <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
-                    {stats.unread_notifications > 99 ? '99+' : stats.unread_notifications}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* Tab hover tooltip — portalled, fixed above the hovered tab. Same
-              approach MarketingDashboard uses; sidesteps the "don't wrap a
-              TabsTrigger in HoverTip" limitation. */}
-          {tabTip && createPortal(
-            <div
-              role="tooltip"
-              className="fixed z-[10000] pointer-events-none -translate-x-1/2 -translate-y-full"
-              style={{ top: tabTip.top, left: tabTip.left }}
-            >
-              <div className="relative max-w-[220px] rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl">
-                {tabTip.text}
-                <span
-                  className="absolute left-1/2 top-full -translate-x-1/2 h-2 w-2 rotate-45 border-b border-r border-[#3a295a] bg-[#161630]"
-                  style={{ marginTop: '-4px' }}
-                />
-              </div>
-            </div>,
-            document.body,
-          )}
-
           {TAB_ITEMS.map(t => (
             <TabsContent key={t.value} value={t.value} className="mt-0" data-tour-em={`tab-${t.value}`}>
               <ErrorBoundary key={t.value}>
