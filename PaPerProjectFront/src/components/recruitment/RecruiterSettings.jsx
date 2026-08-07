@@ -634,39 +634,9 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
   return (
     <div className="space-y-6">
       <Tabs value={activeSettingsTab} onValueChange={handleSettingsTabChange} className="space-y-4">
-        <TabsList
-          className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
-          style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
-        >
-          {[
-            { value: 'email', label: 'Email Settings', icon: Mail },
-            { value: 'interview', label: 'Interview Settings', icon: Calendar },
-            { value: 'qualification', label: 'Qualification Settings', icon: Target },
-          ].map((item) => (
-            <TabsTrigger
-              key={item.value}
-              value={item.value}
-              className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
-              style={activeSettingsTab === item.value
-                ? {
-                    background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
-                    color: '#fff',
-                    border: '1.5px solid #a259ff',
-                    boxShadow: '0 0 8px 0 #a259ff55',
-                  }
-                : {
-                    background: 'rgba(60, 30, 90, 0.22)',
-                    color: '#cfc6e6',
-                    border: '1.5px solid #2d2342',
-                    boxShadow: 'none',
-                  }
-              }
-            >
-              <item.icon className="h-4 w-4 mr-2" />
-              {item.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        {/* The settings tab BAR now lives in the left sidebar (Settings →
+            Email / Interview / Qualification); this keeps the URL-driven
+            content switching. */}
 
         <TabsContent value="email">
           <Card className="border-white/10 bg-black/20 backdrop-blur-sm">

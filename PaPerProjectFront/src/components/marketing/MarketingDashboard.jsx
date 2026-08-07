@@ -159,9 +159,15 @@ const defaultEmailForm = () => ({
 
 const MarketingDashboard = () => {
   const { toast } = useToast();
-  const [searchParams] = useSearchParams();
-  const tabFromUrl = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(tabFromUrl || 'dashboard');
+  // Tab is URL-backed (?tab=) so the left sidebar can drive it and it survives
+  // reloads / deep links — same pattern as Frontline.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'dashboard';
+  const setActiveTab = (v) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set('tab', v);
+    return next;
+  }, { replace: true });
   const [tourOpen, setTourOpen] = useState(false);
   const [howItWorksOpen, setHowItWorksOpen] = useState(false);
   // Tab hover tooltip: { text, top, left } anchored above the hovered tab, or null.
@@ -246,11 +252,8 @@ const MarketingDashboard = () => {
   // Let users re-open the "How it works" summary from the header any time.
   const handleShowHowItWorks = () => setHowItWorksOpen(true);
 
-  // Deep-link support: /marketing/dashboard?tab=email jumps straight to that tab,
-  // including when navigating here again while already mounted on this route.
-  useEffect(() => {
-    if (tabFromUrl) setActiveTab(tabFromUrl);
-  }, [tabFromUrl]);
+  // Deep-link support is now inherent: activeTab derives from ?tab= directly,
+  // so /marketing/dashboard?tab=email jumps straight there with no sync effect.
 
   const fetchSavedGraphPrompts = async (page = savedGraphsPage) => {
     try {
@@ -1001,85 +1004,9 @@ const MarketingDashboard = () => {
           </div>
         ))}
       </div>
-      {/* Tabs */}
+      {/* Tabs — the tab BAR now lives in the left sidebar; this keeps the
+          ?tab=-driven content switching. */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="pb-1">
-          <TabsList
-            data-tour-mkt="tabs"
-            className="grid w-full grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
-            style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
-          >
-            {[
-              { value: 'dashboard', label: 'Dashboard', icon: BarChart3, tip: 'Your overview — stats and your list of campaigns.' },
-              { value: 'campaigns', label: 'Campaigns', icon: Megaphone, tip: 'Create campaigns with AI and manage your whole list.' },
-              { value: 'email', label: 'Email', icon: Mail, tip: 'Connect and manage the accounts your campaigns send from.' },
-              { value: 'qa', label: 'Q&A', icon: MessageSquare, tip: 'Ask AI about your campaign results, or generate a chart.' },
-              { value: 'research', label: 'Research', icon: Sparkles, tip: 'Run AI market research to shape your next campaign.' },
-              { value: 'documents', label: 'Documents', icon: FileText, tip: 'Generate and store marketing documents with AI.' },
-              { value: 'notifications', label: 'Notifications', icon: Bell, badge: notificationUnreadCount, tip: 'Alerts and AI health checks for your campaigns.' },
-              { value: 'saved-graphs', label: 'Saved Graphs', icon: Sparkles, tip: 'Charts you saved from Q&A — reuse or pin them here.' },
-            ].map((item) => (
-              <TabsTrigger
-                key={item.value}
-                value={item.value}
-                data-tour-mkt={`tab-${item.value}`}
-                // Hover hint: anchor a themed tooltip above this tab. Handlers live
-                // on the trigger itself (not a wrapper) so Radix's tab keyboard
-                // nav and the grid layout stay intact.
-                onMouseEnter={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  setTabTip({ text: item.tip, top: r.top - 8, left: r.left + r.width / 2 });
-                }}
-                onMouseLeave={() => setTabTip(null)}
-                className="w-full min-w-0 px-2 sm:px-3 py-2 text-sm font-medium rounded-md border transition-all duration-150 relative flex items-center justify-center gap-2"
-                style={activeTab === item.value
-                  ? {
-                      background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)',
-                      color: '#fff',
-                      border: '1.5px solid #a259ff',
-                      boxShadow: '0 0 8px 0 #a259ff55',
-                    }
-                  : {
-                      background: 'rgba(60, 30, 90, 0.22)',
-                      color: '#cfc6e6',
-                      border: '1.5px solid #2d2342',
-                      boxShadow: 'none',
-                    }
-                }
-              >
-                <item.icon className="h-4 w-4" />
-                <span className="truncate">{item.label}</span>
-                {item.badge > 0 && (
-                  <span
-                    className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground"
-                    title={`${item.badge} unread`}
-                  >
-                    {item.badge > 99 ? '99+' : item.badge}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* Tab hover tooltip — portalled, fixed above the hovered tab */}
-          {tabTip && createPortal(
-            <div
-              role="tooltip"
-              className="fixed z-[10000] pointer-events-none -translate-x-1/2 -translate-y-full"
-              style={{ top: tabTip.top, left: tabTip.left }}
-            >
-              <div className="relative max-w-[220px] rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl">
-                {tabTip.text}
-                <span
-                  className="absolute left-1/2 top-full -translate-x-1/2 h-2 w-2 rotate-45 border-b border-r border-[#3a295a] bg-[#161630]"
-                  style={{ marginTop: '-4px' }}
-                />
-              </div>
-            </div>,
-            document.body,
-          )}
-        </div>
-
         <TabsContent value="dashboard" data-tour-mkt="page-dashboard" className="space-y-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">

@@ -13,7 +13,7 @@ import { DatePicker } from '@/components/common/DatePicker';
 import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 
-const ManualProjectCreation = ({ onProjectCreated }) => {
+const ManualProjectCreation = ({ onProjectCreated, onSuccess }) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -150,9 +150,16 @@ const ManualProjectCreation = ({ onProjectCreated }) => {
           start_date: '',
         });
 
-        // Notify parent component
+        // Notify parent component. `onProjectCreated` is the legacy prop
+        // used by the standalone tab (parent re-fetches its list). `onSuccess`
+        // is the newer prop used by dialog wrappers so they can close after
+        // a successful submit. Both are optional; callers pass whichever
+        // makes sense for their context.
         if (onProjectCreated) {
           onProjectCreated();
+        }
+        if (onSuccess) {
+          onSuccess();
         }
       } else {
         throw new Error(response.message || 'Failed to create project');
