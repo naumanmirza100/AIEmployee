@@ -555,6 +555,8 @@ const KnowledgeQA = () => {
                   <span className="text-sm font-semibold text-white/90">Conversations</span>
                 </div>
                 <button
+                  id="OPS-qa-hide-sidebar-btn"
+                  data-testid="OPS-qa-hide-sidebar-btn"
                   onClick={() => setShowSidebar(false)}
                   title="Hide sidebar"
                   className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/20 hover:bg-white/5 transition-colors"
@@ -565,6 +567,8 @@ const KnowledgeQA = () => {
 
               <div className="flex items-center gap-2">
                 <Button
+                  id="OPS-qa-new-chat-btn"
+                  data-testid="OPS-qa-new-chat-btn"
                   onClick={handleNewChat}
                   size="sm"
                   className="flex-1 text-xs h-8"
@@ -578,6 +582,8 @@ const KnowledgeQA = () => {
                   New chat
                 </Button>
                 <button
+                  id="OPS-qa-search-toggle-btn"
+                  data-testid="OPS-qa-search-toggle-btn"
                   onClick={() => { setShowSearch((v) => !v); if (showSearch) setSidebarSearch(''); }}
                   title="Search chats"
                   className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/20 hover:bg-white/5 transition-colors"
@@ -588,6 +594,8 @@ const KnowledgeQA = () => {
 
               {showSearch && (
                 <input
+                  id="OPS-qa-sidebar-search-input"
+                  data-testid="OPS-qa-sidebar-search-input"
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
                   placeholder="Search conversations..."
@@ -597,14 +605,26 @@ const KnowledgeQA = () => {
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+            <div
+              id="OPS-qa-chat-list"
+              data-testid="OPS-qa-chat-list"
+              className="flex-1 overflow-y-auto px-2 py-2 space-y-1"
+            >
               {loadingChats ? (
-                <div className="flex items-center justify-center h-24 text-white/50 text-sm">
+                <div
+                  id="OPS-qa-chat-list-loading"
+                  data-testid="OPS-qa-chat-list-loading"
+                  className="flex items-center justify-center h-24 text-white/50 text-sm"
+                >
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                   Loading...
                 </div>
               ) : filteredChats.length === 0 ? (
-                <div className="text-center text-white/40 text-xs px-2 py-6">
+                <div
+                  id="OPS-qa-chat-list-empty"
+                  data-testid="OPS-qa-chat-list-empty"
+                  className="text-center text-white/40 text-xs px-2 py-6"
+                >
                   {sidebarSearch ? 'No conversations match your search.' : 'No conversations yet. Ask your first question!'}
                 </div>
               ) : (
@@ -614,6 +634,8 @@ const KnowledgeQA = () => {
                   return (
                     <div
                       key={chat.id}
+                      id={`OPS-qa-chat-item-${chat.id}`}
+                      data-testid={`OPS-qa-chat-item-${chat.id}`}
                       onClick={() => !isRenaming && handleSelectChat(chat.id)}
                       className={`group relative rounded-lg px-2.5 py-2 cursor-pointer transition-colors ${
                         isActive ? 'bg-amber-500/10 border border-amber-500/25' : 'hover:bg-white/[0.04] border border-transparent'
@@ -622,6 +644,8 @@ const KnowledgeQA = () => {
                       {isRenaming ? (
                         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           <input
+                            id={`OPS-qa-rename-input-${chat.id}`}
+                            data-testid={`OPS-qa-rename-input-${chat.id}`}
                             value={renameValue}
                             onChange={(e) => setRenameValue(e.target.value)}
                             onKeyDown={(e) => {
@@ -632,6 +656,8 @@ const KnowledgeQA = () => {
                             autoFocus
                           />
                           <button
+                            id={`OPS-qa-rename-save-btn-${chat.id}`}
+                            data-testid={`OPS-qa-rename-save-btn-${chat.id}`}
                             onClick={(e) => commitRename(e, chat)}
                             className="h-6 w-6 flex items-center justify-center rounded hover:bg-green-500/20"
                             title="Save"
@@ -639,6 +665,8 @@ const KnowledgeQA = () => {
                             <Check className="h-3 w-3 text-green-400" />
                           </button>
                           <button
+                            id={`OPS-qa-rename-cancel-btn-${chat.id}`}
+                            data-testid={`OPS-qa-rename-cancel-btn-${chat.id}`}
                             onClick={cancelRename}
                             className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-500/20"
                             title="Cancel"
@@ -667,6 +695,8 @@ const KnowledgeQA = () => {
                             </div>
                             <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5 shrink-0">
                               <button
+                                id={`OPS-qa-chat-rename-btn-${chat.id}`}
+                                data-testid={`OPS-qa-chat-rename-btn-${chat.id}`}
                                 onClick={(e) => startRename(e, chat)}
                                 title="Rename"
                                 className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/10"
@@ -674,6 +704,8 @@ const KnowledgeQA = () => {
                                 <Pencil className="h-3 w-3 text-white/60 hover:text-amber-300" />
                               </button>
                               <button
+                                id={`OPS-qa-chat-delete-btn-${chat.id}`}
+                                data-testid={`OPS-qa-chat-delete-btn-${chat.id}`}
                                 onClick={(e) => handleDeleteChat(e, chat)}
                                 title="Delete"
                                 className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-500/20"
@@ -698,6 +730,8 @@ const KnowledgeQA = () => {
           <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3 bg-black/20">
             {!showSidebar && (
               <button
+                id="OPS-qa-show-sidebar-btn"
+                data-testid="OPS-qa-show-sidebar-btn"
                 onClick={() => setShowSidebar(true)}
                 title="Show sidebar"
                 className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors"
@@ -723,6 +757,8 @@ const KnowledgeQA = () => {
             </div>
             {/* Onboarding / how-it-works */}
             <button
+              id="OPS-qa-how-it-works-btn"
+              data-testid="OPS-qa-how-it-works-btn"
               onClick={() => setShowOnboarding(true)}
               title="How this page works"
               className="shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
@@ -734,16 +770,29 @@ const KnowledgeQA = () => {
           </div>
 
           {/* Messages */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
+          <div
+            ref={scrollRef}
+            id="OPS-qa-messages-scroll"
+            data-testid="OPS-qa-messages-scroll"
+            className="flex-1 overflow-y-auto px-6 py-6"
+          >
             {loadingMessages ? (
-              <div className="flex items-center justify-center h-full text-white/50 text-sm">
+              <div
+                id="OPS-qa-messages-loading"
+                data-testid="OPS-qa-messages-loading"
+                className="flex items-center justify-center h-full text-white/50 text-sm"
+              >
                 <Loader2 className="h-5 w-5 animate-spin mr-2" />
                 Loading conversation...
               </div>
             ) : messages.length === 0 ? (
               <EmptyState onPick={(q) => setQuestion(q)} />
             ) : (
-              <div className="max-w-4xl mx-auto space-y-5">
+              <div
+                id="OPS-qa-message-list"
+                data-testid="OPS-qa-message-list"
+                className="max-w-4xl mx-auto space-y-5"
+              >
                 {(() => {
                   // Index of the last user message (only that one is editable)
                   // and the last assistant message (target for scroll-to-top).
@@ -756,6 +805,7 @@ const KnowledgeQA = () => {
                   return messages.map((m, idx) => (
                     <Message
                       key={m.id}
+                      index={idx}
                       message={m}
                       isLastUser={idx === lastUserIdx}
                       answerRef={idx === lastAssistantIdx ? lastAnswerRef : null}
@@ -770,7 +820,11 @@ const KnowledgeQA = () => {
                   ));
                 })()}
                 {sending && (
-                  <div className="flex items-start gap-3">
+                  <div
+                    id="OPS-qa-thinking-indicator"
+                    data-testid="OPS-qa-thinking-indicator"
+                    className="flex items-start gap-3"
+                  >
                     <div
                       className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0"
                       style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}
@@ -794,12 +848,14 @@ const KnowledgeQA = () => {
 
           {/* Composer */}
           <div className="border-t border-white/10 px-6 py-4 bg-black/25">
-            <form onSubmit={handleSend} className="max-w-4xl mx-auto">
+            <form id="OPS-qa-composer-form" data-testid="OPS-qa-composer-form" onSubmit={handleSend} className="max-w-4xl mx-auto">
               <div
                 className="rounded-2xl border bg-black/50 overflow-hidden transition-all focus-within:border-amber-500/40 focus-within:shadow-[0_0_0_3px_rgba(245,158,11,0.08)]"
                 style={{ borderColor: 'rgba(255,255,255,0.1)' }}
               >
                 <Textarea
+                  id="OPS-qa-question-input"
+                  data-testid="OPS-qa-question-input"
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -815,6 +871,8 @@ const KnowledgeQA = () => {
                     <kbd className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] font-mono">Shift+Enter</kbd> for newline
                   </div>
                   <Button
+                    id="OPS-qa-send-btn"
+                    data-testid="OPS-qa-send-btn"
                     type="submit"
                     size="sm"
                     disabled={!question.trim() || sending}
@@ -843,7 +901,7 @@ const KnowledgeQA = () => {
 
       {/* ── Onboarding / How-it-works modal ── */}
       <Dialog open={showOnboarding} onOpenChange={setShowOnboarding}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto border-white/10 text-white" style={{ background: '#100a20' }}>
+        <DialogContent id="OPS-qa-onboarding-dialog" data-testid="OPS-qa-onboarding-dialog" className="max-w-lg max-h-[85vh] overflow-y-auto border-white/10 text-white" style={{ background: '#100a20' }}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-white">
               <span className="flex items-center justify-center w-8 h-8 rounded-lg" style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}>
@@ -898,6 +956,8 @@ const KnowledgeQA = () => {
             </div>
 
             <Button
+              id="OPS-qa-onboarding-close-btn"
+              data-testid="OPS-qa-onboarding-close-btn"
               onClick={() => setShowOnboarding(false)}
               className="w-full border-0"
               style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: '#fff' }}
@@ -908,6 +968,7 @@ const KnowledgeQA = () => {
         </DialogContent>
       </Dialog>
 
+      <div id="OPS-qa-delete-confirm-dialog" data-testid="OPS-qa-delete-confirm-dialog">
       <ConfirmDialog
         open={!!pendingDeleteChat}
         onOpenChange={(open) => { if (!open) setPendingDeleteChat(null); }}
@@ -926,6 +987,7 @@ const KnowledgeQA = () => {
         loading={deletingChat}
         onConfirm={confirmDeleteChat}
       />
+      </div>
     </div>
   );
 };
@@ -935,7 +997,7 @@ const KnowledgeQA = () => {
 // ──────────────────────────────────────────────
 
 const EmptyState = ({ onPick }) => (
-  <div className="max-w-2xl mx-auto flex flex-col items-center justify-center py-10 text-center">
+  <div id="OPS-qa-empty-state" data-testid="OPS-qa-empty-state" className="max-w-2xl mx-auto flex flex-col items-center justify-center py-10 text-center">
     <div
       className="flex items-center justify-center w-14 h-14 rounded-2xl mb-4"
       style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}
@@ -949,9 +1011,11 @@ const EmptyState = ({ onPick }) => (
       Ask about contracts, invoices, reports, policies — I'll answer with source citations.
     </p>
     <div className="grid sm:grid-cols-2 gap-2 w-full">
-      {SUGGESTIONS.map((s) => (
+      {SUGGESTIONS.map((s, i) => (
         <button
           key={s}
+          id={`OPS-qa-suggestion-btn-${i}`}
+          data-testid={`OPS-qa-suggestion-btn-${i}`}
           onClick={() => onPick(s)}
           className="text-left px-3 py-2.5 rounded-lg border border-white/10 bg-white/[0.02] hover:bg-white/[0.06] hover:border-amber-500/30 text-sm text-white/80 transition-colors"
         >
@@ -963,7 +1027,7 @@ const EmptyState = ({ onPick }) => (
 );
 
 // Small hover-reveal copy button; flips to a check for 2s on success.
-const CopyButton = ({ text, title = 'Copy' }) => {
+const CopyButton = ({ text, title = 'Copy', testId }) => {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -976,6 +1040,8 @@ const CopyButton = ({ text, title = 'Copy' }) => {
   };
   return (
     <button
+      id={testId}
+      data-testid={testId}
       type="button"
       onClick={copy}
       title={copied ? 'Copied' : title}
@@ -990,6 +1056,7 @@ const CopyButton = ({ text, title = 'Copy' }) => {
 
 const Message = ({
   message,
+  index = 0,
   isLastUser = false,
   answerRef = null,
   isEditing = false,
@@ -1004,12 +1071,18 @@ const Message = ({
     // Inline edit mode (only reachable for the last user message).
     if (isEditing) {
       return (
-        <div className="flex justify-end">
+        <div
+          id={`OPS-qa-message-edit-${index}`}
+          data-testid={`OPS-qa-message-edit-${index}`}
+          className="flex justify-end"
+        >
           <div
             className="w-full max-w-[78%] rounded-2xl px-3 py-3"
             style={{ backgroundColor: 'rgba(245,158,11,0.10)', border: `1px solid ${ACCENT_BORDER}` }}
           >
             <Textarea
+              id={`OPS-qa-message-edit-input-${index}`}
+              data-testid={`OPS-qa-message-edit-input-${index}`}
               value={editValue}
               onChange={(e) => onEditChange(e.target.value)}
               onKeyDown={(e) => {
@@ -1022,6 +1095,8 @@ const Message = ({
             />
             <div className="flex items-center justify-end gap-2 mt-2">
               <button
+                id={`OPS-qa-message-edit-cancel-btn-${index}`}
+                data-testid={`OPS-qa-message-edit-cancel-btn-${index}`}
                 type="button"
                 onClick={onCancelEdit}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-white/70 hover:bg-white/10 transition-colors"
@@ -1029,6 +1104,8 @@ const Message = ({
                 <X className="h-3.5 w-3.5" /> Cancel
               </button>
               <button
+                id={`OPS-qa-message-edit-save-btn-${index}`}
+                data-testid={`OPS-qa-message-edit-save-btn-${index}`}
                 type="button"
                 onClick={onSubmitEdit}
                 disabled={editDisabled || !editValue.trim()}
@@ -1043,12 +1120,18 @@ const Message = ({
       );
     }
     return (
-      <div className="group flex justify-end items-start gap-1.5">
+      <div
+        id={`OPS-qa-message-user-${index}`}
+        data-testid={`OPS-qa-message-user-${index}`}
+        className="group flex justify-end items-start gap-1.5"
+      >
         {/* Hover actions sit to the LEFT of the right-aligned bubble */}
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 mt-1 shrink-0">
-          <CopyButton text={message.content} title="Copy question" />
+          <CopyButton text={message.content} title="Copy question" testId={`OPS-qa-message-copy-btn-${index}`} />
           {isLastUser && (
             <button
+              id={`OPS-qa-message-edit-btn-${index}`}
+              data-testid={`OPS-qa-message-edit-btn-${index}`}
               type="button"
               onClick={onStartEdit}
               title="Edit & resend"
@@ -1079,7 +1162,12 @@ const Message = ({
   const cacheHit = message.responseData?.cache_hit ?? message.cache_hit ?? false;
   const totalMs = timing?.total;
   return (
-    <div ref={answerRef} className="group flex items-start gap-3 scroll-mt-6">
+    <div
+      ref={answerRef}
+      id={`OPS-qa-message-assistant-${index}`}
+      data-testid={`OPS-qa-message-assistant-${index}`}
+      className="group flex items-start gap-3 scroll-mt-6"
+    >
       <div
         className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0 mt-0.5"
         style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}
@@ -1092,7 +1180,11 @@ const Message = ({
           dangerouslySetInnerHTML={{ __html: markdownToHtml(message.content || '') }}
         />
         {sources.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-white/10">
+          <div
+            id={`OPS-qa-message-sources-${index}`}
+            data-testid={`OPS-qa-message-sources-${index}`}
+            className="mt-3 pt-3 border-t border-white/10"
+          >
             <div className="flex items-center gap-1.5 mb-2">
               <FileText className="h-3 w-3 text-amber-300" />
               <span className="text-[11px] uppercase tracking-wider text-amber-300 font-semibold">
@@ -1103,6 +1195,8 @@ const Message = ({
               {sources.map((s, i) => (
                 <span
                   key={`${s.document_id || i}-${s.page || 0}-${i}`}
+                  id={`OPS-qa-message-source-${index}-${i}`}
+                  data-testid={`OPS-qa-message-source-${index}-${i}`}
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/8 border border-amber-500/20 text-[11px] text-amber-100/90"
                 >
                   <FileText className="h-2.5 w-2.5" />
@@ -1130,7 +1224,7 @@ const Message = ({
         )}
         {/* Hover-reveal copy for the answer text */}
         <div className="mt-2 -mb-1 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <CopyButton text={message.content} title="Copy answer" />
+          <CopyButton text={message.content} title="Copy answer" testId={`OPS-qa-message-copy-btn-${index}`} />
         </div>
       </div>
     </div>

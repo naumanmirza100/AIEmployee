@@ -588,6 +588,8 @@ const DocumentAuthoring = () => {
                       </div>
                     )}
                   <button
+                    id="OPS-authoring-guide-btn"
+                    data-testid="OPS-authoring-guide-btn"
                     onClick={() => { setShowGuideHint(false); setOnboardStep(0); setShowOnboarding(true); }}
                     title="How Authoring works"
                     className="h-7 w-7 flex items-center justify-center rounded-md border transition-colors"
@@ -597,6 +599,8 @@ const DocumentAuthoring = () => {
                   </button>
                   </div>
                   <button
+                    id="OPS-authoring-hide-sidebar-btn"
+                    data-testid="OPS-authoring-hide-sidebar-btn"
                     onClick={() => setShowSidebar(false)}
                     title="Hide sidebar"
                     className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/20 hover:bg-white/5 transition-colors"
@@ -607,6 +611,8 @@ const DocumentAuthoring = () => {
               </div>
 
               <Button
+                id="OPS-authoring-new-doc-btn"
+                data-testid="OPS-authoring-new-doc-btn"
                 data-tour="new-doc"
                 onClick={handleNewDocument}
                 size="sm"
@@ -619,6 +625,8 @@ const DocumentAuthoring = () => {
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40" />
                 <input
+                  id="OPS-authoring-sidebar-search-input"
+                  data-testid="OPS-authoring-sidebar-search-input"
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
                   placeholder="Search..."
@@ -627,13 +635,25 @@ const DocumentAuthoring = () => {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+            <div
+              id="OPS-authoring-doc-list"
+              data-testid="OPS-authoring-doc-list"
+              className="flex-1 overflow-y-auto px-2 py-2 space-y-1"
+            >
               {loadingDocs ? (
-                <div className="flex items-center justify-center h-24 text-white/50 text-sm">
+                <div
+                  id="OPS-authoring-doc-list-loading"
+                  data-testid="OPS-authoring-doc-list-loading"
+                  className="flex items-center justify-center h-24 text-white/50 text-sm"
+                >
                   <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading...
                 </div>
               ) : filteredSidebar.length === 0 ? (
-                <div className="text-center text-white/40 text-xs px-2 py-6">
+                <div
+                  id="OPS-authoring-doc-list-empty"
+                  data-testid="OPS-authoring-doc-list-empty"
+                  className="text-center text-white/40 text-xs px-2 py-6"
+                >
                   {sidebarSearch ? 'No matches.' : 'No documents yet. Generate your first one!'}
                 </div>
               ) : (
@@ -644,6 +664,8 @@ const DocumentAuthoring = () => {
                   return (
                     <div
                       key={d.id}
+                      id={`OPS-authoring-doc-row-${d.id}`}
+                      data-testid={`OPS-authoring-doc-row-${d.id}`}
                       onClick={() => openDoc(d.id)}
                       className={`group relative rounded-lg px-2.5 py-2 cursor-pointer transition-colors ${
                         isActive ? 'bg-amber-500/10 border border-amber-500/25' : 'hover:bg-white/[0.04] border border-transparent'
@@ -669,6 +691,8 @@ const DocumentAuthoring = () => {
                           </div>
                         </div>
                         <button
+                          id={`OPS-authoring-doc-delete-btn-${d.id}`}
+                          data-testid={`OPS-authoring-doc-delete-btn-${d.id}`}
                           onClick={(e) => handleDeleteFromSidebar(e, d)}
                           title="Delete"
                           className="opacity-0 group-hover:opacity-100 h-6 w-6 flex items-center justify-center rounded hover:bg-red-500/20 shrink-0 transition-opacity"
@@ -871,6 +895,8 @@ const AuthoringOnboarding = ({ open, step, setStep, onClose }) => {
         {ONBOARDING_STEPS.map((_, i) => (
           <button
             key={i}
+            id={`OPS-authoring-onboarding-dot-${i}`}
+            data-testid={`OPS-authoring-onboarding-dot-${i}`}
             onClick={() => setStep(i)}
             aria-label={`Step ${i + 1}`}
             className="h-1.5 rounded-full transition-all"
@@ -879,19 +905,19 @@ const AuthoringOnboarding = ({ open, step, setStep, onClose }) => {
         ))}
       </div>
       <div className="flex items-center justify-between gap-3">
-        <button onClick={onClose} className="text-xs text-white/50 hover:text-white/80 transition-colors">Skip</button>
+        <button id="OPS-authoring-onboarding-skip-btn" data-testid="OPS-authoring-onboarding-skip-btn" onClick={onClose} className="text-xs text-white/50 hover:text-white/80 transition-colors">Skip</button>
         <div className="flex items-center gap-2">
           {step > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setStep(step - 1)} className="h-8 border-white/20 text-white">
+            <Button id="OPS-authoring-onboarding-back-btn" data-testid="OPS-authoring-onboarding-back-btn" variant="outline" size="sm" onClick={() => setStep(step - 1)} className="h-8 border-white/20 text-white">
               <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Button>
           )}
           {isLast ? (
-            <Button size="sm" onClick={onClose} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff' }}>
+            <Button id="OPS-authoring-onboarding-getstarted-btn" data-testid="OPS-authoring-onboarding-getstarted-btn" size="sm" onClick={onClose} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff' }}>
               <Check className="h-4 w-4 mr-1" /> Get started
             </Button>
           ) : (
-            <Button size="sm" onClick={() => setStep(step + 1)} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff' }}>
+            <Button id="OPS-authoring-onboarding-next-btn" data-testid="OPS-authoring-onboarding-next-btn" size="sm" onClick={() => setStep(step + 1)} className="h-8 border-0" style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)', color: '#fff' }}>
               Next <ArrowRight className="h-4 w-4 ml-1" />
             </Button>
           )}
@@ -947,7 +973,7 @@ const AuthoringOnboarding = ({ open, step, setStep, onClose }) => {
   return (
     <>
       {/* Dim backdrop with a spotlight cutout around the target */}
-      <div className="fixed inset-0 z-[90]" onClick={onClose} style={{ background: 'rgba(0,0,0,0.55)' }} />
+      <div id="OPS-authoring-onboarding-backdrop" data-testid="OPS-authoring-onboarding-backdrop" className="fixed inset-0 z-[90]" onClick={onClose} style={{ background: 'rgba(0,0,0,0.55)' }} />
       {rect && (
         <div
           className="fixed z-[95] rounded-xl pointer-events-none transition-all duration-200"
@@ -984,6 +1010,8 @@ const CreateView = ({
       <div className="px-6 py-4 border-b border-white/10 flex items-center gap-3 bg-black/25">
         {!showSidebar && (
           <button
+            id="OPS-authoring-create-show-sidebar-btn"
+            data-testid="OPS-authoring-create-show-sidebar-btn"
             onClick={() => setShowSidebar(true)}
             title="Show sidebar"
             className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors"
@@ -1012,7 +1040,7 @@ const CreateView = ({
           {/* Compact config row: Template + References */}
           <div className="grid sm:grid-cols-2 gap-3">
             {/* Template selector */}
-            <div data-tour="template">
+            <div id="OPS-authoring-template-selector" data-testid="OPS-authoring-template-selector" data-tour="template">
             <SelectorCard
               label="Template"
               onClick={onOpenTemplatePicker}
@@ -1023,7 +1051,7 @@ const CreateView = ({
             </div>
 
             {/* References selector */}
-            <div data-tour="references">
+            <div id="OPS-authoring-references-selector" data-testid="OPS-authoring-references-selector" data-tour="references">
             <SelectorCard
               label="References"
               onClick={onOpenRefsPicker}
@@ -1036,6 +1064,8 @@ const CreateView = ({
               icon={<Layers className="h-4 w-4" style={{ color: ACCENT }} />}
               trailingAction={selectedRefIds.length > 0 ? (
                 <button
+                  id="OPS-authoring-clear-refs-btn"
+                  data-testid="OPS-authoring-clear-refs-btn"
                   onClick={(e) => { e.stopPropagation(); onClearRefs?.(); }}
                   className="text-[11px] text-amber-300/80 hover:text-amber-200 px-2 py-1"
                   type="button"
@@ -1058,6 +1088,8 @@ const CreateView = ({
                 return (
                   <button
                     key={t.value}
+                    id={`OPS-authoring-tone-btn-${t.value}`}
+                    data-testid={`OPS-authoring-tone-btn-${t.value}`}
                     type="button"
                     onClick={() => setTone(t.value)}
                     className={`rounded-lg border px-3 py-2 text-xs transition-colors flex flex-col items-start gap-0.5 ${
@@ -1080,6 +1112,8 @@ const CreateView = ({
               Title <span className="text-white/35 normal-case">(optional)</span>
             </Label>
             <Input
+              id="OPS-authoring-title-input"
+              data-testid="OPS-authoring-title-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder={`e.g. ${tpl.label} – Q3 Operations`}
@@ -1093,6 +1127,8 @@ const CreateView = ({
               What should the document cover?
             </Label>
             <Textarea
+              id="OPS-authoring-prompt-input"
+              data-testid="OPS-authoring-prompt-input"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder={`Describe the document you want. Example: "Draft a weekly operations report focusing on the risks from the latest Q3 financial document and recommended mitigation steps."`}
@@ -1113,6 +1149,8 @@ const CreateView = ({
             Powered by AI · Always review before sharing
           </div>
           <Button
+            id="OPS-authoring-generate-btn"
+            data-testid="OPS-authoring-generate-btn"
             data-tour="generate"
             onClick={onGenerate}
             disabled={!prompt.trim() || generating}
@@ -1147,6 +1185,8 @@ const StreamingView = ({ scrollRef, title, content, onCancel, showSidebar, setSh
       <div className="px-6 py-3 border-b border-white/10 flex items-center gap-3 bg-black/25">
         {!showSidebar && (
           <button
+            id="OPS-authoring-streaming-show-sidebar-btn"
+            data-testid="OPS-authoring-streaming-show-sidebar-btn"
             onClick={() => setShowSidebar(true)}
             title="Show sidebar"
             className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors"
@@ -1173,6 +1213,8 @@ const StreamingView = ({ scrollRef, title, content, onCancel, showSidebar, setSh
           </div>
         </div>
         <Button
+          id="OPS-authoring-streaming-cancel-btn"
+          data-testid="OPS-authoring-streaming-cancel-btn"
           onClick={onCancel}
           variant="outline"
           size="sm"
@@ -1183,7 +1225,7 @@ const StreamingView = ({ scrollRef, title, content, onCancel, showSidebar, setSh
       </div>
 
       {/* Live content */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} id="OPS-authoring-streaming-content" data-testid="OPS-authoring-streaming-content" className="flex-1 overflow-y-auto">
         <div className={`mx-auto px-8 py-8 transition-[max-width] duration-300 ${showSidebar ? 'max-w-3xl' : 'max-w-5xl'}`}>
           {content ? (
             <article
@@ -1213,7 +1255,11 @@ const ViewView = ({
 }) => {
   if (!doc) {
     return (
-      <div className="flex-1 flex items-center justify-center text-white/50 text-sm">
+      <div
+        id="OPS-authoring-view-loading"
+        data-testid="OPS-authoring-view-loading"
+        className="flex-1 flex items-center justify-center text-white/50 text-sm"
+      >
         Loading document...
       </div>
     );
@@ -1227,6 +1273,8 @@ const ViewView = ({
       <div className="px-6 py-3 border-b border-white/10 flex items-center gap-3 bg-black/25">
         {!showSidebar && (
           <button
+            id="OPS-authoring-view-show-sidebar-btn"
+            data-testid="OPS-authoring-view-show-sidebar-btn"
             onClick={() => setShowSidebar(true)}
             title="Show sidebar"
             className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors"
@@ -1235,6 +1283,8 @@ const ViewView = ({
           </button>
         )}
         <button
+          id="OPS-authoring-view-new-btn"
+          data-testid="OPS-authoring-view-new-btn"
           onClick={onBack}
           title="New document"
           className="h-8 px-2.5 flex items-center gap-1.5 rounded-md border border-white/10 hover:border-white/30 bg-black/30 hover:bg-white/5 transition-colors text-xs text-white/75"
@@ -1246,6 +1296,8 @@ const ViewView = ({
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {editMode ? (
             <Input
+              id="OPS-authoring-edit-title-input"
+              data-testid="OPS-authoring-edit-title-input"
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
               className="bg-black/30 border-white/10 text-white/95 font-semibold h-9 focus-visible:ring-1 focus-visible:ring-amber-500/40 focus-visible:border-amber-500/40"
@@ -1281,6 +1333,8 @@ const ViewView = ({
           {editMode ? (
             <>
               <Button
+                id="OPS-authoring-edit-cancel-btn"
+                data-testid="OPS-authoring-edit-cancel-btn"
                 onClick={() => { setEditMode(false); setEditTitle(doc.title); setEditContent(doc.content); }}
                 variant="outline"
                 size="sm"
@@ -1290,6 +1344,8 @@ const ViewView = ({
                 <X className="h-3.5 w-3.5 mr-1" /> Cancel
               </Button>
               <Button
+                id="OPS-authoring-save-btn"
+                data-testid="OPS-authoring-save-btn"
                 onClick={onSave}
                 size="sm"
                 className="h-8 text-xs font-semibold"
@@ -1302,26 +1358,36 @@ const ViewView = ({
             </>
           ) : (
             <>
-              <IconButton title="Copy markdown" onClick={onCopy}><Copy className="h-3.5 w-3.5" /></IconButton>
-              <ExportMenu
-                docId={doc.id}
-                title={doc.title}
-                content={doc.content}
-                fetchPdfBlob={operationsService.fetchGeneratedDocumentPdf}
-              />
-              <IconButton title="Edit" onClick={() => { setEditMode(true); setTab('edit-markdown'); }}>
-                <Pencil className="h-3.5 w-3.5" />
-              </IconButton>
-              <IconButton
-                title="Regenerate (new version)"
-                onClick={onRegenerate}
-                disabled={regenerating}
-              >
-                {regenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              </IconButton>
-              <IconButton title="Delete" onClick={onDelete} danger>
-                <Trash2 className="h-3.5 w-3.5" />
-              </IconButton>
+              <span id="OPS-authoring-copy-btn" data-testid="OPS-authoring-copy-btn" className="contents">
+                <IconButton title="Copy markdown" onClick={onCopy}><Copy className="h-3.5 w-3.5" /></IconButton>
+              </span>
+              <span id="OPS-authoring-export-menu" data-testid="OPS-authoring-export-menu" className="contents">
+                <ExportMenu
+                  docId={doc.id}
+                  title={doc.title}
+                  content={doc.content}
+                  fetchPdfBlob={operationsService.fetchGeneratedDocumentPdf}
+                />
+              </span>
+              <span id="OPS-authoring-edit-btn" data-testid="OPS-authoring-edit-btn" className="contents">
+                <IconButton title="Edit" onClick={() => { setEditMode(true); setTab('edit-markdown'); }}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </IconButton>
+              </span>
+              <span id="OPS-authoring-regenerate-btn" data-testid="OPS-authoring-regenerate-btn" className="contents">
+                <IconButton
+                  title="Regenerate (new version)"
+                  onClick={onRegenerate}
+                  disabled={regenerating}
+                >
+                  {regenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                </IconButton>
+              </span>
+              <span id="OPS-authoring-delete-btn" data-testid="OPS-authoring-delete-btn" className="contents">
+                <IconButton title="Delete" onClick={onDelete} danger>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </IconButton>
+              </span>
             </>
           )}
         </div>
@@ -1329,12 +1395,16 @@ const ViewView = ({
 
       {/* Tab switcher */}
       <div className="px-6 py-2 border-b border-white/10 bg-black/15 flex items-center gap-1">
-        <TabButton active={tab === 'preview'} onClick={() => setTab('preview')} icon={Eye}>
-          Preview
-        </TabButton>
-        <TabButton active={tab === 'edit-markdown'} onClick={() => setTab('edit-markdown')} icon={Code}>
-          Markdown
-        </TabButton>
+        <span id="OPS-authoring-tab-preview" data-testid="OPS-authoring-tab-preview" className="contents">
+          <TabButton active={tab === 'preview'} onClick={() => setTab('preview')} icon={Eye}>
+            Preview
+          </TabButton>
+        </span>
+        <span id="OPS-authoring-tab-markdown" data-testid="OPS-authoring-tab-markdown" className="contents">
+          <TabButton active={tab === 'edit-markdown'} onClick={() => setTab('edit-markdown')} icon={Code}>
+            Markdown
+          </TabButton>
+        </span>
         {doc.edit_history && doc.edit_history.length > 0 && (
           <div className="ml-auto flex items-center gap-1.5 text-[11px] text-white/45">
             <History className="h-3 w-3" />
@@ -1348,6 +1418,8 @@ const ViewView = ({
         {tab === 'preview' ? (
           <div className={`mx-auto px-8 py-8 transition-[max-width] duration-300 ${showSidebar ? 'max-w-3xl' : 'max-w-5xl'}`}>
             <article
+              id="OPS-authoring-preview-content"
+              data-testid="OPS-authoring-preview-content"
               className="prose prose-invert max-w-none"
               dangerouslySetInnerHTML={{ __html: markdownToHtml(editMode ? editContent : doc.content) }}
             />
@@ -1355,6 +1427,8 @@ const ViewView = ({
         ) : (
           <div className="h-full px-6 py-4">
             <Textarea
+              id="OPS-authoring-markdown-input"
+              data-testid="OPS-authoring-markdown-input"
               value={editMode ? editContent : doc.content}
               onChange={(e) => setEditContent(e.target.value)}
               readOnly={!editMode}

@@ -155,7 +155,7 @@ const SummarizationInsights = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" id="OPS-summarization-root" data-testid="OPS-summarization-root">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -163,7 +163,7 @@ const SummarizationInsights = () => {
           <p className="text-gray-400 text-sm mt-1">Upload any document and get an AI-powered comprehensive summary</p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant="outline" className="text-xs py-1 px-3 w-fit" style={{ borderColor: '#f59e0b40', color: '#f59e0b' }}>
+          <Badge variant="outline" className="text-xs py-1 px-3 w-fit" style={{ borderColor: '#f59e0b40', color: '#f59e0b' }} id="OPS-summarization-count-badge" data-testid="OPS-summarization-count-badge">
             {summaries.length} {summaries.length === 1 ? 'Summary' : 'Summaries'}
           </Badge>
           <Button
@@ -171,6 +171,8 @@ const SummarizationInsights = () => {
             className="gap-2 text-xs font-semibold"
             style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff' }}
             onClick={() => setShowUploadModal(true)}
+            id="OPS-summarization-upload-btn"
+            data-testid="OPS-summarization-upload-btn"
           >
             <Plus className="h-3.5 w-3.5" />
             Upload & Summarize
@@ -180,7 +182,7 @@ const SummarizationInsights = () => {
 
       {/* Search & Refresh */}
       {(summaries.length > 0 || searchQuery) && (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3" id="OPS-summarization-toolbar" data-testid="OPS-summarization-toolbar">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
             <Input
@@ -188,30 +190,35 @@ const SummarizationInsights = () => {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="pl-10 h-10 rounded-xl bg-white/[0.03] border-white/[0.08] text-white placeholder:text-white/30"
+              id="OPS-summarization-search-input"
+              data-testid="OPS-summarization-search-input"
             />
           </div>
           {/* Rows per page */}
           <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
             className="h-10 rounded-xl border border-white/[0.08] text-xs text-white/70 pl-3 pr-8 shrink-0 cursor-pointer outline-none focus:border-amber-500/40 transition-colors"
-            style={{ background: 'rgba(0,0,0,0.25)', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}>
+            style={{ background: 'rgba(0,0,0,0.25)', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
+            id="OPS-summarization-page-size-select" data-testid="OPS-summarization-page-size-select">
             {[5, 10, 20, 30, 50].map(n => (
               <option key={n} value={n} className="bg-[#1a1028] text-white">{n} rows</option>
             ))}
           </select>
           {/* View Toggle */}
-          <div className="flex items-center h-10 rounded-xl border border-white/[0.08] overflow-hidden" style={{ background: 'rgba(0,0,0,0.25)' }}>
+          <div className="flex items-center h-10 rounded-xl border border-white/[0.08] overflow-hidden" style={{ background: 'rgba(0,0,0,0.25)' }} id="OPS-summarization-view-toggle" data-testid="OPS-summarization-view-toggle">
             <button onClick={() => setViewMode('list')}
-              className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'list' ? 'text-amber-400 bg-amber-500/10' : 'text-white/30 hover:text-white/50'}`}>
+              className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'list' ? 'text-amber-400 bg-amber-500/10' : 'text-white/30 hover:text-white/50'}`}
+              id="OPS-summarization-view-list-btn" data-testid="OPS-summarization-view-list-btn">
               <LayoutList className="h-4 w-4" />
             </button>
             <div className="w-px h-5 bg-white/[0.08]" />
             <button onClick={() => setViewMode('table')}
-              className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'table' ? 'text-amber-400 bg-amber-500/10' : 'text-white/30 hover:text-white/50'}`}>
+              className={`h-full px-2.5 flex items-center justify-center transition-colors ${viewMode === 'table' ? 'text-amber-400 bg-amber-500/10' : 'text-white/30 hover:text-white/50'}`}
+              id="OPS-summarization-view-table-btn" data-testid="OPS-summarization-view-table-btn">
               <LayoutGrid className="h-4 w-4" />
             </button>
           </div>
           <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-white/[0.08] text-white/50 hover:text-white"
-            onClick={fetchSummaries}>
+            onClick={fetchSummaries} id="OPS-summarization-refresh-btn" data-testid="OPS-summarization-refresh-btn">
             <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
@@ -219,12 +226,12 @@ const SummarizationInsights = () => {
 
       {/* Loading */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16">
+        <div className="flex flex-col items-center justify-center py-16" id="OPS-summarization-loading-state" data-testid="OPS-summarization-loading-state">
           <Loader2 className="h-8 w-8 animate-spin text-amber-500/60" />
           <p className="mt-3 text-sm text-white/40">Loading summaries...</p>
         </div>
       ) : summaries.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-white/[0.06]" style={{ background: 'rgba(0,0,0,0.1)' }}>
+        <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-white/[0.06]" style={{ background: 'rgba(0,0,0,0.1)' }} id="OPS-summarization-empty-state" data-testid="OPS-summarization-empty-state">
           <Sparkles className="h-10 w-10 text-white/10 mb-3" />
           <p className="text-white/40 text-sm">No summaries yet</p>
           <p className="text-white/25 text-xs mt-1">Click "Upload & Summarize" to generate your first summary</p>
@@ -233,7 +240,7 @@ const SummarizationInsights = () => {
         <>
           {/* ── List View ── */}
           {viewMode === 'list' && (
-            <div className="space-y-3">
+            <div className="space-y-3" id="OPS-summarization-list" data-testid="OPS-summarization-list">
               <AnimatePresence>
                 {summaries.map((s) => {
                   const fc = getFileConfig(s.file_type);
@@ -247,6 +254,8 @@ const SummarizationInsights = () => {
                       exit={{ opacity: 0, y: -8 }}
                       className="group rounded-xl border border-white/[0.06] overflow-hidden hover:border-white/[0.12] transition-all"
                       style={{ background: 'rgba(0,0,0,0.2)' }}
+                      id={`OPS-summarization-list-row-${s.id}`}
+                      data-testid={`OPS-summarization-list-row-${s.id}`}
                     >
                       <div className="flex items-center gap-4 p-4">
                         <div className="flex items-center justify-center w-11 h-11 rounded-xl shrink-0" style={{ backgroundColor: `${fc.color}15` }}>
@@ -264,11 +273,13 @@ const SummarizationInsights = () => {
                         </div>
                         <div className="flex items-center gap-1 shrink-0 opacity-50 group-hover:opacity-100 transition-opacity">
                           <Button variant="ghost" size="sm" className="h-8 px-3 text-xs text-white/50 hover:text-amber-400 hover:bg-amber-500/10 gap-1.5 rounded-lg"
-                            onClick={() => navigate(`/operations/summarization/${s.id}`)}>
+                            onClick={() => navigate(`/operations/summarization/${s.id}`)}
+                            id={`OPS-summarization-list-view-btn-${s.id}`} data-testid={`OPS-summarization-list-view-btn-${s.id}`}>
                             <ArrowRight className="h-3.5 w-3.5" />View
                           </Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10"
-                            onClick={() => handleDelete(s)} disabled={deletingId === s.id}>
+                            onClick={() => handleDelete(s)} disabled={deletingId === s.id}
+                            id={`OPS-summarization-list-delete-btn-${s.id}`} data-testid={`OPS-summarization-list-delete-btn-${s.id}`}>
                             {deletingId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                           </Button>
                         </div>
@@ -282,9 +293,9 @@ const SummarizationInsights = () => {
 
           {/* ── Table View ── */}
           {viewMode === 'table' && (
-            <div className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'rgba(0,0,0,0.2)' }}>
+            <div className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'rgba(0,0,0,0.2)' }} id="OPS-summarization-table-wrapper" data-testid="OPS-summarization-table-wrapper">
               <div className="overflow-x-auto">
-                <table className="w-full text-left">
+                <table className="w-full text-left" id="OPS-summarization-table" data-testid="OPS-summarization-table">
                   <thead>
                     <tr className="border-b border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.02)' }}>
                       <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Document</th>
@@ -301,7 +312,7 @@ const SummarizationInsights = () => {
                       const fc = getFileConfig(s.file_type);
                       const FIcon = fc.icon;
                       return (
-                        <tr key={s.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors group">
+                        <tr key={s.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors group" id={`OPS-summarization-table-row-${s.id}`} data-testid={`OPS-summarization-table-row-${s.id}`}>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-3">
                               <div className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0" style={{ backgroundColor: `${fc.color}15` }}>
@@ -325,11 +336,13 @@ const SummarizationInsights = () => {
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
                               <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/60 hover:text-amber-400 hover:bg-amber-500/10"
-                                onClick={() => navigate(`/operations/summarization/${s.id}`)}>
+                                onClick={() => navigate(`/operations/summarization/${s.id}`)}
+                                id={`OPS-summarization-table-view-btn-${s.id}`} data-testid={`OPS-summarization-table-view-btn-${s.id}`}>
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-white/40 hover:text-red-400 hover:bg-red-500/10"
-                                onClick={() => handleDelete(s)} disabled={deletingId === s.id}>
+                                onClick={() => handleDelete(s)} disabled={deletingId === s.id}
+                                id={`OPS-summarization-table-delete-btn-${s.id}`} data-testid={`OPS-summarization-table-delete-btn-${s.id}`}>
                                 {deletingId === s.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                               </Button>
                             </div>
@@ -344,14 +357,15 @@ const SummarizationInsights = () => {
           )}
 
           {/* ── Pagination ── */}
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex items-center justify-between pt-2" id="OPS-summarization-pagination" data-testid="OPS-summarization-pagination">
             <span className="text-[11px] text-white/25">
               Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalItems)} of {totalItems}
             </span>
             {totalPages > 1 && (
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-white disabled:opacity-20"
-                  disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                  disabled={page <= 1} onClick={() => setPage(p => p - 1)}
+                  id="OPS-summarization-page-prev-btn" data-testid="OPS-summarization-page-prev-btn">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
                 {Array.from({ length: totalPages }, (_, i) => i + 1)
@@ -366,13 +380,15 @@ const SummarizationInsights = () => {
                       <span key={`dot-${i}`} className="text-[11px] text-white/20 px-1">...</span>
                     ) : (
                       <button key={p} onClick={() => setPage(p)}
-                        className={`h-8 min-w-[32px] rounded-lg text-[11px] font-medium transition-colors ${p === page ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white hover:bg-white/[0.05]'}`}>
+                        className={`h-8 min-w-[32px] rounded-lg text-[11px] font-medium transition-colors ${p === page ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white hover:bg-white/[0.05]'}`}
+                        id={`OPS-summarization-page-btn-${p}`} data-testid={`OPS-summarization-page-btn-${p}`}>
                         {p}
                       </button>
                     )
                   )}
                 <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-white/40 hover:text-white disabled:opacity-20"
-                  disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                  disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
+                  id="OPS-summarization-page-next-btn" data-testid="OPS-summarization-page-next-btn">
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -391,6 +407,8 @@ const SummarizationInsights = () => {
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
             style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
             onClick={closeModal}
+            id="OPS-summarization-upload-modal-overlay"
+            data-testid="OPS-summarization-upload-modal-overlay"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -400,6 +418,8 @@ const SummarizationInsights = () => {
               className="w-full max-w-md rounded-2xl border border-white/[0.08] overflow-hidden"
               style={{ background: '#1a1028' }}
               onClick={(e) => e.stopPropagation()}
+              id="OPS-summarization-upload-modal"
+              data-testid="OPS-summarization-upload-modal"
             >
               {/* Modal Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
@@ -417,6 +437,8 @@ const SummarizationInsights = () => {
                   size="icon"
                   className="h-8 w-8 rounded-lg text-white/40 hover:text-white"
                   onClick={closeModal}
+                  id="OPS-summarization-modal-close-btn"
+                  data-testid="OPS-summarization-modal-close-btn"
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -431,6 +453,8 @@ const SummarizationInsights = () => {
                   className="hidden"
                   accept=".pdf,.docx,.xlsx,.csv,.pptx,.txt,.md"
                   onChange={handleFileChange}
+                  id="OPS-summarization-file-input"
+                  data-testid="OPS-summarization-file-input"
                 />
 
                 {/* Drop/Select Area */}
@@ -439,6 +463,8 @@ const SummarizationInsights = () => {
                     className="rounded-xl border-2 border-dashed border-white/[0.08] hover:border-amber-500/30 transition-colors cursor-pointer p-8"
                     style={{ background: 'rgba(0,0,0,0.15)' }}
                     onClick={() => fileInputRef.current?.click()}
+                    id="OPS-summarization-dropzone"
+                    data-testid="OPS-summarization-dropzone"
                   >
                     <div className="flex flex-col items-center text-center">
                       <div className="flex items-center justify-center w-12 h-12 rounded-2xl mb-3" style={{ background: 'rgba(245,158,11,0.1)' }}>
@@ -451,7 +477,7 @@ const SummarizationInsights = () => {
                   </div>
                 ) : (
                   /* Selected File Preview */
-                  <div className="rounded-xl border border-white/[0.08] p-4" style={{ background: 'rgba(0,0,0,0.15)' }}>
+                  <div className="rounded-xl border border-white/[0.08] p-4" style={{ background: 'rgba(0,0,0,0.15)' }} id="OPS-summarization-selected-file" data-testid="OPS-summarization-selected-file">
                     <div className="flex items-center gap-3">
                       {(() => {
                         const sfc = getSelectedFileConfig();
@@ -472,6 +498,8 @@ const SummarizationInsights = () => {
                         size="icon"
                         className="h-8 w-8 rounded-lg text-white/40 hover:text-white"
                         onClick={() => setSelectedFile(null)}
+                        id="OPS-summarization-remove-file-btn"
+                        data-testid="OPS-summarization-remove-file-btn"
                       >
                         <X className="h-3.5 w-3.5" />
                       </Button>
@@ -487,6 +515,8 @@ const SummarizationInsights = () => {
                   size="sm"
                   className="text-xs text-white/40 hover:text-white"
                   onClick={closeModal}
+                  id="OPS-summarization-modal-cancel-btn"
+                  data-testid="OPS-summarization-modal-cancel-btn"
                 >
                   Cancel
                 </Button>
@@ -497,6 +527,8 @@ const SummarizationInsights = () => {
                       size="sm"
                       className="text-xs text-white/50 hover:text-white"
                       onClick={() => fileInputRef.current?.click()}
+                      id="OPS-summarization-change-file-btn"
+                      data-testid="OPS-summarization-change-file-btn"
                     >
                       Change File
                     </Button>
@@ -507,6 +539,8 @@ const SummarizationInsights = () => {
                     style={{ background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff' }}
                     onClick={handleUpload}
                     disabled={!selectedFile}
+                    id="OPS-summarization-submit-btn"
+                    data-testid="OPS-summarization-submit-btn"
                   >
                     <Sparkles className="h-3.5 w-3.5" />
                     Summarize
@@ -518,6 +552,7 @@ const SummarizationInsights = () => {
         )}
       </AnimatePresence>
 
+      <div id="OPS-summarization-delete-dialog" data-testid="OPS-summarization-delete-dialog">
       <ConfirmDialog
         open={!!pendingDelete}
         onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
@@ -538,6 +573,7 @@ const SummarizationInsights = () => {
         loading={deletingId === pendingDelete?.id}
         onConfirm={confirmDelete}
       />
+      </div>
     </div>
   );
 };

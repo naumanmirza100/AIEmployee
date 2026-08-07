@@ -32,7 +32,7 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#1a1333] border border-white/10 text-white max-w-2xl">
+      <DialogContent id="OPS-templatepicker-dialog" data-testid="OPS-templatepicker-dialog" className="bg-[#1a1333] border border-white/10 text-white max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-white">Select a template</DialogTitle>
           <DialogDescription className="text-white/55">
@@ -40,13 +40,15 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 max-h-[55vh] overflow-y-auto pr-1">
+        <div id="OPS-templatepicker-list" data-testid="OPS-templatepicker-list" className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 max-h-[55vh] overflow-y-auto pr-1">
           {TEMPLATES.map((t) => {
             const Icon = t.icon;
             const active = selected === t.value;
             return (
               <button
                 key={t.value}
+                id={`OPS-templatepicker-item-${t.value}`}
+                data-testid={`OPS-templatepicker-item-${t.value}`}
                 type="button"
                 onClick={() => setSelected(t.value)}
                 className={`relative text-left rounded-xl border px-3 py-3 transition-all ${
@@ -84,6 +86,8 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
 
         <DialogFooter className="mt-3 gap-2">
           <Button
+            id="OPS-templatepicker-cancel-btn"
+            data-testid="OPS-templatepicker-cancel-btn"
             variant="outline"
             onClick={() => onOpenChange?.(false)}
             className="border-white/10 bg-transparent text-white/80 hover:bg-white/5"
@@ -91,6 +95,8 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
             Cancel
           </Button>
           <Button
+            id="OPS-templatepicker-confirm-btn"
+            data-testid="OPS-templatepicker-confirm-btn"
             onClick={confirm}
             className="font-semibold"
             style={{ backgroundColor: AUTHORING_ACCENT, color: '#1a0e00', border: 'none' }}
