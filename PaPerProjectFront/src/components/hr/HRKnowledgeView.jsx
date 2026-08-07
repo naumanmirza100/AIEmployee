@@ -1,6 +1,6 @@
 import React from 'react';
-import { FileText, MessageSquare } from 'lucide-react';
-import { SubTabsShell, SubTabTrigger, SubTabClickThrough, TabsContent, TabsList } from './HRSubTabs';
+import { FileText } from 'lucide-react';
+import { SubTabsShell, SubTabClickThrough, TabsContent } from './HRSubTabs';
 import HRKnowledgeQAAgent from './HRKnowledgeQAAgent';
 
 /**
@@ -21,10 +21,8 @@ export default function HRKnowledgeView({ activeSubTab, onSubTabChange, onNaviga
       activeSubTab={activeSubTab}
       onSubTabChange={onSubTabChange}
     >
-      <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-        <SubTabTrigger value="documents" active={active} icon={FileText}      label="Documents" />
-        <SubTabTrigger value="qa"        active={active} icon={MessageSquare} label="Knowledge Q&A" />
-      </TabsList>
+      {/* Internal sub-tab bar removed — users navigate via the global
+          AgentSidebar which has Documents + Q&A as sub-items. */}
 
       <TabsContent value="documents" className="mt-6">
         <SubTabClickThrough

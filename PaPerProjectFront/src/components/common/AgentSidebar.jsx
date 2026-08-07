@@ -297,6 +297,11 @@ const AgentSidebar = ({
 function defaultTabFor(path) {
   if (path?.startsWith('/frontline')) return 'queue';
   if (path?.startsWith('/marketing')) return 'dashboard';
+  // PM dashboard lands on Ask (Pilot) by default — matches the restructured
+  // ProjectManagerDashboardPage default of 'project-pilot'.
+  if (path?.startsWith('/project-manager')) return 'project-pilot';
+  // HR dashboard lands on Overview by default — matches HRDashboard.jsx.
+  if (path?.startsWith('/hr')) return 'overview';
   return '';
 }
 

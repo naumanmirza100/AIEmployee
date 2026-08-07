@@ -52,7 +52,8 @@ import HROrgChartTab from './HROrgChartTab';
 import InfoHint, { HintsProvider, useHints } from '../frontline/InfoHint';
 import FrontlineTutorial, { resetTutorial } from '../frontline/FrontlineTutorial';
 import HRFloatingChat from './HRFloatingChat';
-import HRSidebar from './HRSidebar';
+// HRSidebar removed — navigation moved to the global AgentSidebar (see
+// src/utils/agentNavItems.js → hr_agent).
 import { Spinner, EmptyState } from './HRUiKit';
 import HRKnowledgeView from './HRKnowledgeView';
 import HRPeopleView from './HRPeopleView';
@@ -152,59 +153,9 @@ const HRDashboard = () => {
     []
   );
 
-  // Sidebar collapsed state — persisted per browser so the user's preference
-  // survives reloads. Read once on init.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return localStorage.getItem('hr_sidebar_collapsed_v1') === '1'; }
-    catch (_) { return false; }
-  });
-  const toggleSidebar = React.useCallback(() => {
-    setSidebarCollapsed((v) => {
-      const next = !v;
-      try { localStorage.setItem('hr_sidebar_collapsed_v1', next ? '1' : '0'); }
-      catch (_) { /* ignore */ }
-      return next;
-    });
-  }, []);
-
-  // Sidebar items — top-level tabs with nested sub-items pointing to the
-  // (currently hidden) legacy tabs that own the real content. Once Chunks
-  // B–D extract that content into the new views, sub-item values will move
-  // from legacy hidden values (e.g. 'documents') to `?sub=documents` on
-  // the parent — that swap is a one-liner per sub-item.
-  const sidebarItems = React.useMemo(() => [
-    { value: 'overview', label: 'Overview', icon: LayoutDashboard },
-    {
-      value: 'people',
-      label: 'People',
-      icon: Users,
-      subItems: [
-        { value: 'employees', label: 'Employees', icon: Users },
-        { value: 'my_team',   label: 'My team',   icon: UserCheck },
-        { value: 'org_chart', label: 'Org chart', icon: Network },
-      ],
-    },
-    {
-      value: 'knowledge',
-      label: 'Knowledge',
-      icon: MessageSquare,
-      subItems: [
-        { value: 'documents', label: 'Documents',     icon: FileText },
-        { value: 'qa',        label: 'Knowledge Q&A', icon: MessageSquare },
-      ],
-    },
-    {
-      value: 'operations',
-      label: 'Operations',
-      icon: GitBranch,
-      subItems: [
-        { value: 'workflows',     label: 'Workflows',     icon: GitBranch },
-        { value: 'leave',         label: 'Leave',         icon: ClipboardList },
-        { value: 'notifications', label: 'Notifications', icon: AlertTriangle },
-      ],
-    },
-    { value: 'meetings', label: 'Meetings', icon: CalendarClock },
-  ], []);
+  // HRSidebar state removed — navigation moved to the global AgentSidebar
+  // (see src/utils/agentNavItems.js → hr_agent). The old sidebarCollapsed,
+  // toggleSidebar, and sidebarItems were consumed exclusively by <HRSidebar>.
 
   // ---- Onboarding tutorial + per-tab tours ----
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -922,20 +873,11 @@ const HRDashboard = () => {
 
   return (
     <HintsProvider>
-    <div className="flex gap-4 items-start w-full">
-      {/* Left sidebar — hidden below lg (mobile uses the hamburger inside
-          the content area, further down). */}
-      <div data-tour-hr="tabs">
-        <HRSidebar
-          items={sidebarItems}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          collapsed={sidebarCollapsed}
-          onToggleCollapsed={toggleSidebar}
-        />
-      </div>
-
-    <div className="flex-1 min-w-0 space-y-4">
+    {/* HRSidebar removed — its navigation now lives in the global
+        AgentSidebar (see src/utils/agentNavItems.js → hr_agent).
+        The mobile hamburger inside the content area still handles < lg
+        viewports. */}
+    <div data-tour-hr="tabs" className="space-y-4">
       <div
         className="w-full rounded-2xl border border-white/[0.06] p-0"
         style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
@@ -2386,7 +2328,6 @@ const HRDashboard = () => {
         />
       )}
     </div>
-    </div>{/* flex row (sidebar + content) */}
 
     {/* Floating HR Quick Chat — pinned bottom-right, portaled internally */}
     <HRFloatingChat />

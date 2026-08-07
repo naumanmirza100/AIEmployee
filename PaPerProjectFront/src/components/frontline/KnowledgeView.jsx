@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileText, MessageSquare } from 'lucide-react';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import FrontlineDocumentsTab from './FrontlineDocumentsTab';
 import FrontlineKnowledgeQATab from './FrontlineKnowledgeQATab';
 
@@ -50,10 +49,8 @@ export default function KnowledgeView({
   return (
     <div className="space-y-6">
       <Tabs value={active} onValueChange={setActive} className="w-full">
-        <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-          <SubTabTrigger value="documents" active={active} icon={FileText} label="Documents" />
-          <SubTabTrigger value="qa" active={active} icon={MessageSquare} label="Knowledge Q&A" />
-        </TabsList>
+        {/* Internal sub-tab bar removed — users navigate via the global
+            AgentSidebar which has Documents + Q&A as sub-items. */}
 
         <TabsContent value="documents" className="mt-6">
           <FrontlineDocumentsTab
@@ -76,20 +73,4 @@ export default function KnowledgeView({
   );
 }
 
-function SubTabTrigger({ value, active, icon: Icon, label }) {
-  const isActive = value === active;
-  return (
-    <TabsTrigger
-      value={value}
-      className="relative whitespace-nowrap shrink-0 px-3.5 py-1.5 text-sm font-medium rounded-md border transition-all duration-150"
-      style={isActive
-        ? { background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff', borderColor: 'transparent' }
-        : { background: 'transparent', color: 'rgba(255,255,255,0.55)', borderColor: 'transparent' }}
-    >
-      <span className="inline-flex items-center gap-1.5">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </span>
-    </TabsTrigger>
-  );
-}
+// SubTabTrigger removed — internal sub-tab bar no longer rendered.

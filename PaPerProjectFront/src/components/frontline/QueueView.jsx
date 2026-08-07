@@ -1,6 +1,6 @@
 import React from 'react';
 import { Headphones, Ticket } from 'lucide-react';
-import { SubTabsShell, SubTabTrigger, SubTabClickThrough, TabsContent, TabsList } from './FrontlineSubTabs';
+import { SubTabsShell, SubTabClickThrough, TabsContent } from './FrontlineSubTabs';
 import { HandoffQueueTab } from './FrontlineDashboard';
 
 /**
@@ -23,10 +23,8 @@ export default function QueueView({ activeSubTab, onSubTabChange, onNavigateToTa
       activeSubTab={activeSubTab}
       onSubTabChange={onSubTabChange}
     >
-      <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-        <SubTabTrigger value="handoffs" active={activeSubTab || 'handoffs'} icon={Headphones} label="Hand-offs" />
-        <SubTabTrigger value="tickets"  active={activeSubTab || 'handoffs'} icon={Ticket}     label="Tickets" />
-      </TabsList>
+      {/* Internal sub-tab bar removed — users navigate via the global
+          AgentSidebar which has Hand-offs + Tickets as sub-items. */}
 
       <TabsContent value="handoffs" className="mt-6">
         <HandoffQueueTab />

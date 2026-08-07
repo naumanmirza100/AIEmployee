@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Target, MessageSquare, CalendarPlus } from 'lucide-react';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import ProjectPilotAgent from './ProjectPilotAgent';
 import KnowledgeQAAgent from './KnowledgeQAAgent';
 import MeetingScheduler from './MeetingScheduler';
@@ -42,16 +41,10 @@ export default function AskView({
   return (
     <div className="space-y-6">
       <Tabs value={active} onValueChange={setActive} className="w-full">
-        <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-          <SubTabTrigger value="pilot"    active={active} icon={Target}         label="Project Pilot" />
-          <SubTabTrigger value="kqa"      active={active} icon={MessageSquare}  label="Knowledge Q&A" />
-          <SubTabTrigger value="meetings" active={active} icon={CalendarPlus}   label="Meeting Scheduler" />
-        </TabsList>
-
-        {/* All three sub-tabs mount their component. shadcn's TabsContent
-            hides inactive panels via CSS, which keeps conversation state
-            (chat history, selected chat, in-progress draft) intact when
-            the user flips between Pilot / KQA / Meetings. */}
+        {/* Internal sub-tab bar removed — users navigate between Pilot /
+            KQA / Meetings via the global AgentSidebar. Tabs wrapper kept
+            so old `?sub=kqa` / `?sub=meetings` bookmarks still resolve
+            to the right pane; only one TabsContent renders at a time. */}
         <TabsContent value="pilot" className="mt-6">
           <ProjectPilotAgent
             projects={projects || []}
@@ -70,20 +63,4 @@ export default function AskView({
   );
 }
 
-function SubTabTrigger({ value, active, icon: Icon, label }) {
-  const isActive = value === active;
-  return (
-    <TabsTrigger
-      value={value}
-      className="relative whitespace-nowrap shrink-0 px-3.5 py-1.5 text-sm font-medium rounded-md border transition-all duration-150"
-      style={isActive
-        ? { background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff', borderColor: 'transparent' }
-        : { background: 'transparent', color: 'rgba(255,255,255,0.55)', borderColor: 'transparent' }}
-    >
-      <span className="inline-flex items-center gap-1.5">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </span>
-    </TabsTrigger>
-  );
-}
+// SubTabTrigger removed — internal sub-tab bar no longer rendered.

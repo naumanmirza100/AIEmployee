@@ -1,6 +1,6 @@
 import React from 'react';
-import { Users, UserCheck, Network } from 'lucide-react';
-import { SubTabsShell, SubTabTrigger, SubTabClickThrough, TabsContent, TabsList } from './HRSubTabs';
+import { Users } from 'lucide-react';
+import { SubTabsShell, SubTabClickThrough, TabsContent } from './HRSubTabs';
 import HRManagerTeamTab from './HRManagerTeamTab';
 import HROrgChartTab from './HROrgChartTab';
 
@@ -22,11 +22,8 @@ export default function HRPeopleView({ activeSubTab, onSubTabChange, onNavigateT
       activeSubTab={activeSubTab}
       onSubTabChange={onSubTabChange}
     >
-      <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-        <SubTabTrigger value="employees" active={active} icon={Users}     label="Employees" />
-        <SubTabTrigger value="my_team"   active={active} icon={UserCheck} label="My team" />
-        <SubTabTrigger value="org_chart" active={active} icon={Network}   label="Org chart" />
-      </TabsList>
+      {/* Internal sub-tab bar removed — users navigate via the global
+          AgentSidebar which has Employees + My team + Org chart as sub-items. */}
 
       <TabsContent value="employees" className="mt-6">
         <SubTabClickThrough

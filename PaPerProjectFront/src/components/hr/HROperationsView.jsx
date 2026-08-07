@@ -1,6 +1,6 @@
 import React from 'react';
-import { GitBranch, ClipboardList, AlertTriangle } from 'lucide-react';
-import { SubTabsShell, SubTabTrigger, SubTabClickThrough, TabsContent, TabsList } from './HRSubTabs';
+import { GitBranch } from 'lucide-react';
+import { SubTabsShell, SubTabClickThrough, TabsContent } from './HRSubTabs';
 import HRLeaveTab from './HRLeaveTab';
 import HRNotificationsTab from './HRNotificationsTab';
 
@@ -23,11 +23,8 @@ export default function HROperationsView({ activeSubTab, onSubTabChange, onNavig
       activeSubTab={activeSubTab}
       onSubTabChange={onSubTabChange}
     >
-      <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-        <SubTabTrigger value="workflows"     active={active} icon={GitBranch}      label="Workflows" />
-        <SubTabTrigger value="leave"         active={active} icon={ClipboardList}  label="Leave" />
-        <SubTabTrigger value="notifications" active={active} icon={AlertTriangle}  label="Notifications" />
-      </TabsList>
+      {/* Internal sub-tab bar removed — users navigate via the global
+          AgentSidebar which has Workflows + Leave + Notifications as sub-items. */}
 
       <TabsContent value="workflows" className="mt-6">
         <SubTabClickThrough

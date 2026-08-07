@@ -392,8 +392,8 @@ export const HINTS = {
     body: 'These tiles pull real data from the last 30 days: SLA status, knowledge base gaps, background failure queue (DLQ), and recent audit events. Refresh any tile from its icon.',
   },
   ovQuicknav: {
-    title: 'Quick jump to any tool',
-    body: 'Shortcut cards to the most-used tabs — Documents, Knowledge Q&A, Tickets, Chat widget, Workflows, or Analytics. Click any card to switch tabs instantly.',
+    title: 'Quick jump to any tab',
+    body: 'Shortcut cards for the tabs you use most. The sidebar on the left has the full navigation including sub-items — Hand-offs, Tickets, Documents, Analytics, and everything else.',
   },
 
   // Documents
@@ -573,16 +573,105 @@ export const HINTS = {
   },
 };
 
+// ---- Main "Take the Tour" tour (added post-restructure) -----------------
+// Frontline previously had no main tour — added here to match PM + HR.
+// Walks the user through the 6 visible tabs after the consolidation.
+export const FRONTLINE_MAIN_TOUR_STEPS = [
+  {
+    title: 'Welcome to the Frontline Agent 👋',
+    body: "Quick tour of the 6 tabs on this dashboard. You can skip anytime, or replay it later from 'Take the Tour' in the header.",
+    placement: 'center',
+  },
+  {
+    selector: '[data-tour-fl="tabs"]',
+    title: 'Navigation lives in the left sidebar',
+    body: "Every tab is reachable from the global sidebar on the left. Parent tabs (Queue / Knowledge / Insights / Automation / Settings) expand to show sub-items when you're on them.",
+    placement: 'right',
+  },
+  { tab: 'queue', title: 'Queue',
+    body: 'Your day-to-day support work: reply to escalated Hand-offs and manage the Tickets backlog. Both are sub-items of Queue.',
+    placement: 'center' },
+  { tab: 'knowledge', title: 'Knowledge',
+    body: 'Feed the knowledge base (Documents) and ask questions of it (Knowledge Q&A). Ctrl+K opens the floating chat for quick asks.',
+    placement: 'center' },
+  { tab: 'insights', title: 'Insights',
+    body: 'The look-at-data tabs: Analytics (KPI dashboards, team perf, CSV export) and AI Graphs (natural-language chart generator).',
+    placement: 'center' },
+  { tab: 'automation', title: 'Automation',
+    body: 'Trigger-based Workflows and notification templates + scheduled sends. Set it and forget it.',
+    placement: 'center' },
+  { tab: 'settings', title: 'Settings',
+    body: 'Configure the public Chat widget: theme, allowed origins, embed snippet. Copy-paste it into your site\'s HTML and customers can start chatting.',
+    placement: 'center' },
+  { tab: 'overview', title: 'Overview',
+    body: 'Home base: stat cards + admin insights panel (SLA, KB gaps, DLQ, audit log). Come back here for a pulse on how the operation is running.',
+    placement: 'center' },
+];
+
+export const FRONTLINE_MAIN_TOUR_KEY = 'frontline_tutorial_seen_v1';
+
+// ---- Per-tab tours for the NEW consolidated tabs ------------------------
+// Short, focused tours for the 5 new tabs added in the restructure. They
+// live alongside the (untouched) legacy tab tours above — those still work
+// if a user deep-links to a hidden tab like ?tab=documents.
+
+export const QUEUE_TOUR = {
+  key: 'frontline_tour_queue_v1',
+  label: 'Queue',
+  steps: [
+    { title: 'Queue tab 🎧', body: "Your day-to-day support work: Hand-offs (tickets escalated by the AI that need a human reply) and Tickets (the full backlog).", placement: 'center' },
+    { title: 'Sub-items in the sidebar', body: 'Hand-offs and Tickets are indented under Queue in the left sidebar. Click either to jump straight in.', placement: 'center' },
+    { title: 'Where to start', body: 'Most days you\'ll start with Hand-offs — that\'s the queue of things that need YOUR attention. Tickets is the full history.', placement: 'center' },
+  ],
+};
+
+export const KNOWLEDGE_TOUR_NEW = {
+  key: 'frontline_tour_knowledge_v1',
+  label: 'Knowledge',
+  steps: [
+    { title: 'Knowledge tab 💬', body: 'Feed the KB (Documents) and query it (Knowledge Q&A). Documents feed answers; Q&A retrieves from them with citations.', placement: 'center' },
+    { title: 'Documents vs. Q&A', body: 'Both are sub-items in the sidebar. Upload PDFs / policies to Documents; ask questions in Q&A — the AI shows exactly which docs it used.', placement: 'center' },
+    { title: 'Quick asks via Ctrl+K', body: 'The floating chat (bottom-right, Ctrl+K from anywhere) hits the same Q&A endpoint. Use it when you don\'t need chat history sidebar.', placement: 'center' },
+  ],
+};
+
+export const INSIGHTS_TOUR = {
+  key: 'frontline_tour_insights_v1',
+  label: 'Insights',
+  steps: [
+    { title: 'Insights tab 📊', body: 'The two look-at-data tabs consolidated: Analytics (KPI dashboards, trend charts, team performance, CSV export) and AI Graphs (natural-language chart generator).', placement: 'center' },
+    { title: 'Sub-items in the sidebar', body: 'Analytics + AI Graphs are indented under Insights. Click either to switch.', placement: 'center' },
+  ],
+};
+
+export const AUTOMATION_TOUR = {
+  key: 'frontline_tour_automation_v1',
+  label: 'Automation',
+  steps: [
+    { title: 'Automation tab ⚙️', body: 'Set-it-and-forget-it flows: Workflows (trigger-based automation — send email, update ticket, webhook, slack, assign) and Notifications (templates + scheduled sends).', placement: 'center' },
+    { title: 'Sub-items in the sidebar', body: 'Workflows + Notifications are indented under Automation. Workflows has a step builder + dry-run + run history with approve/reject on paused executions.', placement: 'center' },
+  ],
+};
+
+export const SETTINGS_TOUR = {
+  key: 'frontline_tour_settings_v1',
+  label: 'Settings',
+  steps: [
+    { title: 'Settings tab 🔧', body: 'Configure how the agent surfaces to your customers. Currently: the public Chat widget.', placement: 'center' },
+    { title: 'Chat widget', body: 'Set the theme, allowed origins, and copy the embed snippet. Paste into your site\'s HTML and customers can start chatting.', placement: 'center' },
+  ],
+};
+
 // Convenience map for quick lookup by tab value.
+// Only includes tours for VISIBLE tabs so the per-tab launcher UI doesn't
+// offer tours for tabs the user can't reach through normal navigation.
+// The hidden-tab tour constants above (DOCUMENTS_TOUR, QA_TOUR, etc.) are
+// still exported so URL deep-links can still launch them if needed.
 export const TAB_TOURS = {
-  overview: OVERVIEW_TOUR,
-  documents: DOCUMENTS_TOUR,
-  qa: QA_TOUR,
-  widget: WIDGET_TOUR,
-  tickets: TICKETS_TOUR,
-  handoffs: HANDOFFS_TOUR,
-  notifications: NOTIFICATIONS_TOUR,
-  workflows: WORKFLOWS_TOUR,
-  analytics: ANALYTICS_TOUR,
-  'ai-graphs': AI_GRAPHS_TOUR,
+  queue:      QUEUE_TOUR,
+  knowledge:  KNOWLEDGE_TOUR_NEW,
+  insights:   INSIGHTS_TOUR,
+  automation: AUTOMATION_TOUR,
+  settings:   SETTINGS_TOUR,
+  overview:   OVERVIEW_TOUR,
 };

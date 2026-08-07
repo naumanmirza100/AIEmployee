@@ -1,6 +1,6 @@
 import React from 'react';
 import { Monitor } from 'lucide-react';
-import { SubTabsShell, SubTabTrigger, SubTabClickThrough, TabsContent, TabsList } from './FrontlineSubTabs';
+import { SubTabsShell, SubTabClickThrough, TabsContent } from './FrontlineSubTabs';
 
 /**
  * SettingsView — Settings tab body: currently just [Chat widget].
@@ -21,9 +21,8 @@ export default function SettingsView({ activeSubTab, onSubTabChange, onNavigateT
       activeSubTab={activeSubTab}
       onSubTabChange={onSubTabChange}
     >
-      <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-        <SubTabTrigger value="widget" active={activeSubTab || 'widget'} icon={Monitor} label="Chat widget" />
-      </TabsList>
+      {/* Internal sub-tab bar removed — users navigate via the global
+          AgentSidebar which has Chat widget as a sub-item. */}
 
       <TabsContent value="widget" className="mt-6">
         <SubTabClickThrough

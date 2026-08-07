@@ -1,6 +1,5 @@
 import React from 'react';
-import { GitBranch, Bell } from 'lucide-react';
-import { SubTabsShell, SubTabTrigger, TabsContent, TabsList } from './FrontlineSubTabs';
+import { SubTabsShell, TabsContent } from './FrontlineSubTabs';
 import { FrontlineWorkflowsTab, FrontlineNotificationsTab } from './FrontlineDashboard';
 
 /**
@@ -20,10 +19,8 @@ export default function AutomationView({ activeSubTab, onSubTabChange }) {
       activeSubTab={activeSubTab}
       onSubTabChange={onSubTabChange}
     >
-      <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-        <SubTabTrigger value="workflows"     active={activeSubTab || 'workflows'} icon={GitBranch} label="Workflows" />
-        <SubTabTrigger value="notifications" active={activeSubTab || 'workflows'} icon={Bell}      label="Notifications" />
-      </TabsList>
+      {/* Internal sub-tab bar removed — users navigate via the global
+          AgentSidebar which has Workflows + Notifications as sub-items. */}
 
       <TabsContent value="workflows" className="mt-6">
         <FrontlineWorkflowsTab />
