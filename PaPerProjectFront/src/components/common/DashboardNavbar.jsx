@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LogOut, Bell, Key, User } from 'lucide-react';
+import { LogOut, Bell, Key, User, Menu } from 'lucide-react';
+import AgentSidebar, { EXPANDED_W, COLLAPSED_W } from '@/components/common/AgentSidebar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +24,7 @@ const DashboardNavbar = ({
   onLogout,
   onNotificationClick,
   navItems = [],
+  sidebarLoading = false,
 }) => {
   const navigate = useNavigate();
   const [showConfirm, setShowConfirm] = useState(false);
@@ -30,6 +32,39 @@ const DashboardNavbar = ({
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const notifRef = useRef(null);
+
+  // ── Agent sidebar state ──
+  const hasSidebar = showNavTabs && navItems.length > 0;
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('agentSidebarCollapsed') === '1'; } catch { return false; }
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try { localStorage.setItem('agentSidebarCollapsed', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+
+  // Reserve space for the fixed desktop sidebar by padding the document body,
+  // so page content (centered in its own container) shifts right without any
+  // per-page change. Restored on unmount. Mobile (< md) reserves nothing — the
+  // sidebar is an overlay drawer there.
+  useEffect(() => {
+    if (!hasSidebar) return undefined;
+    const mq = window.matchMedia('(min-width: 768px)');
+    const apply = () => {
+      const w = mq.matches ? (collapsed ? COLLAPSED_W : EXPANDED_W) : 0;
+      document.body.style.paddingLeft = `${w}px`;
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => {
+      mq.removeEventListener('change', apply);
+      document.body.style.paddingLeft = '';
+    };
+  }, [hasSidebar, collapsed]);
 
   // Fetch notifications for project users (Django User auth)
   // Determine which auth token and notification endpoint to use
@@ -114,16 +149,6 @@ const DashboardNavbar = ({
     } catch {}
   };
 
-  const handleNavClick = (item) => {
-    if (item.onClick) {
-      item.onClick();
-    } else if (item.path) {
-      navigate(item.path);
-    } else if (onSectionChange) {
-      onSectionChange(item.section);
-    }
-  };
-
   const getNotifColor = (type) => {
     if (type?.includes('meeting_request') || type?.includes('meeting_counter')) return 'text-violet-400';
     if (type?.includes('accepted')) return 'text-green-400';
@@ -146,24 +171,37 @@ const DashboardNavbar = ({
   return (
     <>
       <header
-        className="border-b border-white/[0.08]"
+        className="border-b border-white/[0.08] sticky top-0 z-30"
         style={{ background: 'linear-gradient(180deg, #0a0a14 0%, #0d0b1a 40%, #110e1f 100%)' }}
       >
-        <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
+        <div className="container mx-auto px-3 sm:px-4 py-2 sm:py-2.5">
           {/* Header Row */}
-          <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-              <Link to="/" className="shrink-0" title="Pay Per Project — Home">
-                <img
-                  src="/logo.png"
-                  alt="Pay Per Project logo"
-                  className="h-9 w-9 sm:h-11 sm:w-11 rounded-md object-contain"
-                />
-              </Link>
-              {Icon && <Icon className="h-6 w-6 sm:h-8 sm:w-8 text-violet-400 shrink-0" />}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
+              {hasSidebar && (
+                <button
+                  onClick={() => setMobileOpen(true)}
+                  className="md:hidden h-8 w-8 shrink-0 flex items-center justify-center rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                  title="Open menu"
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+              )}
+              {/* Logo only when there's no sidebar (the sidebar already shows the
+                  brand); avoids a duplicate logo in the top bar. */}
+              {!hasSidebar && (
+                <Link to="/" className="shrink-0" title="Pay Per Project — Home">
+                  <img
+                    src="/logo.png"
+                    alt="Pay Per Project logo"
+                    className="h-8 w-8 sm:h-9 sm:w-9 rounded-md object-contain"
+                  />
+                </Link>
+              )}
+              {Icon && <Icon className="h-5 w-5 sm:h-6 sm:w-6 text-violet-400 shrink-0" />}
               <div className="min-w-0">
-                <h1 className="text-lg sm:text-2xl font-bold truncate text-white">{title}</h1>
-                {subtitle && <p className="text-xs sm:text-sm text-white/50 truncate">{subtitle}</p>}
+                <h1 className="text-sm sm:text-lg font-bold truncate text-white leading-tight">{title}</h1>
+                {subtitle && <p className="text-[11px] sm:text-xs text-white/45 truncate leading-tight">{subtitle}</p>}
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
@@ -251,18 +289,18 @@ const DashboardNavbar = ({
               {/* Profile dropdown — avatar + name/email; opens a menu with profile, API keys, logout */}
               {user && (
                 <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-2 sm:gap-3 rounded-full focus:outline-none focus:ring-2 focus:ring-violet-400/50 pr-1">
+                  <DropdownMenuTrigger className="flex items-center gap-2 rounded-full focus:outline-none focus:ring-2 focus:ring-violet-400/50 pr-1">
                     <div
-                      className="h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center shrink-0 text-white font-bold text-sm sm:text-base select-none"
+                      className="h-8 w-8 rounded-full flex items-center justify-center shrink-0 text-white font-bold text-sm select-none"
                       style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a259ff 100%)', boxShadow: '0 0 10px rgba(124,58,237,0.45)' }}
                     >
                       {(user.fullName || user.username || user.email || 'U').charAt(0).toUpperCase()}
                     </div>
                     <div className="hidden sm:block text-left">
-                      <p className="text-sm font-semibold text-white leading-tight truncate max-w-[160px]">
+                      <p className="text-xs font-semibold text-white leading-tight truncate max-w-[150px]">
                         {user.fullName || user.username || user.email?.split('@')[0] || 'User'}
                       </p>
-                      <p className="text-xs text-white/40 leading-tight truncate max-w-[160px]">{user.email}</p>
+                      <p className="text-[11px] text-white/40 leading-tight truncate max-w-[150px]">{user.email}</p>
                     </div>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
@@ -310,35 +348,23 @@ const DashboardNavbar = ({
             </div>
           </div>
 
-          {/* Navigation Tabs */}
-          {showNavTabs && navItems.length > 0 && (
-            <div className="border-t border-white/[0.08] pt-3 sm:pt-4 -mx-3 sm:-mx-4 px-3 sm:px-4">
-              <div className="flex gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none pb-1" style={{scrollbarWidth:'none',msOverflowStyle:'none'}}>
-                {navItems.map((item) => {
-                  const isActive = item.section === activeSection;
-                  return (
-                    <Button
-                      key={item.section || item.path || item.label}
-                      variant={isActive ? 'default' : 'ghost'}
-                      onClick={() => handleNavClick(item)}
-                      size="sm"
-                      className={`flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 h-8 sm:h-9 px-2.5 sm:px-3 text-xs sm:text-sm ${
-                        isActive
-                          ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-[0_0_12px_rgba(139,92,246,0.3)]'
-                          : 'text-white/60 hover:text-white hover:bg-white/10'
-                      }`}
-                    >
-                      {item.icon && <item.icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
-                      <span className="hidden xs:inline sm:inline">{item.label}</span>
-                      <span className="xs:hidden sm:hidden">{item.shortLabel || item.label.split(' ')[0]}</span>
-                    </Button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          {/* Cross-agent navigation now lives in the left AgentSidebar (below),
+              not in top tabs. */}
         </div>
       </header>
+
+      {/* ── Left agent sidebar (replaces the old top tabs) ── */}
+      {hasSidebar && (
+        <AgentSidebar
+          navItems={navItems}
+          activeSection={activeSection}
+          collapsed={collapsed}
+          onToggle={toggleCollapsed}
+          mobileOpen={mobileOpen}
+          onMobileClose={() => setMobileOpen(false)}
+          loading={sidebarLoading}
+        />
+      )}
 
       {/* Logout Confirmation Modal */}
       {showConfirm && (

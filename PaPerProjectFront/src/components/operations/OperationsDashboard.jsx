@@ -143,90 +143,9 @@ const OperationsDashboard = () => {
         ))}
       </div>
 
-      {/* Main Tabs - each tab navigates to its URL */}
+      {/* Main Tabs — the tab BAR now lives in the left sidebar; this keeps the
+          URL-driven content switching. */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        {/* Mobile & Tablet: Hamburger Menu (below lg) */}
-        <div className="lg:hidden">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="w-full justify-between h-11">
-                <div className="flex items-center gap-2">
-                  <currentTab.icon className="h-4 w-4" />
-                  <span className="font-medium">{currentTab.label}</span>
-                </div>
-                <Menu className="h-5 w-5 text-muted-foreground" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto">
-              {TAB_ITEMS.map((item) => {
-                const isActive = item.value === activeTab;
-                const showBadge = item.value === 'notifications' && unreadCount > 0;
-                return (
-                  <DropdownMenuItem
-                    key={item.value}
-                    onClick={() => handleTabChange(item.value)}
-                    className={`flex items-center justify-between py-3 cursor-pointer ${
-                      isActive ? 'bg-primary/10' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <item.icon className={`h-4 w-4 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
-                      <span className={isActive ? 'font-medium text-primary' : ''}>{item.label}</span>
-                      {showBadge && (
-                        <span className="ml-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                          {unreadCount > 99 ? '99+' : unreadCount}
-                        </span>
-                      )}
-                    </div>
-                    {isActive && <Check className="h-4 w-4 text-primary" />}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Desktop: Regular Tabs (lg and above) with horizontal scroll */}
-        <div className="hidden lg:block overflow-x-auto pb-1">
-          <TabsList
-            className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
-            style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
-          >
-            {TAB_ITEMS.map((item) => {
-              const showBadge = item.value === 'notifications' && unreadCount > 0;
-              return (
-                <TabsTrigger
-                  key={item.value}
-                  value={item.value}
-                  className="whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150 relative"
-                  style={activeTab === item.value
-                    ? {
-                        background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
-                        color: '#fff',
-                        border: '1.5px solid #f59e0b',
-                        boxShadow: '0 0 8px 0 #f59e0b55',
-                      }
-                    : {
-                        background: 'rgba(60, 30, 90, 0.22)',
-                        color: '#cfc6e6',
-                        border: '1.5px solid #2d2342',
-                        boxShadow: 'none',
-                      }
-                  }
-                >
-                  <item.icon className="h-4 w-4 mr-2" />
-                  {item.label}
-                  {showBadge && (
-                    <span className="ml-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </span>
-                  )}
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
-        </div>
-
         <TabsContent value="dashboard" className="space-y-5 mt-2">
           {/* Quick Actions */}
           <div>
