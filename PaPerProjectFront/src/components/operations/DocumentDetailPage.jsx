@@ -277,7 +277,7 @@ const DocumentDetailPage = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-32">
+      <div id="OPS-docdetail-loading-state" data-testid="OPS-docdetail-loading-state" className="flex flex-col items-center justify-center py-32">
         <Loader2 className="h-10 w-10 animate-spin text-amber-500/60" />
         <p className="mt-4 text-sm text-white/40">Loading document details...</p>
       </div>
@@ -286,10 +286,12 @@ const DocumentDetailPage = () => {
 
   if (!document) {
     return (
-      <div className="flex flex-col items-center justify-center py-32">
+      <div id="OPS-docdetail-not-found-state" data-testid="OPS-docdetail-not-found-state" className="flex flex-col items-center justify-center py-32">
         <FileText className="h-12 w-12 text-white/15 mb-4" />
         <p className="text-white/40 text-sm">Document not found</p>
         <Button
+          id="OPS-docdetail-notfound-back-btn"
+          data-testid="OPS-docdetail-notfound-back-btn"
           variant="ghost"
           className="mt-4 text-amber-400 hover:text-amber-300"
           onClick={() => navigate('/operations/documents')}
@@ -305,9 +307,11 @@ const DocumentDetailPage = () => {
   const FI = fc.icon;
 
   return (
-    <div className="space-y-6">
+    <div id="OPS-docdetail-page" data-testid="OPS-docdetail-page" className="space-y-6">
       {/* Back Button */}
       <Button
+        id="OPS-docdetail-back-btn"
+        data-testid="OPS-docdetail-back-btn"
         variant="ghost"
         className="text-white/50 hover:text-white gap-2 -ml-2"
         onClick={() => navigate('/operations/documents')}
@@ -317,7 +321,7 @@ const DocumentDetailPage = () => {
       </Button>
 
       {/* Header Card */}
-      <div className="rounded-2xl border border-white/[0.06] p-6" style={{ background: 'rgba(0,0,0,0.25)' }}>
+      <div id="OPS-docdetail-header-card" data-testid="OPS-docdetail-header-card" className="rounded-2xl border border-white/[0.06] p-6" style={{ background: 'rgba(0,0,0,0.25)' }}>
         <div className="flex items-start gap-4">
           <div className="flex items-center justify-center w-16 h-16 rounded-2xl shrink-0" style={{ backgroundColor: fc.bg }}>
             <FI className="h-8 w-8" style={{ color: fc.color }} />
@@ -345,7 +349,7 @@ const DocumentDetailPage = () => {
             { label: 'Chunks', value: document.chunks_count || 0, icon: Layers, color: '#14b8a6' },
             { label: 'Uploaded', value: formatDate(document.created_at), icon: Calendar, color: '#f59e0b' },
           ].map((m, i) => (
-            <div key={i} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <div key={i} id={`OPS-docdetail-stat-${m.label.toLowerCase()}`} data-testid={`OPS-docdetail-stat-${m.label.toLowerCase()}`} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
               <m.icon className="h-4 w-4 shrink-0" style={{ color: `${m.color}80` }} />
               <div className="min-w-0">
                 <p className="text-[10px] text-white/30 uppercase tracking-wider">{m.label}</p>
@@ -357,8 +361,8 @@ const DocumentDetailPage = () => {
       </div>
 
       {/* Tabbed Content */}
-      <Tabs value={detailTab} onValueChange={setDetailTab}>
-        <TabsList className="h-10 p-1 rounded-xl w-full sm:w-auto justify-start gap-1 bg-[#1a1333] border border-[#3a295a]">
+      <Tabs id="OPS-docdetail-tabs" data-testid="OPS-docdetail-tabs" value={detailTab} onValueChange={setDetailTab}>
+        <TabsList id="OPS-docdetail-tabs-list" data-testid="OPS-docdetail-tabs-list" className="h-10 p-1 rounded-xl w-full sm:w-auto justify-start gap-1 bg-[#1a1333] border border-[#3a295a]">
           {[
             { value: 'summary', label: 'Summary', icon: Sparkles },
             { value: 'entities', label: 'Entities', icon: Brain },
@@ -366,6 +370,8 @@ const DocumentDetailPage = () => {
           ].map((tab) => (
             <TabsTrigger
               key={tab.value}
+              id={`OPS-docdetail-tab-${tab.value}`}
+              data-testid={`OPS-docdetail-tab-${tab.value}`}
               value={tab.value}
               className="text-sm rounded-lg px-4 gap-2 data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-300 text-white/40 data-[state=active]:shadow-none"
             >
@@ -376,9 +382,9 @@ const DocumentDetailPage = () => {
         </TabsList>
 
         {/* Summary Tab */}
-        <TabsContent value="summary" className="mt-6 space-y-4">
+        <TabsContent id="OPS-docdetail-tabpanel-summary" data-testid="OPS-docdetail-tabpanel-summary" value="summary" className="mt-6 space-y-4">
           {document.summary ? (
-            <div className="rounded-xl border border-amber-500/10 p-5" style={{ background: 'rgba(245,158,11,0.04)' }}>
+            <div id="OPS-docdetail-summary-card" data-testid="OPS-docdetail-summary-card" className="rounded-xl border border-amber-500/10 p-5" style={{ background: 'rgba(245,158,11,0.04)' }}>
               <div className="flex items-center gap-2 mb-3">
                 <Sparkles className="h-4 w-4 text-amber-400" />
                 <h4 className="text-sm font-semibold text-white">AI Summary</h4>
@@ -386,14 +392,14 @@ const DocumentDetailPage = () => {
               <p className="text-sm text-white/60 leading-relaxed">{document.summary}</p>
             </div>
           ) : (
-            <div className="rounded-xl border border-white/[0.06] p-6 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-docdetail-summary-empty-state" data-testid="OPS-docdetail-summary-empty-state" className="rounded-xl border border-white/[0.06] p-6 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <Info className="h-5 w-5 text-white/20 mx-auto mb-2" />
               <p className="text-xs text-white/30">No summary available. Re-upload the document to generate an AI summary.</p>
             </div>
           )}
 
           {document.key_insights && document.key_insights.length > 0 && (
-            <div className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-docdetail-insights-card" data-testid="OPS-docdetail-insights-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <div className="flex items-center gap-2 mb-3">
                 <Lightbulb className="h-4 w-4 text-amber-400" />
                 <h4 className="text-sm font-semibold text-white">Key Insights</h4>
@@ -401,7 +407,7 @@ const DocumentDetailPage = () => {
               </div>
               <div className="space-y-2">
                 {document.key_insights.map((insight, i) => (
-                  <div key={i} className="flex items-start gap-2.5 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <div key={i} id={`OPS-docdetail-insight-row-${i}`} data-testid={`OPS-docdetail-insight-row-${i}`} className="flex items-start gap-2.5 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
                     <div className="h-5 w-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.12)' }}>
                       <span className="text-[10px] font-bold text-amber-400">{i + 1}</span>
                     </div>
@@ -412,7 +418,7 @@ const DocumentDetailPage = () => {
             </div>
           )}
 
-          <div className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
+          <div id="OPS-docdetail-processing-card" data-testid="OPS-docdetail-processing-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
             <div className="flex items-center gap-2 mb-3">
               <Zap className="h-4 w-4 text-emerald-400" />
               <h4 className="text-sm font-semibold text-white">Processing Details</h4>
@@ -424,7 +430,7 @@ const DocumentDetailPage = () => {
                 { label: 'Text Chunks', value: document.chunks_count || 0 },
                 { label: 'Processed At', value: document.processed_at ? formatDateTime(document.processed_at) : 'N/A' },
               ].map((item, i) => (
-                <div key={i} className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                <div key={i} id={`OPS-docdetail-processing-${item.label.toLowerCase().replace(/\s+/g, '-')}`} data-testid={`OPS-docdetail-processing-${item.label.toLowerCase().replace(/\s+/g, '-')}`} className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
                   <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{item.label}</p>
                   <p className="text-sm text-white/70 font-medium">{item.value}</p>
                 </div>
@@ -433,7 +439,7 @@ const DocumentDetailPage = () => {
           </div>
 
           {document.tags && (
-            <div className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-docdetail-tags-card" data-testid="OPS-docdetail-tags-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <div className="flex items-center gap-2 mb-3">
                 <Tag className="h-4 w-4 text-violet-400" />
                 <h4 className="text-sm font-semibold text-white">Tags</h4>
@@ -442,6 +448,8 @@ const DocumentDetailPage = () => {
                 {document.tags.split(',').map((tag, i) => (
                   <span
                     key={i}
+                    id={`OPS-docdetail-tag-${i}`}
+                    data-testid={`OPS-docdetail-tag-${i}`}
                     className="text-xs px-3 py-1 rounded-full text-violet-300 border border-violet-400/20"
                     style={{ background: 'rgba(139,92,246,0.08)' }}
                   >
@@ -454,7 +462,7 @@ const DocumentDetailPage = () => {
         </TabsContent>
 
         {/* Entities Tab */}
-        <TabsContent value="entities" className="mt-6 space-y-4">
+        <TabsContent id="OPS-docdetail-tabpanel-entities" data-testid="OPS-docdetail-tabpanel-entities" value="entities" className="mt-6 space-y-4">
           {document.entities && Object.keys(document.entities).length > 0 ? (
             Object.entries(document.entities).map(([key, values]) => {
               if (!Array.isArray(values) || values.length === 0) return null;
@@ -469,7 +477,7 @@ const DocumentDetailPage = () => {
               const EntityIcon = iconMap[key] || Tag;
               const entityColor = colorMap[key] || '#6b7280';
               return (
-                <div key={key} className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
+                <div key={key} id={`OPS-docdetail-entity-group-${key}`} data-testid={`OPS-docdetail-entity-group-${key}`} className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
                   <div className="flex items-center gap-2 mb-3">
                     <EntityIcon className="h-4 w-4" style={{ color: entityColor }} />
                     <h4 className="text-sm font-semibold text-white capitalize">{key.replace(/_/g, ' ')}</h4>
@@ -479,6 +487,8 @@ const DocumentDetailPage = () => {
                     {values.map((v, i) => (
                       <span
                         key={i}
+                        id={`OPS-docdetail-entity-${key}-${i}`}
+                        data-testid={`OPS-docdetail-entity-${key}-${i}`}
                         className="text-xs px-2.5 py-1 rounded-full border"
                         style={{ borderColor: `${entityColor}25`, color: `${entityColor}cc`, background: `${entityColor}0a` }}
                       >
@@ -490,7 +500,7 @@ const DocumentDetailPage = () => {
               );
             })
           ) : (
-            <div className="rounded-xl border border-white/[0.06] p-10 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-docdetail-entities-empty-state" data-testid="OPS-docdetail-entities-empty-state" className="rounded-xl border border-white/[0.06] p-10 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <Brain className="h-8 w-8 text-white/15 mx-auto mb-3" />
               <p className="text-sm text-white/30">No entities were extracted from this document.</p>
               <p className="text-xs text-white/20 mt-1">Entity extraction works best with text-rich documents.</p>
@@ -499,9 +509,9 @@ const DocumentDetailPage = () => {
         </TabsContent>
 
         {/* Content Tab */}
-        <TabsContent value="content" className="mt-6 space-y-4">
+        <TabsContent id="OPS-docdetail-tabpanel-content" data-testid="OPS-docdetail-tabpanel-content" value="content" className="mt-6 space-y-4">
           {document.parsed_text ? (
-            <div className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-docdetail-content-card" data-testid="OPS-docdetail-content-card" className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.02)' }}>
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-white/30" />
@@ -518,7 +528,7 @@ const DocumentDetailPage = () => {
               </div>
             </div>
           ) : (
-            <div className="rounded-xl border border-white/[0.06] p-10 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-docdetail-content-empty-state" data-testid="OPS-docdetail-content-empty-state" className="rounded-xl border border-white/[0.06] p-10 text-center" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <FileText className="h-8 w-8 text-white/15 mx-auto mb-3" />
               <p className="text-sm text-white/30">No content preview available for this document.</p>
             </div>

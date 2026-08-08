@@ -133,7 +133,7 @@ const SummaryDetailPage = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-32">
+      <div id="OPS-summarydetail-loading-state" data-testid="OPS-summarydetail-loading-state" className="flex flex-col items-center justify-center py-32">
         <Loader2 className="h-10 w-10 animate-spin text-amber-500/60" />
         <p className="mt-4 text-sm text-white/40">Loading summary details...</p>
       </div>
@@ -142,10 +142,12 @@ const SummaryDetailPage = () => {
 
   if (!summary) {
     return (
-      <div className="flex flex-col items-center justify-center py-32">
+      <div id="OPS-summarydetail-not-found-state" data-testid="OPS-summarydetail-not-found-state" className="flex flex-col items-center justify-center py-32">
         <FileText className="h-12 w-12 text-white/15 mb-4" />
         <p className="text-white/40 text-sm">Summary not found</p>
         <Button
+          id="OPS-summarydetail-notfound-back-btn"
+          data-testid="OPS-summarydetail-notfound-back-btn"
           variant="ghost"
           className="mt-4 text-amber-400 hover:text-amber-300"
           onClick={() => navigate('/operations/summarization')}
@@ -173,9 +175,11 @@ const SummaryDetailPage = () => {
     summary.risks?.length > 0 || summary.opportunities?.length > 0 || summary.deadlines?.length > 0;
 
   return (
-    <div className="space-y-6">
+    <div id="OPS-summarydetail-page" data-testid="OPS-summarydetail-page" className="space-y-6">
       {/* Back Button */}
       <Button
+        id="OPS-summarydetail-back-btn"
+        data-testid="OPS-summarydetail-back-btn"
         variant="ghost"
         className="text-white/50 hover:text-white gap-2 -ml-2"
         onClick={() => navigate('/operations/summarization')}
@@ -185,7 +189,7 @@ const SummaryDetailPage = () => {
       </Button>
 
       {/* ── Header Card ── */}
-      <div className="rounded-2xl border border-white/[0.06] p-6" style={{ background: 'rgba(0,0,0,0.25)' }}>
+      <div id="OPS-summarydetail-header-card" data-testid="OPS-summarydetail-header-card" className="rounded-2xl border border-white/[0.06] p-6" style={{ background: 'rgba(0,0,0,0.25)' }}>
         <div className="flex items-start gap-4">
           <div className="flex items-center justify-center w-16 h-16 rounded-2xl shrink-0" style={{ backgroundColor: fc.bg }}>
             <FI className="h-8 w-8" style={{ color: fc.color }} />
@@ -203,6 +207,8 @@ const SummaryDetailPage = () => {
             <p className="text-sm text-white/35">AI-powered summary with insights</p>
           </div>
           <Button
+            id="OPS-summarydetail-delete-btn"
+            data-testid="OPS-summarydetail-delete-btn"
             variant="ghost"
             size="sm"
             className="text-white/40 hover:text-red-400 hover:bg-red-500/10 gap-1.5 shrink-0"
@@ -224,7 +230,7 @@ const SummaryDetailPage = () => {
             { label: 'Created', value: formatDate(summary.created_at), icon: Calendar, color: '#f59e0b' },
             { label: 'By', value: summary.created_by || 'Unknown', icon: User, color: '#ec4899' },
           ].map((m, i) => (
-            <div key={i} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <div key={i} id={`OPS-summarydetail-stat-${m.label.toLowerCase()}`} data-testid={`OPS-summarydetail-stat-${m.label.toLowerCase()}`} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
               <m.icon className="h-4 w-4 shrink-0" style={{ color: `${m.color}80` }} />
               <div className="min-w-0">
                 <p className="text-[10px] text-white/30 uppercase tracking-wider">{m.label}</p>
@@ -236,9 +242,9 @@ const SummaryDetailPage = () => {
 
         {/* Sentiment + Importance + Topics badges */}
         {(sentimentCfg || importanceCfg || summary.topics?.length > 0) && (
-          <div className="flex flex-wrap gap-3 mt-4">
+          <div id="OPS-summarydetail-badges-row" data-testid="OPS-summarydetail-badges-row" className="flex flex-wrap gap-3 mt-4">
             {sentimentCfg && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.06]" style={{ background: sentimentCfg.bg }}>
+              <div id="OPS-summarydetail-badge-sentiment" data-testid="OPS-summarydetail-badge-sentiment" className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.06]" style={{ background: sentimentCfg.bg }}>
                 <SentimentIcon className="h-4 w-4" style={{ color: sentimentCfg.color }} />
                 <span className="text-xs font-semibold" style={{ color: sentimentCfg.color }}>
                   Sentiment: {sentimentCfg.label}
@@ -246,7 +252,7 @@ const SummaryDetailPage = () => {
               </div>
             )}
             {importanceCfg && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.06]" style={{ background: importanceCfg.bg }}>
+              <div id="OPS-summarydetail-badge-importance" data-testid="OPS-summarydetail-badge-importance" className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.06]" style={{ background: importanceCfg.bg }}>
                 <Shield className="h-4 w-4" style={{ color: importanceCfg.color }} />
                 <span className="text-xs font-semibold" style={{ color: importanceCfg.color }}>
                   Importance: {importanceCfg.label}
@@ -254,7 +260,7 @@ const SummaryDetailPage = () => {
               </div>
             )}
             {summary.topics?.length > 0 && summary.topics.map((topic, i) => (
-              <span key={i} className="text-[11px] px-2.5 py-1.5 rounded-lg font-medium border border-white/[0.06]"
+              <span key={i} id={`OPS-summarydetail-badge-topic-${i}`} data-testid={`OPS-summarydetail-badge-topic-${i}`} className="text-[11px] px-2.5 py-1.5 rounded-lg font-medium border border-white/[0.06]"
                 style={{ background: 'rgba(139,92,246,0.1)', color: '#c4b5fd' }}>
                 {topic}
               </span>
@@ -265,7 +271,7 @@ const SummaryDetailPage = () => {
 
       {/* ── Rich Summary ── */}
       {summary.rich_summary && (
-        <div className="rounded-xl border border-white/[0.06] p-6" style={{ background: 'rgba(0,0,0,0.15)' }}>
+        <div id="OPS-summarydetail-rich-summary-card" data-testid="OPS-summarydetail-rich-summary-card" className="rounded-xl border border-white/[0.06] p-6" style={{ background: 'rgba(0,0,0,0.15)' }}>
           <div className="flex items-center gap-2 mb-4">
             <Sparkles className="h-5 w-5 text-amber-400" />
             <h3 className="text-base font-bold text-white">Summary</h3>
@@ -276,7 +282,7 @@ const SummaryDetailPage = () => {
 
       {/* ── Insights Section ── */}
       {hasInsights && (
-        <div className="space-y-5">
+        <div id="OPS-summarydetail-insights-section" data-testid="OPS-summarydetail-insights-section" className="space-y-5">
           <div className="flex items-center gap-2">
             <Brain className="h-5 w-5 text-violet-400" />
             <h3 className="text-base font-bold text-white">Document Insights</h3>
@@ -286,7 +292,7 @@ const SummaryDetailPage = () => {
           {(sentimentCfg || importanceCfg) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {sentimentCfg && (
-                <div className="rounded-xl border border-white/[0.06] p-5" style={{ background: sentimentCfg.bg }}>
+                <div id="OPS-summarydetail-sentiment-card" data-testid="OPS-summarydetail-sentiment-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: sentimentCfg.bg }}>
                   <div className="flex items-center gap-2 mb-3">
                     <SentimentIcon className="h-5 w-5" style={{ color: sentimentCfg.color }} />
                     <h4 className="text-sm font-bold" style={{ color: sentimentCfg.color }}>
@@ -299,7 +305,7 @@ const SummaryDetailPage = () => {
                 </div>
               )}
               {importanceCfg && (
-                <div className="rounded-xl border border-white/[0.06] p-5" style={{ background: importanceCfg.bg }}>
+                <div id="OPS-summarydetail-importance-card" data-testid="OPS-summarydetail-importance-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: importanceCfg.bg }}>
                   <div className="flex items-center gap-2 mb-3">
                     <Shield className="h-5 w-5" style={{ color: importanceCfg.color }} />
                     <h4 className="text-sm font-bold" style={{ color: importanceCfg.color }}>
@@ -316,14 +322,14 @@ const SummaryDetailPage = () => {
 
           {/* Topics */}
           {summary.topics?.length > 0 && (
-            <div className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-summarydetail-topics-card" data-testid="OPS-summarydetail-topics-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <div className="flex items-center gap-2 mb-3">
                 <Tag className="h-4 w-4 text-violet-400" />
                 <h4 className="text-sm font-semibold text-white">Topics</h4>
               </div>
               <div className="flex flex-wrap gap-2">
                 {summary.topics.map((topic, i) => (
-                  <span key={i} className="text-xs px-3 py-1.5 rounded-full font-medium border border-white/[0.06]"
+                  <span key={i} id={`OPS-summarydetail-topic-chip-${i}`} data-testid={`OPS-summarydetail-topic-chip-${i}`} className="text-xs px-3 py-1.5 rounded-full font-medium border border-white/[0.06]"
                     style={{ background: 'rgba(139,92,246,0.1)', color: '#c4b5fd' }}>
                     {topic}
                   </span>
@@ -334,7 +340,7 @@ const SummaryDetailPage = () => {
 
           {/* Entities */}
           {hasEntities && (
-            <div className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
+            <div id="OPS-summarydetail-entities-card" data-testid="OPS-summarydetail-entities-card" className="rounded-xl border border-white/[0.06] p-5" style={{ background: 'rgba(0,0,0,0.15)' }}>
               <div className="flex items-center gap-2 mb-4">
                 <Zap className="h-4 w-4 text-amber-400" />
                 <h4 className="text-sm font-semibold text-white">Entities Detected</h4>
@@ -350,7 +356,7 @@ const SummaryDetailPage = () => {
                   const items = summary.entities?.[key];
                   if (!items?.length) return null;
                   return (
-                    <div key={key} className="rounded-lg border border-white/[0.05] p-3" style={{ background: 'rgba(0,0,0,0.1)' }}>
+                    <div key={key} id={`OPS-summarydetail-entity-group-${key}`} data-testid={`OPS-summarydetail-entity-group-${key}`} className="rounded-lg border border-white/[0.05] p-3" style={{ background: 'rgba(0,0,0,0.1)' }}>
                       <div className="flex items-center gap-1.5 mb-2">
                         <Icon className="h-3.5 w-3.5" style={{ color }} />
                         <span className="text-[11px] font-semibold" style={{ color }}>{label}</span>
@@ -358,7 +364,7 @@ const SummaryDetailPage = () => {
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {items.map((v, i) => (
-                          <span key={i} className="text-[11px] px-2 py-0.5 rounded-md"
+                          <span key={i} id={`OPS-summarydetail-entity-${key}-${i}`} data-testid={`OPS-summarydetail-entity-${key}-${i}`} className="text-[11px] px-2 py-0.5 rounded-md"
                             style={{ background: `${color}15`, color: `${color}cc` }}>
                             {v}
                           </span>
@@ -375,14 +381,14 @@ const SummaryDetailPage = () => {
           {(summary.risks?.length > 0 || summary.opportunities?.length > 0) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {summary.risks?.length > 0 && (
-                <div className="rounded-xl border border-red-500/10 p-5" style={{ background: 'rgba(239,68,68,0.04)' }}>
+                <div id="OPS-summarydetail-risks-card" data-testid="OPS-summarydetail-risks-card" className="rounded-xl border border-red-500/10 p-5" style={{ background: 'rgba(239,68,68,0.04)' }}>
                   <div className="flex items-center gap-2 mb-3">
                     <AlertTriangle className="h-4 w-4 text-red-400" />
                     <h4 className="text-sm font-semibold text-red-400">Risks & Concerns</h4>
                   </div>
                   <div className="space-y-2.5">
                     {summary.risks.map((risk, i) => (
-                      <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-red-500/10" style={{ background: 'rgba(239,68,68,0.05)' }}>
+                      <div key={i} id={`OPS-summarydetail-risk-row-${i}`} data-testid={`OPS-summarydetail-risk-row-${i}`} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-red-500/10" style={{ background: 'rgba(239,68,68,0.05)' }}>
                         <span className="text-red-400 font-bold text-xs mt-0.5 shrink-0">!</span>
                         <span className="text-xs text-white/50 leading-relaxed">{risk}</span>
                       </div>
@@ -391,14 +397,14 @@ const SummaryDetailPage = () => {
                 </div>
               )}
               {summary.opportunities?.length > 0 && (
-                <div className="rounded-xl border border-emerald-500/10 p-5" style={{ background: 'rgba(16,185,129,0.04)' }}>
+                <div id="OPS-summarydetail-opportunities-card" data-testid="OPS-summarydetail-opportunities-card" className="rounded-xl border border-emerald-500/10 p-5" style={{ background: 'rgba(16,185,129,0.04)' }}>
                   <div className="flex items-center gap-2 mb-3">
                     <TrendingUp className="h-4 w-4 text-emerald-400" />
                     <h4 className="text-sm font-semibold text-emerald-400">Opportunities</h4>
                   </div>
                   <div className="space-y-2.5">
                     {summary.opportunities.map((opp, i) => (
-                      <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-emerald-500/10" style={{ background: 'rgba(16,185,129,0.05)' }}>
+                      <div key={i} id={`OPS-summarydetail-opportunity-row-${i}`} data-testid={`OPS-summarydetail-opportunity-row-${i}`} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-emerald-500/10" style={{ background: 'rgba(16,185,129,0.05)' }}>
                         <span className="text-emerald-400 font-bold text-xs mt-0.5 shrink-0">+</span>
                         <span className="text-xs text-white/50 leading-relaxed">{opp}</span>
                       </div>
@@ -411,14 +417,14 @@ const SummaryDetailPage = () => {
 
           {/* Deadlines */}
           {summary.deadlines?.length > 0 && (
-            <div className="rounded-xl border border-orange-500/10 p-5" style={{ background: 'rgba(249,115,22,0.04)' }}>
+            <div id="OPS-summarydetail-deadlines-card" data-testid="OPS-summarydetail-deadlines-card" className="rounded-xl border border-orange-500/10 p-5" style={{ background: 'rgba(249,115,22,0.04)' }}>
               <div className="flex items-center gap-2 mb-3">
                 <Calendar className="h-4 w-4 text-orange-400" />
                 <h4 className="text-sm font-semibold text-orange-400">Key Deadlines</h4>
               </div>
               <div className="space-y-2">
                 {summary.deadlines.map((dl, i) => (
-                  <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-orange-500/10" style={{ background: 'rgba(249,115,22,0.05)' }}>
+                  <div key={i} id={`OPS-summarydetail-deadline-row-${i}`} data-testid={`OPS-summarydetail-deadline-row-${i}`} className="flex items-start gap-2.5 p-2.5 rounded-lg border border-orange-500/10" style={{ background: 'rgba(249,115,22,0.05)' }}>
                     <Clock className="h-3.5 w-3.5 text-orange-400 mt-0.5 shrink-0" />
                     <span className="text-xs text-white/50 leading-relaxed">{dl}</span>
                   </div>
@@ -431,7 +437,7 @@ const SummaryDetailPage = () => {
 
       {/* ── Key Findings ── */}
       {summary.key_findings?.length > 0 && (
-        <div className="rounded-xl border border-amber-500/10 p-5" style={{ background: 'rgba(245,158,11,0.04)' }}>
+        <div id="OPS-summarydetail-key-findings-card" data-testid="OPS-summarydetail-key-findings-card" className="rounded-xl border border-amber-500/10 p-5" style={{ background: 'rgba(245,158,11,0.04)' }}>
           <div className="flex items-center gap-2 mb-4">
             <Lightbulb className="h-5 w-5 text-amber-400" />
             <h3 className="text-base font-bold text-white">Key Findings</h3>
@@ -439,7 +445,7 @@ const SummaryDetailPage = () => {
           </div>
           <div className="space-y-3">
             {summary.key_findings.map((finding, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <div key={i} id={`OPS-summarydetail-finding-row-${i}`} data-testid={`OPS-summarydetail-finding-row-${i}`} className="flex items-start gap-3 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
                 <div className="h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.12)' }}>
                   <span className="text-[11px] font-bold text-amber-400">{i + 1}</span>
                 </div>
@@ -452,7 +458,7 @@ const SummaryDetailPage = () => {
 
       {/* ── Action Items ── */}
       {summary.action_items?.length > 0 && (
-        <div className="rounded-xl border border-emerald-500/10 p-5" style={{ background: 'rgba(16,185,129,0.04)' }}>
+        <div id="OPS-summarydetail-action-items-card" data-testid="OPS-summarydetail-action-items-card" className="rounded-xl border border-emerald-500/10 p-5" style={{ background: 'rgba(16,185,129,0.04)' }}>
           <div className="flex items-center gap-2 mb-4">
             <ListChecks className="h-5 w-5 text-emerald-400" />
             <h3 className="text-base font-bold text-white">Action Items</h3>
@@ -460,7 +466,7 @@ const SummaryDetailPage = () => {
           </div>
           <div className="space-y-2.5">
             {summary.action_items.map((item, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-emerald-500/10" style={{ background: 'rgba(16,185,129,0.04)' }}>
+              <div key={i} id={`OPS-summarydetail-action-item-row-${i}`} data-testid={`OPS-summarydetail-action-item-row-${i}`} className="flex items-start gap-3 p-3 rounded-lg border border-emerald-500/10" style={{ background: 'rgba(16,185,129,0.04)' }}>
                 <ArrowRight className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
                 <span className="text-sm text-white/55 leading-relaxed">{item}</span>
               </div>

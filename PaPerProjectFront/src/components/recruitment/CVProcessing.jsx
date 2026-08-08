@@ -266,6 +266,8 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
 
   return (
     <div
+      id="REC-cvprocessing-root"
+      data-testid="REC-cvprocessing-root"
       className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
       style={{
         background:
@@ -275,6 +277,8 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
       <div className="p-4 md:p-6 lg:p-8 space-y-6 w-full max-w-full">
         {/* Manual-processing notice */}
         <div
+          id="REC-cvprocessing-manual-notice"
+          data-testid="REC-cvprocessing-manual-notice"
           className="flex items-start gap-3 rounded-xl px-4 py-3.5"
           style={{
             background: 'linear-gradient(90deg, rgba(167,139,250,0.10) 0%, rgba(96,165,250,0.07) 100%)',
@@ -294,7 +298,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
         </div>
 
         {/* Upload Form Card */}
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-cvprocessing-upload-card" data-testid="REC-cvprocessing-upload-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardHeader className="p-4 sm:p-6">
             <CardTitle className="text-lg sm:text-xl text-white">Process CV Files</CardTitle>
             <CardDescription className="text-xs sm:text-sm text-white/60">
@@ -310,6 +314,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
               <div className="relative">
                 <Input
                   id="cv-files"
+                  data-testid="REC-cvprocessing-cv-files-input"
                   type="file"
                   multiple
                   accept=".pdf,.doc,.docx"
@@ -318,7 +323,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                 />
               </div>
               {files.length > 0 && (
-                <div className="flex items-center gap-2 text-xs sm:text-sm text-white/70 bg-black/40 border border-white/10 p-2 rounded-md">
+                <div id="REC-cvprocessing-files-selected-info" data-testid="REC-cvprocessing-files-selected-info" className="flex items-center gap-2 text-xs sm:text-sm text-white/70 bg-black/40 border border-white/10 p-2 rounded-md">
                   <FileText className="h-4 w-4 shrink-0" />
                   <span>{files.length} file(s) selected</span>
                 </div>
@@ -332,6 +337,8 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
               </Label>
               <div className="relative" ref={jobDropdownRef}>
                 <button
+                  id="REC-cvprocessing-job-select-trigger"
+                  data-testid="REC-cvprocessing-job-select-trigger"
                   type="button"
                   onClick={() => { setJobSearchOpen(!jobSearchOpen); setJobSearchQuery(''); }}
                   className="w-full flex items-center justify-between text-sm bg-black/30 border border-white/20 text-white rounded-md px-3 py-2 hover:bg-black/40 transition-colors"
@@ -342,10 +349,12 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                   <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
                 </button>
                 {jobSearchOpen && (
-                  <div className="absolute z-50 mt-1 w-full bg-[#1a1a2e] border border-white/20 rounded-md shadow-xl overflow-hidden">
+                  <div id="REC-cvprocessing-job-dropdown" data-testid="REC-cvprocessing-job-dropdown" className="absolute z-50 mt-1 w-full bg-[#1a1a2e] border border-white/20 rounded-md shadow-xl overflow-hidden">
                     <div className="flex items-center border-b border-white/10 px-3">
                       <Search className="h-4 w-4 text-white/40 shrink-0" />
                       <input
+                        id="REC-cvprocessing-job-search-input"
+                        data-testid="REC-cvprocessing-job-search-input"
                         type="text"
                         autoFocus
                         value={jobSearchQuery}
@@ -356,11 +365,13 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                     </div>
                     <div className="max-h-[200px] overflow-y-auto">
                       {filteredJobs.length === 0 ? (
-                        <div className="px-3 py-3 text-sm text-white/40 text-center">No jobs found</div>
+                        <div id="REC-cvprocessing-job-empty" data-testid="REC-cvprocessing-job-empty" className="px-3 py-3 text-sm text-white/40 text-center">No jobs found</div>
                       ) : (
                         filteredJobs.map((job) => (
                           <button
                             key={job.id}
+                            id={`REC-cvprocessing-job-option-${job.id}`}
+                            data-testid={`REC-cvprocessing-job-option-${job.id}`}
                             type="button"
                             onClick={() => {
                               handleJobSelection(job.id.toString());
@@ -386,13 +397,15 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
 
               {/* Settings incomplete warning banner */}
               {settingsChecking && (
-                <div className="flex items-center gap-2 text-xs text-white/40 mt-1">
+                <div id="REC-cvprocessing-settings-checking" data-testid="REC-cvprocessing-settings-checking" className="flex items-center gap-2 text-xs text-white/40 mt-1">
                   <Loader2 className="h-3 w-3 animate-spin" />
                   Checking interview settings…
                 </div>
               )}
               {!settingsChecking && settingsIncomplete && selectedJobId && (
                 <div
+                  id="REC-cvprocessing-settings-incomplete-banner"
+                  data-testid="REC-cvprocessing-settings-incomplete-banner"
                   className="flex items-start gap-3 rounded-xl px-4 py-3 mt-1"
                   style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.30)' }}
                 >
@@ -405,6 +418,8 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                   </div>
                   {onGoToSettings && (
                     <button
+                      id="REC-cvprocessing-fix-settings-btn"
+                      data-testid="REC-cvprocessing-fix-settings-btn"
                       onClick={() => onGoToSettings(selectedJobId)}
                       className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-amber-300 hover:text-amber-200 transition-colors"
                     >
@@ -414,7 +429,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                 </div>
               )}
               {!settingsChecking && settingsChecked && !settingsIncomplete && selectedJobId && (
-                <div className="flex items-center gap-1.5 text-xs text-emerald-400 mt-1">
+                <div id="REC-cvprocessing-settings-configured" data-testid="REC-cvprocessing-settings-configured" className="flex items-center gap-1.5 text-xs text-emerald-400 mt-1">
                   <CheckCircle className="h-3.5 w-3.5" />
                   Interview settings configured
                 </div>
@@ -422,11 +437,11 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
               
               {/* Display Keywords when job is selected */}
               {selectedJobId && selectedJobId !== 'none' && displayedKeywords.length > 0 && (
-                <div className="mt-3 p-2.5 sm:p-3 bg-black/40 rounded-lg border border-white/10">
+                <div id="REC-cvprocessing-extracted-keywords" data-testid="REC-cvprocessing-extracted-keywords" className="mt-3 p-2.5 sm:p-3 bg-black/40 rounded-lg border border-white/10">
                   <div className="text-xs sm:text-sm font-semibold mb-2 text-white">Extracted Keywords:</div>
                   <div className="flex flex-wrap gap-1.5 sm:gap-2">
                     {displayedKeywords.map((keyword, index) => (
-                      <Badge key={index} variant="secondary" className="text-[10px] sm:text-xs">
+                      <Badge key={index} id={`REC-cvprocessing-keyword-chip-${index}`} data-testid={`REC-cvprocessing-keyword-chip-${index}`} variant="secondary" className="text-[10px] sm:text-xs">
                         {keyword}
                       </Badge>
                     ))}
@@ -442,6 +457,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
               </Label>
               <Input
                 id="keywords"
+                data-testid="REC-cvprocessing-keywords-input"
                 value={jobKeywords}
                 onChange={(e) => setJobKeywords(e.target.value)}
                 placeholder="Python, React, etc."
@@ -456,6 +472,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
               </Label>
               <Input
                 id="top-n"
+                data-testid="REC-cvprocessing-top-n-input"
                 type="number"
                 value={topN}
                 onChange={(e) => setTopN(e.target.value)}
@@ -465,6 +482,8 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
             </div>
 
             <Button
+              id="REC-cvprocessing-process-btn"
+              data-testid="REC-cvprocessing-process-btn"
               onClick={handleProcess}
               disabled={processing || files.length === 0 || !selectedJobId || settingsIncomplete || settingsChecking}
               className="w-full sm:w-auto sm:min-w-[200px] h-10 text-sm"
@@ -487,7 +506,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
 
         {/* Results */}
         {results && results.results && (
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card id="REC-cvprocessing-results-card" data-testid="REC-cvprocessing-results-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader className="p-4 sm:p-6">
               <CardTitle className="text-lg sm:text-xl text-white">Processing Results</CardTitle>
               <CardDescription className="text-xs sm:text-sm text-white/60">
@@ -495,7 +514,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
-              <div className="space-y-3 sm:space-y-4">
+              <div id="REC-cvprocessing-results-list" data-testid="REC-cvprocessing-results-list" className="space-y-3 sm:space-y-4">
                 {results.results.map((result, index) => {
                   const qualified = result.qualified || {};
                   const summary = result.summary || {};
@@ -504,6 +523,8 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                   return (
                     <Card
                       key={index}
+                      id={`REC-cvprocessing-result-card-${index}`}
+                      data-testid={`REC-cvprocessing-result-card-${index}`}
                       className="border-l-4 border-l-primary overflow-hidden bg-black/40 border border-white/10"
                     >
                       <CardHeader className="p-3 sm:p-4 pb-2 sm:pb-3">
