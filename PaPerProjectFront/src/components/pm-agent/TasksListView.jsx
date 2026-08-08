@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { companyApi } from '@/services/companyAuthService';
 import { apiErrorMessage } from '@/utils/apiErrorMessage';
@@ -66,11 +66,9 @@ export default function TasksListView({
   return (
     <div className="space-y-6">
       <Tabs value={active} onValueChange={setActive} className="w-full">
-        <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-          <SubTabTrigger value="list" active={active} icon={CheckSquare} label="List" />
-          <SubTabTrigger value="prioritize" active={active} icon={Target} label="Prioritize" />
-          <SubTabTrigger value="timeline" active={active} icon={BarChart3} label="Timeline" />
-        </TabsList>
+        {/* Internal sub-tab bar removed — users navigate between List /
+            Prioritize / Timeline via the global AgentSidebar. Tabs wrapper
+            kept so old `?sub=` bookmarks still resolve. */}
 
         <TabsContent value="list" className="mt-6">
           <TaskList projects={projects} onOpenPilot={onOpenPilot} />
@@ -86,25 +84,7 @@ export default function TasksListView({
   );
 }
 
-// Nested tab trigger — visual match to the parent PM tab bar (same amber
-// active state), just smaller. Extracted only to keep the parent JSX flat.
-function SubTabTrigger({ value, active, icon: Icon, label }) {
-  const isActive = value === active;
-  return (
-    <TabsTrigger
-      value={value}
-      className="relative whitespace-nowrap shrink-0 px-3.5 py-1.5 text-sm font-medium rounded-md border transition-all duration-150"
-      style={isActive
-        ? { background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)', color: '#fff', borderColor: 'transparent' }
-        : { background: 'transparent', color: 'rgba(255,255,255,0.55)', borderColor: 'transparent' }}
-    >
-      <span className="inline-flex items-center gap-1.5">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </span>
-    </TabsTrigger>
-  );
-}
+// SubTabTrigger removed — internal sub-tab bar no longer rendered.
 
 // ─── TaskList ──────────────────────────────────────────────────────────────
 // The List sub-tab. Own component so its state (search / filters / pagination

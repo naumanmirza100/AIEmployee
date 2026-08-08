@@ -47,7 +47,8 @@ import AskView from '@/components/pm-agent/AskView';
 import InsightsView from '@/components/pm-agent/InsightsView';
 import ProjectsListView from '@/components/pm-agent/ProjectsListView';
 import TasksListView from '@/components/pm-agent/TasksListView';
-import PMSidebar from '@/components/pm-agent/PMSidebar';
+// PMSidebar removed — its navigation now lives in the global AgentSidebar
+// (see src/utils/agentNavItems.js → project_manager_agent).
 import TaskPrioritizationAgent from '@/components/pm-agent/TaskPrioritizationAgent';
 import KnowledgeQAAgent from '@/components/pm-agent/KnowledgeQAAgent';
 import TimelineGanttAgent from '@/components/pm-agent/TimelineGanttAgent';
@@ -181,52 +182,10 @@ const ProjectManagerDashboardPage = () => {
     []
   );
 
-  // Sidebar collapsed state — persisted per browser so the user's preference
-  // survives reloads. Read on first render only (localStorage is sync, no
-  // effect needed for hydration).
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try { return localStorage.getItem('pm_sidebar_collapsed_v1') === '1'; }
-    catch (_) { return false; }
-  });
-  const toggleSidebar = React.useCallback(() => {
-    setSidebarCollapsed((v) => {
-      const next = !v;
-      try { localStorage.setItem('pm_sidebar_collapsed_v1', next ? '1' : '0'); }
-      catch (_) { /* ignore */ }
-      return next;
-    });
-  }, []);
-
-  // Sidebar items — top-level tabs with nested sub-items where applicable.
-  // Sourced from PM_TAB_ITEMS so hiding/un-hiding a tab up top propagates
-  // here automatically. Sub-item metadata is inline because it's tightly
-  // coupled to the specific view components' sub-tab values.
-  const sidebarItems = React.useMemo(() => {
-    const subsByTab = {
-      'project-pilot': [
-        { value: 'pilot', label: 'Project Pilot', icon: Target },
-        { value: 'kqa', label: 'Knowledge Q&A', icon: MessageSquare },
-      ],
-      tasks: [
-        { value: 'list', label: 'List', icon: CheckSquare },
-        { value: 'prioritize', label: 'Prioritize', icon: Target },
-        { value: 'timeline', label: 'Timeline', icon: Calendar },
-      ],
-      insights: [
-        { value: 'health', label: 'Project Health', icon: TrendingUp },
-        { value: 'standup', label: 'Daily Standup', icon: Calendar },
-        { value: 'team', label: 'Team Performance', icon: Sparkles },
-      ],
-    };
-    return PM_TAB_ITEMS
-      .filter((t) => !t.hidden)
-      .map((t) => ({
-        value: t.value,
-        label: t.label,
-        icon: t.icon,
-        subItems: subsByTab[t.value],
-      }));
-  }, []);
+  // PMSidebar state removed — navigation now lives in the global
+  // AgentSidebar (see src/utils/agentNavItems.js → project_manager_agent).
+  // Local `sidebarCollapsed`, `toggleSidebar`, `sidebarItems` were all
+  // consumed exclusively by the removed <PMSidebar> render.
 
   // Variant used by sample-prompt chips on the Overview hero: switches to
   // Pilot AND stashes the prompt in the URL as `?prompt=...`, which
@@ -514,28 +473,13 @@ const ProjectManagerDashboardPage = () => {
           }}
         />
 
-        {/* Main Content — flex row on lg+ so the sidebar sits alongside.
-            Below lg the sidebar is display:none and the existing hamburger
-            (inside the content area, further down) is the only nav. */}
+        {/* Main Content — PMSidebar removed. Its navigation now lives in the
+            global AgentSidebar (see src/utils/agentNavItems.js → project_manager_agent).
+            The mobile hamburger below still handles < lg viewports. */}
         <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 w-full max-w-full overflow-x-hidden">
-          <div className="flex gap-4 items-start">
-            {/* Sidebar wrapper carries the main-tour selector so the tour
-                still points at the primary nav after we replaced the
-                horizontal desktop tab bar with the sidebar. */}
-            <div data-tour-pm="tabs">
-              <PMSidebar
-                items={sidebarItems}
-                activeTab={activeTab}
-                activeSubTab={activeSubTab}
-                onTabChange={setActiveTab}
-                onSubTabChange={(tabValue, subValue) => setSubTab(tabValue, subValue)}
-                collapsed={sidebarCollapsed}
-                onToggleCollapsed={toggleSidebar}
-              />
-            </div>
-
           <div
-            className="flex-1 min-w-0 w-full rounded-2xl border border-white/[0.06] p-0"
+            data-tour-pm="tabs"
+            className="w-full rounded-2xl border border-white/[0.06] p-0"
             style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
           >
           <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
@@ -881,7 +825,6 @@ const ProjectManagerDashboardPage = () => {
           </div>
           </div>
           </div>
-          </div>{/* flex row (sidebar + content) */}
 
         </main>
       </div>

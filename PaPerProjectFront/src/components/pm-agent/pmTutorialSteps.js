@@ -5,10 +5,16 @@
 
 // ---- Main "Take the Tour" tour ------------------------------------------
 
+// Rewritten for the post-restructure tab shape (5 visible tabs). Uses the
+// global AgentSidebar selector [data-tour-pm="tabs"] since the horizontal
+// desktop tab bar has been removed. Steps that previously targeted hidden
+// legacy tabs (create-project, create-task, task-prioritization,
+// knowledge-qa, timeline-gantt, meeting-scheduler, ai-tools) are gone —
+// those features now live inside their consolidated parent tab.
 export const PM_MAIN_TOUR_STEPS = [
   {
     title: 'Welcome to Project Pilot 👋',
-    body: "This quick tour walks you through every tab and tool on this dashboard. You can skip anytime, or replay it later from the 'Take the Tour' button in the header.",
+    body: "Quick tour of the 5 tabs on this dashboard. You can skip anytime, or replay it later from 'Take the Tour' in the header.",
     placement: 'center',
   },
   {
@@ -19,23 +25,29 @@ export const PM_MAIN_TOUR_STEPS = [
   },
   {
     selector: '[data-tour-pm="tabs"]',
-    title: 'Everything lives in these tabs',
-    body: "Each tab opens a different tool. We'll walk through them one by one — this dashboard has a LOT, so buckle in.",
-    placement: 'bottom',
+    title: 'Navigation lives in the left sidebar',
+    body: "Every tab you'll see below is reachable from the global sidebar on the left. Sub-items expand under their parent when active. Ctrl+K opens the Quick Chat from anywhere.",
+    placement: 'right',
   },
-  { tab: 'overview',           selector: '[data-tour-pm-tab="overview"]',           title: 'Overview',            body: 'Your home base with quick-nav cards to every major agent. Great starting point when you need to grab a tool fast.', placement: 'bottom' },
-  { tab: 'create-project',     selector: '[data-tour-pm-tab="create-project"]',     title: 'Create Project',      body: 'Manual project creation form. Fill in name, dates, status, priority, budget — everything you need to spin up a project.', placement: 'bottom' },
-  { tab: 'create-task',        selector: '[data-tour-pm-tab="create-task"]',        title: 'Create Task',         body: 'Manual task creation form. Pick a project, add a title, status, priority, assignee, and due date. Done in a minute.', placement: 'bottom' },
-  { tab: 'project-pilot',      selector: '[data-tour-pm-tab="project-pilot"]',      title: 'Project Pilot',       body: 'Natural-language project & task management. Say "add a design task to the marketing project" and it just happens.', placement: 'bottom' },
-  { tab: 'task-prioritization', selector: '[data-tour-pm-tab="task-prioritization"]', title: 'Task Prioritization', body: 'AI ranks your task list, finds bottlenecks, suggests who to delegate what to. Data-driven triage in one click.', placement: 'bottom' },
-  { tab: 'knowledge-qa',       selector: '[data-tour-pm-tab="knowledge-qa"]',       title: 'Knowledge Q&A',       body: 'Ask questions about your projects, tasks, blockers. Grounded in your actual project data — plus a Graph mode for chart-based answers.', placement: 'bottom' },
-  { tab: 'timeline-gantt',     selector: '[data-tour-pm-tab="timeline-gantt"]',     title: 'Timeline & Gantt',    body: 'Build timelines, generate Gantt charts, check deadlines, calculate durations, manage phases. Every scheduling tool in one place.', placement: 'bottom' },
-  { tab: 'meeting-scheduler',  selector: '[data-tour-pm-tab="meeting-scheduler"]',  title: 'Meeting Scheduler',   body: 'Schedule meetings in plain English. Accept / reject / counter-propose invites. Full meeting list with filters.', placement: 'bottom' },
-  { tab: 'ai-tools',           selector: '[data-tour-pm-tab="ai-tools"]',           title: 'AI Tools',            body: 'A hub of 9 more agents: Daily Standup, Health, Notes, Team Performance, Time Estimation, Workflow, Calendar, and Notifications.', placement: 'bottom' },
+  { tab: 'project-pilot', title: 'Ask (Pilot)',
+    body: "The chat-based hero. Project Pilot creates and manages projects/tasks in plain English (\"add a design task to marketing\"), Knowledge Q&A answers questions about your project data, Meeting Scheduler books meetings via chat. All three share this tab.",
+    placement: 'center' },
+  { tab: 'projects', title: 'Projects',
+    body: 'Searchable list of every project. Click a card to expand its details and recent tasks. "New Project" button opens the manual create form in a dialog.',
+    placement: 'center' },
+  { tab: 'tasks', title: 'Tasks',
+    body: 'A task list with filters + Prioritize + Timeline/Gantt views. Prioritize ranks work + finds bottlenecks; Timeline builds schedules and Gantt charts. Old Prioritize / Timeline top-level tabs are folded here as sidebar sub-items.',
+    placement: 'center' },
+  { tab: 'insights', title: 'Insights',
+    body: 'The report-y tools: Project Health, Daily Standup, Team Performance. Previously buried inside AI Tools — now surfaced here as sub-tabs of Insights.',
+    placement: 'center' },
+  { tab: 'overview', title: 'Overview',
+    body: 'Stats grid + shortcut cards to every tab. Comes in handy once you have a few projects — feels a bit sparse when starting fresh, in which case Ask (Pilot) is the better entry point.',
+    placement: 'center' },
   {
     selector: '[data-tour-pm="replay"]',
     title: 'Need the tour again?',
-    body: "Click 'Take the Tour' here anytime to replay this walkthrough. And Ctrl+K opens the Quick Chat from anywhere. That's it — you're set! 🎉",
+    body: "Click 'Take the Tour' here anytime to replay this walkthrough. Ctrl+K opens the Quick Chat from anywhere. That's it — you're set! 🎉",
     placement: 'bottom',
   },
 ];
@@ -189,8 +201,9 @@ export const PM_FLOATING_CHAT_TOUR = {
 // ---- Inline "!" hint content --------------------------------------------
 
 export const PM_HINTS = {
-  // Overview
-  pmOvQuicknav: { title: 'Quick jump to any agent', body: 'Five shortcut cards. Click one to switch tabs instantly.' },
+  // Overview — post-restructure this is a stats grid + optional quick-jump
+  // cards; the sidebar is the primary navigation.
+  pmOvQuicknav: { title: 'Quick jump to any tab', body: 'Shortcut cards for each tab. The sidebar on the left has the same navigation plus sub-items.' },
 
   // Create Project
   pmCpName:     { title: 'Project name',    body: 'A clear, short name. Shows up in every list and chart later.' },
@@ -273,18 +286,52 @@ export const PM_HINTS = {
   pmFcHeader:      { title: 'Header actions',         body: 'Mode switch, history (per mode), + new chat, 🎓 replay tour, X to close.' },
 };
 
+// ---- Per-tab tours for the NEW consolidated tabs ------------------------
+// Short, focused tours for the 3 new tabs added in the restructure. They
+// live alongside the (untouched) legacy tab tours above — those still work
+// if a user deep-links to a hidden tab like ?tab=knowledge-qa.
+
+export const PM_PROJECTS_TOUR = {
+  key: 'pm_tour_projects_v1',
+  label: 'Projects',
+  steps: [
+    { title: 'Projects tab 🗂️', body: 'Every project in one searchable list. Card-per-project with status, priority, task count, and expand-to-see-details.', placement: 'center' },
+    { title: 'Search & filter', body: 'Filter the list with the search box at the top. As you type, the list narrows to matching names and descriptions.', placement: 'center' },
+    { title: 'Create a new project', body: 'The "New Project" button on the top-right opens the manual create form in a dialog. Prefer to describe it? Use Ask (Pilot) instead — same result, less clicking.', placement: 'center' },
+  ],
+};
+
+export const PM_TASKS_TOUR = {
+  key: 'pm_tour_tasks_v1',
+  label: 'Tasks',
+  steps: [
+    { title: 'Tasks tab ✅', body: 'Everything task-related lives here — the list of tasks across your projects, plus the Prioritize and Timeline sub-tools (accessible from the sidebar).', placement: 'center' },
+    { title: 'Task list', body: 'Search + filter by project or status. Click "New Task" to add one manually; if a project filter is active, the dialog pre-selects it.', placement: 'center' },
+    { title: 'Prioritize & Timeline', body: 'Two more sub-items under Tasks in the sidebar: Prioritize (AI ranking + bottleneck detection) and Timeline (Gantt / phases / duration calc). Click either to open.', placement: 'center' },
+  ],
+};
+
+export const PM_INSIGHTS_TOUR = {
+  key: 'pm_tour_insights_v1',
+  label: 'Insights',
+  steps: [
+    { title: 'Insights tab 📊', body: 'Report-shaped tools: Project Health, Daily Standup, Team Performance. Previously buried inside AI Tools — now surfaced here.', placement: 'center' },
+    { title: 'Switching between reports', body: 'Each report has its own view. Default is Project Health; the other two are reachable by URL (?tab=insights&sub=standup or &sub=team) for now.', placement: 'center' },
+  ],
+};
+
 // ---- Convenience map ----------------------------------------------------
+// Only include tours for VISIBLE tabs so the per-tab launcher UI doesn't
+// offer tours for tabs the user can't reach through normal navigation.
+// The hidden-tab tour constants above (PM_CREATE_PROJECT_TOUR, etc.) are
+// still exported so URL deep-links can still launch them if needed.
 
 export const PM_TAB_TOURS = {
-  overview:              PM_OVERVIEW_TOUR,
-  'create-project':      PM_CREATE_PROJECT_TOUR,
-  'create-task':         PM_CREATE_TASK_TOUR,
-  'project-pilot':       PM_PROJECT_PILOT_TOUR,
-  'task-prioritization': PM_TASK_PRIO_TOUR,
-  'knowledge-qa':        PM_KNOWLEDGE_QA_TOUR,
-  'timeline-gantt':      PM_TIMELINE_TOUR,
-  'meeting-scheduler':   PM_MEETING_TOUR,
-  'ai-tools':            PM_AI_TOOLS_TOUR,
+  'project-pilot': PM_PROJECT_PILOT_TOUR,
+  projects:        PM_PROJECTS_TOUR,
+  tasks:           PM_TASKS_TOUR,
+  insights:        PM_INSIGHTS_TOUR,
+  overview:        PM_OVERVIEW_TOUR,
 };
 
 // Main-tour storage key

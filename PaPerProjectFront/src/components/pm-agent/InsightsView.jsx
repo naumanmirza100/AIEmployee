@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Activity, Calendar as CalendarIcon, Users } from 'lucide-react';
 import ProjectHealthDashboard from './ProjectHealthDashboard';
 import DailyStandupAgent from './DailyStandupAgent';
@@ -52,35 +52,11 @@ export default function InsightsView({ onOpenPilot, activeSubTab, onSubTabChange
   return (
     <div className="space-y-6">
       <Tabs value={active} onValueChange={setActive} className="w-full">
-        <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-          {INSIGHTS_SECTIONS.map((s) => {
-            const Icon = s.icon;
-            const isActive = s.value === active;
-            return (
-              <TabsTrigger
-                key={s.value}
-                value={s.value}
-                className="relative whitespace-nowrap shrink-0 px-3.5 py-1.5 text-sm font-medium rounded-md border transition-all duration-150"
-                style={isActive
-                  ? {
-                      background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
-                      color: '#fff',
-                      borderColor: 'transparent',
-                    }
-                  : {
-                      background: 'transparent',
-                      color: 'rgba(255,255,255,0.55)',
-                      borderColor: 'transparent',
-                    }}
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <Icon className="h-3.5 w-3.5" style={{ color: isActive ? '#fff' : s.color }} />
-                  {s.label}
-                </span>
-              </TabsTrigger>
-            );
-          })}
-        </TabsList>
+        {/* Internal sub-tab bar removed — but note: PM sidebar does not yet
+            surface Standup / Team Performance as distinct entries, so with
+            the bar gone those two panels are only reachable by URL-typing
+            `?tab=insights&sub=standup` / `&sub=team`. Follow-up: add these
+            as sidebar sub-items (needs `sub` support in AgentSidebar). */}
 
         {/* One TabsContent per section so shadcn manages mount/unmount for us.
             Each sub-tool fetches its own project list on mount — mounting only

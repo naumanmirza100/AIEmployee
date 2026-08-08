@@ -52,6 +52,12 @@ import HROrgChartTab from './HROrgChartTab';
 import InfoHint, { HintsProvider, useHints } from '../frontline/InfoHint';
 import FrontlineTutorial, { resetTutorial } from '../frontline/FrontlineTutorial';
 import HRFloatingChat from './HRFloatingChat';
+// HRSidebar removed — navigation moved to the global AgentSidebar (see
+// src/utils/agentNavItems.js → hr_agent).
+import { Spinner, EmptyState } from './HRUiKit';
+import HRKnowledgeView from './HRKnowledgeView';
+import HRPeopleView from './HRPeopleView';
+import HROperationsView from './HROperationsView';
 import {
   HR_MAIN_TOUR_STEPS, HR_TAB_TOURS, HR_HINTS, HR_MAIN_TOUR_KEY,
 } from './hrTutorialSteps';
@@ -60,20 +66,37 @@ import {
   useTutorialNudge,
   tourAvailable, makeHoverLaunchHandlers,
 } from '../frontline/tourUtils';
-import { GraduationCap, Eye, EyeOff } from 'lucide-react';
+import { GraduationCap, Eye, EyeOff, ArrowRight } from 'lucide-react';
 
 // ---------- Tab metadata ----------
+// Tab bar restructure (HR_AGENT_UX_REDESIGN.md):
+//   * Visible surface = 5 tabs — Overview (kept), People (Employees + My
+//     team + Org chart), Knowledge (Documents + Q&A), Operations (Workflows
+//     + Leave + Notifications), Meetings (own tab, big enough).
+//   * `hidden: true` tabs are FILTERED out of the visible tab bar (both
+//     desktop tabs and mobile hamburger) but their TabsContent is still
+//     rendered, so `?tab=qa` deep-links / bookmarks still work.
+//   * Un-hiding a tab is a one-line flip. That's why we hide instead of
+//     delete during the rollout.
 const HR_TAB_ITEMS = [
+  // Visible — the new 5-tab shape
   { value: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { value: 'qa', label: 'Knowledge Q&A', icon: MessageSquare },
-  { value: 'employees', label: 'Employees', icon: Users },
-  { value: 'my_team', label: 'My team', icon: UserCheck },
-  { value: 'org_chart', label: 'Org chart', icon: Network },
-  { value: 'documents', label: 'Documents', icon: FileText },
-  { value: 'workflows', label: 'Workflows', icon: GitBranch },
+  { value: 'people', label: 'People', icon: Users },
+  { value: 'knowledge', label: 'Knowledge', icon: MessageSquare },
+  { value: 'operations', label: 'Operations', icon: GitBranch },
   { value: 'meetings', label: 'Meetings', icon: CalendarClock },
-  { value: 'leave', label: 'Leave', icon: ClipboardList },
-  { value: 'notifications', label: 'Notifications', icon: AlertTriangle },
+
+  // Hidden — content still renders on direct URL navigation. Do NOT
+  // reorder — visible tabs come first so the bar reads left-to-right in
+  // intended priority.
+  { value: 'qa', label: 'Knowledge Q&A', icon: MessageSquare, hidden: true },
+  { value: 'employees', label: 'Employees', icon: Users, hidden: true },
+  { value: 'my_team', label: 'My team', icon: UserCheck, hidden: true },
+  { value: 'org_chart', label: 'Org chart', icon: Network, hidden: true },
+  { value: 'documents', label: 'Documents', icon: FileText, hidden: true },
+  { value: 'workflows', label: 'Workflows', icon: GitBranch, hidden: true },
+  { value: 'leave', label: 'Leave', icon: ClipboardList, hidden: true },
+  { value: 'notifications', label: 'Notifications', icon: AlertTriangle, hidden: true },
 ];
 
 // ---------- Stat card colour tokens (mirror PM dashboard) ----------
@@ -101,9 +124,38 @@ const HRDashboard = () => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('tab', v);
+      // Switching top-level tab clears any nested sub-tab — otherwise a
+      // sub-tab set on People would leak into Knowledge (different set of
+      // sub-tabs) and render a blank panel.
+      next.delete('sub');
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+
+  // Sub-tab URL state (?sub=X) — People / Knowledge / Operations each host
+  // nested sub-tabs. Same pattern as PM + Frontline dashboards.
+  const rawSubTab = searchParams.get('sub');
+  const activeSubTab = rawSubTab || null;
+  const setSubTab = React.useCallback((tabValue, subValue) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tabValue);
+      if (subValue) next.set('sub', subValue);
+      else next.delete('sub');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  // Hidden-tab set — filters main-tour steps and (later) the sidebar's
+  // visible-items list.
+  const hiddenTabValues = React.useMemo(
+    () => new Set(HR_TAB_ITEMS.filter((t) => t.hidden).map((t) => t.value)),
+    []
+  );
+
+  // HRSidebar state removed — navigation moved to the global AgentSidebar
+  // (see src/utils/agentNavItems.js → hr_agent). The old sidebarCollapsed,
+  // toggleSidebar, and sidebarItems were consumed exclusively by <HRSidebar>.
 
   // ---- Onboarding tutorial + per-tab tours ----
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -821,7 +873,11 @@ const HRDashboard = () => {
 
   return (
     <HintsProvider>
-    <div className="space-y-4">
+    {/* HRSidebar removed — its navigation now lives in the global
+        AgentSidebar (see src/utils/agentNavItems.js → hr_agent).
+        The mobile hamburger inside the content area still handles < lg
+        viewports. */}
+    <div data-tour-hr="tabs" className="space-y-4">
       <div
         className="w-full rounded-2xl border border-white/[0.06] p-0"
         style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
@@ -922,8 +978,143 @@ const HRDashboard = () => {
 
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            {/* The tab BAR now lives in the left sidebar; this keeps the
-                ?tab=-driven content switching. */}
+            {/* Merge resolution note: the incoming change from main removed
+                both the mobile hamburger AND the hidden desktop tab bar,
+                assuming the new company-level sidebar (agent switcher)
+                covers all navigation. But PM + Frontline dashboards both
+                kept their mobile hamburger for tab-within-dashboard
+                navigation (the company sidebar switches AGENTS, not tabs
+                inside an agent). Keeping HR consistent with them below. */}
+
+            {/* Mobile: Hamburger menu (below lg) — switches HR tabs, not
+                agents. Company-level agent switcher lives outside this file. */}
+            <div className="lg:hidden w-full mb-4">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between h-11 border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CurrentTabIcon className="h-4 w-4 shrink-0 text-violet-400" />
+                      <span className="font-medium truncate">{currentTab.label}</span>
+                    </div>
+                    <Menu className="h-5 w-5 text-white/40 shrink-0" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[#3a295a] bg-[#161630]">
+                  {HR_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
+                    const isActive = item.value === activeTab;
+                    const ItemIcon = item.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={item.value}
+                        onClick={() => setActiveTab(item.value)}
+                        className={`flex items-center justify-between py-3 cursor-pointer ${isActive ? 'bg-violet-600/20' : 'hover:bg-white/5'}`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <ItemIcon className={`h-4 w-4 shrink-0 ${isActive ? 'text-violet-400' : 'text-white/40'}`} />
+                          <span className={isActive ? 'font-medium text-violet-300' : 'text-white/70'}>{item.label}</span>
+                        </div>
+                        {isActive && <Check className="h-4 w-4 text-violet-400 shrink-0" />}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            {/* Desktop tab bar replaced by HRSidebar (outside main flow, in
+                the parent JSX above). Kept in DOM but permanently hidden so
+                any existing tour selectors targeting `[data-tour-hr-tab="…"]`
+                still resolve without visual junk. Mobile users continue
+                using the hamburger dropdown above. */}
+            <div className="hidden">
+              <TabsList
+                className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
+                style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+              >
+                {HR_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
+                  const TabIcon = item.icon;
+                  const tour = HR_TAB_TOURS[item.value];
+                  const showBadge = tour && tourAvailable(tour.key);
+                  const hoverHandlers = tour ? makeHoverLaunchHandlers({
+                    tourStorageKey: tour.key,
+                    onLaunch: () => setActiveTabTour(item.value),
+                  }) : {};
+                  return (
+                    <TabsTrigger
+                      key={item.value}
+                      value={item.value}
+                      data-tour-hr-tab={item.value}
+                      {...hoverHandlers}
+                      className="relative whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium rounded-md border transition-all duration-150"
+                      style={activeTab === item.value
+                        ? {
+                            background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
+                            color: '#fff',
+                            border: '1.5px solid #f59e0b',
+                            boxShadow: '0 0 8px 0 #f59e0b55',
+                          }
+                        : {
+                            background: 'rgba(60, 30, 90, 0.22)',
+                            color: '#cfc6e6',
+                            border: '1.5px solid #2d2342',
+                            boxShadow: 'none',
+                          }
+                      }
+                    >
+                      <TabIcon className="h-4 w-4 mr-2" />
+                      {item.label}
+                      {showBadge && (
+                        <span
+                          title="Tour available — hover to launch or click 'Tour this tab' inside"
+                          className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-violet-400 ring-2 ring-[#1a1333]"
+                          style={{ animation: 'hrDotPulse 2s ease-in-out infinite' }}
+                        />
+                      )}
+                    </TabsTrigger>
+                  );
+                })}
+              </TabsList>
+            </div>
+
+            {/* ── NEW consolidated tabs (HR_AGENT_UX_REDESIGN.md Chunk A).
+                  Each renders a card grid of click-through jumps to the
+                  hidden legacy tab that currently owns each feature. When
+                  Chunks B–D extract that content into these views as real
+                  nested sub-tabs, the sub-tab feel becomes zero-click. */}
+            <TabsContent value="people" className="mt-6">
+              <ErrorBoundary>
+                <HRPeopleView
+                  activeSubTab={activeSubTab}
+                  onSubTabChange={(sub) => setSubTab('people', sub)}
+                  onNavigateToTab={setActiveTab}
+                  onOpenEmployee={(id) => {
+                    trackHRRecentlyViewed({ kind: 'employee', id, title: `Employee #${id}` });
+                    setEmployeeDrawer({ open: true, id });
+                  }}
+                />
+              </ErrorBoundary>
+            </TabsContent>
+
+            <TabsContent value="knowledge" className="mt-6">
+              <ErrorBoundary>
+                <HRKnowledgeView
+                  activeSubTab={activeSubTab}
+                  onSubTabChange={(sub) => setSubTab('knowledge', sub)}
+                  onNavigateToTab={setActiveTab}
+                  onGoToDocuments={() => setActiveTab('documents')}
+                />
+              </ErrorBoundary>
+            </TabsContent>
+
+            <TabsContent value="operations" className="mt-6">
+              <ErrorBoundary>
+                <HROperationsView
+                  activeSubTab={activeSubTab}
+                  onSubTabChange={(sub) => setSubTab('operations', sub)}
+                  onNavigateToTab={setActiveTab}
+                />
+              </ErrorBoundary>
+            </TabsContent>
 
             {/* OVERVIEW — agent quick-links */}
             <TabsContent value="overview" className="mt-6">
@@ -2147,19 +2338,53 @@ const HRDashboard = () => {
 
 // ---------- Reusable little pieces ----------
 
-const Spinner = () => (
-  <div className="flex justify-center py-8">
-    <Loader2 className="h-5 w-5 animate-spin text-white/40" />
-  </div>
-);
+// Spinner + EmptyState moved to ./HRUiKit.jsx — imported at top of file
+// so both the parent AND the 3 extracted tab components (HRDocumentsTab,
+// HREmployeesTab, HRWorkflowsTab) share a single copy.
 
-const EmptyState = ({ icon: Icon, title, sub }) => (
-  <div className="flex flex-col items-center justify-center py-14 text-center">
-    <div className="h-14 w-14 rounded-2xl bg-violet-500/10 border border-violet-400/20 flex items-center justify-center mb-3">
-      <Icon className="h-7 w-7 text-violet-400" />
+// PlaceholderView — Chunk A scaffolding for the new consolidated tabs
+// (People / Knowledge / Operations). Same shape as Frontline's placeholder
+// view; each card is a click-through to the hidden legacy tab that owns
+// the actual feature. Replaced with real nested-sub-tab views in Chunks B–D.
+const PlaceholderView = ({ title, subtitle, jumps = [], onNavigateToTab }) => (
+  <div className="space-y-6">
+    <div>
+      <h2 className="text-lg font-semibold text-white">{title}</h2>
+      {subtitle && <p className="text-sm text-white/55 mt-1">{subtitle}</p>}
     </div>
-    <div className="font-medium text-white/90 mb-1">{title}</div>
-    {sub && <div className="text-sm text-white/50 max-w-sm">{sub}</div>}
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {jumps.map((jump) => {
+        const Icon = jump.icon;
+        return (
+          <button
+            key={jump.tab}
+            type="button"
+            onClick={() => onNavigateToTab && onNavigateToTab(jump.tab)}
+            className="text-left rounded-2xl border border-white/[0.06] bg-white/[0.03] hover:border-violet-400/30 hover:bg-white/[0.05] transition-colors p-5"
+          >
+            <div className="flex items-start gap-3">
+              {Icon && (
+                <div className="rounded-lg p-2.5 shrink-0 bg-violet-500/10 border border-violet-400/20">
+                  <Icon className="h-5 w-5 text-violet-300" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-semibold text-sm text-white">{jump.label}</h3>
+                  <ArrowRight className="h-4 w-4 text-white/40 shrink-0" />
+                </div>
+                {jump.desc && (
+                  <p className="text-xs text-white/45 mt-1 leading-relaxed">{jump.desc}</p>
+                )}
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+    <p className="text-xs text-white/40 italic">
+      Sub-tabs will render inline here in the next chunk. For now these open the underlying tabs directly.
+    </p>
   </div>
 );
 
