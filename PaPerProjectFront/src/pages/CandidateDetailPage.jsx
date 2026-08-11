@@ -292,7 +292,7 @@ const CandidateDetailPage = () => {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #0a0a1a 0%, #0d1020 100%)' }}>
+    <div className="min-h-full rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #0a0a1a 0%, #0d1020 100%)' }}>
 
       {/* ── Top bar ── */}
       <div className="sticky top-0 z-20 px-6 py-3 flex items-center justify-between gap-3 border-b border-white/6 backdrop-blur-md"
