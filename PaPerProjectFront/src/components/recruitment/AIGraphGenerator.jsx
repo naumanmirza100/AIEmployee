@@ -356,13 +356,13 @@ const AIGraphGenerator = () => {
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" id="REC-aigraph-tabs" data-testid="REC-aigraph-tabs">
         <TabsList className="grid w-full grid-cols-2 max-w-md">
-          <TabsTrigger value="generate" className="text-sm">
+          <TabsTrigger value="generate" className="text-sm" id="REC-aigraph-tab-generate" data-testid="REC-aigraph-tab-generate">
             <Sparkles className="h-4 w-4 mr-2" />
             Generate
           </TabsTrigger>
-          <TabsTrigger value="saved" className="text-sm">
+          <TabsTrigger value="saved" className="text-sm" id="REC-aigraph-tab-saved" data-testid="REC-aigraph-tab-saved">
             <Star className="h-4 w-4 mr-2" />
             Saved Prompts
           </TabsTrigger>
@@ -370,7 +370,7 @@ const AIGraphGenerator = () => {
 
         {/* Generate Tab */}
         <TabsContent value="generate" className="space-y-4 mt-4">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm" id="REC-aigraph-create-card" data-testid="REC-aigraph-create-card">
             <CardHeader className="p-4 sm:p-6">
               <CardTitle className="text-base sm:text-lg flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-primary" />
@@ -383,9 +383,10 @@ const AIGraphGenerator = () => {
             <CardContent className="p-4 sm:p-6 pt-0 space-y-4">
               {/* Prompt Input */}
               <div className="space-y-2">
-                <Label htmlFor="prompt" className="text-sm font-medium">Your Prompt</Label>
+                <Label htmlFor="REC-aigraph-prompt-input" className="text-sm font-medium">Your Prompt</Label>
                 <Textarea
-                  id="prompt"
+                  id="REC-aigraph-prompt-input"
+                  data-testid="REC-aigraph-prompt-input"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="e.g., Show monthly CV processing trends as a line chart"
@@ -404,6 +405,8 @@ const AIGraphGenerator = () => {
                       size="sm"
                       className="text-xs h-auto py-1.5 px-2"
                       onClick={() => setPrompt(example)}
+                      id={`REC-aigraph-example-btn-${index}`}
+                      data-testid={`REC-aigraph-example-btn-${index}`}
                     >
                       {example}
                     </Button>
@@ -416,6 +419,8 @@ const AIGraphGenerator = () => {
                 onClick={handleGenerate}
                 disabled={generating || !prompt.trim()}
                 className="w-full sm:w-auto"
+                id="REC-aigraph-generate-btn"
+                data-testid="REC-aigraph-generate-btn"
               >
                 {generating ? (
                   <>
@@ -434,7 +439,7 @@ const AIGraphGenerator = () => {
 
           {/* Generated Chart Display */}
           {generating && (
-            <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+            <Card className="border-white/10 bg-black/20 backdrop-blur-sm" id="REC-aigraph-generating-state" data-testid="REC-aigraph-generating-state">
               <CardContent className="py-12 flex flex-col items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
                 <p className="text-sm text-muted-foreground">Analyzing your request and generating visualization...</p>
@@ -443,7 +448,7 @@ const AIGraphGenerator = () => {
           )}
 
           {generatedChart && !generating && (
-            <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+            <Card className="border-white/10 bg-black/20 backdrop-blur-sm" id="REC-aigraph-result-card" data-testid="REC-aigraph-result-card">
               <CardHeader className="p-4 sm:p-6 flex flex-row items-start justify-between">
                 <div>
                   <CardTitle className="text-base sm:text-lg flex items-center gap-2">
@@ -465,6 +470,8 @@ const AIGraphGenerator = () => {
                       setSaveTitle(generatedChart.title || '');
                       setSaveModalOpen(true);
                     }}
+                    id="REC-aigraph-open-save-btn"
+                    data-testid="REC-aigraph-open-save-btn"
                   >
                     <Save className="h-4 w-4 mr-2" />
                     Save Prompt
@@ -472,7 +479,7 @@ const AIGraphGenerator = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-4 sm:p-6 pt-0">
-                <div className="bg-muted/30 rounded-lg p-4 sm:p-6">
+                <div className="bg-muted/30 rounded-lg p-4 sm:p-6" id="REC-aigraph-chart-container" data-testid="REC-aigraph-chart-container">
                   {renderChart(generatedChart)}
                 </div>
               </CardContent>
@@ -482,7 +489,7 @@ const AIGraphGenerator = () => {
 
         {/* Saved Prompts Tab */}
         <TabsContent value="saved" className="space-y-4 mt-4">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card className="border-white/10 bg-black/20 backdrop-blur-sm" id="REC-aigraph-saved-card" data-testid="REC-aigraph-saved-card">
             <CardHeader className="p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
@@ -496,6 +503,8 @@ const AIGraphGenerator = () => {
                     variant={filterFavorites ? "default" : "outline"}
                     size="sm"
                     onClick={() => setFilterFavorites(!filterFavorites)}
+                    id="REC-aigraph-favorites-filter-btn"
+                    data-testid="REC-aigraph-favorites-filter-btn"
                   >
                     <Star className={`h-4 w-4 ${filterFavorites ? '' : 'mr-2'}`} />
                     {!filterFavorites && <span className="hidden sm:inline">Favorites</span>}
@@ -505,6 +514,8 @@ const AIGraphGenerator = () => {
                     size="sm"
                     onClick={fetchSavedPrompts}
                     disabled={loadingPrompts}
+                    id="REC-aigraph-refresh-btn"
+                    data-testid="REC-aigraph-refresh-btn"
                   >
                     <RefreshCw className={`h-4 w-4 ${loadingPrompts ? 'animate-spin' : ''}`} />
                   </Button>
@@ -520,16 +531,18 @@ const AIGraphGenerator = () => {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-9"
+                  id="REC-aigraph-search-input"
+                  data-testid="REC-aigraph-search-input"
                 />
               </div>
 
               {/* Prompts List */}
               {loadingPrompts ? (
-                <div className="py-8 flex justify-center">
+                <div className="py-8 flex justify-center" id="REC-aigraph-prompts-loading" data-testid="REC-aigraph-prompts-loading">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : filteredPrompts.length === 0 ? (
-                <div className="py-8 text-center">
+                <div className="py-8 text-center" id="REC-aigraph-prompts-empty" data-testid="REC-aigraph-prompts-empty">
                   <Star className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
                   <p className="text-sm font-medium mb-1">No saved prompts</p>
                   <p className="text-xs text-muted-foreground">
@@ -539,9 +552,9 @@ const AIGraphGenerator = () => {
                   </p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3" id="REC-aigraph-prompts-list" data-testid="REC-aigraph-prompts-list">
                   {filteredPrompts.map((savedPrompt) => (
-                    <Card key={savedPrompt.id} className="overflow-hidden">
+                    <Card key={savedPrompt.id} className="overflow-hidden" id={`REC-aigraph-prompt-card-${savedPrompt.id}`} data-testid={`REC-aigraph-prompt-card-${savedPrompt.id}`}>
                       <CardContent className="p-3 sm:p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
@@ -578,18 +591,20 @@ const AIGraphGenerator = () => {
                               variant="default"
                               size="sm"
                               onClick={() => handleRunSavedPrompt(savedPrompt)}
+                              id={`REC-aigraph-run-btn-${savedPrompt.id}`}
+                              data-testid={`REC-aigraph-run-btn-${savedPrompt.id}`}
                             >
                               <Play className="h-3.5 w-3.5 mr-1" />
                               Run
                             </Button>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" id={`REC-aigraph-prompt-menu-trigger-${savedPrompt.id}`} data-testid={`REC-aigraph-prompt-menu-trigger-${savedPrompt.id}`}>
                                   <MoreVertical className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleToggleFavorite(savedPrompt.id, savedPrompt.is_favorite)}>
+                                <DropdownMenuItem onClick={() => handleToggleFavorite(savedPrompt.id, savedPrompt.is_favorite)} id={`REC-aigraph-menu-favorite-${savedPrompt.id}`} data-testid={`REC-aigraph-menu-favorite-${savedPrompt.id}`}>
                                   {savedPrompt.is_favorite ? (
                                     <>
                                       <StarOff className="h-4 w-4 mr-2" />
@@ -602,18 +617,20 @@ const AIGraphGenerator = () => {
                                     </>
                                   )}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleCopyPrompt(savedPrompt.prompt)}>
+                                <DropdownMenuItem onClick={() => handleCopyPrompt(savedPrompt.prompt)} id={`REC-aigraph-menu-copy-${savedPrompt.id}`} data-testid={`REC-aigraph-menu-copy-${savedPrompt.id}`}>
                                   <Copy className="h-4 w-4 mr-2" />
                                   Copy prompt
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleToggleDashboard(savedPrompt)}>
+                                <DropdownMenuItem onClick={() => handleToggleDashboard(savedPrompt)} id={`REC-aigraph-menu-dashboard-${savedPrompt.id}`} data-testid={`REC-aigraph-menu-dashboard-${savedPrompt.id}`}>
                                   <LayoutDashboard className="h-4 w-4 mr-2" />
                                   {isPromptOnDashboard(savedPrompt) ? 'Remove from dashboard' : 'Add to dashboard'}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem 
+                                <DropdownMenuItem
                                   onClick={() => handleDeletePrompt(savedPrompt.id)}
                                   className="text-destructive focus:text-destructive"
+                                  id={`REC-aigraph-menu-delete-${savedPrompt.id}`}
+                                  data-testid={`REC-aigraph-menu-delete-${savedPrompt.id}`}
                                 >
                                   <Trash2 className="h-4 w-4 mr-2" />
                                   Delete
@@ -634,7 +651,7 @@ const AIGraphGenerator = () => {
 
       {/* Save Prompt Modal */}
       <Dialog open={saveModalOpen} onOpenChange={setSaveModalOpen}>
-        <DialogContent className="w-[95vw] max-w-md">
+        <DialogContent className="w-[95vw] max-w-md" id="REC-aigraph-save-dialog" data-testid="REC-aigraph-save-dialog">
           <DialogHeader>
             <DialogTitle>Save Prompt</DialogTitle>
             <DialogDescription>
@@ -643,27 +660,30 @@ const AIGraphGenerator = () => {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="save-title">Title</Label>
+              <Label htmlFor="REC-aigraph-save-title-input">Title</Label>
               <Input
-                id="save-title"
+                id="REC-aigraph-save-title-input"
+                data-testid="REC-aigraph-save-title-input"
                 value={saveTitle}
                 onChange={(e) => setSaveTitle(e.target.value)}
                 placeholder="e.g., Monthly CV Trends"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="save-prompt">Prompt</Label>
+              <Label htmlFor="REC-aigraph-save-prompt-input">Prompt</Label>
               <Textarea
-                id="save-prompt"
+                id="REC-aigraph-save-prompt-input"
+                data-testid="REC-aigraph-save-prompt-input"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 className="min-h-[80px] text-sm"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="save-tags">Tags (comma-separated)</Label>
+              <Label htmlFor="REC-aigraph-save-tags-input">Tags (comma-separated)</Label>
               <Input
-                id="save-tags"
+                id="REC-aigraph-save-tags-input"
+                data-testid="REC-aigraph-save-tags-input"
                 value={saveTags}
                 onChange={(e) => setSaveTags(e.target.value)}
                 placeholder="e.g., analytics, monthly, trends"
@@ -671,10 +691,10 @@ const AIGraphGenerator = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSaveModalOpen(false)}>
+            <Button variant="outline" onClick={() => setSaveModalOpen(false)} id="REC-aigraph-save-cancel-btn" data-testid="REC-aigraph-save-cancel-btn">
               Cancel
             </Button>
-            <Button onClick={handleSavePrompt} disabled={saving}>
+            <Button onClick={handleSavePrompt} disabled={saving} id="REC-aigraph-save-submit-btn" data-testid="REC-aigraph-save-submit-btn">
               {saving ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

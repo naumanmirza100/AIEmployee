@@ -5,34 +5,44 @@
 
 // ---- Main "Take the Tour" tour ------------------------------------------
 
+// Rewritten for the post-restructure tab shape (5 visible tabs). Uses the
+// global AgentSidebar as the primary navigation. Employees / My team /
+// Org chart / Documents / Q&A / Workflows / Leave / Notifications are all
+// still reachable, but as sub-items of the consolidated People / Knowledge /
+// Operations parent tabs.
 export const HR_MAIN_TOUR_STEPS = [
   {
     title: 'Welcome to HR Support Agent 👋',
-    body: "This quick tour walks you through every tab and tool on this dashboard. You can skip anytime, or replay it later from the 'Take the Tour' button in the header.",
+    body: "Quick tour of the 5 tabs on this dashboard. You can skip anytime, or replay it later from 'Take the Tour' in the header.",
     placement: 'center',
   },
   {
     selector: '[data-tour-hr="stats"]',
     title: 'Your HR snapshot',
-    body: 'Six live tiles: active employees, on leave, pending leave requests, upcoming meetings, indexed documents, and probation ending soon. Updates every time you land on the dashboard.',
+    body: 'Live tiles: active employees, on leave, pending leave requests, upcoming meetings, indexed documents, and probation ending soon. Updates every time you land on the dashboard.',
     placement: 'bottom',
   },
   {
     selector: '[data-tour-hr="tabs"]',
-    title: 'Everything lives in these tabs',
-    body: "Each tab opens a different tool. We'll walk through them one by one.",
-    placement: 'bottom',
+    title: 'Navigation lives in the left sidebar',
+    body: "Every tab you'll see below is reachable from the global sidebar on the left. Parent tabs (People / Knowledge / Operations) expand to show sub-items when you're on them.",
+    placement: 'right',
   },
-  { tab: 'overview',      selector: '[data-tour-hr-tab="overview"]',      title: 'Overview',       body: 'Your home base. Quick-launch tiles for the tools you use most: Q&A, Employees, Documents, Workflows, Meetings.', placement: 'bottom' },
-  { tab: 'qa',            selector: '[data-tour-hr-tab="qa"]',            title: 'Knowledge Q&A',  body: 'Ask any HR question — leave policy, benefits, escalation SOPs, contracts. The AI answers grounded in your indexed HR documents.', placement: 'bottom' },
-  { tab: 'employees',     selector: '[data-tour-hr-tab="employees"]',     title: 'Employees',      body: 'Browse and search everyone in the company. Filter by department, run review cycles, and manage the org structure.', placement: 'bottom' },
-  { tab: 'my_team',       selector: '[data-tour-hr-tab="my_team"]',       title: 'My team',        body: "Manager view: your direct reports, their performance summaries, and quick actions on each report.", placement: 'bottom' },
-  { tab: 'org_chart',     selector: '[data-tour-hr-tab="org_chart"]',     title: 'Org chart',      body: 'Interactive visualization of the reporting structure — who reports to whom, at a glance.', placement: 'bottom' },
-  { tab: 'documents',     selector: '[data-tour-hr-tab="documents"]',     title: 'Documents',      body: 'Upload handbooks, policies, contracts. Once indexed, the AI can answer questions from their content.', placement: 'bottom' },
-  { tab: 'workflows',     selector: '[data-tour-hr-tab="workflows"]',     title: 'Workflows',      body: 'Automate onboarding, offboarding, leave approvals, and more. Build once, run every time you need them.', placement: 'bottom' },
-  { tab: 'meetings',      selector: '[data-tour-hr-tab="meetings"]',      title: 'Meetings',       body: "Schedule 1:1s and reviews in plain English. Export the invite as an .ics file and drop it in the participants' calendars.", placement: 'bottom' },
-  { tab: 'leave',         selector: '[data-tour-hr-tab="leave"]',         title: 'Leave',          body: 'Review and approve pending leave requests, and see the calendar of who is out and when.', placement: 'bottom' },
-  { tab: 'notifications', selector: '[data-tour-hr-tab="notifications"]', title: 'Notifications',  body: "HR event alerts — probation endings, leave conflicts, missed check-ins. You'll never miss a follow-up.", placement: 'bottom' },
+  { tab: 'overview', title: 'Overview',
+    body: 'Home base: stats + quick-launch tiles for the tabs you use most. Come back here when you want a snapshot of what needs attention.',
+    placement: 'center' },
+  { tab: 'people', title: 'People',
+    body: 'Everything on top of the employee record: the directory (Employees), your direct reports (My team), and the reporting structure (Org chart). Departments and Review Cycles admin lives here too — accessible from the Employees header.',
+    placement: 'center' },
+  { tab: 'knowledge', title: 'Knowledge',
+    body: 'Feed the HR knowledge base (Documents) and ask questions of it (Knowledge Q&A). Documents feed the KB, Q&A answers from them. Ctrl+K opens the floating chat for quick asks from anywhere.',
+    placement: 'center' },
+  { tab: 'operations', title: 'Operations',
+    body: 'The process-y HR features: Workflows (onboarding / offboarding / approvals), Leave (approve or submit requests), Notifications (templates + scheduled sends).',
+    placement: 'center' },
+  { tab: 'meetings', title: 'Meetings',
+    body: "Schedule 1:1s and reviews in plain English. Export the invite as an .ics file and drop it in the participants' calendars.",
+    placement: 'center' },
   {
     selector: '[data-tour-hr="replay"]',
     title: 'Need the tour again?',
@@ -132,22 +142,15 @@ export const HR_MEETINGS_TOUR = {
     { selector: '[data-tour-hrmeet="chat-samples"]',   title: 'Try one of these',         body: "Sample prompts show what the scheduler understands. Click one to load it as your prompt — great for learning the phrasing that works best.", placement: 'bottom' },
     { selector: '[data-tour-hrmeet="chat-input"]',     title: 'Describe the meeting',     body: "Type in plain English. Include names, date/time, duration, and agenda — the more detail, the better the invite. Enter to send, Shift+Enter for a new line.", placement: 'top' },
     { selector: '[data-tour-hrmeet="chat-send"]',      title: 'Send',                     body: 'Submit your request. The AI parses it, finds the attendees, and either books the meeting or asks for missing info (like exact time).', placement: 'top' },
-    { selector: '[data-tour-hrmeet="stats"]',          title: 'Meetings snapshot',        body: 'Four counts at a glance: total, upcoming, completed, cancelled. Reflects everything the agent has scheduled for you and your team.', placement: 'bottom',
-      onEnter: () => {
-        // Switch the internal Chat/Meetings sub-tab to "Meetings" so the target is visible.
-        const btn = document.querySelectorAll('[data-tour-hrmeet="tabs"] button')[1];
-        if (btn) btn.click();
-      } },
-    { selector: '[data-tour-hrmeet="refresh"]',        title: 'Refresh',                  body: 'Reload the meetings list from the backend. Handy if a colleague just scheduled something and you want to see it appear.', placement: 'left',
-      onEnter: () => {
-        const btn = document.querySelectorAll('[data-tour-hrmeet="tabs"] button')[1];
-        if (btn) btn.click();
-      } },
-    { selector: '[data-tour-hrmeet="meeting-actions"]', title: 'Per-meeting actions',     body: 'Every meeting has four quick actions: Export .ics (download the invite), Edit (change title/time/attendees), Extract action items (AI pulls tasks from the transcript), and Cancel.', placement: 'top',
-      onEnter: () => {
-        const btn = document.querySelectorAll('[data-tour-hrmeet="tabs"] button')[1];
-        if (btn) btn.click();
-      } },
+    // Post-restructure: the internal Chat/Meetings sub-tab bar was removed
+    // (users navigate via the global sidebar now). Removed the onEnter DOM
+    // clicks that used to switch to the Meetings sub-tab — they'd fail
+    // silently now. The stats / refresh / per-meeting-actions steps stay
+    // because their targets are still present when the Meetings list is
+    // rendered inline (which it is by default).
+    { selector: '[data-tour-hrmeet="stats"]',          title: 'Meetings snapshot',        body: 'Four counts at a glance: total, upcoming, completed, cancelled. Reflects everything the agent has scheduled for you and your team.', placement: 'bottom' },
+    { selector: '[data-tour-hrmeet="refresh"]',        title: 'Refresh',                  body: 'Reload the meetings list from the backend. Handy if a colleague just scheduled something and you want to see it appear.', placement: 'left' },
+    { selector: '[data-tour-hrmeet="meeting-actions"]', title: 'Per-meeting actions',     body: 'Every meeting has four quick actions: Export .ics (download the invite), Edit (change title/time/attendees), Extract action items (AI pulls tasks from the transcript), and Cancel.', placement: 'top' },
   ],
 };
 
@@ -188,7 +191,7 @@ export const HR_FLOATING_CHAT_TOUR = {
 
 export const HR_HINTS = {
   // Overview
-  hrOvQuicknav: { title: 'Quick jump to any tool', body: 'Six shortcut tiles that jump straight to the tabs you use most. Click any tile to switch tabs instantly.' },
+  hrOvQuicknav: { title: 'Quick jump to any tab', body: 'Shortcut tiles for the tabs you use most. The sidebar on the left has the full navigation including sub-items (Employees, Documents, Workflows, etc.).' },
 
   // Q&A
   hrQaPanel:              { title: 'Knowledge Q&A panel', body: 'Chat history on the left, conversation in the middle, input at the bottom. Everything is saved so you can pick up where you left off.' },
@@ -253,17 +256,53 @@ export const HR_HINTS = {
 
 // ---- Convenience map ----------------------------------------------------
 
+// ---- Per-tab tours for the NEW consolidated tabs ------------------------
+// Short, focused tours for the 3 new tabs added in the restructure. They
+// live alongside the (untouched) legacy tab tours above — those still work
+// if a user deep-links to a hidden tab like ?tab=documents.
+
+export const HR_PEOPLE_TOUR = {
+  key: 'hr_tour_people_v1',
+  label: 'People',
+  steps: [
+    { title: 'People tab 👥', body: 'Everything that lives on top of the employee record — the directory (Employees), your direct reports (My team), the org chart, plus Departments + Review Cycles admin.', placement: 'center' },
+    { title: 'Sub-items in the sidebar', body: 'Employees / My team / Org chart are indented under People in the left sidebar. Click any to jump straight to it.', placement: 'center' },
+    { title: 'Departments & Review Cycles', body: 'Both are HR-admin objects reachable as buttons in the Employees header. Departments manage the org structure; Review Cycles run performance reviews with self / manager / released stages.', placement: 'center' },
+  ],
+};
+
+export const HR_KNOWLEDGE_TOUR = {
+  key: 'hr_tour_knowledge_v1',
+  label: 'Knowledge',
+  steps: [
+    { title: 'Knowledge tab 💬', body: 'Feed the HR knowledge base (Documents) and ask questions of it (Knowledge Q&A). Documents feed the KB, Q&A answers from them.', placement: 'center' },
+    { title: 'Documents vs. Q&A', body: 'Both are sub-items in the sidebar. Upload handbooks, policies, contracts to Documents; ask questions in Q&A — the AI cites which docs it used.', placement: 'center' },
+    { title: 'Quick asks via Ctrl+K', body: 'The floating chat (bottom-right, Ctrl+K from anywhere) is a lighter Q&A surface. Same underlying agent — use it when you don\'t need chat history.', placement: 'center' },
+  ],
+};
+
+export const HR_OPERATIONS_TOUR = {
+  key: 'hr_tour_operations_v1',
+  label: 'Operations',
+  steps: [
+    { title: 'Operations tab ⚙️', body: 'The process-y HR features: Workflows (SOP automation), Leave (approve/reject/submit), Notifications (templates + scheduled sends).', placement: 'center' },
+    { title: 'Sub-items in the sidebar', body: 'Workflows / Leave / Notifications each get their own sub-item in the sidebar under Operations. Click any to jump in.', placement: 'center' },
+    { title: 'Workflow templates', body: 'Onboarding / offboarding / approval flows have ready-made templates. Click "From template" in Workflows for a low-friction start instead of raw JSON.', placement: 'center' },
+  ],
+};
+
+// ---- Convenience map ----------------------------------------------------
+// Only include tours for VISIBLE tabs so the per-tab launcher UI doesn't
+// offer tours for tabs the user can't reach through normal navigation.
+// The hidden-tab tour constants above (HR_EMPLOYEES_TOUR, HR_DOCUMENTS_TOUR,
+// etc.) are still exported so URL deep-links can still launch them.
+
 export const HR_TAB_TOURS = {
-  overview:      HR_OVERVIEW_TOUR,
-  qa:            HR_QA_TOUR,
-  employees:     HR_EMPLOYEES_TOUR,
-  my_team:       HR_MY_TEAM_TOUR,
-  org_chart:     HR_ORG_CHART_TOUR,
-  documents:     HR_DOCUMENTS_TOUR,
-  workflows:     HR_WORKFLOWS_TOUR,
-  meetings:      HR_MEETINGS_TOUR,
-  leave:         HR_LEAVE_TOUR,
-  notifications: HR_NOTIFICATIONS_TOUR,
+  overview:   HR_OVERVIEW_TOUR,
+  people:     HR_PEOPLE_TOUR,
+  knowledge:  HR_KNOWLEDGE_TOUR,
+  operations: HR_OPERATIONS_TOUR,
+  meetings:   HR_MEETINGS_TOUR,
 };
 
 // Main-tour storage key (used by the "Take the Tour" auto-launch).

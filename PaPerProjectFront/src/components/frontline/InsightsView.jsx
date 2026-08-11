@@ -1,6 +1,5 @@
 import React from 'react';
-import { BarChart3, Sparkles } from 'lucide-react';
-import { SubTabsShell, SubTabTrigger, TabsContent, TabsList } from './FrontlineSubTabs';
+import { SubTabsShell, TabsContent } from './FrontlineSubTabs';
 import { FrontlineAnalyticsTab } from './FrontlineDashboard';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 
@@ -23,10 +22,8 @@ export default function InsightsView({ activeSubTab, onSubTabChange }) {
       activeSubTab={activeSubTab}
       onSubTabChange={onSubTabChange}
     >
-      <TabsList className="inline-flex h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]">
-        <SubTabTrigger value="analytics" active={activeSubTab || 'analytics'} icon={BarChart3} label="Analytics" />
-        <SubTabTrigger value="ai-graphs" active={activeSubTab || 'analytics'} icon={Sparkles}   label="AI Graphs" />
-      </TabsList>
+      {/* Internal sub-tab bar removed — users navigate via the global
+          AgentSidebar which has Analytics + AI Graphs as sub-items. */}
 
       <TabsContent value="analytics" className="mt-6">
         <FrontlineAnalyticsTab />

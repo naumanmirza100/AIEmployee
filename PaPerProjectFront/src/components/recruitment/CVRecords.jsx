@@ -197,7 +197,7 @@ const CVRecords = () => {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-12">
+      <div id="REC-cvrecords-loading-state" data-testid="REC-cvrecords-loading-state" className="flex justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
@@ -215,6 +215,8 @@ const CVRecords = () => {
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
           <SearchableSelect
+            id="REC-cvrecords-job-filter"
+            data-testid="REC-cvrecords-job-filter"
             value={jobFilter || 'all'}
             onValueChange={(value) => setJobFilter(value === 'all' ? '' : value)}
             options={[{ value: 'all', label: 'All Jobs' }, ...jobs.map(j => ({ value: j.id.toString(), label: j.title }))]}
@@ -222,6 +224,8 @@ const CVRecords = () => {
             triggerClassName="w-[180px]"
           />
           <SearchableSelect
+            id="REC-cvrecords-decision-filter"
+            data-testid="REC-cvrecords-decision-filter"
             value={decisionFilter || 'all'}
             onValueChange={(value) => setDecisionFilter(value === 'all' ? '' : value)}
             options={[
@@ -234,6 +238,8 @@ const CVRecords = () => {
             triggerClassName="w-[140px]"
           />
           <Button
+            id="REC-cvrecords-print-btn"
+            data-testid="REC-cvrecords-print-btn"
             variant="outline"
             size="sm"
             onClick={handlePrint}
@@ -250,6 +256,8 @@ const CVRecords = () => {
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40 pointer-events-none" />
           <Input
+            id="REC-cvrecords-search-input"
+            data-testid="REC-cvrecords-search-input"
             placeholder="Search name or email…"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -257,6 +265,8 @@ const CVRecords = () => {
           />
         </div>
         <Input
+          id="REC-cvrecords-date-from-input"
+          data-testid="REC-cvrecords-date-from-input"
           type="date"
           value={dateFrom}
           onChange={e => { setDateFrom(e.target.value); }}
@@ -265,6 +275,8 @@ const CVRecords = () => {
         />
         <span className="text-white/40 text-xs">to</span>
         <Input
+          id="REC-cvrecords-date-to-input"
+          data-testid="REC-cvrecords-date-to-input"
           type="date"
           value={dateTo}
           onChange={e => { setDateTo(e.target.value); }}
@@ -273,6 +285,8 @@ const CVRecords = () => {
         />
         {(search || dateFrom || dateTo) && (
           <button
+            id="REC-cvrecords-clear-filters-btn"
+            data-testid="REC-cvrecords-clear-filters-btn"
             onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); }}
             className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 px-2 py-1.5 rounded hover:bg-white/5 transition-colors"
           >
@@ -283,18 +297,18 @@ const CVRecords = () => {
 
       {/* Bulk Actions Bar */}
       {selectedIds.size > 0 && (
-        <Card className="border-primary/50 bg-primary/5">
+        <Card id="REC-cvrecords-bulk-actions-bar" data-testid="REC-cvrecords-bulk-actions-bar" className="border-primary/50 bg-primary/5">
           <CardContent className="py-3 px-3 sm:px-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <span className="text-xs sm:text-sm font-medium">{selectedIds.size} selected</span>
               <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
-                <Button size="sm" variant="default" className="bg-green-600 hover:bg-green-700 text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('INTERVIEW')}>
+                <Button id="REC-cvrecords-bulk-interview-btn" data-testid="REC-cvrecords-bulk-interview-btn" size="sm" variant="default" className="bg-green-600 hover:bg-green-700 text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('INTERVIEW')}>
                   {bulkUpdating ? <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 animate-spin mr-1" /> : null}
                   Interview
                 </Button>
-                <Button size="sm" variant="secondary" className="text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('HOLD')}>Hold</Button>
-                <Button size="sm" variant="secondary" className="text-red-600 hover:text-red-700 text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('REJECT')}>Reject</Button>
-                <Button size="sm" variant="ghost" className="text-xs sm:text-sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+                <Button id="REC-cvrecords-bulk-hold-btn" data-testid="REC-cvrecords-bulk-hold-btn" size="sm" variant="secondary" className="text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('HOLD')}>Hold</Button>
+                <Button id="REC-cvrecords-bulk-reject-btn" data-testid="REC-cvrecords-bulk-reject-btn" size="sm" variant="secondary" className="text-red-600 hover:text-red-700 text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('REJECT')}>Reject</Button>
+                <Button id="REC-cvrecords-bulk-clear-btn" data-testid="REC-cvrecords-bulk-clear-btn" size="sm" variant="ghost" className="text-xs sm:text-sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
               </div>
             </div>
           </CardContent>
@@ -302,7 +316,7 @@ const CVRecords = () => {
       )}
 
       {total === 0 ? (
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-cvrecords-empty-state" data-testid="REC-cvrecords-empty-state" className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
             <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
             <p className="text-base sm:text-lg font-medium mb-2 text-white">No candidates yet</p>
@@ -318,7 +332,7 @@ const CVRecords = () => {
           {selectedIds.size === 0 && <BulkSelectHint />}
 
           {/* Mobile Card View */}
-          <div className="block md:hidden space-y-3">
+          <div id="REC-cvrecords-mobile-list" data-testid="REC-cvrecords-mobile-list" className="block md:hidden space-y-3">
             <div className="flex items-center gap-2 px-1 pt-6">
               <div className="relative inline-flex items-center justify-center">
                 {selectedIds.size === 0 && (
@@ -326,7 +340,7 @@ const CVRecords = () => {
                     <ArrowDown className="h-4 w-4" />
                   </span>
                 )}
-                <Checkbox checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false} onCheckedChange={handleSelectAll} aria-label="Select all on page" />
+                <Checkbox id="REC-cvrecords-mobile-select-all" data-testid="REC-cvrecords-mobile-select-all" checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false} onCheckedChange={handleSelectAll} aria-label="Select all on page" />
               </div>
               <span className="text-sm text-muted-foreground">Select all</span>
             </div>
@@ -336,11 +350,11 @@ const CVRecords = () => {
               const displayEmail = record.application_email || parsed.email || '';
               const isSelected = selectedIds.has(record.id);
               return (
-                <Card key={record.id} className={`cursor-pointer transition-colors border-white/10 backdrop-blur-sm ${isSelected ? 'border-primary bg-primary/10' : 'bg-black/20 hover:bg-black/30'}`} onClick={() => handleRowClick(record)}>
+                <Card id={`REC-cvrecords-mobile-card-${record.id}`} data-testid={`REC-cvrecords-mobile-card-${record.id}`} key={record.id} className={`cursor-pointer transition-colors border-white/10 backdrop-blur-sm ${isSelected ? 'border-primary bg-primary/10' : 'bg-black/20 hover:bg-black/30'}`} onClick={() => handleRowClick(record)}>
                   <CardContent className="p-3 sm:p-4">
                     <div className="flex items-start gap-3">
                       <div onClick={(e) => e.stopPropagation()} className="pt-1">
-                        <Checkbox checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} />
+                        <Checkbox id={`REC-cvrecords-mobile-select-${record.id}`} data-testid={`REC-cvrecords-mobile-select-${record.id}`} checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-2">
@@ -369,7 +383,7 @@ const CVRecords = () => {
           </div>
 
           {/* Desktop Table View */}
-          <Card className="hidden md:block border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card id="REC-cvrecords-table-wrapper" data-testid="REC-cvrecords-table-wrapper" className="hidden md:block border-white/10 bg-black/20 backdrop-blur-sm">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -381,7 +395,7 @@ const CVRecords = () => {
                             <ArrowDown className="h-4 w-4" />
                           </span>
                         )}
-                        <Checkbox checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false} onCheckedChange={handleSelectAll} aria-label="Select all on page" className="translate-y-0.5" />
+                        <Checkbox id="REC-cvrecords-select-all" data-testid="REC-cvrecords-select-all" checked={allOnPageSelected ? true : someOnPageSelected ? 'indeterminate' : false} onCheckedChange={handleSelectAll} aria-label="Select all on page" className="translate-y-0.5" />
                       </div>
                     </TableHead>
                     <TableHead className="w-14">#</TableHead>
@@ -400,9 +414,9 @@ const CVRecords = () => {
                     const displayEmail = record.application_email || parsed.email || '—';
                     const isSelected = selectedIds.has(record.id);
                     return (
-                      <TableRow key={record.id} className="cursor-pointer hover:bg-muted/70 data-[state=selected]:bg-muted/70" data-state={isSelected ? 'selected' : undefined} onClick={() => handleRowClick(record)}>
+                      <TableRow id={`REC-cvrecords-row-${record.id}`} data-testid={`REC-cvrecords-row-${record.id}`} key={record.id} className="cursor-pointer hover:bg-muted/70 data-[state=selected]:bg-muted/70" data-state={isSelected ? 'selected' : undefined} onClick={() => handleRowClick(record)}>
                         <TableCell className="w-12 pr-0" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} className="translate-y-0.5" />
+                          <Checkbox id={`REC-cvrecords-select-${record.id}`} data-testid={`REC-cvrecords-select-${record.id}`} checked={isSelected} onCheckedChange={(checked) => handleSelectRow(record.id, !!checked)} aria-label={`Select ${displayName}`} className="translate-y-0.5" />
                         </TableCell>
                         <TableCell className="font-medium">{record.rank != null ? record.rank : '—'}</TableCell>
                         <TableCell>{displayName}</TableCell>
@@ -426,16 +440,16 @@ const CVRecords = () => {
                 <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
                   <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">{rangeStart}–{rangeEnd} of {total}</span>
                   <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
-                    <SelectTrigger className="w-[90px] sm:w-[100px] h-8 sm:h-9 text-xs sm:text-sm border-white/20"><SelectValue /></SelectTrigger>
-                    <SelectContent>{PAGE_SIZES.map((size) => <SelectItem key={size} value={String(size)}>{size} / page</SelectItem>)}</SelectContent>
+                    <SelectTrigger id="REC-cvrecords-page-size-trigger" data-testid="REC-cvrecords-page-size-trigger" className="w-[90px] sm:w-[100px] h-8 sm:h-9 text-xs sm:text-sm border-white/20"><SelectValue /></SelectTrigger>
+                    <SelectContent>{PAGE_SIZES.map((size) => <SelectItem id={`REC-cvrecords-page-size-item-${size}`} data-testid={`REC-cvrecords-page-size-item-${size}`} key={size} value={String(size)}>{size} / page</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="flex items-center gap-1 sm:gap-2 w-full sm:w-auto justify-center">
-                  <Button variant="outline" size="sm" className="h-8 sm:h-9 px-2 sm:px-3" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={!canPrev}>
+                  <Button id="REC-cvrecords-prev-page-btn" data-testid="REC-cvrecords-prev-page-btn" variant="outline" size="sm" className="h-8 sm:h-9 px-2 sm:px-3" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={!canPrev}>
                     <ChevronLeft className="h-4 w-4" /><span className="hidden sm:inline ml-1">Previous</span>
                   </Button>
                   <span className="text-xs sm:text-sm text-muted-foreground px-2 whitespace-nowrap">{page} / {totalPages}</span>
-                  <Button variant="outline" size="sm" className="h-8 sm:h-9 px-2 sm:px-3" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={!canNext}>
+                  <Button id="REC-cvrecords-next-page-btn" data-testid="REC-cvrecords-next-page-btn" variant="outline" size="sm" className="h-8 sm:h-9 px-2 sm:px-3" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={!canNext}>
                     <span className="hidden sm:inline mr-1">Next</span><ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
@@ -510,9 +524,11 @@ export function CandidateProfile({ detail, getDecisionBadge }) {
       </div>
 
       {/* Tab Bar */}
-      <div className="flex gap-1 pt-3 pb-1 overflow-x-auto border-b border-white/10">
+      <div id="REC-cvrecords-profile-tabs" data-testid="REC-cvrecords-profile-tabs" className="flex gap-1 pt-3 pb-1 overflow-x-auto border-b border-white/10">
         {tabs.map(tab => (
           <button
+            id={`REC-cvrecords-profile-tab-${tab.id}`}
+            data-testid={`REC-cvrecords-profile-tab-${tab.id}`}
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`px-3 py-1.5 text-xs sm:text-sm rounded-md font-medium whitespace-nowrap transition-colors ${
@@ -575,7 +591,7 @@ function OverviewTab({ summary, skills, qualified }) {
 function ApplicationTab({ application }) {
   if (!application) {
     return (
-      <div className="py-8 text-center">
+      <div id="REC-cvrecords-application-empty-state" data-testid="REC-cvrecords-application-empty-state" className="py-8 text-center">
         <FileText className="h-10 w-10 mx-auto text-white/20 mb-3" />
         <p className="text-sm text-white/40">No application form submission found for this candidate.</p>
         <p className="text-xs text-white/30 mt-1">Candidate was processed via CV upload, not the public form.</p>
@@ -613,12 +629,12 @@ function ApplicationTab({ application }) {
         <Section title="Links">
           <div className="space-y-1.5">
             {application.linkedin_url && (
-              <a href={application.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors">
+              <a id="REC-cvrecords-application-linkedin-link" data-testid="REC-cvrecords-application-linkedin-link" href={application.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors">
                 <Link2 className="h-3.5 w-3.5 shrink-0" />LinkedIn<ExternalLink className="h-3 w-3" />
               </a>
             )}
             {application.github_url && (
-              <a href={application.github_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors">
+              <a id="REC-cvrecords-application-github-link" data-testid="REC-cvrecords-application-github-link" href={application.github_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors">
                 <Link2 className="h-3.5 w-3.5 shrink-0" />GitHub<ExternalLink className="h-3 w-3" />
               </a>
             )}
@@ -700,9 +716,9 @@ function CVDetailsTab({ parsed, experience, education }) {
       {hasLinks && (
         <Section title="Links">
           <div className="space-y-1.5">
-            {links.linkedin && <a href={links.linkedin} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300"><Link2 className="h-3.5 w-3.5" />LinkedIn<ExternalLink className="h-3 w-3" /></a>}
-            {links.github && <a href={links.github} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300"><Link2 className="h-3.5 w-3.5" />GitHub<ExternalLink className="h-3 w-3" /></a>}
-            {links.portfolio && <a href={links.portfolio} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300"><Link2 className="h-3.5 w-3.5" />Portfolio<ExternalLink className="h-3 w-3" /></a>}
+            {links.linkedin && <a id="REC-cvrecords-cv-linkedin-link" data-testid="REC-cvrecords-cv-linkedin-link" href={links.linkedin} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300"><Link2 className="h-3.5 w-3.5" />LinkedIn<ExternalLink className="h-3 w-3" /></a>}
+            {links.github && <a id="REC-cvrecords-cv-github-link" data-testid="REC-cvrecords-cv-github-link" href={links.github} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300"><Link2 className="h-3.5 w-3.5" />GitHub<ExternalLink className="h-3 w-3" /></a>}
+            {links.portfolio && <a id="REC-cvrecords-cv-portfolio-link" data-testid="REC-cvrecords-cv-portfolio-link" href={links.portfolio} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300"><Link2 className="h-3.5 w-3.5" />Portfolio<ExternalLink className="h-3 w-3" /></a>}
           </div>
         </Section>
       )}
@@ -718,7 +734,7 @@ function CVDetailsTab({ parsed, experience, education }) {
 function InterviewsHistoryTab({ interviews }) {
   if (interviews.length === 0) {
     return (
-      <div className="py-8 text-center">
+      <div id="REC-cvrecords-interviews-empty-state" data-testid="REC-cvrecords-interviews-empty-state" className="py-8 text-center">
         <Calendar className="h-10 w-10 mx-auto text-white/20 mb-3" />
         <p className="text-sm text-white/40">No interviews scheduled for this candidate yet.</p>
       </div>
@@ -732,7 +748,7 @@ function InterviewsHistoryTab({ interviews }) {
   return (
     <div className="space-y-3">
       {interviews.map((iv) => (
-        <div key={iv.id} className="border border-white/10 rounded-lg p-3 space-y-2">
+        <div id={`REC-cvrecords-interview-row-${iv.id}`} data-testid={`REC-cvrecords-interview-row-${iv.id}`} key={iv.id} className="border border-white/10 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge className={`${statusColors[iv.status] || 'bg-gray-500'} text-xs`}>{iv.status}</Badge>

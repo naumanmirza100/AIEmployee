@@ -79,6 +79,8 @@ const AnalyticsDashboardTab = () => {
       style={{
         background: 'linear-gradient(135deg, #1a1333 0%, #1a1333 45%, rgba(64,40,10,0.55) 100%)',
       }}
+      id="OPS-analytics-root"
+      data-testid="OPS-analytics-root"
     >
       {/* Header */}
       <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
@@ -96,7 +98,7 @@ const AnalyticsDashboardTab = () => {
         </div>
         <div className="flex items-center gap-2">
           {/* Time range */}
-          <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5">
+          <div className="flex rounded-lg border border-white/10 bg-black/30 p-0.5" id="OPS-analytics-range-select" data-testid="OPS-analytics-range-select">
             {RANGES.map((r) => {
               const active = r.value === range;
               return (
@@ -108,6 +110,8 @@ const AnalyticsDashboardTab = () => {
                       ? 'bg-amber-500/20 text-amber-200 border border-amber-500/30'
                       : 'text-white/65 hover:text-white/90 border border-transparent'
                   }`}
+                  id={`OPS-analytics-range-btn-${r.value}`}
+                  data-testid={`OPS-analytics-range-btn-${r.value}`}
                 >
                   {r.label}
                 </button>
@@ -119,6 +123,8 @@ const AnalyticsDashboardTab = () => {
             disabled={refreshing}
             title="Refresh"
             className="h-8 w-8 flex items-center justify-center rounded-md border border-white/10 bg-black/30 hover:bg-white/5 transition-colors disabled:opacity-50"
+            id="OPS-analytics-refresh-btn"
+            data-testid="OPS-analytics-refresh-btn"
           >
             <RefreshCw className={`h-3.5 w-3.5 text-white/70 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
@@ -126,24 +132,25 @@ const AnalyticsDashboardTab = () => {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-20 text-white/55 text-sm">
+        <div className="flex items-center justify-center py-20 text-white/55 text-sm" id="OPS-analytics-loading-state" data-testid="OPS-analytics-loading-state">
           <Loader2 className="h-5 w-5 animate-spin mr-2" style={{ color: ACCENT }} />
           Crunching numbers...
         </div>
       ) : !data ? (
-        <div className="py-20 text-center text-white/55 text-sm">No data available yet.</div>
+        <div className="py-20 text-center text-white/55 text-sm" id="OPS-analytics-empty-state" data-testid="OPS-analytics-empty-state">No data available yet.</div>
       ) : (
         <>
           {/* KPI grid */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <KpiCard icon={FileText}      label="Documents"       value={formatNumber(kpis.total_documents)}   sub={`${formatNumber(kpis.processed_documents)} processed`} />
-            <KpiCard icon={Hash}          label="Pages processed" value={formatNumber(kpis.total_pages)}       sub={formatBytes(kpis.total_file_bytes)} />
-            <KpiCard icon={Sparkles}      label="AI-authored"      value={formatNumber(kpis.total_generated)}   sub={`${formatNumber(kpis.total_summaries)} summaries`} />
-            <KpiCard icon={MessageSquare} label="Q&A questions"    value={formatNumber(kpis.total_qa_messages)} sub={`${formatNumber(kpis.total_chats)} chats`} />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5" id="OPS-analytics-kpi-grid" data-testid="OPS-analytics-kpi-grid">
+            <KpiCard testId="OPS-analytics-metric-card-documents"     icon={FileText}      label="Documents"       value={formatNumber(kpis.total_documents)}   sub={`${formatNumber(kpis.processed_documents)} processed`} />
+            <KpiCard testId="OPS-analytics-metric-card-pages"         icon={Hash}          label="Pages processed" value={formatNumber(kpis.total_pages)}       sub={formatBytes(kpis.total_file_bytes)} />
+            <KpiCard testId="OPS-analytics-metric-card-ai-authored"   icon={Sparkles}      label="AI-authored"      value={formatNumber(kpis.total_generated)}   sub={`${formatNumber(kpis.total_summaries)} summaries`} />
+            <KpiCard testId="OPS-analytics-metric-card-qa-questions"  icon={MessageSquare} label="Q&A questions"    value={formatNumber(kpis.total_qa_messages)} sub={`${formatNumber(kpis.total_chats)} chats`} />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-5">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-5" id="OPS-analytics-kpi-grid-secondary" data-testid="OPS-analytics-kpi-grid-secondary">
             <KpiCard
+              testId="OPS-analytics-metric-card-tokens"
               wide
               icon={Zap}
               label="AI tokens consumed"
@@ -151,12 +158,14 @@ const AnalyticsDashboardTab = () => {
               sub="Across generated documents"
             />
             <KpiCard
+              testId="OPS-analytics-metric-card-risks"
               icon={AlertTriangle}
               label="Risks flagged"
               value={formatNumber(data.risks_vs_opportunities?.risks)}
               tint="#ef4444"
             />
             <KpiCard
+              testId="OPS-analytics-metric-card-opportunities"
               icon={Target}
               label="Opportunities"
               value={formatNumber(data.risks_vs_opportunities?.opportunities)}
@@ -165,7 +174,7 @@ const AnalyticsDashboardTab = () => {
           </div>
 
           {/* Activity over time */}
-          <ChartCard title="Activity over time" icon={TrendingUp} className="mb-5">
+          <ChartCard testId="OPS-analytics-chart-activity" title="Activity over time" icon={TrendingUp} className="mb-5">
             {hasAnySeries(data.timeseries) ? (
               <ResponsiveContainer width="100%" height={260}>
                 <AreaChart data={mergeTimeseries(data.timeseries)} margin={{ top: 10, right: 12, left: -10, bottom: 0 }}>
@@ -197,8 +206,8 @@ const AnalyticsDashboardTab = () => {
           </ChartCard>
 
           {/* Row: Doc types + File formats */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
-            <ChartCard title="Documents by category" icon={FileText}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5" id="OPS-analytics-charts-row-types" data-testid="OPS-analytics-charts-row-types">
+            <ChartCard testId="OPS-analytics-chart-doc-category" title="Documents by category" icon={FileText}>
               {data.document_types?.length ? (
                 <ResponsiveContainer width="100%" height={240}>
                   <PieChart>
@@ -225,7 +234,7 @@ const AnalyticsDashboardTab = () => {
               ) : <EmptyChart />}
             </ChartCard>
 
-            <ChartCard title="Documents by file format" icon={Hash}>
+            <ChartCard testId="OPS-analytics-chart-file-format" title="Documents by file format" icon={Hash}>
               {data.file_types?.length ? (
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={data.file_types} layout="vertical" margin={{ left: 30 }}>
@@ -241,8 +250,8 @@ const AnalyticsDashboardTab = () => {
           </div>
 
           {/* Row: Sentiment + Importance */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
-            <ChartCard title="Sentiment across summaries" icon={TrendingUp}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5" id="OPS-analytics-charts-row-sentiment" data-testid="OPS-analytics-charts-row-sentiment">
+            <ChartCard testId="OPS-analytics-chart-sentiment" title="Sentiment across summaries" icon={TrendingUp}>
               {data.sentiment?.length ? (
                 <ResponsiveContainer width="100%" height={240}>
                   <PieChart>
@@ -268,7 +277,7 @@ const AnalyticsDashboardTab = () => {
               ) : <EmptyChart />}
             </ChartCard>
 
-            <ChartCard title="Document importance levels" icon={AlertTriangle}>
+            <ChartCard testId="OPS-analytics-chart-importance" title="Document importance levels" icon={AlertTriangle}>
               {data.importance?.length ? (
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={data.importance}>
@@ -288,7 +297,7 @@ const AnalyticsDashboardTab = () => {
           </div>
 
           {/* AI authoring breakdown */}
-          <ChartCard title="AI authoring — by template" icon={Sparkles} className="mb-5">
+          <ChartCard testId="OPS-analytics-chart-template-usage" title="AI authoring — by template" icon={Sparkles} className="mb-5">
             {data.template_usage?.length ? (
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={data.template_usage.map((t) => ({
@@ -309,13 +318,15 @@ const AnalyticsDashboardTab = () => {
           </ChartCard>
 
           {/* Deadlines */}
-          <ChartCard title="Upcoming deadlines mentioned" icon={CalendarClock}>
+          <ChartCard testId="OPS-analytics-chart-deadlines" title="Upcoming deadlines mentioned" icon={CalendarClock}>
             {data.upcoming_deadlines?.length ? (
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1" id="OPS-analytics-deadlines-list" data-testid="OPS-analytics-deadlines-list">
                 {data.upcoming_deadlines.map((d, i) => (
                   <div
                     key={i}
                     className="flex items-start gap-3 px-3 py-2 rounded-lg border border-white/10 bg-white/[0.02]"
+                    id={`OPS-analytics-deadline-row-${i}`}
+                    data-testid={`OPS-analytics-deadline-row-${i}`}
                   >
                     <div
                       className="flex items-center justify-center w-8 h-8 rounded-md shrink-0"
@@ -346,8 +357,8 @@ const AnalyticsDashboardTab = () => {
 // Sub-components
 // ──────────────────────────────────────────────
 
-const KpiCard = ({ icon: Icon, label, value, sub, tint = ACCENT, wide = false }) => (
-  <div className={`rounded-xl border border-white/10 bg-black/30 px-4 py-3 ${wide ? 'lg:col-span-1' : ''}`}>
+const KpiCard = ({ icon: Icon, label, value, sub, tint = ACCENT, wide = false, testId }) => (
+  <div className={`rounded-xl border border-white/10 bg-black/30 px-4 py-3 ${wide ? 'lg:col-span-1' : ''}`} id={testId} data-testid={testId}>
     <div className="flex items-center gap-2 mb-2">
       <div
         className="w-7 h-7 rounded-md flex items-center justify-center"
@@ -362,8 +373,8 @@ const KpiCard = ({ icon: Icon, label, value, sub, tint = ACCENT, wide = false })
   </div>
 );
 
-const ChartCard = ({ title, icon: Icon, children, className = '' }) => (
-  <div className={`rounded-xl border border-white/10 bg-black/25 p-4 ${className}`}>
+const ChartCard = ({ title, icon: Icon, children, className = '', testId }) => (
+  <div className={`rounded-xl border border-white/10 bg-black/25 p-4 ${className}`} id={testId} data-testid={testId}>
     <div className="flex items-center gap-2 mb-3">
       {Icon && <Icon className="h-3.5 w-3.5 text-amber-300" />}
       <h3 className="text-sm font-semibold text-white/90">{title}</h3>

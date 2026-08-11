@@ -35,6 +35,11 @@ import {
   AlertTriangle,
   ListChecks,
   CalendarDays,
+  // PM restructure additions
+  CheckSquare,
+  LineChart,
+  FolderKanban,
+  CalendarPlus,
 } from 'lucide-react';
 
 /**
@@ -53,6 +58,35 @@ const ALL_AGENTS = [
   {
     key: 'project_manager_agent', label: 'Project Manager Agent', icon: BrainCircuit,
     section: 'project-manager', path: '/project-manager/dashboard', basePath: '/project-manager',
+    // Matches the restructured PM dashboard (?tab=-driven). Same shape as
+    // Frontline: parent tabs carry their own sub-items (routing to the legacy
+    // hidden tabs via ?tab=), so the former inner PMSidebar is folded into
+    // this one global sidebar.
+    children: [
+      {
+        label: 'Ask (Pilot)', icon: Target, path: '/project-manager/dashboard', tab: 'project-pilot',
+        basePathTab: 'project-pilot',
+        children: [
+          { label: 'Project Pilot',     icon: Target,        path: '/project-manager/dashboard', tab: 'project-pilot' },
+          { label: 'Knowledge Q&A',     icon: MessageSquare, path: '/project-manager/dashboard', tab: 'knowledge-qa' },
+          { label: 'Meeting Scheduler', icon: CalendarPlus,  path: '/project-manager/dashboard', tab: 'meeting-scheduler' },
+        ],
+      },
+      { label: 'Projects', icon: FolderKanban, path: '/project-manager/dashboard', tab: 'projects' },
+      {
+        label: 'Tasks', icon: CheckSquare, path: '/project-manager/dashboard', tab: 'tasks',
+        basePathTab: 'tasks',
+        // 'List' has no legacy hidden tab (it's the default inline sub-tab of
+        // TasksListView), so only Prioritize + Timeline appear as grandchildren.
+        children: [
+          { label: 'Prioritize', icon: Target,   path: '/project-manager/dashboard', tab: 'task-prioritization' },
+          { label: 'Timeline',   icon: Calendar, path: '/project-manager/dashboard', tab: 'timeline-gantt' },
+        ],
+      },
+      // Insights + Overview have no per-sub-item legacy tabs — leave flat.
+      { label: 'Insights', icon: LineChart,     path: '/project-manager/dashboard', tab: 'insights' },
+      { label: 'Overview', icon: BrainCircuit,  path: '/project-manager/dashboard', tab: 'overview' },
+    ],
   },
   {
     key: 'recruitment_agent', label: 'Recruitment Agent', icon: UserCheck,
@@ -174,17 +208,39 @@ const ALL_AGENTS = [
   {
     key: 'hr_agent', label: 'HR Support Agent', icon: Users,
     section: 'hr', path: '/hr/dashboard', basePath: '/hr',
+    // Matches the restructured HR dashboard (?tab=-driven). Same shape as
+    // Frontline: parent tabs carry their own sub-items (routing to the legacy
+    // hidden tabs via ?tab=), so the former inner HRSidebar is folded into
+    // this one global sidebar.
     children: [
-      { label: 'Overview',      icon: LayoutDashboard, path: '/hr/dashboard', tab: 'overview' },
-      { label: 'Knowledge Q&A', icon: MessageSquare,   path: '/hr/dashboard', tab: 'qa' },
-      { label: 'Employees',     icon: Users,           path: '/hr/dashboard', tab: 'employees' },
-      { label: 'My team',       icon: UserCheck,       path: '/hr/dashboard', tab: 'my_team' },
-      { label: 'Org chart',     icon: Network,         path: '/hr/dashboard', tab: 'org_chart' },
-      { label: 'Documents',     icon: FileText,        path: '/hr/dashboard', tab: 'documents' },
-      { label: 'Workflows',     icon: GitBranch,       path: '/hr/dashboard', tab: 'workflows' },
-      { label: 'Meetings',      icon: CalendarClock,   path: '/hr/dashboard', tab: 'meetings' },
-      { label: 'Leave',         icon: ClipboardList,   path: '/hr/dashboard', tab: 'leave' },
-      { label: 'Notifications', icon: AlertTriangle,   path: '/hr/dashboard', tab: 'notifications' },
+      { label: 'Overview', icon: LayoutDashboard, path: '/hr/dashboard', tab: 'overview' },
+      {
+        label: 'People', icon: Users, path: '/hr/dashboard', tab: 'people',
+        basePathTab: 'people',
+        children: [
+          { label: 'Employees', icon: Users,     path: '/hr/dashboard', tab: 'employees' },
+          { label: 'My team',   icon: UserCheck, path: '/hr/dashboard', tab: 'my_team' },
+          { label: 'Org chart', icon: Network,   path: '/hr/dashboard', tab: 'org_chart' },
+        ],
+      },
+      {
+        label: 'Knowledge', icon: MessageSquare, path: '/hr/dashboard', tab: 'knowledge',
+        basePathTab: 'knowledge',
+        children: [
+          { label: 'Documents',     icon: FileText,      path: '/hr/dashboard', tab: 'documents' },
+          { label: 'Knowledge Q&A', icon: MessageSquare, path: '/hr/dashboard', tab: 'qa' },
+        ],
+      },
+      {
+        label: 'Operations', icon: GitBranch, path: '/hr/dashboard', tab: 'operations',
+        basePathTab: 'operations',
+        children: [
+          { label: 'Workflows',     icon: GitBranch,      path: '/hr/dashboard', tab: 'workflows' },
+          { label: 'Leave',         icon: ClipboardList,  path: '/hr/dashboard', tab: 'leave' },
+          { label: 'Notifications', icon: AlertTriangle,  path: '/hr/dashboard', tab: 'notifications' },
+        ],
+      },
+      { label: 'Meetings', icon: CalendarClock, path: '/hr/dashboard', tab: 'meetings' },
     ],
   },
   {

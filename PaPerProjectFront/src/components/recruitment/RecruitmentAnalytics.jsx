@@ -246,7 +246,7 @@ const RecruitmentAnalytics = () => {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-8 sm:py-12 min-h-[200px]">
+      <div className="flex justify-center items-center py-8 sm:py-12 min-h-[200px]" id="REC-analytics-loading-state" data-testid="REC-analytics-loading-state">
         <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin" />
       </div>
     );
@@ -254,7 +254,7 @@ const RecruitmentAnalytics = () => {
 
   if (!analytics) {
     return (
-      <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+      <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm" id="REC-analytics-empty-state" data-testid="REC-analytics-empty-state">
         <CardContent className="py-8 sm:py-12 px-4 text-center">
           <p className="text-white/60 text-sm sm:text-base">No analytics data available</p>
         </CardContent>
@@ -271,19 +271,21 @@ const RecruitmentAnalytics = () => {
   return (
     <div className="space-y-4 sm:space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Filters */}
-      <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+      <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm" id="REC-analytics-filters-card" data-testid="REC-analytics-filters-card">
         <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6 space-y-3">
           {/* Row 1: Job filter */}
           <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
-            <label className="text-sm font-medium shrink-0 text-white">Job:</label>
-            <SearchableSelect
-              value={selectedJobId ? String(selectedJobId) : 'all'}
-              onValueChange={(value) => setSelectedJobId(value === 'all' ? null : value)}
-              options={[{ value: 'all', label: 'All Jobs' }, ...jobs.map(j => ({ value: j.id.toString(), label: j.title }))]}
-              placeholder="Select a job"
-              triggerClassName="w-full sm:w-[280px] md:w-[300px] min-w-0"
-              displayLength={30}
-            />
+            <label className="text-sm font-medium shrink-0 text-white" htmlFor="REC-analytics-job-select">Job:</label>
+            <div id="REC-analytics-job-select" data-testid="REC-analytics-job-select">
+              <SearchableSelect
+                value={selectedJobId ? String(selectedJobId) : 'all'}
+                onValueChange={(value) => setSelectedJobId(value === 'all' ? null : value)}
+                options={[{ value: 'all', label: 'All Jobs' }, ...jobs.map(j => ({ value: j.id.toString(), label: j.title }))]}
+                placeholder="Select a job"
+                triggerClassName="w-full sm:w-[280px] md:w-[300px] min-w-0"
+                displayLength={30}
+              />
+            </div>
             {selectedJob ? (
               <Badge variant="secondary" className="w-fit truncate max-w-full">
                 <span className="truncate">Showing: {selectedJob.title}</span>
@@ -297,6 +299,8 @@ const RecruitmentAnalytics = () => {
                 disabled={!!exportingType}
                 className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all disabled:opacity-50"
                 style={{ background: 'rgba(96,165,250,0.08)', borderColor: 'rgba(96,165,250,0.3)', color: '#60a5fa' }}
+                id="REC-analytics-export-candidates-btn"
+                data-testid="REC-analytics-export-candidates-btn"
               >
                 {exportingType === 'candidates' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
                 Export Candidates
@@ -306,6 +310,8 @@ const RecruitmentAnalytics = () => {
                 disabled={!!exportingType}
                 className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all disabled:opacity-50"
                 style={{ background: 'rgba(52,211,153,0.08)', borderColor: 'rgba(52,211,153,0.3)', color: '#34d399' }}
+                id="REC-analytics-export-interviews-btn"
+                data-testid="REC-analytics-export-interviews-btn"
               >
                 {exportingType === 'interviews' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                 Export Interviews
@@ -329,6 +335,8 @@ const RecruitmentAnalytics = () => {
                   key={preset.label}
                   onClick={() => setTimeRange({ days: preset.days, months: preset.months })}
                   className="text-xs px-3 py-1.5 rounded-lg border font-medium transition-all"
+                  id={`REC-analytics-period-btn-${preset.days}`}
+                  data-testid={`REC-analytics-period-btn-${preset.days}`}
                   style={active
                     ? { background: 'rgba(167,139,250,0.18)', borderColor: 'rgba(167,139,250,0.5)', color: '#c4b5fd' }
                     : { background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.45)' }
@@ -343,7 +351,7 @@ const RecruitmentAnalytics = () => {
       </Card>
 
       {/* Overview Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" id="REC-analytics-overview-grid" data-testid="REC-analytics-overview-grid">
         {[
           {
             label: 'Total CVs Processed',
@@ -387,6 +395,8 @@ const RecruitmentAnalytics = () => {
             className="group relative flex flex-col items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-4 text-left transition-all duration-300 hover:bg-white/[0.06]"
             onMouseEnter={(e) => e.currentTarget.style.borderColor = card.borderHover}
             onMouseLeave={(e) => e.currentTarget.style.borderColor = ''}
+            id={`REC-analytics-metric-card-${card.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
+            data-testid={`REC-analytics-metric-card-${card.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
           >
             <div className="flex items-start justify-between w-full">
               <div className="rounded-lg p-2" style={{ backgroundColor: card.bgColor }}>
@@ -405,7 +415,7 @@ const RecruitmentAnalytics = () => {
 
       {/* Recruitment Funnel */}
       {funnel && funnel.length > 0 && (
-        <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm" id="REC-analytics-funnel-card" data-testid="REC-analytics-funnel-card">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -420,7 +430,7 @@ const RecruitmentAnalytics = () => {
                 const widthPct = maxCount > 0 ? Math.max(8, (stage.count / maxCount) * 100) : 8;
                 const dropOff = idx > 0 ? funnel[idx - 1].count - stage.count : 0;
                 return (
-                  <div key={stage.stage} className="flex items-center gap-3">
+                  <div key={stage.stage} className="flex items-center gap-3" id={`REC-analytics-funnel-stage-${stage.stage.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`} data-testid={`REC-analytics-funnel-stage-${stage.stage.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}>
                     <div className="w-24 sm:w-28 text-xs text-white/60 text-right shrink-0">{stage.stage}</div>
                     <div className="flex-1 relative h-9 flex items-center">
                       <div
@@ -446,7 +456,7 @@ const RecruitmentAnalytics = () => {
             </div>
             <div className="mt-4 flex flex-wrap gap-4 pt-3 border-t border-white/[0.06]">
               {funnel.map(stage => (
-                <div key={stage.stage} className="flex items-center gap-1.5">
+                <div key={stage.stage} className="flex items-center gap-1.5" id={`REC-analytics-funnel-legend-${stage.stage.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`} data-testid={`REC-analytics-funnel-legend-${stage.stage.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}>
                   <div className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
                   <span className="text-[11px] text-white/50">{stage.stage}: <span className="text-white/80 font-medium">{stage.count}</span></span>
                 </div>
@@ -458,7 +468,7 @@ const RecruitmentAnalytics = () => {
 
       {/* CV Statistics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm" id="REC-analytics-chart-cvs-by-decision" data-testid="REC-analytics-chart-cvs-by-decision">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <PieChart className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -474,7 +484,7 @@ const RecruitmentAnalytics = () => {
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm" id="REC-analytics-chart-cvs-over-time" data-testid="REC-analytics-chart-cvs-over-time">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -494,7 +504,7 @@ const RecruitmentAnalytics = () => {
 
       {/* Interview Statistics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm" id="REC-analytics-chart-interviews-by-status" data-testid="REC-analytics-chart-interviews-by-status">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <Activity className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
@@ -511,7 +521,7 @@ const RecruitmentAnalytics = () => {
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card className="min-w-0 overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm" id="REC-analytics-chart-interviews-over-time" data-testid="REC-analytics-chart-interviews-over-time">
           <CardHeader className="px-4 sm:px-6 pb-2">
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />

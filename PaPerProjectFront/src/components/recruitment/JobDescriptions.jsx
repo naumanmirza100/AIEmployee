@@ -473,6 +473,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
             </p>
             {onGoToSettings && (
               <button
+                id="REC-jobs-banner-go-to-settings-btn"
+                data-testid="REC-jobs-banner-go-to-settings-btn"
                 onClick={() => { setShowSettingsBanner(false); onGoToSettings(null); }}
                 className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-violet-300 hover:text-violet-200 transition-colors"
               >
@@ -481,6 +483,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
             )}
           </div>
           <button
+            id="REC-jobs-banner-dismiss-btn"
+            data-testid="REC-jobs-banner-dismiss-btn"
             onClick={() => setShowSettingsBanner(false)}
             className="shrink-0 text-white/30 hover:text-white/60 transition-colors mt-0.5"
           >
@@ -497,11 +501,11 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => setShowCreateModal(true)} variant="outline">
+          <Button id="REC-jobs-create-btn" data-testid="REC-jobs-create-btn" onClick={() => setShowCreateModal(true)} variant="outline">
             <Plus className="h-4 w-4 mr-2" />
             Create Job Description
           </Button>
-          <Button onClick={openCreateWithAi}>
+          <Button id="REC-jobs-create-ai-btn" data-testid="REC-jobs-create-ai-btn" onClick={openCreateWithAi}>
             <Wand2 className="h-4 w-4 mr-2" />
             Create Job with AI
           </Button>
@@ -510,7 +514,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
 
       {/* Bulk selection / delete bar */}
       {jobs.length > 0 && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+        <div id="REC-jobs-bulk-bar" data-testid="REC-jobs-bulk-bar" className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
           <div className="flex items-center gap-2">
             <div className="relative inline-flex items-center justify-center">
               {selectedJobIds.size === 0 && (
@@ -519,6 +523,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 </span>
               )}
               <Checkbox
+                id="REC-jobs-select-all-checkbox"
+                data-testid="REC-jobs-select-all-checkbox"
                 checked={allJobsSelected ? true : selectedJobIds.size > 0 ? 'indeterminate' : false}
                 onCheckedChange={(c) => toggleSelectAllJobs(!!c)}
                 aria-label="Select all jobs"
@@ -538,6 +544,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           {selectedJobIds.size > 0 && (
             <div className="flex items-center gap-2">
               <Button
+                id="REC-jobs-bulk-delete-btn"
+                data-testid="REC-jobs-bulk-delete-btn"
                 size="sm"
                 variant="destructive"
                 onClick={() => setShowBulkDeleteModal(true)}
@@ -545,7 +553,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 <Trash2 className="h-4 w-4 mr-1" />
                 Delete ({selectedJobIds.size})
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setSelectedJobIds(new Set())}>
+              <Button id="REC-jobs-bulk-clear-btn" data-testid="REC-jobs-bulk-clear-btn" size="sm" variant="ghost" onClick={() => setSelectedJobIds(new Set())}>
                 Clear
               </Button>
             </div>
@@ -558,6 +566,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30 pointer-events-none" />
           <input
+            id="REC-jobs-search-input"
+            data-testid="REC-jobs-search-input"
             type="text"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
@@ -570,31 +580,33 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         </div>
 
         <Select value={statusFilter || '_all'} onValueChange={(v) => { setStatusFilter(v === '_all' ? '' : v); setPage(1); }}>
-          <SelectTrigger className="w-[130px] bg-white/5 border-white/10 text-white text-sm">
+          <SelectTrigger id="REC-jobs-filter-status" data-testid="REC-jobs-filter-status" className="w-[130px] bg-white/5 border-white/10 text-white text-sm">
             <SelectValue placeholder="All Status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="_all">All Status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
+            <SelectItem id="REC-jobs-filter-status-all" data-testid="REC-jobs-filter-status-all" value="_all">All Status</SelectItem>
+            <SelectItem id="REC-jobs-filter-status-active" data-testid="REC-jobs-filter-status-active" value="active">Active</SelectItem>
+            <SelectItem id="REC-jobs-filter-status-inactive" data-testid="REC-jobs-filter-status-inactive" value="inactive">Inactive</SelectItem>
           </SelectContent>
         </Select>
 
         <Select value={typeFilter || '_all'} onValueChange={(v) => { setTypeFilter(v === '_all' ? '' : v); setPage(1); }}>
-          <SelectTrigger className="w-[140px] bg-white/5 border-white/10 text-white text-sm">
+          <SelectTrigger id="REC-jobs-filter-type" data-testid="REC-jobs-filter-type" className="w-[140px] bg-white/5 border-white/10 text-white text-sm">
             <SelectValue placeholder="All Types" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="_all">All Types</SelectItem>
-            <SelectItem value="Full-time">Full-time</SelectItem>
-            <SelectItem value="Part-time">Part-time</SelectItem>
-            <SelectItem value="Contract">Contract</SelectItem>
-            <SelectItem value="Internship">Internship</SelectItem>
+            <SelectItem id="REC-jobs-filter-type-all" data-testid="REC-jobs-filter-type-all" value="_all">All Types</SelectItem>
+            <SelectItem id="REC-jobs-filter-type-full-time" data-testid="REC-jobs-filter-type-full-time" value="Full-time">Full-time</SelectItem>
+            <SelectItem id="REC-jobs-filter-type-part-time" data-testid="REC-jobs-filter-type-part-time" value="Part-time">Part-time</SelectItem>
+            <SelectItem id="REC-jobs-filter-type-contract" data-testid="REC-jobs-filter-type-contract" value="Contract">Contract</SelectItem>
+            <SelectItem id="REC-jobs-filter-type-internship" data-testid="REC-jobs-filter-type-internship" value="Internship">Internship</SelectItem>
           </SelectContent>
         </Select>
 
         {(search || statusFilter || typeFilter) && (
           <button
+            id="REC-jobs-clear-filters-btn"
+            data-testid="REC-jobs-clear-filters-btn"
             onClick={() => { setSearch(''); setStatusFilter(''); setTypeFilter(''); setPage(1); }}
             className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-white/10 text-white/50 hover:text-white/80 hover:border-white/20 transition-colors"
           >
@@ -606,18 +618,18 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-16">
+        <div id="REC-jobs-loading" data-testid="REC-jobs-loading" className="flex justify-center py-16">
           <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
         </div>
       ) : jobs.length === 0 ? (
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-jobs-empty-state" data-testid="REC-jobs-empty-state" className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-12 text-center">
             <Briefcase className="h-12 w-12 mx-auto text-white/40 mb-4" />
             {search || statusFilter || typeFilter ? (
               <>
                 <p className="text-lg font-medium mb-2 text-white">No jobs match your filters</p>
                 <p className="text-sm text-white/60 mb-4">Try adjusting your search or filters</p>
-                <Button variant="outline" onClick={() => { setSearch(''); setStatusFilter(''); setTypeFilter(''); setPage(1); }}>
+                <Button id="REC-jobs-empty-clear-filters-btn" data-testid="REC-jobs-empty-clear-filters-btn" variant="outline" onClick={() => { setSearch(''); setStatusFilter(''); setTypeFilter(''); setPage(1); }}>
                   Clear filters
                 </Button>
               </>
@@ -628,11 +640,11 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                   Create your first job description to start recruiting
                 </p>
                 <div className="flex gap-2 justify-center">
-                  <Button onClick={() => setShowCreateModal(true)} variant="outline">
+                  <Button id="REC-jobs-empty-create-btn" data-testid="REC-jobs-empty-create-btn" onClick={() => setShowCreateModal(true)} variant="outline">
                     <Plus className="h-4 w-4 mr-2" />
                     Create Job Description
                   </Button>
-                  <Button onClick={openCreateWithAi}>
+                  <Button id="REC-jobs-empty-create-ai-btn" data-testid="REC-jobs-empty-create-ai-btn" onClick={openCreateWithAi}>
                     <Wand2 className="h-4 w-4 mr-2" />
                     Create Job with AI
                   </Button>
@@ -642,16 +654,20 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-full">
+        <div id="REC-jobs-list" data-testid="REC-jobs-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-full">
           {jobs.map((job) => (
             <Card
               key={job.id}
+              id={`REC-jobs-row-${job.id}`}
+              data-testid={`REC-jobs-row-${job.id}`}
               className={`border-white/10 bg-black/20 backdrop-blur-sm ${selectedJobIds.has(job.id) ? 'ring-1 ring-primary/60' : ''}`}
             >
               <CardHeader>
                 <div className="flex justify-between items-start">
                   <div className="flex flex-1 items-start gap-2 min-w-0">
                     <Checkbox
+                      id={`REC-jobs-select-checkbox-${job.id}`}
+                      data-testid={`REC-jobs-select-checkbox-${job.id}`}
                       checked={selectedJobIds.has(job.id)}
                       onCheckedChange={(c) => toggleJobSelected(job.id, !!c)}
                       onClick={(e) => e.stopPropagation()}
@@ -670,6 +686,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                     {onGoToSettings && (
                       configuredJobIds.has(job.id) ? (
                         <button
+                          id={`REC-jobs-configured-btn-${job.id}`}
+                          data-testid={`REC-jobs-configured-btn-${job.id}`}
                           onClick={(e) => { e.stopPropagation(); onGoToSettings(job.id); }}
                           title="Interview settings configured — click to view"
                           className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
@@ -693,6 +711,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                             </>
                           )}
                           <button
+                            id={`REC-jobs-setup-btn-${job.id}`}
+                            data-testid={`REC-jobs-setup-btn-${job.id}`}
                             onClick={(e) => { e.stopPropagation(); setHighlightSetupJobId(null); onGoToSettings(job.id); }}
                             title="Complete email, interview & qualification settings"
                             className="relative inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all duration-150 cursor-pointer"
@@ -728,6 +748,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 </p>
                 <div className="flex gap-2 flex-wrap">
                   <Button
+                    id={`REC-jobs-view-btn-${job.id}`}
+                    data-testid={`REC-jobs-view-btn-${job.id}`}
                     variant="outline"
                     size="sm"
                     title="View job details"
@@ -736,6 +758,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                     <Eye className="h-3 w-3" />
                   </Button>
                   <Button
+                    id={`REC-jobs-applications-btn-${job.id}`}
+                    data-testid={`REC-jobs-applications-btn-${job.id}`}
                     variant="outline"
                     size="sm"
                     onClick={() => handleViewApplications(job)}
@@ -745,6 +769,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                     Applications
                   </Button>
                   <Button
+                    id={`REC-jobs-edit-btn-${job.id}`}
+                    data-testid={`REC-jobs-edit-btn-${job.id}`}
                     variant="outline"
                     size="sm"
                     onClick={() => handleEdit(job)}
@@ -752,6 +778,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                     <Edit className="h-3 w-3" />
                   </Button>
                   <Button
+                    id={`REC-jobs-copy-link-btn-${job.id}`}
+                    data-testid={`REC-jobs-copy-link-btn-${job.id}`}
                     variant="outline"
                     size="sm"
                     title="Copy application link"
@@ -767,6 +795,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                     {copiedJobId === job.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   </Button>
                   <Button
+                    id={`REC-jobs-delete-btn-${job.id}`}
+                    data-testid={`REC-jobs-delete-btn-${job.id}`}
                     variant="outline"
                     size="sm"
                     onClick={() => handleDeleteClick(job)}
@@ -789,6 +819,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           </p>
           <div className="flex items-center gap-1">
             <button
+              id="REC-jobs-page-prev-btn"
+              data-testid="REC-jobs-page-prev-btn"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-white/10 text-white/50 hover:text-white/80 hover:border-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
@@ -808,6 +840,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 ) : (
                   <button
                     key={item}
+                    id={`REC-jobs-page-${item}-btn`}
+                    data-testid={`REC-jobs-page-${item}-btn`}
                     onClick={() => setPage(item)}
                     className={`inline-flex items-center justify-center h-8 w-8 rounded-lg text-xs font-medium border transition-colors ${
                       item === page
@@ -820,6 +854,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 )
               )}
             <button
+              id="REC-jobs-page-next-btn"
+              data-testid="REC-jobs-page-next-btn"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-white/10 text-white/50 hover:text-white/80 hover:border-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
@@ -833,6 +869,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
       {/* View Applications Modal */}
       {viewingApplicationsJob && (
         <div
+          id="REC-jobs-applications-modal"
+          data-testid="REC-jobs-applications-modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(4px)' }}
           onClick={() => setViewingApplicationsJob(null)}
@@ -859,7 +897,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                   style={{ background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.25)' }}>
                   {applications.length} total
                 </span>
-                <button onClick={() => setViewingApplicationsJob(null)} className="text-white/30 hover:text-white/70 transition-colors">
+                <button id="REC-jobs-applications-close-btn" data-testid="REC-jobs-applications-close-btn" onClick={() => setViewingApplicationsJob(null)} className="text-white/30 hover:text-white/70 transition-colors">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -868,17 +906,17 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
             {/* Body */}
             <div className="px-6 py-5 space-y-3">
               {applicationsLoading ? (
-                <div className="flex justify-center py-12">
+                <div id="REC-jobs-applications-loading" data-testid="REC-jobs-applications-loading" className="flex justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
                 </div>
               ) : applications.length === 0 ? (
-                <div className="flex flex-col items-center py-14 gap-3">
+                <div id="REC-jobs-applications-empty-state" data-testid="REC-jobs-applications-empty-state" className="flex flex-col items-center py-14 gap-3">
                   <Users className="h-12 w-12 text-white/20" />
                   <p className="text-white/50 text-sm">No applications yet for this job</p>
                 </div>
               ) : (
                 applications.map((app) => (
-                  <div key={app.id} className="rounded-xl overflow-hidden"
+                  <div key={app.id} id={`REC-jobs-application-row-${app.id}`} data-testid={`REC-jobs-application-row-${app.id}`} className="rounded-xl overflow-hidden"
                     style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
                     {/* Application Row */}
                     <div className="flex items-center gap-3 px-4 py-3">
@@ -919,6 +957,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                       <div className="flex items-center gap-2 shrink-0">
                         {app.cv_url && (
                           <a href={app.cv_url} target="_blank" rel="noopener noreferrer"
+                            id={`REC-jobs-application-cv-link-${app.id}`}
+                            data-testid={`REC-jobs-application-cv-link-${app.id}`}
                             className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg font-medium text-blue-300 transition-all"
                             style={{ background: 'rgba(96,165,250,0.10)', border: '1px solid rgba(96,165,250,0.20)' }}>
                             <Download className="h-3 w-3" />CV
@@ -926,6 +966,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                         )}
                         {app.ai_analysed && app.cv_record_id && (
                           <button
+                            id={`REC-jobs-application-report-btn-${app.id}`}
+                            data-testid={`REC-jobs-application-report-btn-${app.id}`}
                             onClick={() => { setViewingApplicationsJob(null); navigate(`/recruitment/candidates/${app.cv_record_id}`); }}
                             className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg font-medium text-violet-300 transition-all"
                             style={{ background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.20)' }}
@@ -934,6 +976,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                           </button>
                         )}
                         <button
+                          id={`REC-jobs-application-expand-btn-${app.id}`}
+                          data-testid={`REC-jobs-application-expand-btn-${app.id}`}
                           onClick={() => setExpandedApp(expandedApp === app.id ? null : app.id)}
                           className="text-white/30 hover:text-white/60 transition-colors p-1"
                         >
@@ -973,6 +1017,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                           <div className="rounded-lg px-3 py-2 col-span-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
                             <p className="text-xs text-white/30 mb-0.5">LinkedIn</p>
                             <a href={app.linkedin_url} target="_blank" rel="noopener noreferrer"
+                              id={`REC-jobs-application-linkedin-link-${app.id}`}
+                              data-testid={`REC-jobs-application-linkedin-link-${app.id}`}
                               className="text-sm text-blue-400 hover:underline truncate block">{app.linkedin_url}</a>
                           </div>
                         )}
@@ -995,6 +1041,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
       {/* View Job Modal */}
       {viewingJob && (
         <div
+          id="REC-jobs-view-modal"
+          data-testid="REC-jobs-view-modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
           onClick={() => setViewingJob(null)}
@@ -1028,7 +1076,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                   </div>
                 </div>
               </div>
-              <button onClick={() => setViewingJob(null)} className="shrink-0 text-white/30 hover:text-white/70 transition-colors mt-1">
+              <button id="REC-jobs-view-close-btn" data-testid="REC-jobs-view-close-btn" onClick={() => setViewingJob(null)} className="shrink-0 text-white/30 hover:text-white/70 transition-colors mt-1">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -1065,6 +1113,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
             {/* Footer actions */}
             <div className="flex items-center justify-between gap-3 px-6 pb-6 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
               <button
+                id="REC-jobs-view-copy-link-btn"
+                data-testid="REC-jobs-view-copy-link-btn"
                 onClick={() => {
                   const url = `${window.location.origin}/jobs/apply/${viewingJob.id}`;
                   navigator.clipboard.writeText(url).then(() => {
@@ -1079,10 +1129,12 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 {copiedJobId === viewingJob.id ? 'Link Copied!' : 'Copy Application Link'}
               </button>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setViewingJob(null); handleEdit(viewingJob); }}>
+                <Button id="REC-jobs-view-edit-btn" data-testid="REC-jobs-view-edit-btn" variant="outline" size="sm" onClick={() => { setViewingJob(null); handleEdit(viewingJob); }}>
                   <Edit className="h-3.5 w-3.5 mr-1.5" />Edit
                 </Button>
                 <a
+                  id="REC-jobs-view-form-link"
+                  data-testid="REC-jobs-view-form-link"
                   href={`${window.location.origin}/jobs/apply/${viewingJob.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -1099,11 +1151,13 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
 
       {/* Create Modal (manual) – reset form when closed by X or overlay too */}
       <Dialog open={showCreateModal} onOpenChange={(open) => { setShowCreateModal(open); if (!open) { resetForm(); setCreateFullScreen(false); } }}>
-        <DialogContent className={createFullScreen
+        <DialogContent id="REC-jobs-create-modal" data-testid="REC-jobs-create-modal" className={createFullScreen
           ? "w-screen h-[100dvh] max-w-none max-h-[100dvh] rounded-none overflow-y-auto"
           : "max-w-2xl max-h-[90vh] overflow-y-auto"}>
           {/* Full-screen toggle, sitting right beside the dialog's close (X) button */}
           <button
+            id="REC-jobs-create-fullscreen-btn"
+            data-testid="REC-jobs-create-fullscreen-btn"
             type="button"
             onClick={() => setCreateFullScreen((v) => !v)}
             title={createFullScreen ? 'Exit full screen' : 'Full screen'}
@@ -1121,6 +1175,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 </DialogDescription>
               </div>
               <button
+                id="REC-jobs-create-switch-to-ai-btn"
+                data-testid="REC-jobs-create-switch-to-ai-btn"
                 type="button"
                 onClick={switchToAiModal}
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 px-3 py-1.5 text-sm font-medium text-violet-300 transition-colors hover:bg-violet-500/20"
@@ -1142,12 +1198,14 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
 
       {/* Create Job with AI Modal: step 1 = prompt, step 2 = editable form */}
       <Dialog open={showCreateWithAiModal} onOpenChange={(open) => { if (!open) { closeCreateWithAi(); setAiFullScreen(false); } }}>
-        <DialogContent className={(aiFullScreen && createWithAiStep === 'form')
+        <DialogContent id="REC-jobs-ai-modal" data-testid="REC-jobs-ai-modal" className={(aiFullScreen && createWithAiStep === 'form')
           ? "w-screen h-[100dvh] max-w-none max-h-[100dvh] rounded-none overflow-y-auto"
           : "max-w-2xl max-h-[90vh] overflow-y-auto"}>
           {/* Full-screen toggle — only useful on the generated-form step */}
           {createWithAiStep === 'form' && (
             <button
+              id="REC-jobs-ai-fullscreen-btn"
+              data-testid="REC-jobs-ai-fullscreen-btn"
               type="button"
               onClick={() => setAiFullScreen((v) => !v)}
               title={aiFullScreen ? 'Exit full screen' : 'Full screen'}
@@ -1168,6 +1226,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 </DialogDescription>
               </div>
               <button
+                id="REC-jobs-ai-switch-to-manual-btn"
+                data-testid="REC-jobs-ai-switch-to-manual-btn"
                 type="button"
                 onClick={switchToManualModal}
                 className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted ${createWithAiStep === 'form' ? 'mr-20' : 'mr-10'}`}
@@ -1181,6 +1241,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           {createWithAiStep === 'prompt' ? (
             <div className="space-y-4">
               <Textarea
+                id="REC-jobs-ai-prompt-input"
+                data-testid="REC-jobs-ai-prompt-input"
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
                 placeholder="e.g. MERN Stack Developer, 5+ years, MongoDB, Express, React, Node.js, RESTful APIs, remote..."
@@ -1188,10 +1250,10 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                 disabled={generating}
               />
               <DialogFooter>
-                <Button variant="outline" onClick={closeCreateWithAi} disabled={generating}>
+                <Button id="REC-jobs-ai-cancel-btn" data-testid="REC-jobs-ai-cancel-btn" variant="outline" onClick={closeCreateWithAi} disabled={generating}>
                   Cancel
                 </Button>
-                <Button onClick={handleGenerateWithAi} disabled={generating}>
+                <Button id="REC-jobs-ai-generate-btn" data-testid="REC-jobs-ai-generate-btn" onClick={handleGenerateWithAi} disabled={generating}>
                   {generating ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1222,7 +1284,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
 
       {/* Edit Modal – reset form and editingJob when closed by X, overlay, or Cancel */}
       <Dialog open={showEditModal} onOpenChange={(open) => { setShowEditModal(open); if (!open) { setEditingJob(null); resetForm(); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent id="REC-jobs-edit-modal" data-testid="REC-jobs-edit-modal" className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Job Description</DialogTitle>
           </DialogHeader>
@@ -1242,7 +1304,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
 
       {/* Delete Confirmation Modal */}
       <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
-        <DialogContent>
+        <DialogContent id="REC-jobs-delete-modal" data-testid="REC-jobs-delete-modal">
           <DialogHeader>
             <DialogTitle>Delete Job Description</DialogTitle>
             <DialogDescription>
@@ -1251,6 +1313,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           </DialogHeader>
           <DialogFooter>
             <Button
+              id="REC-jobs-delete-cancel-btn"
+              data-testid="REC-jobs-delete-cancel-btn"
               variant="outline"
               onClick={() => {
                 setShowDeleteModal(false);
@@ -1261,6 +1325,8 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
               Cancel
             </Button>
             <Button
+              id="REC-jobs-delete-confirm-btn"
+              data-testid="REC-jobs-delete-confirm-btn"
               variant="destructive"
               onClick={handleDeleteConfirm}
               disabled={submitting}
@@ -1283,7 +1349,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
 
       {/* Bulk delete confirmation */}
       <Dialog open={showBulkDeleteModal} onOpenChange={setShowBulkDeleteModal}>
-        <DialogContent>
+        <DialogContent id="REC-jobs-bulk-delete-modal" data-testid="REC-jobs-bulk-delete-modal">
           <DialogHeader>
             <DialogTitle>Delete {selectedJobIds.size} job{selectedJobIds.size > 1 ? 's' : ''}?</DialogTitle>
             <DialogDescription>
@@ -1291,10 +1357,10 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBulkDeleteModal(false)} disabled={bulkDeleting}>
+            <Button id="REC-jobs-bulk-delete-cancel-btn" data-testid="REC-jobs-bulk-delete-cancel-btn" variant="outline" onClick={() => setShowBulkDeleteModal(false)} disabled={bulkDeleting}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleBulkDeleteConfirm} disabled={bulkDeleting}>
+            <Button id="REC-jobs-bulk-delete-confirm-btn" data-testid="REC-jobs-bulk-delete-confirm-btn" variant="destructive" onClick={handleBulkDeleteConfirm} disabled={bulkDeleting}>
               {bulkDeleting ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Deleting...</>
               ) : (
@@ -1328,9 +1394,10 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
   return (
     <div className="space-y-4 w-full max-w-3xl mx-auto">
       <div className="space-y-2">
-        <Label htmlFor="title">Title *</Label>
+        <Label htmlFor="REC-jobs-title-input">Title *</Label>
         <Input
-          id="title"
+          id="REC-jobs-title-input"
+          data-testid="REC-jobs-title-input"
           value={formData.title}
           onChange={(e) => setFormData({ ...formData, title: e.target.value })}
           placeholder="e.g., Senior Software Engineer"
@@ -1340,18 +1407,20 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="location">Location</Label>
+          <Label htmlFor="REC-jobs-location-input">Location</Label>
           <Input
-            id="location"
+            id="REC-jobs-location-input"
+            data-testid="REC-jobs-location-input"
             value={formData.location}
             onChange={(e) => setFormData({ ...formData, location: e.target.value })}
             placeholder="e.g., New York, NY"
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="department">Department</Label>
+          <Label htmlFor="REC-jobs-department-input">Department</Label>
           <Input
-            id="department"
+            id="REC-jobs-department-input"
+            data-testid="REC-jobs-department-input"
             value={formData.department}
             onChange={(e) => setFormData({ ...formData, department: e.target.value })}
             placeholder="e.g., Engineering"
@@ -1360,27 +1429,28 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="type">Job Type</Label>
+        <Label htmlFor="REC-jobs-type-select">Job Type</Label>
         <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
-          <SelectTrigger className="border-white/20">
+          <SelectTrigger id="REC-jobs-type-select" data-testid="REC-jobs-type-select" className="border-white/20">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="Full-time">Full-time</SelectItem>
-            <SelectItem value="Part-time">Part-time</SelectItem>
-            <SelectItem value="Contract">Contract</SelectItem>
-            <SelectItem value="Internship">Internship</SelectItem>
+            <SelectItem id="REC-jobs-type-option-full-time" data-testid="REC-jobs-type-option-full-time" value="Full-time">Full-time</SelectItem>
+            <SelectItem id="REC-jobs-type-option-part-time" data-testid="REC-jobs-type-option-part-time" value="Part-time">Part-time</SelectItem>
+            <SelectItem id="REC-jobs-type-option-contract" data-testid="REC-jobs-type-option-contract" value="Contract">Contract</SelectItem>
+            <SelectItem id="REC-jobs-type-option-internship" data-testid="REC-jobs-type-option-internship" value="Internship">Internship</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       <div className="flex items-center justify-between rounded-lg border p-4">
         <div className="space-y-0.5">
-          <Label htmlFor="is_active">Status</Label>
+          <Label htmlFor="REC-jobs-active-switch">Status</Label>
           <p className="text-sm text-muted-foreground">Active jobs are visible for CV matching and recruitment</p>
         </div>
         <Switch
-          id="is_active"
+          id="REC-jobs-active-switch"
+          data-testid="REC-jobs-active-switch"
           checked={formData.is_active !== false}
           onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
         />
@@ -1389,12 +1459,13 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
       {/* Quick-set: enter number of days → open = today, close = today + N days.
           Manual date pickers below still work independently. */}
       <div className="rounded-lg border border-white/15 bg-white/[0.03] p-3">
-        <Label htmlFor="durationDays" className="text-sm">
+        <Label htmlFor="REC-jobs-duration-days-input" className="text-sm">
           Quick set — open today for how many days?
         </Label>
         <div className="mt-2 flex items-center gap-2">
           <Input
-            id="durationDays"
+            id="REC-jobs-duration-days-input"
+            data-testid="REC-jobs-duration-days-input"
             type="number"
             min="1"
             value={durationDays}
@@ -1403,7 +1474,7 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
             placeholder="e.g. 30"
             className="w-28"
           />
-          <Button type="button" variant="secondary" onClick={() => applyDaysRange(durationDays)}>
+          <Button id="REC-jobs-set-dates-btn" data-testid="REC-jobs-set-dates-btn" type="button" variant="secondary" onClick={() => applyDaysRange(durationDays)}>
             Set dates
           </Button>
           <span className="text-xs text-muted-foreground">Sets open = today, close = today + days.</span>
@@ -1413,6 +1484,7 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Applications Open Date <span className="text-red-500">*</span></Label>
+          <div id="REC-jobs-open-date-input" data-testid="REC-jobs-open-date-input">
           <DatePicker
             date={formData.application_open_date ? new Date(formData.application_open_date + 'T00:00:00') : null}
             setDate={(date) => setFormData({
@@ -1423,9 +1495,11 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
             // Open date can't be in the past.
             fromDate={new Date(new Date().setHours(0, 0, 0, 0))}
           />
+          </div>
         </div>
         <div className="space-y-2">
           <Label>Applications Close Date <span className="text-red-500">*</span></Label>
+          <div id="REC-jobs-close-date-input" data-testid="REC-jobs-close-date-input">
           <DatePicker
             date={formData.application_close_date ? new Date(formData.application_close_date + 'T00:00:00') : null}
             setDate={(date) => setFormData({
@@ -1438,13 +1512,15 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
               ? new Date(new Date(formData.application_open_date + 'T00:00:00').getTime() + 86400000)
               : undefined}
           />
+          </div>
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="description">Description *</Label>
+        <Label htmlFor="REC-jobs-description-input">Description *</Label>
         <Textarea
-          id="description"
+          id="REC-jobs-description-input"
+          data-testid="REC-jobs-description-input"
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
           placeholder="Enter job description..."
@@ -1454,9 +1530,10 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="requirements">Requirements</Label>
+        <Label htmlFor="REC-jobs-requirements-input">Requirements</Label>
         <Textarea
-          id="requirements"
+          id="REC-jobs-requirements-input"
+          data-testid="REC-jobs-requirements-input"
           value={formData.requirements}
           onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
           placeholder="Enter job requirements..."
@@ -1465,10 +1542,10 @@ const JobForm = ({ formData, setFormData, onSubmit, submitting, onCancel }) => {
       </div>
 
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onCancel} disabled={submitting}>
+        <Button id="REC-jobs-form-cancel-btn" data-testid="REC-jobs-form-cancel-btn" variant="outline" onClick={onCancel} disabled={submitting}>
           Cancel
         </Button>
-        <Button onClick={onSubmit} disabled={submitting}>
+        <Button id="REC-jobs-form-save-btn" data-testid="REC-jobs-form-save-btn" onClick={onSubmit} disabled={submitting}>
           {submitting ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />

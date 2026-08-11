@@ -338,6 +338,11 @@ function defaultTabFor(path) {
   // Campaign-detail tabs default to Overview; the marketing dashboard to Dashboard.
   if (path?.includes('/marketing/dashboard/campaign/')) return 'overview';
   if (path?.startsWith('/marketing')) return 'dashboard';
+  // PM dashboard lands on Ask (Pilot) by default — matches the restructured
+  // ProjectManagerDashboardPage default of 'project-pilot'.
+  if (path?.startsWith('/project-manager')) return 'project-pilot';
+  // HR dashboard lands on Overview by default — matches HRDashboard.jsx.
+  if (path?.startsWith('/hr')) return 'overview';
   return '';
 }
 

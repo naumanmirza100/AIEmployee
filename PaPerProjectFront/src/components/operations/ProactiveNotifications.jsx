@@ -198,6 +198,8 @@ const ProactiveNotifications = () => {
 
   return (
     <div
+      id="OPS-notifications-root"
+      data-testid="OPS-notifications-root"
       className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)] p-5 sm:p-6"
       style={{
         background: 'linear-gradient(135deg, #1a1333 0%, #1a1333 45%, rgba(64,40,10,0.55) 100%)',
@@ -235,6 +237,8 @@ const ProactiveNotifications = () => {
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
+            id="OPS-notifications-refresh-btn"
+            data-testid="OPS-notifications-refresh-btn"
             onClick={() => load(true)}
             disabled={refreshing}
             title="Refresh"
@@ -243,6 +247,8 @@ const ProactiveNotifications = () => {
             <RefreshCw className={`h-3.5 w-3.5 text-white/70 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
           <Button
+            id="OPS-notifications-mark-all-read-btn"
+            data-testid="OPS-notifications-mark-all-read-btn"
             onClick={handleMarkAllRead}
             disabled={totalUnread === 0}
             size="sm"
@@ -252,6 +258,8 @@ const ProactiveNotifications = () => {
             <CheckCheck className="h-3.5 w-3.5 mr-1" /> Mark all read
           </Button>
           <Button
+            id="OPS-notifications-clear-all-btn"
+            data-testid="OPS-notifications-clear-all-btn"
             onClick={handleClearAll}
             disabled={items.length === 0}
             size="sm"
@@ -264,7 +272,7 @@ const ProactiveNotifications = () => {
       </div>
 
       {/* Filter pills */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div id="OPS-notifications-filters" data-testid="OPS-notifications-filters" className="flex items-center gap-2 mb-4 flex-wrap">
         <Filter className="h-3.5 w-3.5 text-white/45" />
         {FILTERS.map((f) => {
           const active = filter === f.value;
@@ -275,6 +283,8 @@ const ProactiveNotifications = () => {
           return (
             <button
               key={f.value}
+              id={`OPS-notifications-filter-${f.value}`}
+              data-testid={`OPS-notifications-filter-${f.value}`}
               onClick={() => setFilter(f.value)}
               className={`px-3 py-1 rounded-full text-[11px] font-semibold transition-colors flex items-center gap-1.5 ${
                 active
@@ -293,16 +303,16 @@ const ProactiveNotifications = () => {
 
       {/* Body */}
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-white/50 text-sm">
+        <div id="OPS-notifications-loading" data-testid="OPS-notifications-loading" className="flex items-center justify-center py-16 text-white/50 text-sm">
           <Loader2 className="h-5 w-5 animate-spin mr-2" style={{ color: '#f59e0b' }} />
           Loading notifications...
         </div>
       ) : grouped.length === 0 ? (
         <EmptyState filter={filter} />
       ) : (
-        <div className="space-y-5">
+        <div id="OPS-notifications-list" data-testid="OPS-notifications-list" className="space-y-5">
           {grouped.map((bucket) => (
-            <div key={bucket.label}>
+            <div key={bucket.label} id={`OPS-notifications-bucket-${bucket.label}`} data-testid={`OPS-notifications-bucket-${bucket.label}`}>
               <div className="flex items-center gap-2 mb-2">
                 <div className="text-[10px] uppercase tracking-wider text-white/45 font-semibold">
                   {bucket.label}
@@ -352,6 +362,8 @@ const NotificationCard = ({ n, busy, onMarkRead, onDelete }) => {
 
   return (
     <div
+      id={`OPS-notifications-item-${n.id}`}
+      data-testid={`OPS-notifications-item-${n.id}`}
       className={`group relative rounded-xl border px-4 py-3 transition-all ${
         n.is_read
           ? 'border-white/10 bg-white/[0.02]'
@@ -399,6 +411,8 @@ const NotificationCard = ({ n, busy, onMarkRead, onDelete }) => {
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           {!n.is_read && (
             <button
+              id={`OPS-notifications-mark-read-btn-${n.id}`}
+              data-testid={`OPS-notifications-mark-read-btn-${n.id}`}
               onClick={onMarkRead}
               disabled={busy}
               title="Mark as read"
@@ -408,6 +422,8 @@ const NotificationCard = ({ n, busy, onMarkRead, onDelete }) => {
             </button>
           )}
           <button
+            id={`OPS-notifications-delete-btn-${n.id}`}
+            data-testid={`OPS-notifications-delete-btn-${n.id}`}
             onClick={onDelete}
             title="Delete"
             className="h-7 w-7 flex items-center justify-center rounded-md border border-white/10 bg-black/30 hover:bg-red-500/10 hover:border-red-500/30 text-white/70 hover:text-red-300"
@@ -429,7 +445,7 @@ const EmptyState = ({ filter }) => {
     info:     { title: 'No info alerts', sub: 'Nothing informational at the moment.' },
   }[filter] || { title: 'Nothing here', sub: '' };
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
+    <div id="OPS-notifications-empty" data-testid="OPS-notifications-empty" className="flex flex-col items-center justify-center py-16 text-center">
       <div
         className="w-14 h-14 rounded-2xl mb-3 flex items-center justify-center"
         style={{ backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)' }}
