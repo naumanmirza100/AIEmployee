@@ -1,6 +1,44 @@
 import { useState } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { useLocation, useNavigate, useSearchParams, matchPath } from 'react-router-dom';
+import {
+  ChevronsLeft, ChevronsRight, ChevronDown, ChevronRight, X,
+  Target, BarChart3, ListOrdered, FileText, Users,
+} from 'lucide-react';
+
+// Campaign-detail tabs (mirrors CampaignDetail.jsx). Injected under "Campaigns"
+// as nested sub-tabs while a campaign detail page is open, each linking to that
+// campaign's ?tab=. Shown only in that context.
+const CAMPAIGN_TABS = [
+  { label: 'Overview',               icon: Target,      tab: 'overview' },
+  { label: 'Analytics & dashboard',  icon: BarChart3,   tab: 'analytics' },
+  { label: 'Email sequences',        icon: ListOrdered, tab: 'sequences' },
+  { label: 'Email sending activity', icon: FileText,    tab: 'email-activity' },
+  { label: 'Campaign leads',         icon: Users,       tab: 'leads' },
+];
+
+// Return the Marketing agent's children with a campaign-context group injected
+// under "Campaigns" when a campaign detail page is open. Other agents unchanged.
+function childrenWithCampaignTabs(item, pathname) {
+  if (item.section !== 'marketing' || !item.children?.length) return item.children;
+  const match = matchPath('/marketing/dashboard/campaign/:id/*', pathname)
+    || matchPath('/marketing/dashboard/campaign/:id', pathname);
+  const campaignId = match?.params?.id;
+  if (!campaignId) return item.children; // not on a campaign → normal children
+
+  const detailPath = `/marketing/dashboard/campaign/${campaignId}`;
+  return item.children.map((child) => {
+    if (child.tab !== 'campaigns') return child;
+    return {
+      ...child,
+      path: detailPath,
+      tab: 'overview',
+      basePath: detailPath, // group active while on any campaign-detail URL
+      children: CAMPAIGN_TABS.map((t) => ({
+        label: t.label, icon: t.icon, path: detailPath, tab: t.tab,
+      })),
+    };
+  });
+}
 
 /**
  * Collapsible left sidebar for agent navigation. Lists agents (Dashboard,
@@ -161,10 +199,11 @@ const AgentSidebar = ({
                 )}
               </div>
 
-              {/* Nested children */}
+              {/* Nested children (Marketing gets campaign tabs injected under
+                  "Campaigns" while a campaign detail page is open). */}
               {showChildren && (
                 <div className="mt-1 mb-1 ml-4 pl-2 border-l border-white/10 space-y-0.5">
-                  {item.children.map((child) => {
+                  {childrenWithCampaignTabs(item, location.pathname).map((child) => {
                     const hasGrand = child.children?.length > 0;
                     const groupActive = hasGrand && isChildGroupActive(child);
                     const cActive = hasGrand ? groupActive : isChildActive(child);
@@ -296,6 +335,8 @@ const AgentSidebar = ({
 // bare /marketing/dashboard or /frontline/dashboard.
 function defaultTabFor(path) {
   if (path?.startsWith('/frontline')) return 'queue';
+  // Campaign-detail tabs default to Overview; the marketing dashboard to Dashboard.
+  if (path?.includes('/marketing/dashboard/campaign/')) return 'overview';
   if (path?.startsWith('/marketing')) return 'dashboard';
   // PM dashboard lands on Ask (Pilot) by default — matches the restructured
   // ProjectManagerDashboardPage default of 'project-pilot'.

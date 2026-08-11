@@ -1236,7 +1236,7 @@ const SuperAdminApiKeysPage = () => {
   const [requestFilter, setRequestFilter] = useState({});
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
-  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '' });
+  const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '', duration_days: '', reset_interval_days: '7' });
   const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '' });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   const [adjustModal, setAdjustModal] = useState({ open: false, quota: null, action: '', value: '' });
@@ -1341,6 +1341,8 @@ const SuperAdminApiKeysPage = () => {
       const duration = prefill.preferred_duration || 'monthly';
       const p = pricing.find(x => x.agent_name === prefill.agent_name);
       const defaultTokens = p?.managed_key_tokens ? String(p.managed_key_tokens) : '';
+      // If the company chose an admin-defined plan, honour its exact day count.
+      const planDays = Number(prefill.plan_days) || 0;
       setAssignForm({
         company_id: prefill.company_id,
         agent_name: prefill.agent_name,
@@ -1348,8 +1350,10 @@ const SuperAdminApiKeysPage = () => {
         api_key: '',
         reset_tokens: true,
         managed_tokens: defaultTokens,
-        renewal_period: duration,
-        duration_months: duration === 'yearly' ? '12' : duration === 'monthly' ? '1' : '',
+        renewal_period: planDays > 0 ? 'monthly' : duration,
+        duration_months: planDays > 0 ? '' : (duration === 'yearly' ? '12' : duration === 'monthly' ? '1' : ''),
+        duration_days: planDays > 0 ? String(planDays) : '',
+        reset_interval_days: '7',
       });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: prefill });
     } else if (existingOrRequest) {
@@ -1365,10 +1369,12 @@ const SuperAdminApiKeysPage = () => {
           : '',
         renewal_period: existingOrRequest.renewal_period || 'none',
         duration_months: '',
+        duration_days: '',
+        reset_interval_days: String(existingOrRequest.reset_interval_days || 7),
       });
       setAssignModal({ open: true, replacingKey: existingOrRequest, prefillRequest: null });
     } else {
-      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '' });
+      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '', duration_days: '', reset_interval_days: '7' });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: null });
     }
   };
@@ -1387,9 +1393,11 @@ const SuperAdminApiKeysPage = () => {
         api_key: assignForm.api_key,
         reset_tokens: assignForm.reset_tokens,
         renewal_period: assignForm.renewal_period,
+        reset_interval_days: Number(assignForm.reset_interval_days) || 7,
       };
       if (assignForm.managed_tokens.trim() !== '') payload.managed_tokens = assignForm.managed_tokens;
-      if (assignForm.duration_months.trim() !== '') payload.duration_months = Number(assignForm.duration_months);
+      if ((assignForm.duration_days || '').trim() !== '') payload.duration_days = Number(assignForm.duration_days);
+      else if (assignForm.duration_months.trim() !== '') payload.duration_months = Number(assignForm.duration_months);
       if (assignModal.prefillRequest) payload.request_id = assignModal.prefillRequest.id;
       await adminApiKeysService.assignManagedKey(payload);
       toast({ title: 'Key assigned', description: 'Company can now use this managed key.' });
@@ -1609,7 +1617,7 @@ const SuperAdminApiKeysPage = () => {
 
       {/* Assign Managed Key Modal */}
       <Dialog open={assignModal.open} onOpenChange={(o) => !o && setAssignModal({ open: false, replacingKey: null, prefillRequest: null })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white sm:max-w-3xl w-full">
+        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto no-scrollbar">
           <DialogHeader className="pb-2 border-b border-white/8">
             <DialogTitle className="flex items-center gap-2">
               <Key className="w-5 h-5 text-violet-400" />
@@ -1620,7 +1628,7 @@ const SuperAdminApiKeysPage = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-3 space-y-4">
+          <div className=" space-y-4">
 
             {/* Row 1 — 2 columns: Company+Agent | API Key+Provider */}
             <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -1746,12 +1754,12 @@ const SuperAdminApiKeysPage = () => {
                     <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Token Reset</p>
                     <p className="text-sm font-semibold">
                       {renewal && renewal !== 'none'
-                        ? <span className="text-emerald-400">Every 7 days</span>
+                        ? <span className="text-emerald-400">Every {rk.reset_interval_days || 7} days</span>
                         : <span className="text-white/40">No reset</span>
                       }
                     </p>
                     <p className="text-[10px] text-white/40 mt-0.5">
-                      {rk.tokens_per_period > 0 ? `${formatTokens(rk.tokens_per_period)} / week` : '—'}
+                      {rk.tokens_per_period > 0 ? `${formatTokens(rk.tokens_per_period)} per reset` : '—'}
                     </p>
                   </div>
                   <div className={`bg-[#120d22] rounded-lg p-3 border ${urgent ? 'border-amber-500/40' : 'border-[#2d2342]'}`}>
@@ -1781,11 +1789,18 @@ const SuperAdminApiKeysPage = () => {
                     <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
                     <p className="text-[11px] text-violet-300 uppercase tracking-widest font-semibold">Requested by company</p>
                   </div>
-                  {assignModal.prefillRequest?.preferred_duration && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/40 text-violet-300 font-semibold capitalize">
-                      Requested: {assignModal.prefillRequest.preferred_duration}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {assignModal.prefillRequest?.plan_days ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-semibold">
+                        Plan: {assignModal.prefillRequest.plan_days} days
+                      </span>
+                    ) : null}
+                    {assignModal.prefillRequest?.preferred_duration && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/40 text-violet-300 font-semibold capitalize">
+                        Requested: {assignModal.prefillRequest.preferred_duration}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
                   <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Billing Plan</p>
@@ -1799,10 +1814,10 @@ const SuperAdminApiKeysPage = () => {
                 <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
                   <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Token Reset</p>
                   <p className="text-sm text-emerald-400 font-semibold">
-                    {assignForm.renewal_period === 'none' ? 'No reset' : 'Every 7 days'}
+                    {assignForm.renewal_period === 'none' ? 'No reset' : `Every ${assignForm.reset_interval_days || 7} days`}
                   </p>
                   <p className="text-[10px] text-white/40 mt-0.5">
-                    {assignForm.renewal_period === 'none' ? 'One-time tokens only' : 'Automatic weekly reset'}
+                    {assignForm.renewal_period === 'none' ? 'One-time tokens only' : 'Automatic recurring reset'}
                   </p>
                 </div>
                 <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
@@ -1822,41 +1837,70 @@ const SuperAdminApiKeysPage = () => {
                     onChange={(e) => setAssignForm((f) => ({ ...f, managed_tokens: e.target.value }))}
                   />
                   {assignForm.managed_tokens && !isNaN(parseInt(assignForm.managed_tokens)) && (
-                    <p className="text-[10px] text-violet-300/70 mt-1">Will grant: {formatTokens(parseInt(assignForm.managed_tokens))} tokens / week</p>
+                    <p className="text-[10px] text-violet-300/70 mt-1">Will grant: {formatTokens(parseInt(assignForm.managed_tokens))} tokens per reset</p>
                   )}
+                </div>
+                {/* Reset interval — how often the token quota auto-resets. */}
+                <div className="col-span-3">
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">Reset every</Label>
+                  <div className="flex gap-2 mt-1">
+                    <Select
+                      value={['7', '10', '14', '30'].includes(String(assignForm.reset_interval_days)) ? String(assignForm.reset_interval_days) : 'custom'}
+                      onValueChange={(v) => setAssignForm((f) => ({ ...f, reset_interval_days: v === 'custom' ? '' : v }))}
+                    >
+                      <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white flex-1"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                        <SelectItem value="7">7 days (weekly)</SelectItem>
+                        <SelectItem value="10">10 days</SelectItem>
+                        <SelectItem value="14">14 days</SelectItem>
+                        <SelectItem value="30">30 days</SelectItem>
+                        <SelectItem value="custom">Custom…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!['7', '10', '14', '30'].includes(String(assignForm.reset_interval_days)) && (
+                      <Input
+                        type="number" min="1" max="365"
+                        placeholder="days"
+                        className="bg-[#1a1333] border-[#3a295a] text-white w-24 h-10"
+                        value={assignForm.reset_interval_days}
+                        onChange={(e) => setAssignForm((f) => ({ ...f, reset_interval_days: e.target.value }))}
+                      />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-white/40 mt-1">Tokens auto-reset every {assignForm.reset_interval_days || 7} day(s) while renewal is active.</p>
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-x-6">
-                {/* <div>
-                  <Label className="text-white/60 text-xs uppercase tracking-wider">Billing Plan — Key Expiry</Label>
-                  <Select value={assignForm.renewal_period} onValueChange={(v) => setAssignForm({ ...assignForm, renewal_period: v })}>
-                    <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-                      <SelectItem value="none">One-time — key never expires</SelectItem>
-                      <SelectItem value="monthly">Monthly — key expires after 1 month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[10px] text-emerald-400/70 mt-1">
-                    {assignForm.renewal_period === 'none' ? 'Tokens are one-time — no weekly reset.' : '✓ Tokens reset automatically every 7 days.'}
-                  </p>
-                </div> */}
-                {/* <div>
-                  <Label className="text-white/60 text-xs uppercase tracking-wider">Key Valid For (months)</Label>
-                  <Input
-                    type="number" min="1"
-                    placeholder={assignForm.renewal_period === 'yearly' ? '12' : assignForm.renewal_period === 'monthly' ? '1' : '—'}
-                    className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-                    value={assignForm.duration_months}
-                    onChange={(e) => setAssignForm((f) => ({ ...f, duration_months: e.target.value }))}
-                  />
-                  <p className="text-[10px] text-white/40 mt-1">Leave blank to auto-set from billing plan</p>
-                  {assignForm.duration_months && !isNaN(parseInt(assignForm.duration_months)) && (
-                    <p className="text-[10px] text-amber-400/80 mt-1">
-                      ⚠ Key expires after {assignForm.duration_months} month{parseInt(assignForm.duration_months) !== 1 ? 's' : ''} — company must renew
-                    </p>
-                  )}
-                </div> */}
+              <div className="grid grid-cols-1 gap-y-3">
+                {/* Reset interval — how often the token quota auto-resets. */}
+                <div>
+                  <Label className="text-white/60 text-xs uppercase tracking-wider">Reset every</Label>
+                  <div className="flex gap-2 mt-1">
+                    <Select
+                      value={['7', '10', '14', '30'].includes(String(assignForm.reset_interval_days)) ? String(assignForm.reset_interval_days) : 'custom'}
+                      onValueChange={(v) => setAssignForm((f) => ({ ...f, reset_interval_days: v === 'custom' ? '' : v }))}
+                    >
+                      <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white flex-1"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                        <SelectItem value="7">7 days (weekly)</SelectItem>
+                        <SelectItem value="10">10 days</SelectItem>
+                        <SelectItem value="14">14 days</SelectItem>
+                        <SelectItem value="30">30 days</SelectItem>
+                        <SelectItem value="custom">Custom…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!['7', '10', '14', '30'].includes(String(assignForm.reset_interval_days)) && (
+                      <Input
+                        type="number" min="1" max="365"
+                        placeholder="days"
+                        className="bg-[#1a1333] border-[#3a295a] text-white w-24 h-10"
+                        value={assignForm.reset_interval_days}
+                        onChange={(e) => setAssignForm((f) => ({ ...f, reset_interval_days: e.target.value }))}
+                      />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-white/40 mt-1">Tokens auto-reset every {assignForm.reset_interval_days || 7} day(s) while renewal is active.</p>
+                </div>
               </div>
             )}
           </div>
@@ -2088,6 +2132,7 @@ const SuperAdminApiKeysPage = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
     </>
   );
 };

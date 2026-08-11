@@ -6,7 +6,7 @@
 // search + agent, paginated. Read-only.
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, RefreshCw, History, Search, Building2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, RefreshCw, History, Search, Building2, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
@@ -25,6 +25,7 @@ const fmtDateTime = (iso) => {
 
 export const ResetLogsTab = ({ agentOptions = [] }) => {
   const [logs, setLogs] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');       // company name filter (client-side)
   const [agent, setAgent] = useState('');         // agent_name filter (server-side)
@@ -38,9 +39,11 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
       if (agentFilter) params.agent_name = agentFilter;
       const res = await adminApiKeysService.listWeeklyResetLogs(params);
       setLogs(res?.logs || []);
+      setUpcoming(res?.upcoming || []);
       setMeta(res?.pagination || { page: p, total_pages: 1, total: 0 });
     } catch {
       setLogs([]);
+      setUpcoming([]);
       setMeta({ page: 1, total_pages: 1, total: 0 });
     } finally {
       setLoading(false);
@@ -88,6 +91,27 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
+
+      {/* Upcoming resets banner — next reset date(s) even before any happens. */}
+      {!loading && upcoming.length > 0 && (
+        <div className="rounded-xl border border-violet-400/25 bg-violet-500/[0.07] p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-300 mb-2">
+            <Clock className="h-3.5 w-3.5" /> Upcoming resets
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-white/70">
+            {upcoming.slice(0, 20).map((u, i) => (
+              <span key={`${u.company_id}-${u.agent_name}-${i}`} className="inline-flex items-center gap-1.5">
+                <span className="text-white/90">{u.company_name}</span>
+                <span className="text-white/40">·</span>
+                <span className="text-white/70">{u.agent_label}</span>
+                <span className="text-white/40">·</span>
+                <span className="text-violet-200">{fmtDateTime(u.next_reset_at)}</span>
+              </span>
+            ))}
+            {upcoming.length > 20 && <span className="text-white/40">+{upcoming.length - 20} more</span>}
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div className="rounded-xl border border-[#3a295a] bg-[#1a1333]/50 overflow-hidden">

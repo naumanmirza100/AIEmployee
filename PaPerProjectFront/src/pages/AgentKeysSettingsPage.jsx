@@ -14,7 +14,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
   Send, Trash2, ChevronLeft, RefreshCw, Sparkles, Activity, Clock,BrainCircuit, 
-  Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight,Zap, Coins, Settings, History
+  Lock, Info, DollarSign, CreditCard, ChevronDown, ChevronRight,Zap, Coins, Settings, History, Check
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import agentKeysService from '@/services/agentKeysService';
@@ -912,7 +912,9 @@ const AgentKeysSettingsPage = () => {
   const [requests, setRequests] = useState([]);
 
   const [byokModal, setByokModal] = useState({ open: false, agent: null, provider: 'openai', apiKey: '', error: '' });
-  const [requestModal, setRequestModal] = useState({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly', is_renewal: false });
+  const [requestModal, setRequestModal] = useState({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly', is_renewal: false, plan_days: null });
+  // Admin-defined subscription plans for the agent being requested.
+  const [reqPlans, setReqPlans] = useState({ loading: false, list: [] });
   const [payModal, setPayModal] = useState({ open: false, request: null });
   const [submitting, setSubmitting] = useState(false);
   const [paying, setPaying] = useState(false);
@@ -979,7 +981,21 @@ const AgentKeysSettingsPage = () => {
   }, []);
 
   const openByok = (agent) => setByokModal({ open: true, agent, provider: agent.byok?.provider || 'openai', apiKey: '', error: '' });
-  const openRequest = (agent, isRenewal = false) => setRequestModal({ open: true, agent, provider: agent.managed?.provider || 'openai', note: '', preferred_duration: 'monthly', is_renewal: isRenewal });
+  const openRequest = (agent, isRenewal = false) => {
+    setRequestModal({ open: true, agent, provider: agent.managed?.provider || 'openai', note: '', preferred_duration: 'monthly', is_renewal: isRenewal, plan_days: null });
+    // Load the admin-defined plans for this agent so the company can pick one.
+    setReqPlans({ loading: true, list: [] });
+    agentKeysService.listAgentPlans(agent.agent_name)
+      .then((res) => {
+        const list = (res?.plans || []).map((p) => ({
+          id: p.id, days: p.duration_days, price: p.price_usd, label: p.label || p.display_label || `${p.duration_days} days`,
+        })).sort((a, b) => a.days - b.days);
+        setReqPlans({ loading: false, list });
+        // Preselect the first plan by default so the request carries a duration.
+        if (list.length) setRequestModal((m) => (m.open && m.agent?.agent_name === agent.agent_name ? { ...m, plan_days: list[0].days } : m));
+      })
+      .catch(() => setReqPlans({ loading: false, list: [] }));
+  };
 
   const submitByok = async () => {
     if (!byokModal.apiKey || byokModal.apiKey.length < 10) {
@@ -1065,12 +1081,13 @@ const AgentKeysSettingsPage = () => {
         note: requestModal.note,
         preferred_duration: requestModal.preferred_duration,
         is_renewal: requestModal.is_renewal,
+        plan_days: requestModal.plan_days || null,
       });
       toast({
         title: res.already_pending ? 'Request already pending' : requestModal.is_renewal ? 'Renewal requested' : 'Request sent',
         description: requestModal.is_renewal ? 'Admin will review and assign a renewed key.' : 'Admin will review and assign a managed key.',
       });
-      setRequestModal({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly', is_renewal: false });
+      setRequestModal({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly', is_renewal: false, plan_days: null });
       loadData({ silent: true });
     } catch (e) {
       toast({ title: 'Request failed', description: String(e.message || e), variant: 'destructive' });
@@ -1428,16 +1445,41 @@ const AgentKeysSettingsPage = () => {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-white/70 text-sm">Billing Plan</Label>
-              <Select value={requestModal.preferred_duration} onValueChange={(v) => setRequestModal({ ...requestModal, preferred_duration: v })}>
-                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-                  <SelectItem value="monthly">Monthly — key expires after 1 month, pay to renew</SelectItem>
-                  {/* <SelectItem value="yearly">Yearly — key expires after 1 year, pay once</SelectItem> */}
-                </SelectContent>
-              </Select>
+              <Label className="text-white/70 text-sm">Choose a plan</Label>
+              {reqPlans.loading ? (
+                <div className="flex items-center gap-2 text-white/50 text-sm py-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading plans…
+                </div>
+              ) : reqPlans.list.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {reqPlans.list.map((p) => {
+                    const selected = requestModal.plan_days === p.days;
+                    return (
+                      <button
+                        type="button"
+                        key={p.id}
+                        onClick={() => setRequestModal({ ...requestModal, plan_days: p.days })}
+                        className={`text-left rounded-lg border px-3 py-2.5 transition-colors ${selected ? 'border-violet-500 bg-violet-500/15' : 'border-[#3a295a] bg-[#1a1333] hover:border-violet-500/50'}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium text-white">{p.label}</span>
+                          {selected && <Check className="w-4 h-4 text-violet-400 shrink-0" />}
+                        </div>
+                        <div className="mt-0.5 text-lg font-bold text-violet-300">
+                          {Number(p.price) > 0 ? `$${Number(p.price).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` : 'Free'}
+                        </div>
+                        <div className="text-[11px] text-white/40">{p.days} days access</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-[#3a295a] bg-[#1a1333] px-3 py-2.5 text-sm text-white/60">
+                  The admin hasn't set up plans for this agent yet. Your request will use the standard monthly plan.
+                </div>
+              )}
               <p className="text-[11px] text-emerald-400/80 flex items-center gap-1">
-                <Info className="w-3 h-3" /> Tokens reset every 7 days automatically on both plans.
+                <Info className="w-3 h-3" /> Tokens reset automatically each cycle after the admin assigns your key.
               </p>
             </div>
             <div className="space-y-1.5">

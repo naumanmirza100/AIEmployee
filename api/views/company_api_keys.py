@@ -25,6 +25,8 @@ from core.models import (
     CompanyAPIKey,
     CompanyModulePurchase,
     KeyRequest,
+    WeeklyResetLog,
+    AgentPlan,
 )
 
 
@@ -377,6 +379,7 @@ def list_key_requests(request):
             'provider': r.provider,
             'note': r.note,
             'preferred_duration': r.preferred_duration,
+            'plan_days': r.plan_days,
             'is_renewal': r.is_renewal,
             'status': r.status,
             'was_assigned': was_assigned,
@@ -422,6 +425,13 @@ def create_key_request(request):
         if preferred_duration not in ('monthly', 'yearly'):
             preferred_duration = 'monthly'
         is_renewal = bool(request.data.get('is_renewal', False))
+        # Optional: the admin-defined AgentPlan duration (days) the company picked.
+        try:
+            plan_days = int(request.data.get('plan_days') or 0)
+        except (TypeError, ValueError):
+            plan_days = 0
+        if plan_days <= 0:
+            plan_days = None
 
         if agent_name not in VALID_AGENTS:
             return Response({'status': 'error', 'message': 'Invalid agent_name'},
@@ -457,6 +467,7 @@ def create_key_request(request):
             note=note,
             preferred_duration=preferred_duration,
             is_renewal=is_renewal,
+            plan_days=plan_days,
         )
 
         # Broadcast to admins so they see it without polling the dashboard.
@@ -667,3 +678,100 @@ def pay_for_key_request(request, request_id):
         'amount_paid': float(total),
         'new_status': 'payment_received',
     })
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def company_reset_logs(request):
+    """This company's weekly managed-token reset history (own data only).
+
+    Query params (optional): agent_name, page, page_size (default 1 / 25).
+    """
+    company = request.user.company
+    qs = WeeklyResetLog.objects.filter(company=company)
+
+    agent_name = (request.query_params.get('agent_name') or '').strip()
+    if agent_name:
+        qs = qs.filter(agent_name=agent_name)
+
+    try:
+        page = max(int(request.query_params.get('page', 1)), 1)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = min(max(int(request.query_params.get('page_size', 25)), 1), 100)
+    except (TypeError, ValueError):
+        page_size = 25
+
+    total = qs.count()
+    start = (page - 1) * page_size
+    rows = list(qs[start:start + page_size])
+
+    agent_labels = dict(AGENT_CHOICES)
+    logs = [{
+        'id': r.id,
+        'agent_name': r.agent_name,
+        'agent_label': agent_labels.get(r.agent_name, r.agent_name),
+        'reset_at': r.reset_at.isoformat() if r.reset_at else None,
+        'tokens_used_before_reset': r.tokens_used_before_reset,
+        'new_included_limit': r.new_included_limit,
+        'next_reset_at': r.next_reset_at.isoformat() if r.next_reset_at else None,
+    } for r in rows]
+
+    # Upcoming resets — this company's active managed keys with a recurring
+    # reset scheduled. Shows "next reset: <date>" even before any reset yet.
+    up_keys = CompanyAPIKey.objects.filter(
+        company=company, mode='managed', status='active',
+    ).exclude(renewal_period='none')
+    if agent_name:
+        up_keys = up_keys.filter(agent_name=agent_name)
+    quota_next = {
+        q.agent_name: q.next_reset_at
+        for q in AgentTokenQuota.objects.filter(company=company, next_reset_at__isnull=False)
+    }
+    upcoming = []
+    for k in up_keys[:100]:
+        nra = quota_next.get(k.agent_name)
+        if not nra:
+            continue
+        upcoming.append({
+            'agent_name': k.agent_name,
+            'agent_label': agent_labels.get(k.agent_name, k.agent_name),
+            'next_reset_at': nra.isoformat(),
+            'reset_interval_days': getattr(k, 'reset_interval_days', 7),
+            'tokens_per_period': k.tokens_per_period,
+        })
+    upcoming.sort(key=lambda x: x['next_reset_at'])
+
+    return Response({
+        'status': 'success',
+        'logs': logs,
+        'upcoming': upcoming,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'total_pages': max((total + page_size - 1) // page_size, 1),
+        },
+    })
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def agent_plans(request):
+    """Active subscription plans an admin defined for an agent — shown to the
+    company in the buy / key-request flow. Query: ?agent_name=<name>."""
+    agent_name = (request.query_params.get('agent_name') or '').strip()
+    qs = AgentPlan.objects.filter(is_active=True)
+    if agent_name:
+        qs = qs.filter(agent_name=agent_name)
+    plans = [{
+        'id': p.id,
+        'agent_name': p.agent_name,
+        'label': p.display_label,
+        'duration_days': p.duration_days,
+        'price_usd': float(p.price_usd),
+    } for p in qs]
+    return Response({'status': 'success', 'plans': plans})
