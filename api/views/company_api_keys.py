@@ -379,7 +379,6 @@ def list_key_requests(request):
             'provider': r.provider,
             'note': r.note,
             'preferred_duration': r.preferred_duration,
-            'plan_days': r.plan_days,
             'is_renewal': r.is_renewal,
             'status': r.status,
             'was_assigned': was_assigned,
@@ -425,13 +424,6 @@ def create_key_request(request):
         if preferred_duration not in ('monthly', 'yearly'):
             preferred_duration = 'monthly'
         is_renewal = bool(request.data.get('is_renewal', False))
-        # Optional: the admin-defined AgentPlan duration (days) the company picked.
-        try:
-            plan_days = int(request.data.get('plan_days') or 0)
-        except (TypeError, ValueError):
-            plan_days = 0
-        if plan_days <= 0:
-            plan_days = None
 
         if agent_name not in VALID_AGENTS:
             return Response({'status': 'error', 'message': 'Invalid agent_name'},
@@ -467,7 +459,6 @@ def create_key_request(request):
             note=note,
             preferred_duration=preferred_duration,
             is_renewal=is_renewal,
-            plan_days=plan_days,
         )
 
         # Broadcast to admins so they see it without polling the dashboard.

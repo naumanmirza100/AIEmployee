@@ -16,6 +16,20 @@ export const getModulePrices = async () => {
 };
 
 /**
+ * Get the admin-defined plans (duration + price) for a single module (public).
+ */
+export const getModulePlans = async (moduleName) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/modules/${moduleName}/plans`);
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Get module plans error:', error);
+    throw error;
+  }
+};
+
+/**
  * Get list of modules purchased by the company
  */
 export const getPurchasedModules = async () => {
@@ -44,10 +58,11 @@ export const checkModuleAccess = async (moduleName) => {
 /**
  * Purchase a module (legacy – no Stripe). Prefer createCheckoutSession for Stripe payments.
  */
-export const purchaseModule = async (moduleName) => {
+export const purchaseModule = async (moduleName, planId) => {
   try {
     const response = await companyApi.post('/modules/purchase', {
-      module_name: moduleName
+      module_name: moduleName,
+      plan_id: planId,
     });
     return response;
   } catch (error) {
@@ -59,10 +74,11 @@ export const purchaseModule = async (moduleName) => {
 /**
  * Create Stripe Checkout session for module purchase. Returns { url } to redirect to Stripe.
  */
-export const createCheckoutSession = async (moduleName) => {
+export const createCheckoutSession = async (moduleName, planId) => {
   try {
     const response = await companyApi.post('/modules/checkout', {
-      module_name: moduleName
+      module_name: moduleName,
+      plan_id: planId,
     });
     return response;
   } catch (error) {
@@ -88,6 +104,7 @@ export const verifySession = async (sessionId) => {
 
 export default {
   getModulePrices,
+  getModulePlans,
   getPurchasedModules,
   checkModuleAccess,
   purchaseModule,

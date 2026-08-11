@@ -17,9 +17,27 @@ import stripe
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
-from core.models import CompanyUser, CompanyModulePurchase, Company
+from core.models import CompanyUser, CompanyModulePurchase, Company, AgentPlan
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_plan(p):
+    """Shape one AgentPlan for the buy flow."""
+    return {
+        'id': p.id,
+        'duration_days': p.duration_days,
+        'price_usd': float(p.price_usd),
+        'label': p.display_label,
+    }
+
+
+def _active_plans_for(module_name):
+    """Active AgentPlans for a module, cheapest/shortest first."""
+    return list(
+        AgentPlan.objects.filter(agent_name=module_name, is_active=True)
+        .order_by('sort_order', 'duration_days')
+    )
 
 stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', None)
 
@@ -88,8 +106,20 @@ def _fulfill_purchase_from_metadata(metadata):
             purchased_by = CompanyUser.objects.get(pk=int(company_user_id), company=company)
         except (CompanyUser.DoesNotExist, ValueError, TypeError):
             pass
+
+    # Price + duration come from the admin-defined AgentPlan the company picked.
+    # Fall back to the legacy flat price / 30 days only if no plan was recorded.
     price = MODULE_PRICES[module_name]
-    expires_at = timezone.now() + timedelta(days=SUBSCRIPTION_DAYS)
+    duration_days = SUBSCRIPTION_DAYS
+    plan_id = metadata.get('plan_id')
+    if plan_id:
+        try:
+            plan = AgentPlan.objects.get(pk=int(plan_id), agent_name=module_name)
+            price = float(plan.price_usd)
+            duration_days = plan.duration_days
+        except (AgentPlan.DoesNotExist, ValueError, TypeError):
+            logger.warning('Fulfill: plan_id %s not found for %s; using legacy price', plan_id, module_name)
+    expires_at = timezone.now() + timedelta(days=duration_days)
     existing = CompanyModulePurchase.objects.filter(company=company, module_name=module_name).first()
     if existing:
         existing.status = 'active'
@@ -329,7 +359,25 @@ def create_checkout_session(request):
                 'message': f'{MODULE_DISPLAY_NAMES[module_name]} is already purchased.',
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        price_usd = MODULE_PRICES[module_name]
+        # A plan is REQUIRED — companies buy a specific admin-defined plan
+        # (duration + price). If the admin hasn't set up any plans for this
+        # agent, it cannot be bought yet.
+        plans = _active_plans_for(module_name)
+        if not plans:
+            return Response({
+                'status': 'error',
+                'message': f'{MODULE_DISPLAY_NAMES[module_name]} has no plans available yet. Please check back later.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        plan_id = request.data.get('plan_id')
+        plan = next((p for p in plans if str(p.id) == str(plan_id)), None) if plan_id else None
+        if plan is None:
+            return Response({
+                'status': 'error',
+                'message': 'Please choose a plan before buying.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        price_usd = float(plan.price_usd)
         display_name = MODULE_DISPLAY_NAMES[module_name]
         frontend_url = (getattr(settings, 'FRONTEND_URL', None) or '').rstrip('/')
 
@@ -339,11 +387,11 @@ def create_checkout_session(request):
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
-                    'unit_amount': price_usd * 100,
+                    'unit_amount': int(round(price_usd * 100)),
                     'product_data': {
-                        'name': display_name,
-                        'description': f'One-time purchase – {display_name} module',
-                        'metadata': {'module_name': module_name},
+                        'name': f'{display_name} — {plan.display_label}',
+                        'description': f'{plan.display_label} ({plan.duration_days} days) – {display_name} module',
+                        'metadata': {'module_name': module_name, 'plan_id': str(plan.id)},
                     },
                 },
                 'quantity': 1,
@@ -352,6 +400,7 @@ def create_checkout_session(request):
                 'company_id': str(company.id),
                 'company_user_id': str(company_user.id),
                 'module_name': module_name,
+                'plan_id': str(plan.id),
             },
             success_url=f'{frontend_url}/module-purchase-success?session_id={{CHECKOUT_SESSION_ID}}',
             cancel_url=f'{frontend_url}/',
@@ -409,16 +458,31 @@ def purchase_module(request):
                 'status': 'error',
                 'message': f'Module {MODULE_DISPLAY_NAMES[module_name]} is already purchased and active'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get price
-        price = MODULE_PRICES[module_name]
-        
+
+        # A plan is REQUIRED — same rule as the Stripe path. The company must
+        # pick an admin-defined AgentPlan (duration + price).
+        plans = _active_plans_for(module_name)
+        if not plans:
+            return Response({
+                'status': 'error',
+                'message': f'{MODULE_DISPLAY_NAMES[module_name]} has no plans available yet.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        plan_id = request.data.get('plan_id')
+        plan = next((p for p in plans if str(p.id) == str(plan_id)), None) if plan_id else None
+        if plan is None:
+            return Response({
+                'status': 'error',
+                'message': 'Please choose a plan before buying.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        price = float(plan.price_usd)
+
         # For now, we'll create the purchase directly
         # In production, you'd integrate with a payment gateway (Stripe, PayPal, etc.)
         # and only create purchase after successful payment
-        
+
         # Create or update purchase
-        expires_at = timezone.now() + timedelta(days=SUBSCRIPTION_DAYS)
+        expires_at = timezone.now() + timedelta(days=plan.duration_days)
         if existing_purchase:
             existing_purchase.status = 'active'
             existing_purchase.price_paid = price
@@ -567,25 +631,64 @@ def verify_session(request):
 
 @api_view(['GET'])
 def get_module_prices(request):
-    """Get pricing information for all modules (public endpoint)"""
+    """Get pricing information for all modules (public endpoint).
+
+    Each module now carries its admin-defined `plans` (active AgentPlans) plus a
+    `has_plans` flag. The legacy flat `price` is kept for backward compatibility
+    but the buy flow uses the plans. A module with no active plans cannot be
+    bought until the admin adds one.
+    """
     try:
+        # One query for all active plans, grouped by agent.
+        plans_by_agent = {}
+        for p in AgentPlan.objects.filter(is_active=True).order_by('sort_order', 'duration_days'):
+            plans_by_agent.setdefault(p.agent_name, []).append(_serialize_plan(p))
+
         prices = []
         for module_name, price in MODULE_PRICES.items():
+            plans = plans_by_agent.get(module_name, [])
             prices.append({
                 'module_name': module_name,
                 'module_display_name': MODULE_DISPLAY_NAMES[module_name],
                 'price': price,
                 'price_period': 'month',
+                'plans': plans,
+                'has_plans': bool(plans),
             })
-        
+
         return Response({
             'status': 'success',
             'modules': prices
         }, status=status.HTTP_200_OK)
-    
+
     except Exception as e:
         logger.error(f"Error getting module prices: {str(e)}", exc_info=True)
         return Response({
             'status': 'error',
             'message': f'Failed to get module prices: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_module_plans(request, module_name):
+    """Active plans for a single module (public endpoint), used by the buy card."""
+    try:
+        if module_name not in MODULE_PRICES:
+            return Response({
+                'status': 'error',
+                'message': 'Invalid module name.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        plans = [_serialize_plan(p) for p in _active_plans_for(module_name)]
+        return Response({
+            'status': 'success',
+            'module_name': module_name,
+            'module_display_name': MODULE_DISPLAY_NAMES[module_name],
+            'plans': plans,
+            'has_plans': bool(plans),
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error('Error getting module plans for %s: %s', module_name, e, exc_info=True)
+        return Response({
+            'status': 'error',
+            'message': 'Failed to get module plans.',
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

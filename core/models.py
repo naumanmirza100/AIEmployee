@@ -2300,12 +2300,6 @@ class KeyRequest(models.Model):
         help_text='Duration company is requesting: monthly or yearly.',
     )
     is_renewal = models.BooleanField(default=False, help_text='True when this request is a renewal of an expired key.')
-    # The admin-defined AgentPlan duration (in days) the company picked at request
-    # time. 0/None means no specific plan was chosen (legacy monthly default).
-    plan_days = models.PositiveIntegerField(
-        null=True, blank=True,
-        help_text='Duration (days) of the AgentPlan the company selected when requesting.',
-    )
     key_cost_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     service_charge_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount_pct_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)

@@ -20,14 +20,10 @@ export const listResetLogs = (params = {}) => {
   return companyApi.get(`/company/agent-keys/reset-logs${qs ? `?${qs}` : ''}`);
 };
 
-// Admin-defined subscription plans for an agent — shown when buying.
-export const listAgentPlans = (agentName) =>
-  companyApi.get(`/company/agent-keys/plans${agentName ? `?agent_name=${encodeURIComponent(agentName)}` : ''}`);
-
 export const listKeyRequests = () => companyApi.get('/company/key-requests');
 
-export const createKeyRequest = ({ agent_name, provider, note, preferred_duration, is_renewal, plan_days }) =>
-  companyApi.post('/company/key-requests/create', { agent_name, provider, note, preferred_duration, is_renewal, plan_days });
+export const createKeyRequest = ({ agent_name, provider, note, preferred_duration, is_renewal }) =>
+  companyApi.post('/company/key-requests/create', { agent_name, provider, note, preferred_duration, is_renewal });
 
 export const payForRequest = (requestId) =>
   companyApi.post(`/company/key-requests/${requestId}/pay`, {});
@@ -45,7 +41,6 @@ export default {
   setTokenPool,
   setByokLimit,
   listResetLogs,
-  listAgentPlans,
   listKeyRequests,
   createKeyRequest,
   payForRequest,
