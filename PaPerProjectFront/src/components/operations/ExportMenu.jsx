@@ -67,6 +67,8 @@ const ExportMenu = ({
 
   const defaultTrigger = (
     <button
+      id="OPS-exportmenu-trigger"
+      data-testid="OPS-exportmenu-trigger"
       type="button"
       title="Download"
       disabled={disabled || downloading}
@@ -84,6 +86,8 @@ const ExportMenu = ({
         {trigger || defaultTrigger}
       </DropdownMenuTrigger>
       <DropdownMenuContent
+        id="OPS-exportmenu-content"
+        data-testid="OPS-exportmenu-content"
         align="end"
         className="bg-[#1a1333] border border-white/10 text-white/90 min-w-[200px]"
       >
@@ -92,6 +96,8 @@ const ExportMenu = ({
         </DropdownMenuLabel>
         <DropdownMenuSeparator className="bg-white/5" />
         <DropdownMenuItem
+          id="OPS-exportmenu-md-item"
+          data-testid="OPS-exportmenu-md-item"
           onClick={handleMd}
           className="cursor-pointer text-sm focus:bg-amber-500/10 focus:text-amber-200"
         >
@@ -102,6 +108,8 @@ const ExportMenu = ({
           </div>
         </DropdownMenuItem>
         <DropdownMenuItem
+          id="OPS-exportmenu-pdf-item"
+          data-testid="OPS-exportmenu-pdf-item"
           onClick={handlePdf}
           disabled={downloading}
           className="cursor-pointer text-sm focus:bg-amber-500/10 focus:text-amber-200"

@@ -289,14 +289,14 @@ const Interviews = ({ onUpdate }) => {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-12">
+      <div id="REC-interviews-loading" data-testid="REC-interviews-loading" className="flex justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 w-full">
+    <div id="REC-interviews-root" data-testid="REC-interviews-root" className="space-y-4 w-full">
       {/* Header and Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -307,6 +307,8 @@ const Interviews = ({ onUpdate }) => {
           {/* List / Kanban toggle */}
           <div className="flex rounded-lg border border-white/15 overflow-hidden">
             <button
+              id="REC-interviews-view-list-btn"
+              data-testid="REC-interviews-view-list-btn"
               onClick={() => setViewMode('list')}
               title="List view"
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -317,6 +319,8 @@ const Interviews = ({ onUpdate }) => {
               List
             </button>
             <button
+              id="REC-interviews-view-kanban-btn"
+              data-testid="REC-interviews-view-kanban-btn"
               onClick={() => setViewMode('kanban')}
               title="Kanban view"
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-l border-white/15 transition-colors ${
@@ -329,6 +333,8 @@ const Interviews = ({ onUpdate }) => {
           </div>
 
           <SearchableSelect
+            id="REC-interviews-status-filter"
+            data-testid="REC-interviews-status-filter"
             value={statusFilter || 'all'}
             onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}
             options={[
@@ -342,6 +348,8 @@ const Interviews = ({ onUpdate }) => {
             triggerClassName="w-[140px] sm:w-[160px]"
           />
           <SearchableSelect
+            id="REC-interviews-decision-filter"
+            data-testid="REC-interviews-decision-filter"
             value={decisionFilter === '' ? 'all' : decisionFilter}
             onValueChange={(v) => setDecisionFilter(v === 'all' ? '' : v)}
             options={[
@@ -356,6 +364,8 @@ const Interviews = ({ onUpdate }) => {
             triggerClassName="w-[140px] sm:w-[160px]"
           />
           <SearchableSelect
+            id="REC-interviews-job-filter"
+            data-testid="REC-interviews-job-filter"
             value={jobFilter || 'all'}
             onValueChange={(v) => setJobFilter(v === 'all' ? '' : v)}
             options={[{ value: 'all', label: 'All Jobs' }, ...jobs.map(j => ({ value: j.title, label: j.title }))]}
@@ -370,6 +380,8 @@ const Interviews = ({ onUpdate }) => {
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/30 pointer-events-none" />
           <Input
+            id="REC-interviews-search-input"
+            data-testid="REC-interviews-search-input"
             placeholder="Search name or email…"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -377,6 +389,8 @@ const Interviews = ({ onUpdate }) => {
           />
         </div>
         <Input
+          id="REC-interviews-date-from-input"
+          data-testid="REC-interviews-date-from-input"
           type="date"
           value={dateFrom}
           onChange={e => setDateFrom(e.target.value)}
@@ -385,6 +399,8 @@ const Interviews = ({ onUpdate }) => {
         />
         <span className="text-white/30 text-xs">to</span>
         <Input
+          id="REC-interviews-date-to-input"
+          data-testid="REC-interviews-date-to-input"
           type="date"
           value={dateTo}
           onChange={e => setDateTo(e.target.value)}
@@ -393,6 +409,8 @@ const Interviews = ({ onUpdate }) => {
         />
         {(search || dateFrom || dateTo) && (
           <button
+            id="REC-interviews-clear-filters-btn"
+            data-testid="REC-interviews-clear-filters-btn"
             onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); }}
             className="text-xs text-white/40 hover:text-white/70 transition-colors px-2 py-1 rounded border border-white/10 hover:border-white/25"
           >
@@ -403,6 +421,8 @@ const Interviews = ({ onUpdate }) => {
         <div className="ml-auto flex items-center gap-1.5">
           <span className="text-xs text-white/40 whitespace-nowrap">Rows per page:</span>
           <select
+            id="REC-interviews-page-size-select"
+            data-testid="REC-interviews-page-size-select"
             value={pageSize}
             onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
             className="h-8 rounded-lg border border-white/15 bg-white/5 text-white text-xs px-2 pr-6 appearance-none cursor-pointer focus:outline-none focus:border-violet-500"
@@ -415,7 +435,7 @@ const Interviews = ({ onUpdate }) => {
       </div>
 
       {interviews.length === 0 ? (
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-interviews-empty-state" data-testid="REC-interviews-empty-state" className="border-white/10 bg-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
             <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
             <p className="text-base sm:text-lg font-medium mb-2 text-white">No interviews yet</p>
@@ -433,9 +453,9 @@ const Interviews = ({ onUpdate }) => {
           onFeedback={openFeedbackModal}
         />
       ) : (
-        <div className="space-y-3 sm:space-y-4">
+        <div id="REC-interviews-list" data-testid="REC-interviews-list" className="space-y-3 sm:space-y-4">
           {interviews.map((interview) => (
-            <Card key={interview.id} className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+            <Card key={interview.id} id={`REC-interviews-row-${interview.id}`} data-testid={`REC-interviews-row-${interview.id}`} className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
               <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-4">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-4">
                   <div className="min-w-0 flex-1">
@@ -499,17 +519,17 @@ const Interviews = ({ onUpdate }) => {
                       {interview.meeting_link && !mlState?.open ? (
                         <div className="flex items-center gap-2 text-xs flex-wrap">
                           <Link2 className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                          <a href={interview.meeting_link} target="_blank" rel="noopener noreferrer"
+                          <a id={`REC-interviews-meeting-link-${interview.id}`} data-testid={`REC-interviews-meeting-link-${interview.id}`} href={interview.meeting_link} target="_blank" rel="noopener noreferrer"
                             className="text-blue-400 hover:text-blue-300 underline truncate max-w-[260px]">
                             {interview.meeting_link}
                           </a>
-                          <button onClick={() => openMeetingLinkEdit(interview)}
+                          <button id={`REC-interviews-meeting-link-edit-btn-${interview.id}`} data-testid={`REC-interviews-meeting-link-edit-btn-${interview.id}`} onClick={() => openMeetingLinkEdit(interview)}
                             className="ml-1 text-white/40 hover:text-white/70 transition-colors">
                             <Pencil className="h-3 w-3" />
                           </button>
                         </div>
                       ) : !mlState?.open ? (
-                        <button onClick={() => openMeetingLinkEdit(interview)}
+                        <button id={`REC-interviews-meeting-link-add-btn-${interview.id}`} data-testid={`REC-interviews-meeting-link-add-btn-${interview.id}`} onClick={() => openMeetingLinkEdit(interview)}
                           className="flex items-center gap-1.5 text-xs text-white/40 hover:text-blue-400 transition-colors w-fit">
                           <Link2 className="h-3.5 w-3.5" />
                           Add meeting link (Zoom / Teams / Meet)
@@ -519,6 +539,8 @@ const Interviews = ({ onUpdate }) => {
                       {mlState?.open && (
                         <div className="flex items-center gap-2 flex-wrap">
                           <Input
+                            id={`REC-interviews-meeting-link-input-${interview.id}`}
+                            data-testid={`REC-interviews-meeting-link-input-${interview.id}`}
                             type="url"
                             placeholder="https://zoom.us/j/... or meet.google.com/..."
                             value={mlState.value}
@@ -526,12 +548,12 @@ const Interviews = ({ onUpdate }) => {
                             className="h-8 text-xs flex-1 min-w-[200px] border-white/20 bg-white/5"
                             disabled={mlState.saving}
                           />
-                          <button onClick={() => saveMeetingLink(interview)} disabled={mlState.saving}
+                          <button id={`REC-interviews-meeting-link-save-btn-${interview.id}`} data-testid={`REC-interviews-meeting-link-save-btn-${interview.id}`} onClick={() => saveMeetingLink(interview)} disabled={mlState.saving}
                             className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-3 py-1 text-xs font-medium text-white transition-colors whitespace-nowrap">
                             {mlState.saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                             Save & Resend Email
                           </button>
-                          <button onClick={() => setMeetingLinkEdit(prev => ({ ...prev, [interview.id]: { open: false, value: '', saving: false } }))}
+                          <button id={`REC-interviews-meeting-link-cancel-btn-${interview.id}`} data-testid={`REC-interviews-meeting-link-cancel-btn-${interview.id}`} onClick={() => setMeetingLinkEdit(prev => ({ ...prev, [interview.id]: { open: false, value: '', saving: false } }))}
                             className="text-xs text-white/40 hover:text-white/60 transition-colors">
                             Cancel
                           </button>
@@ -547,6 +569,8 @@ const Interviews = ({ onUpdate }) => {
                   {/* Reschedule quick button */}
                   {(interview.status === 'PENDING' || interview.status === 'SCHEDULED') && (
                     <button
+                      id={`REC-interviews-reschedule-btn-${interview.id}`}
+                      data-testid={`REC-interviews-reschedule-btn-${interview.id}`}
                       type="button"
                       onClick={() => openRescheduleModal(interview)}
                       className="inline-flex items-center gap-1.5 rounded-full border border-amber-800 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-900/50 transition-colors"
@@ -559,7 +583,7 @@ const Interviews = ({ onUpdate }) => {
                   {/* Feedback quick button */}
                   {interview.status === 'COMPLETED' && (
                     interview.feedback_submitted_at ? (
-                      <button type="button" onClick={() => openFeedbackModal(interview)}
+                      <button id={`REC-interviews-view-feedback-btn-${interview.id}`} data-testid={`REC-interviews-view-feedback-btn-${interview.id}`} type="button" onClick={() => openFeedbackModal(interview)}
                         className="inline-flex items-center gap-1.5 rounded-full border border-green-800 bg-green-950/40 px-3 py-1.5 text-xs font-medium text-green-300 hover:bg-green-900/50 transition-colors">
                         <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
                         View Feedback
@@ -572,7 +596,7 @@ const Interviews = ({ onUpdate }) => {
                         )}
                       </button>
                     ) : (
-                      <button type="button" onClick={() => openFeedbackModal(interview)}
+                      <button id={`REC-interviews-add-feedback-btn-${interview.id}`} data-testid={`REC-interviews-add-feedback-btn-${interview.id}`} type="button" onClick={() => openFeedbackModal(interview)}
                         className="inline-flex items-center gap-1.5 rounded-full border border-blue-800 bg-blue-950/40 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-900/50 transition-colors">
                         <MessageSquare className="h-3.5 w-3.5 text-blue-400" />
                         Add Feedback
@@ -589,7 +613,7 @@ const Interviews = ({ onUpdate }) => {
                   {/* Three-dots menu */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className="p-1.5 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors focus:outline-none">
+                      <button id={`REC-interviews-actions-menu-trigger-${interview.id}`} data-testid={`REC-interviews-actions-menu-trigger-${interview.id}`} className="p-1.5 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors focus:outline-none">
                         <MoreVertical className="h-4 w-4" />
                       </button>
                     </DropdownMenuTrigger>
@@ -597,7 +621,7 @@ const Interviews = ({ onUpdate }) => {
 
                       {/* Change Status */}
                       <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer">
+                        <DropdownMenuSubTrigger id={`REC-interviews-change-status-trigger-${interview.id}`} data-testid={`REC-interviews-change-status-trigger-${interview.id}`} className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer">
                           <RefreshCw className="h-3.5 w-3.5 text-white/50" />
                           <span className="text-sm">Change Status</span>
                         </DropdownMenuSubTrigger>
@@ -612,6 +636,8 @@ const Interviews = ({ onUpdate }) => {
                             const active = interview.status === v;
                             return (
                               <DropdownMenuItem key={v}
+                                id={`REC-interviews-status-option-${v}-${interview.id}`}
+                                data-testid={`REC-interviews-status-option-${v}-${interview.id}`}
                                 className={`gap-2 cursor-pointer focus:bg-white/10 ${active ? 'text-white' : 'text-white/60'}`}
                                 onClick={() => !active && handleStatusChange(interview, v)}>
                                 <span className={`h-2 w-2 rounded-full shrink-0 ${
@@ -628,7 +654,7 @@ const Interviews = ({ onUpdate }) => {
 
                       {/* Change Decision */}
                       <DropdownMenuSub>
-                        <DropdownMenuSubTrigger className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer">
+                        <DropdownMenuSubTrigger id={`REC-interviews-change-decision-trigger-${interview.id}`} data-testid={`REC-interviews-change-decision-trigger-${interview.id}`} className="gap-2 focus:bg-white/10 data-[state=open]:bg-white/10 cursor-pointer">
                           <Award className="h-3.5 w-3.5 text-white/50" />
                           <span className="text-sm">Change Decision</span>
                           {interview.status !== 'COMPLETED' && <Lock className="h-3 w-3 text-white/30 ml-auto" />}
@@ -655,6 +681,8 @@ const Interviews = ({ onUpdate }) => {
                               const active = (interview.outcome || '') === v;
                               return (
                                 <DropdownMenuItem key={v || 'none'}
+                                  id={`REC-interviews-decision-option-${v || 'none'}-${interview.id}`}
+                                  data-testid={`REC-interviews-decision-option-${v || 'none'}-${interview.id}`}
                                   className={`gap-2 cursor-pointer focus:bg-white/10 ${active ? 'text-white' : 'text-white/60'}`}
                                   onClick={() => !active && handleOutcomeChange(interview, v)}>
                                   <span className="text-sm w-4 text-center shrink-0">{icon}</span>
@@ -679,6 +707,8 @@ const Interviews = ({ onUpdate }) => {
       {/* Pagination */}
       <div className="flex items-center justify-center gap-2 pt-2 border-t border-white/8">
         <button
+          id="REC-interviews-pagination-prev-btn"
+          data-testid="REC-interviews-pagination-prev-btn"
           onClick={() => goToPage(currentPage - 1)}
           disabled={currentPage <= 1}
           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/15 text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
@@ -689,6 +719,8 @@ const Interviews = ({ onUpdate }) => {
           Page {currentPage} of {totalPages || 1} &nbsp;·&nbsp; {totalCount} total
         </span>
         <button
+          id="REC-interviews-pagination-next-btn"
+          data-testid="REC-interviews-pagination-next-btn"
           onClick={() => goToPage(currentPage + 1)}
           disabled={currentPage >= totalPages}
           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/15 text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
@@ -701,7 +733,7 @@ const Interviews = ({ onUpdate }) => {
       <Dialog open={showRescheduleModal} onOpenChange={(open) => {
         if (!open) { setShowRescheduleModal(false); setRescheduleInterviewObj(null); setReschedulePickedDate(null); setReschedulePickedTime(''); setRescheduleError(''); }
       }}>
-        <DialogContent className="w-[95vw] max-w-lg max-h-[85vh] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+        <DialogContent id="REC-interviews-reschedule-dialog" data-testid="REC-interviews-reschedule-dialog" className="w-[95vw] max-w-lg max-h-[85vh] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="text-base sm:text-lg">Reschedule Interview</DialogTitle>
             {rescheduleInterviewObj && (
@@ -717,7 +749,7 @@ const Interviews = ({ onUpdate }) => {
                 <Label className="text-xs sm:text-sm font-medium">Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start h-10 sm:h-[47px] text-left font-normal text-xs sm:text-sm truncate">
+                    <Button id="REC-interviews-reschedule-date-trigger" data-testid="REC-interviews-reschedule-date-trigger" variant="outline" className="w-full justify-start h-10 sm:h-[47px] text-left font-normal text-xs sm:text-sm truncate">
                       <CalendarIcon className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                       <span className="truncate">{reschedulePickedDate ? format(reschedulePickedDate, 'PPP') : 'Pick a date'}</span>
                     </Button>
@@ -730,20 +762,20 @@ const Interviews = ({ onUpdate }) => {
                 </Popover>
               </div>
               <div className="space-y-2 min-w-0">
-                <Label htmlFor="reschedule-time" className="text-xs sm:text-sm font-medium">Time</Label>
-                <Input id="reschedule-time" type="time" value={reschedulePickedTime}
+                <Label htmlFor="REC-interviews-reschedule-time-input" className="text-xs sm:text-sm font-medium">Time</Label>
+                <Input id="REC-interviews-reschedule-time-input" data-testid="REC-interviews-reschedule-time-input" type="time" value={reschedulePickedTime}
                   onChange={(e) => { setReschedulePickedTime(e.target.value); setRescheduleError(''); }}
                   className="w-full h-10 sm:h-[47px] text-xs sm:text-sm" />
               </div>
             </div>
             {rescheduleError && <p className="text-xs sm:text-sm text-destructive font-medium">{rescheduleError}</p>}
             <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end sm:gap-2">
-              <Button variant="ghost" size="sm"
+              <Button id="REC-interviews-reschedule-cancel-btn" data-testid="REC-interviews-reschedule-cancel-btn" variant="ghost" size="sm"
                 onClick={() => { setShowRescheduleModal(false); setRescheduleInterviewObj(null); setReschedulePickedDate(null); setReschedulePickedTime(''); setRescheduleError(''); }}
                 disabled={rescheduleSubmitting} className="w-full sm:w-auto h-9 sm:h-10 text-xs sm:text-sm">
                 Cancel
               </Button>
-              <Button onClick={handleRescheduleSubmit}
+              <Button id="REC-interviews-reschedule-submit-btn" data-testid="REC-interviews-reschedule-submit-btn" onClick={handleRescheduleSubmit}
                 disabled={!reschedulePickedDate || !reschedulePickedTime || rescheduleSubmitting}
                 className="w-full sm:w-auto h-10 sm:h-11 text-xs sm:text-sm">
                 {rescheduleSubmitting ? (
@@ -757,7 +789,7 @@ const Interviews = ({ onUpdate }) => {
 
       {/* Feedback Modal */}
       {feedbackModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div id="REC-interviews-feedback-modal" data-testid="REC-interviews-feedback-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
           onClick={() => setFeedbackModal(null)}>
           <div className="w-full max-w-md rounded-2xl p-5 space-y-4"
@@ -787,7 +819,7 @@ const Interviews = ({ onUpdate }) => {
               <Label className="text-xs text-white/60 mb-2 block">Overall Rating *</Label>
               <div className="flex gap-1">
                 {[1,2,3,4,5].map(star => (
-                  <button key={star} type="button" onClick={() => setFeedbackModal(f => ({ ...f, rating: star }))}
+                  <button key={star} id={`REC-interviews-feedback-rating-${star}-btn`} data-testid={`REC-interviews-feedback-rating-${star}-btn`} type="button" onClick={() => setFeedbackModal(f => ({ ...f, rating: star }))}
                     className="transition-transform hover:scale-110 focus:outline-none">
                     <Star className={`h-7 w-7 transition-colors ${star <= feedbackModal.rating ? 'text-amber-400 fill-amber-400' : 'text-white/20 hover:text-amber-300'}`} />
                   </button>
@@ -799,28 +831,28 @@ const Interviews = ({ onUpdate }) => {
             </div>
             <div>
               <Label className="text-xs text-white/60 mb-1.5 block">Strengths Observed</Label>
-              <Textarea value={feedbackModal.strengths} onChange={(e) => setFeedbackModal(f => ({ ...f, strengths: e.target.value }))}
+              <Textarea id="REC-interviews-feedback-strengths-textarea" data-testid="REC-interviews-feedback-strengths-textarea" value={feedbackModal.strengths} onChange={(e) => setFeedbackModal(f => ({ ...f, strengths: e.target.value }))}
                 placeholder="e.g. Strong communication skills, solid technical foundation..."
                 className="min-h-[70px] text-sm bg-white/5 border-white/10 text-white placeholder:text-white/25 resize-none" />
             </div>
             <div>
               <Label className="text-xs text-white/60 mb-1.5 block">Areas for Improvement</Label>
-              <Textarea value={feedbackModal.improvements} onChange={(e) => setFeedbackModal(f => ({ ...f, improvements: e.target.value }))}
+              <Textarea id="REC-interviews-feedback-improvements-textarea" data-testid="REC-interviews-feedback-improvements-textarea" value={feedbackModal.improvements} onChange={(e) => setFeedbackModal(f => ({ ...f, improvements: e.target.value }))}
                 placeholder="e.g. Needs more experience with system design..."
                 className="min-h-[70px] text-sm bg-white/5 border-white/10 text-white placeholder:text-white/25 resize-none" />
             </div>
             <div>
               <Label className="text-xs text-white/60 mb-1.5 block">Additional Notes</Label>
-              <Textarea value={feedbackModal.notes} onChange={(e) => setFeedbackModal(f => ({ ...f, notes: e.target.value }))}
+              <Textarea id="REC-interviews-feedback-notes-textarea" data-testid="REC-interviews-feedback-notes-textarea" value={feedbackModal.notes} onChange={(e) => setFeedbackModal(f => ({ ...f, notes: e.target.value }))}
                 placeholder="Any other observations or comments..."
                 className="min-h-[60px] text-sm bg-white/5 border-white/10 text-white placeholder:text-white/25 resize-none" />
             </div>
             <div className="flex gap-3 justify-end pt-1">
-              <button onClick={() => setFeedbackModal(null)} disabled={feedbackSubmitting}
+              <button id="REC-interviews-feedback-cancel-btn" data-testid="REC-interviews-feedback-cancel-btn" onClick={() => setFeedbackModal(null)} disabled={feedbackSubmitting}
                 className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 border border-white/10 hover:border-white/25 transition-colors">
                 Cancel
               </button>
-              <button onClick={handleFeedbackSubmit} disabled={feedbackSubmitting || !feedbackModal.rating}
+              <button id="REC-interviews-feedback-save-btn" data-testid="REC-interviews-feedback-save-btn" onClick={handleFeedbackSubmit} disabled={feedbackSubmitting || !feedbackModal.rating}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50 flex items-center gap-2"
                 style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}>
                 {feedbackSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -833,7 +865,7 @@ const Interviews = ({ onUpdate }) => {
 
       {/* Confirm Status / Decision Change Modal */}
       {pendingChange && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div id="REC-interviews-confirm-change-modal" data-testid="REC-interviews-confirm-change-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
           onClick={() => setPendingChange(null)}>
           <div className="w-full max-w-sm rounded-2xl p-6"
@@ -849,11 +881,11 @@ const Interviews = ({ onUpdate }) => {
               <span className="font-semibold text-violet-300">{pendingChange.label}</span>
             </p>
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setPendingChange(null)}
+              <button id="REC-interviews-confirm-change-cancel-btn" data-testid="REC-interviews-confirm-change-cancel-btn" onClick={() => setPendingChange(null)}
                 className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white/90 border border-white/10 hover:border-white/25 transition-colors">
                 Cancel
               </button>
-              <button onClick={handleConfirmChange} disabled={!!updatingId}
+              <button id="REC-interviews-confirm-change-confirm-btn" data-testid="REC-interviews-confirm-change-confirm-btn" onClick={handleConfirmChange} disabled={!!updatingId}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
                 style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}>
                 {updatingId ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yes, Update'}

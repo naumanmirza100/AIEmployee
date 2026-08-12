@@ -139,6 +139,8 @@ const SavedPrompts = () => {
             </div>
             <div className="flex items-center gap-2">
               <Button
+                id="REC-savedprompts-favorites-toggle"
+                data-testid="REC-savedprompts-favorites-toggle"
                 variant={filterFavorites ? "default" : "outline"}
                 size="sm"
                 onClick={() => setFilterFavorites(!filterFavorites)}
@@ -148,6 +150,8 @@ const SavedPrompts = () => {
                 <span>{filterFavorites ? 'Show all prompts' : 'Favorites'}</span>
               </Button>
               <Button
+                id="REC-savedprompts-refresh-btn"
+                data-testid="REC-savedprompts-refresh-btn"
                 variant="outline"
                 size="sm"
                 onClick={fetchSavedPrompts}
@@ -163,6 +167,8 @@ const SavedPrompts = () => {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
+              id="REC-savedprompts-search-input"
+              data-testid="REC-savedprompts-search-input"
               placeholder="Search prompts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -172,11 +178,19 @@ const SavedPrompts = () => {
 
           {/* Prompts List */}
           {loadingPrompts ? (
-            <div className="py-8 flex justify-center">
+            <div
+              id="REC-savedprompts-loading-state"
+              data-testid="REC-savedprompts-loading-state"
+              className="py-8 flex justify-center"
+            >
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : filteredPrompts.length === 0 ? (
-            <div className="py-8 text-center">
+            <div
+              id="REC-savedprompts-empty-state"
+              data-testid="REC-savedprompts-empty-state"
+              className="py-8 text-center"
+            >
               <Star className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
               <p className="text-sm font-medium mb-1 text-white">No saved prompts</p>
               <p className="text-xs text-white/60">
@@ -186,9 +200,18 @@ const SavedPrompts = () => {
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div
+              id="REC-savedprompts-list"
+              data-testid="REC-savedprompts-list"
+              className="space-y-3"
+            >
               {filteredPrompts.map((savedPrompt) => (
-                <Card key={savedPrompt.id} className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card
+                  key={savedPrompt.id}
+                  id={`REC-savedprompts-row-${savedPrompt.id}`}
+                  data-testid={`REC-savedprompts-row-${savedPrompt.id}`}
+                  className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm"
+                >
                   <CardContent className="p-3 sm:p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
@@ -222,6 +245,8 @@ const SavedPrompts = () => {
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <Button
+                          id={`REC-savedprompts-run-btn-${savedPrompt.id}`}
+                          data-testid={`REC-savedprompts-run-btn-${savedPrompt.id}`}
                           variant="default"
                           size="sm"
                           onClick={() => handleRunPrompt(savedPrompt)}
@@ -231,12 +256,22 @@ const SavedPrompts = () => {
                         </Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <Button
+                              id={`REC-savedprompts-menu-trigger-${savedPrompt.id}`}
+                              data-testid={`REC-savedprompts-menu-trigger-${savedPrompt.id}`}
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                            >
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleToggleFavorite(savedPrompt.id, savedPrompt.is_favorite)}>
+                            <DropdownMenuItem
+                              id={`REC-savedprompts-favorite-item-${savedPrompt.id}`}
+                              data-testid={`REC-savedprompts-favorite-item-${savedPrompt.id}`}
+                              onClick={() => handleToggleFavorite(savedPrompt.id, savedPrompt.is_favorite)}
+                            >
                               {savedPrompt.is_favorite ? (
                                 <>
                                   <StarOff className="h-4 w-4 mr-2" />
@@ -249,16 +284,26 @@ const SavedPrompts = () => {
                                 </>
                               )}
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleCopyPrompt(savedPrompt.prompt)}>
+                            <DropdownMenuItem
+                              id={`REC-savedprompts-copy-item-${savedPrompt.id}`}
+                              data-testid={`REC-savedprompts-copy-item-${savedPrompt.id}`}
+                              onClick={() => handleCopyPrompt(savedPrompt.prompt)}
+                            >
                               <Copy className="h-4 w-4 mr-2" />
                               Copy prompt
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleToggleDashboard(savedPrompt)}>
+                            <DropdownMenuItem
+                              id={`REC-savedprompts-dashboard-item-${savedPrompt.id}`}
+                              data-testid={`REC-savedprompts-dashboard-item-${savedPrompt.id}`}
+                              onClick={() => handleToggleDashboard(savedPrompt)}
+                            >
                               <LayoutDashboard className="h-4 w-4 mr-2" />
                               {isPromptOnDashboard(savedPrompt) ? 'Remove from dashboard' : 'Add to dashboard'}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
+                              id={`REC-savedprompts-delete-item-${savedPrompt.id}`}
+                              data-testid={`REC-savedprompts-delete-item-${savedPrompt.id}`}
                               onClick={() => handleDeletePrompt(savedPrompt.id)}
                               className="text-destructive focus:text-destructive"
                             >
@@ -279,14 +324,25 @@ const SavedPrompts = () => {
 
       {/* Inline Graph Render */}
       {(graphLoading || graphData) && (
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card
+          id="REC-savedprompts-graph-panel"
+          data-testid="REC-savedprompts-graph-panel"
+          className="border-white/10 bg-black/20 backdrop-blur-sm"
+        >
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                 <BarChart2 className="h-5 w-5" />
                 {selectedPrompt?.title || 'Graph'}
               </h3>
-              <Button variant="ghost" size="sm" onClick={handleCloseGraph} className="text-white/60 hover:text-white">
+              <Button
+                id="REC-savedprompts-graph-close-btn"
+                data-testid="REC-savedprompts-graph-close-btn"
+                variant="ghost"
+                size="sm"
+                onClick={handleCloseGraph}
+                className="text-white/60 hover:text-white"
+              >
                 <X className="h-4 w-4" />
               </Button>
             </div>

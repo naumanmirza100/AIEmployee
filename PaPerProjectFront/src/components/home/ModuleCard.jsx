@@ -7,21 +7,21 @@ import { cn } from '@/lib/utils';
 import { Check, ArrowRight, Sparkles, CheckCircle2, Lock } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { getCompanyUser } from '@/services/companyAuthService';
-import { checkModuleAccess, createCheckoutSession } from '@/services/modulePurchaseService';
+import { checkModuleAccess, createCheckoutSession, getModulePlans } from '@/services/modulePurchaseService';
 
-const ModuleCard = ({ 
-  title, 
-  description, 
-  icon: Icon, 
-  features = [], 
-  price, 
+const ModuleCard = ({
+  title,
+  description,
+  icon: Icon,
+  features = [],
+  price,
   pricePeriod = 'month',
   highlight = false,
   gradientFrom,
   gradientTo,
   iconColor = 'text-primary',
   moduleName, // Internal module name (e.g., 'recruitment_agent')
-  className 
+  className
 }) => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -29,21 +29,48 @@ const ModuleCard = ({
   const [hasAccess, setHasAccess] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isPurchasing, setIsPurchasing] = useState(false);
+  // Admin-defined plans (duration + price) the company picks from when buying.
+  const [plans, setPlans] = useState([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [selectedPlanId, setSelectedPlanId] = useState(null);
 
   useEffect(() => {
     // Check if company user is logged in
     const companyUser = getCompanyUser();
     setIsLoggedIn(!!companyUser);
-    
+
     // If logged in and moduleName provided, check access
     if (companyUser && moduleName) {
       checkAccess();
     }
+    // Load the buy plans (public — works even when logged out).
+    if (moduleName) {
+      loadPlans();
+    } else {
+      setPlansLoading(false);
+    }
   }, [moduleName]);
+
+  const loadPlans = async () => {
+    setPlansLoading(true);
+    try {
+      const res = await getModulePlans(moduleName);
+      const list = res?.status === 'success' ? (res.plans || []) : [];
+      setPlans(list);
+      if (list.length) setSelectedPlanId(list[0].id); // preselect cheapest/shortest
+    } catch (error) {
+      console.error('Error loading module plans:', error);
+      setPlans([]);
+    } finally {
+      setPlansLoading(false);
+    }
+  };
+
+  const selectedPlan = plans.find((p) => p.id === selectedPlanId) || null;
 
   const checkAccess = async () => {
     if (!moduleName) return;
-    
+
     setIsChecking(true);
     try {
       const response = await checkModuleAccess(moduleName);
@@ -89,9 +116,27 @@ const ModuleCard = ({
       return;
     }
 
+    // A plan must exist and be selected before buying.
+    if (!plans.length) {
+      toast({
+        title: 'No plans available',
+        description: `${title} can't be purchased yet — please check back later.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (!selectedPlanId) {
+      toast({
+        title: 'Choose a plan',
+        description: 'Please select a plan before buying.',
+        variant: 'default',
+      });
+      return;
+    }
+
     setIsPurchasing(true);
     try {
-      const response = await createCheckoutSession(moduleName);
+      const response = await createCheckoutSession(moduleName, selectedPlanId);
       if (response.status === 'success' && response.url) {
         window.location.href = response.url;
         return;
@@ -166,15 +211,55 @@ const ModuleCard = ({
         </CardHeader>
 
         <CardContent className="flex-1">
-          {/* Price */}
-          {price && (
-            <div className="mb-6">
-              <div className="flex items-baseline gap-2">
-                <span className="text-4xl font-bold text-foreground">${price}</span>
-                <span className="text-muted-foreground">/{pricePeriod}</span>
+          {/* Plans — the company picks an admin-defined duration + price. */}
+          <div className="mb-6">
+            {plansLoading ? (
+              <div className="h-10 w-32 rounded-md bg-muted animate-pulse" />
+            ) : plans.length > 0 ? (
+              <>
+                {/* Selected plan's price, shown large */}
+                <div className="flex items-baseline gap-2">
+                  <span className="text-4xl font-bold text-foreground">
+                    ${selectedPlan ? Number(selectedPlan.price_usd).toLocaleString() : '—'}
+                  </span>
+                  {selectedPlan && (
+                    <span className="text-muted-foreground">
+                      /{selectedPlan.label} ({selectedPlan.duration_days} days)
+                    </span>
+                  )}
+                </div>
+
+                {/* Plan chooser — only shown when there's more than one */}
+                {plans.length > 1 && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {plans.map((p) => {
+                      const active = p.id === selectedPlanId;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setSelectedPlanId(p.id)}
+                          className={cn(
+                            "px-3 py-1.5 rounded-full text-sm font-medium border transition-colors",
+                            active
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/50"
+                          )}
+                        >
+                          {p.label} · ${Number(p.price_usd).toLocaleString()}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="inline-flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+                <Lock className="h-3.5 w-3.5" />
+                No plans available yet
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Features List */}
           {features.length > 0 && (
@@ -224,17 +309,22 @@ const ModuleCard = ({
           ) : (
             <Button
               onClick={handleBuyClick}
-              disabled={isPurchasing || isChecking}
+              disabled={isPurchasing || isChecking || plansLoading || plans.length === 0}
               className={cn(
                 "w-full group",
-                highlight 
-                  ? "bg-primary hover:bg-primary/90" 
+                highlight
+                  ? "bg-primary hover:bg-primary/90"
                   : "bg-secondary hover:bg-secondary/80"
               )}
               size="lg"
             >
               {isPurchasing ? (
                 <>Processing...</>
+              ) : plans.length === 0 && !plansLoading ? (
+                <>
+                  <Lock className="mr-2 h-4 w-4" />
+                  Unavailable
+                </>
               ) : (
                 <>
                   Buy Now

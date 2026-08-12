@@ -1,12 +1,9 @@
 // Admin → "Agent Plans" tab.
 //
-// Frontend-only (no backend yet): the admin defines, per agent, one or more
-// subscription plans — a duration (how long a company's purchase stays active)
-// and its price. Companies would pick one of these when buying the agent.
-//
-// Plans are persisted to localStorage keyed by agent so they survive refreshes
-// while the backend is still to be built. When the API lands, swap the
-// load/save helpers for service calls and the UI stays the same.
+// The admin defines, per agent, one or more subscription plans — a duration
+// (how long a company's purchase stays active) and its price. Companies pick
+// one of these when buying the agent. Backed by the AgentPlan model via the
+// admin API, so companies see the same plans.
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -19,8 +16,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   BrainCircuit, Plus, Trash2, Clock, DollarSign, Loader2, Save, Search,
 } from 'lucide-react';
-
-const STORAGE_KEY = 'admin_agent_plans_v1';
+import adminApiKeysService from '@/services/adminApiKeysService';
 
 // Duration presets the admin can pick from when adding a plan. `days` is the
 // canonical value stored; `label` is what the admin/company sees. "Custom"
@@ -44,34 +40,58 @@ const humanizeDays = (days) => {
   return `${d} days`;
 };
 
-// { [agentValue]: [ { id, days, price, label } ] }
-const loadPlans = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-};
-const savePlans = (plans) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(plans)); } catch { /* quota / private mode — non-fatal */ }
-};
-
-// Simple incrementing id without Date.now/Math.random dependence issues.
-let _idSeq = 1;
-const nextId = () => `p${_idSeq++}_${(Object.keys(loadPlans()).length)}`;
-
-export const AgentPlansTab = ({ agents = [], loading = false }) => {
+export const AgentPlansTab = ({ agents = [], loading: agentsLoading = false }) => {
   const { toast } = useToast();
+  // { [agentValue]: [ { id, days, price, label } ] } — mirrors backend rows.
   const [plans, setPlans] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [savingAgent, setSavingAgent] = useState(null);
   const [search, setSearch] = useState('');
 
   // Per-agent "add plan" draft state, keyed by agent value.
   const [drafts, setDrafts] = useState({}); // { [agentValue]: { duration, customDays, price } }
 
-  useEffect(() => { setPlans(loadPlans()); }, []);
+  // Load all plans from the API and group by agent.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await adminApiKeysService.listAgentPlans();
+        const grouped = {};
+        for (const p of (res?.plans || [])) {
+          (grouped[p.agent_name] = grouped[p.agent_name] || []).push({
+            id: p.id, days: p.duration_days, price: p.price_usd, label: p.label,
+          });
+        }
+        Object.values(grouped).forEach((arr) => arr.sort((a, b) => a.days - b.days));
+        if (!cancelled) setPlans(grouped);
+      } catch {
+        if (!cancelled) setPlans({});
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-  const persist = (next) => { setPlans(next); savePlans(next); };
+  // Persist ONE agent's plan list to the backend (replace-all), update state.
+  const persistAgent = async (agentValue, list) => {
+    setSavingAgent(agentValue);
+    // Optimistic update.
+    setPlans((prev) => ({ ...prev, [agentValue]: list }));
+    try {
+      const payload = list.map((p, i) => ({ duration_days: p.days, price_usd: p.price, label: p.label || '', sort_order: i }));
+      const res = await adminApiKeysService.saveAgentPlans(agentValue, payload);
+      const saved = (res?.plans || []).map((p) => ({ id: p.id, days: p.duration_days, price: p.price_usd, label: p.label }))
+        .sort((a, b) => a.days - b.days);
+      setPlans((prev) => ({ ...prev, [agentValue]: saved }));
+    } catch (e) {
+      toast({ title: 'Could not save plans', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally {
+      setSavingAgent(null);
+    }
+  };
 
   const draftFor = (agentValue) =>
     drafts[agentValue] || { duration: '30', customDays: '', price: '' };
@@ -95,24 +115,21 @@ export const AgentPlansTab = ({ agents = [], loading = false }) => {
       toast({ title: 'Duplicate plan', description: `A ${humanizeDays(days)} plan already exists for this agent.`, variant: 'destructive' });
       return;
     }
-    const plan = { id: nextId(), days, price, label: humanizeDays(days) };
-    const next = { ...plans, [agentValue]: [...existing, plan].sort((a, b) => a.days - b.days) };
-    persist(next);
+    const plan = { id: `tmp-${days}`, days, price, label: humanizeDays(days) };
+    const next = [...existing, plan].sort((a, b) => a.days - b.days);
+    persistAgent(agentValue, next);
     setDraft(agentValue, { duration: '30', customDays: '', price: '' });
     toast({ title: 'Plan added', description: `${humanizeDays(days)} · $${price} added.` });
   };
 
   const removePlan = (agentValue, planId) => {
-    const next = { ...plans, [agentValue]: (plans[agentValue] || []).filter((p) => p.id !== planId) };
-    persist(next);
+    const next = (plans[agentValue] || []).filter((p) => p.id !== planId);
+    persistAgent(agentValue, next);
   };
 
   const updatePlanPrice = (agentValue, planId, price) => {
-    const next = {
-      ...plans,
-      [agentValue]: (plans[agentValue] || []).map((p) => (p.id === planId ? { ...p, price: Number(price) || 0 } : p)),
-    };
-    persist(next);
+    const next = (plans[agentValue] || []).map((p) => (p.id === planId ? { ...p, price: Number(price) || 0 } : p));
+    persistAgent(agentValue, next);
   };
 
   const filteredAgents = useMemo(() => {
@@ -283,7 +300,7 @@ export const AgentPlansTab = ({ agents = [], loading = false }) => {
 
       <p className="text-xs text-muted-foreground flex items-center gap-1.5">
         <Save className="h-3.5 w-3.5" />
-        Plans are saved in this browser for now (frontend preview). They'll move to the server once the pricing API is ready.
+        {savingAgent ? 'Saving plan…' : 'Plans are saved to the server and are shown to companies when they buy this agent.'}
       </p>
     </div>
   );

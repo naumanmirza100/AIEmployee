@@ -621,7 +621,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-12">
+      <div id="REC-settings-loading-state" data-testid="REC-settings-loading-state" className="flex justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );
@@ -632,14 +632,14 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
   };
 
   return (
-    <div className="space-y-6">
-      <Tabs value={activeSettingsTab} onValueChange={handleSettingsTabChange} className="space-y-4">
+    <div id="REC-settings-root" data-testid="REC-settings-root" className="space-y-6">
+      <Tabs id="REC-settings-tabs" data-testid="REC-settings-tabs" value={activeSettingsTab} onValueChange={handleSettingsTabChange} className="space-y-4">
         {/* The settings tab BAR now lives in the left sidebar (Settings →
             Email / Interview / Qualification); this keeps the URL-driven
             content switching. */}
 
-        <TabsContent value="email">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <TabsContent id="REC-settings-email-panel" data-testid="REC-settings-email-panel" value="email">
+          <Card id="REC-settings-email-card" data-testid="REC-settings-email-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Email Settings</CardTitle>
               <CardDescription>
@@ -649,9 +649,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
             <CardContent className="space-y-6">
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="followup_delay">Follow-up Delay (hours)</Label>
+                  <Label htmlFor="REC-settings-followup-delay-input">Follow-up Delay (hours)</Label>
                   <Input
-                    id="followup_delay"
+                    id="REC-settings-followup-delay-input"
+                    data-testid="REC-settings-followup-delay-input"
                     type="number"
                     step="0.1"
                     value={emailSettings.followup_delay_hours}
@@ -666,9 +667,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="min_hours_between">Min Hours Between Follow-ups</Label>
+                  <Label htmlFor="REC-settings-min-hours-between-input">Min Hours Between Follow-ups</Label>
                   <Input
-                    id="min_hours_between"
+                    id="REC-settings-min-hours-between-input"
+                    data-testid="REC-settings-min-hours-between-input"
                     type="number"
                     step="0.1"
                     value={emailSettings.min_hours_between_followups}
@@ -683,9 +685,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="max_followups">Max Follow-up Emails</Label>
+                  <Label htmlFor="REC-settings-max-followups-input">Max Follow-up Emails</Label>
                   <Input
-                    id="max_followups"
+                    id="REC-settings-max-followups-input"
+                    data-testid="REC-settings-max-followups-input"
                     type="number"
                     value={emailSettings.max_followup_emails}
                     onChange={(e) => setEmailSettings({
@@ -699,9 +702,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="reminder_hours">Reminder Hours Before Interview</Label>
+                  <Label htmlFor="REC-settings-reminder-hours-input">Reminder Hours Before Interview</Label>
                   <Input
-                    id="reminder_hours"
+                    id="REC-settings-reminder-hours-input"
+                    data-testid="REC-settings-reminder-hours-input"
                     type="number"
                     step="0.1"
                     value={emailSettings.reminder_hours_before}
@@ -717,13 +721,14 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label htmlFor="auto_followups">Auto-send Follow-ups</Label>
+                    <Label htmlFor="REC-settings-auto-followups-switch">Auto-send Follow-ups</Label>
                     <p className="text-xs text-muted-foreground">
                       Automatically send follow-up emails for unconfirmed interviews
                     </p>
                   </div>
                   <Switch
-                    id="auto_followups"
+                    id="REC-settings-auto-followups-switch"
+                    data-testid="REC-settings-auto-followups-switch"
                     checked={emailSettings.auto_send_followups}
                     onCheckedChange={(checked) => setEmailSettings({
                       ...emailSettings,
@@ -734,13 +739,14 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label htmlFor="auto_reminders">Auto-send Reminders</Label>
+                    <Label htmlFor="REC-settings-auto-reminders-switch">Auto-send Reminders</Label>
                     <p className="text-xs text-muted-foreground">
                       Automatically send pre-interview reminder emails
                     </p>
                   </div>
                   <Switch
-                    id="auto_reminders"
+                    id="REC-settings-auto-reminders-switch"
+                    data-testid="REC-settings-auto-reminders-switch"
                     checked={emailSettings.auto_send_reminders}
                     onCheckedChange={(checked) => setEmailSettings({
                       ...emailSettings,
@@ -750,7 +756,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 </div>
               </div>
 
-              <Button onClick={handleSaveEmailSettings} disabled={saving}>
+              <Button id="REC-settings-email-save-btn" data-testid="REC-settings-email-save-btn" onClick={handleSaveEmailSettings} disabled={saving}>
                 {saving ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -767,8 +773,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
           </Card>
         </TabsContent>
 
-        <TabsContent value="interview">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <TabsContent id="REC-settings-interview-panel" data-testid="REC-settings-interview-panel" value="interview">
+          <Card id="REC-settings-interview-card" data-testid="REC-settings-interview-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Interview Settings</CardTitle>
               <CardDescription>
@@ -779,7 +785,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
               {/* Google Calendar connection hint — Meet links need a connected calendar */}
               {gcal && (
                 gcal.connected ? (
-                  <div className="flex items-center gap-2 rounded-lg px-4 py-2.5"
+                  <div id="REC-settings-gcal-connected-banner" data-testid="REC-settings-gcal-connected-banner" className="flex items-center gap-2 rounded-lg px-4 py-2.5"
                        style={{ background: 'rgba(16,185,129,0.10)', border: '1px solid rgba(16,185,129,0.30)' }}>
                     <CalendarCheck className="h-4 w-4 text-emerald-400 shrink-0" />
                     <p className="text-sm text-emerald-200/90">
@@ -787,7 +793,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                     </p>
                   </div>
                 ) : (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg px-4 py-3"
+                  <div id="REC-settings-gcal-disconnected-banner" data-testid="REC-settings-gcal-disconnected-banner" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg px-4 py-3"
                        style={{ background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.30)' }}>
                     <div className="flex items-start gap-2.5">
                       <CalendarCheck className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
@@ -799,6 +805,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       </div>
                     </div>
                     <Button
+                      id="REC-settings-connect-gcal-btn"
+                      data-testid="REC-settings-connect-gcal-btn"
                       size="sm"
                       onClick={() => navigate('/company/profile/integrations')}
                       className="shrink-0 border-0 text-white"
@@ -811,9 +819,9 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="job-select">Select Job</Label>
+                <Label htmlFor="REC-settings-job-select-trigger">Select Job</Label>
                 {jobs.length === 0 && !loadingJobs ? (
-                  <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                  <div id="REC-settings-no-jobs-empty-state" data-testid="REC-settings-no-jobs-empty-state" className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                     <p className="text-sm text-yellow-800 dark:text-yellow-200">
                       <Lock className="h-4 w-4 inline mr-2" />
                       No jobs available. Please add a job description first to configure interview settings.
@@ -823,6 +831,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                   <>
                     <div className="relative" ref={jobDropdownRef}>
                       <button
+                        id="REC-settings-job-select-trigger"
+                        data-testid="REC-settings-job-select-trigger"
                         type="button"
                         onClick={() => { if (!loadingJobs) { setJobSearchOpen(!jobSearchOpen); setJobSearchQuery(''); } }}
                         className="w-full flex items-center justify-between text-sm bg-black/30 border border-white/20 text-white rounded-md px-3 py-2 hover:bg-black/40 transition-colors disabled:opacity-50"
@@ -834,10 +844,12 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                         <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
                       </button>
                       {jobSearchOpen && (
-                        <div className="absolute z-50 mt-1 w-full bg-[#1a1a2e] border border-white/20 rounded-md shadow-xl overflow-hidden">
+                        <div id="REC-settings-job-select-dropdown" data-testid="REC-settings-job-select-dropdown" className="absolute z-50 mt-1 w-full bg-[#1a1a2e] border border-white/20 rounded-md shadow-xl overflow-hidden">
                           <div className="flex items-center border-b border-white/10 px-3">
                             <Search className="h-4 w-4 text-white/40 shrink-0" />
                             <input
+                              id="REC-settings-job-search-input"
+                              data-testid="REC-settings-job-search-input"
                               type="text"
                               autoFocus
                               value={jobSearchQuery}
@@ -848,11 +860,13 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                           </div>
                           <div className="max-h-[200px] overflow-y-auto">
                             {filteredJobs.length === 0 ? (
-                              <div className="px-3 py-3 text-sm text-white/40 text-center">No jobs found</div>
+                              <div id="REC-settings-job-search-empty-state" data-testid="REC-settings-job-search-empty-state" className="px-3 py-3 text-sm text-white/40 text-center">No jobs found</div>
                             ) : (
                               filteredJobs.map((job) => (
                                 <button
                                   key={job.id}
+                                  id={`REC-settings-job-option-${job.id}`}
+                                  data-testid={`REC-settings-job-option-${job.id}`}
                                   type="button"
                                   onClick={() => {
                                     setSelectedJobId(job.id);
@@ -897,7 +911,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="schedule_from">Schedule From Date</Label>
+                    <Label htmlFor="REC-settings-schedule-from-datepicker">Schedule From Date</Label>
+                    <div id="REC-settings-schedule-from-datepicker" data-testid="REC-settings-schedule-from-datepicker">
                     <DatePicker
                       date={scheduleFromDate}
                       setDate={(date) => {
@@ -928,13 +943,15 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       }}
                       placeholder="Select start date"
                     />
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       Start date for scheduling (must be today or a future date)
                     </p>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="schedule_to">Schedule To Date</Label>
+                    <Label htmlFor="REC-settings-schedule-to-datepicker">Schedule To Date</Label>
+                    <div id="REC-settings-schedule-to-datepicker" data-testid="REC-settings-schedule-to-datepicker">
                     <DatePicker
                       date={scheduleToDate}
                       setDate={(date) => {
@@ -973,6 +990,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       }}
                       placeholder="Select end date"
                     />
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       End date for scheduling (leave empty for no limit)
                     </p>
@@ -981,9 +999,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="start_time">Start Time</Label>
+                    <Label htmlFor="REC-settings-start-time-input">Start Time</Label>
                     <Input
-                      id="start_time"
+                      id="REC-settings-start-time-input"
+                      data-testid="REC-settings-start-time-input"
                       type="time"
                       value={interviewSettings.start_time}
                       onChange={(e) => {
@@ -1010,9 +1029,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                   
 
                   <div className="space-y-2">
-                    <Label htmlFor="end_time">End Time</Label>
+                    <Label htmlFor="REC-settings-end-time-input">End Time</Label>
                     <Input
-                      id="end_time"
+                      id="REC-settings-end-time-input"
+                      data-testid="REC-settings-end-time-input"
                       type="time"
                       value={interviewSettings.end_time}
                       onChange={(e) => {
@@ -1039,9 +1059,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="time_gap">Interview Time Gap (minutes)</Label>
+                  <Label htmlFor="REC-settings-time-gap-input">Interview Time Gap (minutes)</Label>
                   <Input
-                    id="time_gap"
+                    id="REC-settings-time-gap-input"
+                    data-testid="REC-settings-time-gap-input"
                     type="number"
                     value={interviewSettings.interview_time_gap}
                     onChange={(e) => setInterviewSettings({
@@ -1055,7 +1076,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="default_interview_type">Interview type for this job</Label>
+                  <Label htmlFor="REC-settings-interview-type-trigger">Interview type for this job</Label>
                   <Select
                     value={interviewSettings.default_interview_type || 'ONLINE'}
                     onValueChange={(value) => setInterviewSettings({
@@ -1063,12 +1084,12 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       default_interview_type: value,
                     })}
                   >
-                    <SelectTrigger id="default_interview_type" className="max-w-[200px] border-white/20">
+                    <SelectTrigger id="REC-settings-interview-type-trigger" data-testid="REC-settings-interview-type-trigger" className="max-w-[200px] border-white/20">
                       <SelectValue placeholder="Online or Onsite" />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ONLINE">Online</SelectItem>
-                      <SelectItem value="ONSITE">Onsite</SelectItem>
+                    <SelectContent id="REC-settings-interview-type-content" data-testid="REC-settings-interview-type-content">
+                      <SelectItem id="REC-settings-interview-type-online-item" data-testid="REC-settings-interview-type-online-item" value="ONLINE">Online</SelectItem>
+                      <SelectItem id="REC-settings-interview-type-onsite-item" data-testid="REC-settings-interview-type-onsite-item" value="ONSITE">Onsite</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
@@ -1078,7 +1099,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
               </div>
 
               <div className="flex gap-2">
-                <Button onClick={handleSaveInterviewSettings} disabled={saving}>
+                <Button id="REC-settings-interview-save-btn" data-testid="REC-settings-interview-save-btn" onClick={handleSaveInterviewSettings} disabled={saving}>
                   {saving ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1092,8 +1113,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                   )}
                 </Button>
                 {scheduleFromDate && scheduleToDate && (
-                  <Button 
-                    onClick={handleGenerateTimeSlots} 
+                  <Button
+                    id="REC-settings-generate-slots-btn"
+                    data-testid="REC-settings-generate-slots-btn"
+                    onClick={handleGenerateTimeSlots}
                     disabled={saving}
                     variant="outline"
                   >
@@ -1110,8 +1133,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       <Calendar className="h-5 w-5" />
                       <h3 className="text-lg font-semibold">Generated Time Slots</h3>
                     </div>
-                    <Button 
-                      onClick={handleUpdateTimeSlotAvailability} 
+                    <Button
+                      id="REC-settings-update-availability-btn"
+                      data-testid="REC-settings-update-availability-btn"
+                      onClick={handleUpdateTimeSlotAvailability}
                       disabled={saving}
                       variant="outline"
                       className="bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600"
@@ -1126,6 +1151,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                     <div className="min-w-[300px] bg-slate-800 rounded-xl p-5 border border-slate-600">
                       <div className="flex justify-between items-center mb-5">
                         <button
+                          id="REC-settings-calendar-prev-month-btn"
+                          data-testid="REC-settings-calendar-prev-month-btn"
                           onClick={() => changeCalendarMonth(-1)}
                           className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-600 hover:bg-indigo-600 border border-slate-500 text-white transition-colors"
                         >
@@ -1135,6 +1162,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                           {formatMonthYear(calendarMonth)}
                         </div>
                         <button
+                          id="REC-settings-calendar-next-month-btn"
+                          data-testid="REC-settings-calendar-next-month-btn"
                           onClick={() => changeCalendarMonth(1)}
                           className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-600 hover:bg-indigo-600 border border-slate-500 text-white transition-colors"
                         >
@@ -1154,6 +1183,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                         {generateCalendarDates().map((dateInfo, idx) => (
                           <div
                             key={idx}
+                            id={`REC-settings-calendar-day-${dateInfo.date || `empty-${idx}`}`}
+                            data-testid={`REC-settings-calendar-day-${dateInfo.date || `empty-${idx}`}`}
                             className={`
                               aspect-square flex items-center justify-center rounded-lg text-sm transition-colors min-h-[36px]
                               ${dateInfo.day === null 
@@ -1194,6 +1225,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                             return (
                               <div
                                 key={formatDateLocal(date)}
+                                id={`REC-settings-slot-date-header-${formatDateLocal(date)}`}
+                                data-testid={`REC-settings-slot-date-header-${formatDateLocal(date)}`}
                                 className={`
                                   bg-slate-700 border border-slate-600 rounded-lg p-4 text-center font-semibold text-white text-sm
                                   ${isStart ? 'bg-indigo-600 border-indigo-600' : isInRange ? 'bg-indigo-500/80 border-indigo-500' : ''}
@@ -1229,16 +1262,20 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                   return (
                                     <div
                                       key={`${dateStr}-${timeStr}`}
+                                      id={`REC-settings-slot-cell-${dateStr}-${timeStr}`}
+                                      data-testid={`REC-settings-slot-cell-${dateStr}-${timeStr}`}
                                       className={`
                                         bg-slate-800 border border-slate-600 rounded-lg p-3.5 text-sm text-white cursor-pointer transition-all relative min-h-[52px] flex items-center
-                                        ${isAvailable 
-                                          ? 'hover:bg-indigo-600 hover:border-indigo-500' 
+                                        ${isAvailable
+                                          ? 'hover:bg-indigo-600 hover:border-indigo-500'
                                           : 'opacity-50 line-through bg-slate-700'
                                         }
                                       `}
                                       onClick={() => handleToggleTimeSlot(slot.datetime)}
                                     >
                                       <input
+                                        id={`REC-settings-slot-checkbox-${dateStr}-${timeStr}`}
+                                        data-testid={`REC-settings-slot-checkbox-${dateStr}-${timeStr}`}
                                         type="checkbox"
                                         checked={isAvailable}
                                         onChange={() => handleToggleTimeSlot(slot.datetime)}
@@ -1252,6 +1289,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                   return (
                                     <div
                                       key={`${dateStr}-${timeStr}`}
+                                      id={`REC-settings-slot-empty-${dateStr}-${timeStr}`}
+                                      data-testid={`REC-settings-slot-empty-${dateStr}-${timeStr}`}
                                       className="bg-slate-800 border border-slate-600 rounded-lg opacity-40 cursor-not-allowed flex items-center justify-center min-h-[52px]"
                                     >
                                       <span className="text-slate-500 text-lg">-</span>
@@ -1269,13 +1308,13 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
               )}
 
               {timeSlots.length === 0 && scheduleFromDate && scheduleToDate && (
-                <div className="mt-4 p-4 bg-slate-800 rounded-lg text-center text-sm text-slate-400 border border-slate-700">
+                <div id="REC-settings-no-slots-empty-state" data-testid="REC-settings-no-slots-empty-state" className="mt-4 p-4 bg-slate-800 rounded-lg text-center text-sm text-slate-400 border border-slate-700">
                   No time slots generated yet. Click "Save Interview Settings" to automatically generate time slots based on your date range and time settings.
                 </div>
               )}
 
               {timeSlots.length > 0 && scheduleFromDate && scheduleToDate && (
-                <div className="mt-2 text-xs text-slate-400 text-center">
+                <div id="REC-settings-slots-summary" data-testid="REC-settings-slots-summary" className="mt-2 text-xs text-slate-400 text-center">
                   Showing {timeSlots.length} time slots for {getAvailableDates().length} day(s)
                 </div>
               )}
@@ -1285,8 +1324,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
           </Card>
         </TabsContent>
 
-        <TabsContent value="qualification">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <TabsContent id="REC-settings-qualification-panel" data-testid="REC-settings-qualification-panel" value="qualification">
+          <Card id="REC-settings-qualification-card" data-testid="REC-settings-qualification-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Qualification Settings</CardTitle>
               <CardDescription>
@@ -1297,13 +1336,14 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label htmlFor="use_custom_thresholds">Use Custom Thresholds</Label>
+                    <Label htmlFor="REC-settings-use-custom-thresholds-switch">Use Custom Thresholds</Label>
                     <p className="text-xs text-muted-foreground">
                       Enable custom decision thresholds. If disabled, default values (INTERVIEW: 65, HOLD: 45) will be used.
                     </p>
                   </div>
                   <Switch
-                    id="use_custom_thresholds"
+                    id="REC-settings-use-custom-thresholds-switch"
+                    data-testid="REC-settings-use-custom-thresholds-switch"
                     checked={qualificationSettings.use_custom_thresholds}
                     onCheckedChange={(checked) => setQualificationSettings({
                       ...qualificationSettings,
@@ -1315,9 +1355,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 {qualificationSettings.use_custom_thresholds && (
                   <>
                     <div className="space-y-2">
-                      <Label htmlFor="interview_threshold">INTERVIEW Threshold (0-100)</Label>
+                      <Label htmlFor="REC-settings-interview-threshold-input">INTERVIEW Threshold (0-100)</Label>
                       <Input
-                        id="interview_threshold"
+                        id="REC-settings-interview-threshold-input"
+                        data-testid="REC-settings-interview-threshold-input"
                         type="number"
                         min="0"
                         max="100"
@@ -1337,9 +1378,10 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="hold_threshold">HOLD Threshold (0-100)</Label>
+                      <Label htmlFor="REC-settings-hold-threshold-input">HOLD Threshold (0-100)</Label>
                       <Input
-                        id="hold_threshold"
+                        id="REC-settings-hold-threshold-input"
+                        data-testid="REC-settings-hold-threshold-input"
                         type="number"
                         min="0"
                         max="100"
@@ -1387,7 +1429,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                 )}
               </div>
 
-              <Button onClick={handleSaveQualificationSettings} disabled={saving || (qualificationSettings.use_custom_thresholds && qualificationSettings.interview_threshold <= qualificationSettings.hold_threshold)}>
+              <Button id="REC-settings-qualification-save-btn" data-testid="REC-settings-qualification-save-btn" onClick={handleSaveQualificationSettings} disabled={saving || (qualificationSettings.use_custom_thresholds && qualificationSettings.interview_threshold <= qualificationSettings.hold_threshold)}>
                 {saving ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

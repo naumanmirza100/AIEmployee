@@ -18,7 +18,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
-  researchLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
+  researchLeads, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
   bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads,
 } from '@/services/aiSdrService';
 
@@ -664,6 +664,27 @@ const SDRLeadsTab = () => {
     } catch (e) {
       toast({ title: 'Generate failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
     } finally { setGenerating(false); }
+  };
+
+  // Import leads already generated in the Apify Console (works on the free plan,
+  // which can't RUN paid actors via API but CAN read finished runs).
+  const [fetchingApify, setFetchingApify] = useState(false);
+  const handleFetchApify = async () => {
+    setFetchingApify(true);
+    try {
+      const resp = await fetchApifyLeads({ count: 200 });
+      const created = resp?.data?.leads_created ?? resp?.leads_created ?? 0;
+      const skipped = resp?.data?.skipped_duplicates ?? resp?.skipped_duplicates ?? 0;
+      toast({
+        title: created ? `Imported ${created} leads from Apify` : 'No new leads found',
+        description: skipped ? `${skipped} duplicates skipped.` : (resp?.message || resp?.data?.message || ''),
+      });
+      setShowGenModal(false);
+      setPage(1);
+      loadLeads({ page: 1 });
+    } catch (e) {
+      toast({ title: 'Fetch failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally { setFetchingApify(false); }
   };
 
   // Ask for confirmation before deleting a single lead (was a one-click delete).
@@ -1450,6 +1471,21 @@ const SDRLeadsTab = () => {
                 <span>5</span><span>50</span>
               </div>
             </div>
+          </div>
+
+          {/* Fetch-from-Apify — import runs you generated in the Apify Console.
+              Useful on the free Apify plan (can't RUN paid actors via API, but
+              can read finished runs). */}
+          <div style={{ marginTop: 6, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,58,237,0.06)', border: '1px solid #2d1f4a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: '#e2d9f3' }}>Already generated in Apify?</div>
+              <div style={{ fontSize: 11.5, color: '#9ca3af' }}>Import leads from your finished Apify runs (works on the free plan).</div>
+            </div>
+            <button onClick={handleFetchApify} disabled={fetchingApify}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(168,85,247,0.35)', color: '#c4b5fd', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: fetchingApify ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
+              {fetchingApify ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+              {fetchingApify ? 'Fetching…' : 'Fetch from Apify'}
+            </button>
           </div>
 
           <DialogFooter>

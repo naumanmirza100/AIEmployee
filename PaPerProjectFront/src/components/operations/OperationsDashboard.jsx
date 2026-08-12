@@ -110,10 +110,10 @@ const OperationsDashboard = () => {
   }
 
   const statCards = [
-    { label: 'Total Documents', value: stats?.total_documents ?? '-', icon: FileText, color: '#3b82f6', gradient: 'from-blue-500/10 to-blue-600/5' },
-    { label: 'Processed', value: stats?.processed_documents ?? '-', icon: TrendingUp, color: '#10b981', gradient: 'from-emerald-500/10 to-emerald-600/5' },
-    { label: 'Text Chunks', value: stats?.total_chunks ?? '-', icon: Hash, color: '#8b5cf6', gradient: 'from-violet-500/10 to-violet-600/5' },
-    { label: 'Doc Types', value: stats?.document_types ? Object.keys(stats.document_types).length : '-', icon: Tag, color: '#f59e0b', gradient: 'from-amber-500/10 to-amber-600/5' },
+    { label: 'Total Documents', slug: 'total-documents', value: stats?.total_documents ?? '-', icon: FileText, color: '#3b82f6', gradient: 'from-blue-500/10 to-blue-600/5' },
+    { label: 'Processed', slug: 'processed', value: stats?.processed_documents ?? '-', icon: TrendingUp, color: '#10b981', gradient: 'from-emerald-500/10 to-emerald-600/5' },
+    { label: 'Text Chunks', slug: 'text-chunks', value: stats?.total_chunks ?? '-', icon: Hash, color: '#8b5cf6', gradient: 'from-violet-500/10 to-violet-600/5' },
+    { label: 'Doc Types', slug: 'doc-types', value: stats?.document_types ? Object.keys(stats.document_types).length : '-', icon: Tag, color: '#f59e0b', gradient: 'from-amber-500/10 to-amber-600/5' },
   ];
 
   return (
@@ -127,7 +127,7 @@ const OperationsDashboard = () => {
       {/* Stats Cards - always visible */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {statCards.map((s, i) => (
-          <Card key={i} className={`bg-gradient-to-br ${s.gradient} border-white/[0.06] backdrop-blur-sm`}>
+          <Card key={i} id={`OPS-dashboard-stat-${s.slug}`} data-testid={`OPS-dashboard-stat-${s.slug}`} className={`bg-gradient-to-br ${s.gradient} border-white/[0.06] backdrop-blur-sm`}>
             <CardContent className="p-4 sm:p-5 flex items-center gap-3 sm:gap-4">
               <div className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-xl" style={{ backgroundColor: `${s.color}15` }}>
                 <s.icon className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: s.color }} />
@@ -146,7 +146,7 @@ const OperationsDashboard = () => {
       {/* Main Tabs — the tab BAR now lives in the left sidebar; this keeps the
           URL-driven content switching. */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsContent value="dashboard" className="space-y-5 mt-2">
+        <TabsContent value="dashboard" id="OPS-dashboard-tab-dashboard" data-testid="OPS-dashboard-tab-dashboard" className="space-y-5 mt-2">
           {/* Quick Actions */}
           <div>
             <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -212,6 +212,8 @@ const OperationsDashboard = () => {
               ].map((action) => (
                 <button
                   key={action.tab}
+                  id={`OPS-dashboard-quickaction-${action.tab}`}
+                  data-testid={`OPS-dashboard-quickaction-${action.tab}`}
                   onClick={() => handleTabChange(action.tab)}
                   className="group flex items-center gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 text-left transition-all hover:border-white/[0.12] hover:bg-white/[0.04]"
                 >
@@ -232,27 +234,27 @@ const OperationsDashboard = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="documents" className="mt-6">
+        <TabsContent value="documents" id="OPS-dashboard-tab-documents" data-testid="OPS-dashboard-tab-documents" className="mt-6">
           <DocumentProcessing />
         </TabsContent>
 
-        <TabsContent value="summarization" className="mt-6">
+        <TabsContent value="summarization" id="OPS-dashboard-tab-summarization" data-testid="OPS-dashboard-tab-summarization" className="mt-6">
           <SummarizationInsights />
         </TabsContent>
 
-        <TabsContent value="analytics" className="mt-6">
+        <TabsContent value="analytics" id="OPS-dashboard-tab-analytics" data-testid="OPS-dashboard-tab-analytics" className="mt-6">
           <AnalyticsDashboardTab />
         </TabsContent>
 
-        <TabsContent value="knowledge-qa" className="mt-6">
+        <TabsContent value="knowledge-qa" id="OPS-dashboard-tab-knowledge-qa" data-testid="OPS-dashboard-tab-knowledge-qa" className="mt-6">
           <KnowledgeQA />
         </TabsContent>
 
-        <TabsContent value="authoring" className="mt-6">
+        <TabsContent value="authoring" id="OPS-dashboard-tab-authoring" data-testid="OPS-dashboard-tab-authoring" className="mt-6">
           <DocumentAuthoring />
         </TabsContent>
 
-        <TabsContent value="notifications" className="mt-6">
+        <TabsContent value="notifications" id="OPS-dashboard-tab-notifications" data-testid="OPS-dashboard-tab-notifications" className="mt-6">
           <ProactiveNotifications />
         </TabsContent>
       </Tabs>

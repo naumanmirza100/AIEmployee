@@ -660,6 +660,7 @@ urlpatterns = [
     re_path(r'^modules/stripe-webhook/?$', module_purchase.stripe_webhook, name='stripe_webhook'),  # POST (raw, no auth)
     re_path(r'^modules/verify-session/?$', module_purchase.verify_session, name='verify_session'),  # POST (public)
     re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/plans/?$', module_purchase.get_module_plans, name='get_module_plans'),  # GET (public)
 
     # Company API Key management (user-side: BYOK + key requests)
     re_path(r'^company/agent-keys/?$', company_api_keys.list_agent_keys, name='list_agent_keys'),  # GET
@@ -667,6 +668,8 @@ urlpatterns = [
     re_path(r'^company/agent-keys/byok/(?P<agent_name>[a-z_]+)/?$', company_api_keys.revoke_byok_key, name='revoke_byok_key'),  # DELETE
     re_path(r'^company/agent-keys/pool/?$', company_api_keys.set_token_pool, name='set_token_pool'),  # POST
     re_path(r'^company/agent-keys/byok-limit/?$', company_api_keys.set_byok_limit, name='set_byok_limit'),  # POST
+    re_path(r'^company/agent-keys/reset-logs/?$', company_api_keys.company_reset_logs, name='company_reset_logs'),  # GET
+    re_path(r'^company/agent-keys/plans/?$', company_api_keys.agent_plans, name='company_agent_plans'),  # GET ?agent_name=
     re_path(r'^company/key-requests/?$', company_api_keys.list_key_requests, name='list_key_requests'),  # GET
     re_path(r'^company/key-requests/create/?$', company_api_keys.create_key_request, name='create_key_request'),  # POST
     re_path(r'^company/key-requests/(?P<request_id>\d+)/pay/?$', company_api_keys.pay_for_key_request, name='pay_for_key_request'),  # POST
@@ -681,6 +684,10 @@ urlpatterns = [
     re_path(r'^admin/pricing-config/?$', admin_api_keys.list_pricing, name='admin_list_pricing'),  # GET
     re_path(r'^admin/pricing-config/(?P<agent_name>[a-z_]+)/?$', admin_api_keys.update_pricing, name='admin_update_pricing'),  # PUT
     re_path(r'^admin/token-quotas/?$', admin_api_keys.list_quotas, name='admin_list_quotas'),  # GET
+    re_path(r'^admin/weekly-reset-logs/?$', admin_api_keys.weekly_reset_logs, name='admin_weekly_reset_logs'),  # GET
+    re_path(r'^admin/reset-schedule/?$', admin_api_keys.update_reset_schedule, name='admin_update_reset_schedule'),  # POST
+    re_path(r'^admin/agent-plans/?$', admin_api_keys.list_agent_plans, name='admin_list_agent_plans'),  # GET ?agent_name=
+    re_path(r'^admin/agent-plans/save/?$', admin_api_keys.save_agent_plans, name='admin_save_agent_plans'),  # POST
     re_path(r'^admin/token-quotas/(?P<quota_id>\d+)/?$', admin_api_keys.adjust_quota, name='admin_adjust_quota'),  # PATCH
     re_path(r'^admin/key-requests/?$', admin_api_keys.list_requests, name='admin_list_requests'),  # GET
     re_path(r'^admin/key-requests/(?P<request_id>\d+)/approve/?$', admin_api_keys.approve_key_request, name='admin_approve_request'),  # POST
@@ -705,6 +712,7 @@ urlpatterns = [
     re_path(r'^sdr/leads/?$', sdr_api.leads_list, name='sdr_leads_list'),  # GET, POST
     re_path(r'^sdr/leads/research/sources/?$', sdr_api.research_sources, name='sdr_research_sources'),  # GET
     re_path(r'^sdr/leads/research/?$', sdr_api.research_leads, name='sdr_research_leads'),  # POST
+    re_path(r'^sdr/leads/fetch-apify/?$', sdr_api.fetch_apify_leads, name='sdr_fetch_apify_leads'),  # POST
     re_path(r'^sdr/leads/import/?$', sdr_api.import_leads_csv, name='sdr_import_leads_csv'),  # POST
     re_path(r'^sdr/leads/qualify-all/?$', sdr_api.qualify_all_leads, name='sdr_qualify_all_leads'),  # POST
     re_path(r'^sdr/leads/(?P<lead_id>\d+)/restore/?$', sdr_api.restore_lead, name='sdr_restore_lead'),  # POST

@@ -22,8 +22,8 @@ export const listResetLogs = (params = {}) => {
 
 export const listKeyRequests = () => companyApi.get('/company/key-requests');
 
-export const createKeyRequest = ({ agent_name, provider, note }) =>
-  companyApi.post('/company/key-requests/create', { agent_name, provider, note });
+export const createKeyRequest = ({ agent_name, provider, note, preferred_duration, is_renewal }) =>
+  companyApi.post('/company/key-requests/create', { agent_name, provider, note, preferred_duration, is_renewal });
 
 export const payForRequest = (requestId) =>
   companyApi.post(`/company/key-requests/${requestId}/pay`, {});

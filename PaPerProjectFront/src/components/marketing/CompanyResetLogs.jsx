@@ -8,7 +8,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, History, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, History, RefreshCw, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import agentKeysService from '@/services/agentKeysService';
 
 const fmtDateTime = (iso) => {
@@ -30,6 +30,7 @@ const fmtDateTime = (iso) => {
 //     dialog that already has its own header).
 export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '', bare = false }) => {
   const [logs, setLogs] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);
   const [loading, setLoading] = useState(true);
   const [agent, setAgent] = useState(agentName || '');
   const [page, setPage] = useState(1);
@@ -44,9 +45,11 @@ export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '',
       const res = await agentKeysService.listResetLogs(params);
       const data = res?.data || res; // companyApi may wrap in { data }
       setLogs(data?.logs || []);
+      setUpcoming(data?.upcoming || []);
       setMeta(data?.pagination || { page: p, total_pages: 1, total: 0 });
     } catch {
       setLogs([]);
+      setUpcoming([]);
       setMeta({ page: 1, total_pages: 1, total: 0 });
     } finally {
       setLoading(false);
@@ -83,12 +86,34 @@ export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '',
         </div>
       )}
 
+      {/* Upcoming resets banner — shows the next reset date(s), even when no
+          reset has happened yet. */}
+      {!loading && upcoming.length > 0 && (
+        <div className="mb-3 rounded-lg border border-violet-400/25 bg-violet-500/[0.07] p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-300 mb-1.5">
+            <Clock className="h-3.5 w-3.5" /> Next reset
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/70">
+            {upcoming.map((u) => (
+              <span key={u.agent_name}>
+                {!locked && <span className="text-white/90 font-medium">{u.agent_label}: </span>}
+                <span className="text-violet-200">{fmtDateTime(u.next_reset_at)}</span>
+                <span className="text-white/30"> · every {u.reset_interval_days} day(s)</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-violet-400" /></div>
       ) : logs.length === 0 ? (
-        <div className="text-center py-12 text-white/40">
+        <div className="text-center py-10 text-white/40">
           <History className="h-10 w-10 mx-auto mb-3 opacity-50" />
-          <p className="text-sm">No weekly resets yet{agent ? ' for this agent' : ''}. They'll appear here as your quota resets each week.</p>
+          <p className="text-sm">
+            No resets have happened yet{agent ? ' for this agent' : ''}.
+            {upcoming.length > 0 ? ' The first one is scheduled above.' : " They'll appear here after the first reset cycle."}
+          </p>
         </div>
       ) : (
         <>

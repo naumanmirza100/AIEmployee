@@ -66,7 +66,7 @@ const ReferenceDocsPickerDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#1a1333] border border-white/10 text-white max-w-2xl">
+      <DialogContent id="OPS-refpicker-dialog" data-testid="OPS-refpicker-dialog" className="bg-[#1a1333] border border-white/10 text-white max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <Layers className="h-4 w-4 text-amber-300" />
@@ -81,6 +81,8 @@ const ReferenceDocsPickerDialog = ({
         <div className="relative mt-2">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40" />
           <input
+            id="OPS-refpicker-search-input"
+            data-testid="OPS-refpicker-search-input"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search your documents..."
@@ -100,6 +102,8 @@ const ReferenceDocsPickerDialog = ({
             {filtered.length > 0 && (
               <button
                 type="button"
+                id="OPS-refpicker-select-all-btn"
+                data-testid="OPS-refpicker-select-all-btn"
                 onClick={selectAll}
                 className="text-[11px] text-white/70 hover:text-amber-300"
               >
@@ -109,6 +113,8 @@ const ReferenceDocsPickerDialog = ({
             {selected.size > 0 && (
               <button
                 type="button"
+                id="OPS-refpicker-clear-btn"
+                data-testid="OPS-refpicker-clear-btn"
                 onClick={clearAll}
                 className="text-[11px] text-white/70 hover:text-amber-300"
               >
@@ -119,13 +125,13 @@ const ReferenceDocsPickerDialog = ({
         </div>
 
         {/* List */}
-        <div className="rounded-lg border border-white/10 divide-y divide-white/5 max-h-[50vh] overflow-y-auto">
+        <div id="OPS-refpicker-list" data-testid="OPS-refpicker-list" className="rounded-lg border border-white/10 divide-y divide-white/5 max-h-[50vh] overflow-y-auto">
           {loading ? (
-            <div className="flex items-center justify-center py-8 text-white/50 text-sm">
+            <div id="OPS-refpicker-loading" data-testid="OPS-refpicker-loading" className="flex items-center justify-center py-8 text-white/50 text-sm">
               <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading your documents...
             </div>
           ) : docs.length === 0 ? (
-            <div className="px-4 py-8 text-center">
+            <div id="OPS-refpicker-empty" data-testid="OPS-refpicker-empty" className="px-4 py-8 text-center">
               <Layers className="h-6 w-6 text-white/30 mx-auto mb-2" />
               <p className="text-xs text-white/55">
                 No processed documents yet. Upload from the{' '}
@@ -133,7 +139,7 @@ const ReferenceDocsPickerDialog = ({
               </p>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs text-white/45">
+            <div id="OPS-refpicker-no-match" data-testid="OPS-refpicker-no-match" className="px-4 py-6 text-center text-xs text-white/45">
               No documents match “{search}”.
             </div>
           ) : (
@@ -142,6 +148,8 @@ const ReferenceDocsPickerDialog = ({
               return (
                 <label
                   key={d.id}
+                  id={`OPS-refpicker-doc-${d.id}`}
+                  data-testid={`OPS-refpicker-doc-${d.id}`}
                   className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${
                     active ? 'bg-amber-500/8' : 'hover:bg-white/[0.03]'
                   }`}
@@ -162,6 +170,8 @@ const ReferenceDocsPickerDialog = ({
                     </div>
                   </div>
                   <input
+                    id={`OPS-refpicker-doc-checkbox-${d.id}`}
+                    data-testid={`OPS-refpicker-doc-checkbox-${d.id}`}
                     type="checkbox"
                     className="hidden"
                     checked={active}
@@ -175,6 +185,8 @@ const ReferenceDocsPickerDialog = ({
 
         <DialogFooter className="mt-3 gap-2">
           <Button
+            id="OPS-refpicker-cancel-btn"
+            data-testid="OPS-refpicker-cancel-btn"
             variant="outline"
             onClick={() => onOpenChange?.(false)}
             className="border-white/10 bg-transparent text-white/80 hover:bg-white/5"
@@ -182,6 +194,8 @@ const ReferenceDocsPickerDialog = ({
             Cancel
           </Button>
           <Button
+            id="OPS-refpicker-confirm-btn"
+            data-testid="OPS-refpicker-confirm-btn"
             onClick={confirm}
             className="font-semibold"
             style={{ backgroundColor: AUTHORING_ACCENT, color: '#1a0e00', border: 'none' }}

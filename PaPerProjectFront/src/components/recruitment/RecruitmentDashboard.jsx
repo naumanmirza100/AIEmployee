@@ -243,6 +243,8 @@ const RecruitmentDashboard = () => {
         ].map((card) => (
           <div
             key={card.label}
+            id={`REC-dashboard-stat-${card.label.toLowerCase().replace(/\s+/g, '-')}`}
+            data-testid={`REC-dashboard-stat-${card.label.toLowerCase().replace(/\s+/g, '-')}`}
             className="relative group w-full min-w-0 rounded-xl backdrop-blur-sm p-5 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg"
             style={{
               border: `1px solid ${card.borderColor}`,
@@ -267,7 +269,7 @@ const RecruitmentDashboard = () => {
       {/* Main Tabs — the tab BAR now lives in the left sidebar; this keeps the
           URL-driven content switching. */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsContent value="dashboard" className="space-y-5 mt-2">
+        <TabsContent value="dashboard" id="REC-dashboard-tab-dashboard" data-testid="REC-dashboard-tab-dashboard" className="space-y-5 mt-2">
           {/* Quick Actions */}
           <div>
             <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -315,6 +317,8 @@ const RecruitmentDashboard = () => {
               ].map((action) => (
                 <button
                   key={action.label}
+                  id={`REC-dashboard-quickaction-${action.label.toLowerCase().replace(/\s+/g, '-')}`}
+                  data-testid={`REC-dashboard-quickaction-${action.label.toLowerCase().replace(/\s+/g, '-')}`}
                   onClick={() => navigate(action.path)}
                   className="group relative flex flex-col items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-4 text-left transition-all duration-300 hover:bg-white/[0.06] cursor-pointer"
                   style={{ '--hover-border': action.borderHover }}
@@ -342,11 +346,19 @@ const RecruitmentDashboard = () => {
             </h3>
             <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] backdrop-blur-sm p-4 sm:p-5">
               {loadingDashboardPrompts ? (
-                <div className="flex items-center justify-center py-8">
+                <div
+                  id="REC-dashboard-graphs-loading-state"
+                  data-testid="REC-dashboard-graphs-loading-state"
+                  className="flex items-center justify-center py-8"
+                >
                   <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
                 </div>
               ) : dashboardPrompts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div
+                  id="REC-dashboard-graphs-empty-state"
+                  data-testid="REC-dashboard-graphs-empty-state"
+                  className="flex flex-col items-center justify-center py-10 text-center"
+                >
                   <div className="bg-white/[0.05] rounded-full p-4 mb-4">
                     <BarChart2 className="h-8 w-8 text-white/20" />
                   </div>
@@ -356,10 +368,16 @@ const RecruitmentDashboard = () => {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div
+                  id="REC-dashboard-graphs-grid"
+                  data-testid="REC-dashboard-graphs-grid"
+                  className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+                >
                   {dashboardPrompts.map((p) => (
                     <button
                       key={p.id}
+                      id={`REC-dashboard-graph-btn-${p.id}`}
+                      data-testid={`REC-dashboard-graph-btn-${p.id}`}
                       onClick={() => handleViewGraph(p)}
                       className={`group flex items-center gap-3 rounded-lg border p-3.5 text-left transition-all duration-200 cursor-pointer ${
                         selectedGraphPrompt?.id === p.id
@@ -389,7 +407,11 @@ const RecruitmentDashboard = () => {
 
               {/* Inline Graph Render */}
               {(graphLoading || graphData) && (
-                <div className="mt-5 rounded-xl border border-white/[0.08] bg-black/30 p-4 sm:p-6">
+                <div
+                  id="REC-dashboard-graph-panel"
+                  data-testid="REC-dashboard-graph-panel"
+                  className="mt-5 rounded-xl border border-white/[0.08] bg-black/30 p-4 sm:p-6"
+                >
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <div className="bg-violet-500/20 rounded-lg p-1.5">
@@ -400,6 +422,8 @@ const RecruitmentDashboard = () => {
                       </h3>
                     </div>
                     <button
+                      id="REC-dashboard-graph-close-btn"
+                      data-testid="REC-dashboard-graph-close-btn"
                       onClick={handleCloseGraph}
                       className="rounded-lg p-1.5 text-white/40 hover:text-white hover:bg-white/10 transition-all"
                     >
@@ -429,47 +453,47 @@ const RecruitmentDashboard = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="analytics">
+        <TabsContent value="analytics" id="REC-dashboard-tab-analytics" data-testid="REC-dashboard-tab-analytics">
           <RecruitmentAnalytics />
         </TabsContent>
 
         {/* AI Graphs tab removed - graphs now render inline on dashboard */}
 
-        <TabsContent value="cv-processing">
+        <TabsContent value="cv-processing" id="REC-dashboard-tab-cv-processing" data-testid="REC-dashboard-tab-cv-processing">
           <CVProcessing
                 onProcessComplete={fetchStats}
                 onGoToSettings={(jobId) => { setPendingSettingsJobId(jobId || null); navigate('/recruitment/settings/interview'); }}
               />
         </TabsContent>
 
-        <TabsContent value="api-tester">
+        <TabsContent value="api-tester" id="REC-dashboard-tab-api-tester" data-testid="REC-dashboard-tab-api-tester">
           <RecruitmentApiTester />
         </TabsContent>
 
-        <TabsContent value="ai-interview-questions">
+        <TabsContent value="ai-interview-questions" id="REC-dashboard-tab-ai-interview-questions" data-testid="REC-dashboard-tab-ai-interview-questions">
           <AiInterviewQuestions />
         </TabsContent>
 
-        <TabsContent value="saved-prompts">
+        <TabsContent value="saved-prompts" id="REC-dashboard-tab-saved-prompts" data-testid="REC-dashboard-tab-saved-prompts">
           <SavedPrompts />
         </TabsContent>
 
-        <TabsContent value="jobs">
+        <TabsContent value="jobs" id="REC-dashboard-tab-jobs" data-testid="REC-dashboard-tab-jobs">
           <JobDescriptions
             onUpdate={fetchStats}
             onGoToSettings={(jobId) => { setPendingSettingsJobId(jobId || null); navigate('/recruitment/settings/interview'); }}
           />
         </TabsContent>
 
-        <TabsContent value="candidates">
+        <TabsContent value="candidates" id="REC-dashboard-tab-candidates" data-testid="REC-dashboard-tab-candidates">
           <CVRecords />
         </TabsContent>
 
-        <TabsContent value="interviews">
+        <TabsContent value="interviews" id="REC-dashboard-tab-interviews" data-testid="REC-dashboard-tab-interviews">
           <Interviews onUpdate={fetchStats} />
         </TabsContent>
 
-        <TabsContent value="settings">
+        <TabsContent value="settings" id="REC-dashboard-tab-settings" data-testid="REC-dashboard-tab-settings">
           <RecruiterSettings
             settingsJobId={pendingSettingsJobId}
             onSettingsJobConsumed={() => setPendingSettingsJobId(null)}

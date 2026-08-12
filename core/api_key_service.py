@@ -203,10 +203,16 @@ def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIK
     if now < quota.next_reset_at:
         return
 
-    # Advance next_reset_at by 7-day steps until it is in the future
+    # Advance next_reset_at by the key's interval (default 7 days) until it is
+    # in the future. Admin-configurable per (company, agent).
+    interval_days = getattr(managed_key, 'reset_interval_days', 7) or 7
     next_reset = quota.next_reset_at
     while next_reset <= now:
-        next_reset = next_reset + timedelta(days=7)
+        next_reset = next_reset + timedelta(days=interval_days)
+
+    # Capture how many managed tokens were used this week BEFORE we zero it,
+    # so the reset-log records the real usage for the period.
+    used_before = quota.managed_used_tokens or 0
 
     AgentTokenQuota.objects.filter(pk=quota.pk).update(
         managed_used_tokens=0,
@@ -217,6 +223,20 @@ def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIK
         managed_notified_90pct=False,
         managed_notified_100pct=False,
     )
+
+    # Persist a queryable history row for this reset (admin "reset log").
+    try:
+        from core.models import WeeklyResetLog
+        WeeklyResetLog.objects.create(
+            company=managed_key.company,
+            agent_name=managed_key.agent_name,
+            reset_at=now,
+            tokens_used_before_reset=used_before,
+            new_included_limit=managed_key.tokens_per_period,
+            next_reset_at=next_reset,
+        )
+    except Exception as exc:
+        _log.warning("Failed to write WeeklyResetLog: %s", exc)
     quota.managed_used_tokens = 0
     quota.managed_included_tokens = managed_key.tokens_per_period
     quota.next_reset_at = next_reset
