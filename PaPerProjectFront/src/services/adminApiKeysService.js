@@ -48,6 +48,10 @@ export const listWeeklyResetLogs = (params = {}) => {
   return req(`/admin/weekly-reset-logs${qs ? `?${qs}` : ''}`);
 };
 
+// Change the reset interval (and optionally recompute next reset) for one managed key.
+export const updateResetSchedule = (payload) =>
+  req('/admin/reset-schedule', { method: 'POST', body: JSON.stringify(payload) });
+
 // Agent subscription plans (admin-managed).
 export const listAgentPlans = (agentName = '') =>
   req(`/admin/agent-plans${agentName ? `?agent_name=${encodeURIComponent(agentName)}` : ''}`);
@@ -96,6 +100,7 @@ export default {
   listQuotas,
   adjustQuota,
   listWeeklyResetLogs,
+  updateResetSchedule,
   listAgentPlans,
   saveAgentPlans,
   listRequests,

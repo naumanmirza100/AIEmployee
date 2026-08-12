@@ -198,14 +198,6 @@ def _assign_managed_key_impl(request):
     except (TypeError, ValueError):
         duration_months = 0
 
-    # duration_days: exact validity in days — takes precedence over
-    # duration_months. Used when honouring an arbitrary AgentPlan the company
-    # picked (e.g. 45 / 90 days) that doesn't map cleanly to whole months.
-    try:
-        duration_days = int(request.data.get('duration_days') or 0)
-    except (TypeError, ValueError):
-        duration_days = 0
-
     if not company_id or agent_name not in VALID_AGENTS or provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Missing or invalid fields'},
                         status=status.HTTP_400_BAD_REQUEST)
@@ -255,11 +247,9 @@ def _assign_managed_key_impl(request):
     else:
         token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
 
-    # Compute valid_until from duration_days / duration_months (or renewal default)
+    # Compute valid_until from duration_months (or from renewal_period default)
     now = timezone.now()
-    if duration_days > 0:
-        valid_until = now + _td(days=duration_days)
-    elif duration_months > 0:
+    if duration_months > 0:
         # Approximate: 30 days per month
         valid_until = now + _td(days=duration_months * 30)
     elif renewal_period == 'monthly':
@@ -658,7 +648,6 @@ def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None, linked_ke
         'provider': r.provider,
         'status': r.status,
         'preferred_duration': r.preferred_duration,
-        'plan_days': r.plan_days,
         'is_renewal': r.is_renewal,
         'was_assigned': was_assigned,
         'revoked_at': r.updated_at.isoformat() if was_assigned else None,
@@ -1057,6 +1046,7 @@ def weekly_reset_logs(request):
         if not nra:
             continue
         upcoming.append({
+            'key_id': k.id,
             'company_id': k.company_id,
             'company_name': k.company.name if k.company_id else '',
             'agent_name': k.agent_name,
@@ -1077,6 +1067,76 @@ def weekly_reset_logs(request):
             'total': total,
             'total_pages': max((total + page_size - 1) // page_size, 1),
         },
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def update_reset_schedule(request):
+    """Change the token-reset schedule for one managed key.
+
+    Body: { key_id, reset_interval_days, tokens_per_period?, recompute_next? (default True) }
+
+    Sets the key's reset_interval_days (and tokens_per_period when given) and,
+    when recompute_next is true, resets the linked quota's next_reset_at to
+    (now + interval) so the change takes effect from now rather than only after
+    the next scheduled reset. A new tokens_per_period is applied to the quota's
+    per-reset limit immediately.
+    """
+    try:
+        key_id = request.data.get('key_id')
+        interval = int(request.data.get('reset_interval_days') or 0)
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'Invalid reset_interval_days'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if not key_id or interval < 1:
+        return Response({'status': 'error', 'message': 'key_id and a positive reset_interval_days are required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    interval = max(1, min(interval, 365))
+    recompute_next = request.data.get('recompute_next', True)
+
+    # Optional: new tokens-per-reset amount. Absent/blank means "leave as is".
+    tokens_raw = request.data.get('tokens_per_period', None)
+    tokens_per_period = None
+    if tokens_raw is not None and str(tokens_raw).strip() != '':
+        try:
+            tokens_per_period = max(0, int(tokens_raw))
+        except (TypeError, ValueError):
+            return Response({'status': 'error', 'message': 'Invalid tokens_per_period'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        key = CompanyAPIKey.objects.get(pk=key_id, mode='managed')
+    except CompanyAPIKey.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Managed key not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    update_fields = ['reset_interval_days']
+    key.reset_interval_days = interval
+    if tokens_per_period is not None:
+        key.tokens_per_period = tokens_per_period
+        update_fields.append('tokens_per_period')
+    key.save(update_fields=update_fields)
+
+    # Apply changes to the linked quota: next reset date and/or per-reset limit.
+    quota_update = {}
+    next_reset_at = None
+    if recompute_next and key.renewal_period != 'none':
+        next_reset_at = timezone.now() + _td(days=interval)
+        quota_update['next_reset_at'] = next_reset_at
+    if tokens_per_period is not None:
+        quota_update['managed_included_tokens'] = tokens_per_period
+    if quota_update:
+        AgentTokenQuota.objects.filter(
+            company_id=key.company_id, agent_name=key.agent_name,
+        ).update(**quota_update)
+
+    return Response({
+        'status': 'success',
+        'key_id': key.id,
+        'reset_interval_days': interval,
+        'tokens_per_period': key.tokens_per_period,
+        'next_reset_at': next_reset_at.isoformat() if next_reset_at else None,
     })
 
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import HoverTip from '@/components/common/HoverTip';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -209,6 +209,15 @@ const CampaignDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  // Active tab lives in the URL (?tab=) so the global left sidebar can show
+  // these campaign tabs as nested sub-items while a campaign is open.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'overview';
+  const setActiveTab = (v) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    next.set('tab', v);
+    return next;
+  }, { replace: true });
   // Tab hover tooltip: { text, top, left } above the hovered tab, or null.
   const [tabTip, setTabTip] = useState(null);
   const [campaign, setCampaign] = useState(null);
@@ -734,9 +743,11 @@ const CampaignDetail = () => {
         </div>
       </div>
 
-      {/* Tabs: Overview, Analytics, Email sequences, Email sending activity, Campaign leads */}
-      <Tabs defaultValue="overview" className="space-y-4 flex flex-col">
-        <TabsList className="flex flex-wrap gap-1 w-full h-auto justify-evenly">
+      {/* Tabs: Overview, Analytics, Email sequences, Email sending activity, Campaign leads.
+          URL-driven (?tab=); the horizontal bar is hidden because these tabs now
+          live in the global left sidebar (nested under Campaigns). */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 flex flex-col">
+        <TabsList className="sr-only">
           {[
             { value: 'overview', label: 'Overview', icon: Target, tip: 'Summary of this campaign at a glance.' },
             { value: 'analytics', label: 'Analytics & dashboard', icon: BarChart3, tip: 'This tab show charts and performance metrics for this campaign.' },

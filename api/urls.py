@@ -660,6 +660,7 @@ urlpatterns = [
     re_path(r'^modules/stripe-webhook/?$', module_purchase.stripe_webhook, name='stripe_webhook'),  # POST (raw, no auth)
     re_path(r'^modules/verify-session/?$', module_purchase.verify_session, name='verify_session'),  # POST (public)
     re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/plans/?$', module_purchase.get_module_plans, name='get_module_plans'),  # GET (public)
 
     # Company API Key management (user-side: BYOK + key requests)
     re_path(r'^company/agent-keys/?$', company_api_keys.list_agent_keys, name='list_agent_keys'),  # GET
@@ -684,6 +685,7 @@ urlpatterns = [
     re_path(r'^admin/pricing-config/(?P<agent_name>[a-z_]+)/?$', admin_api_keys.update_pricing, name='admin_update_pricing'),  # PUT
     re_path(r'^admin/token-quotas/?$', admin_api_keys.list_quotas, name='admin_list_quotas'),  # GET
     re_path(r'^admin/weekly-reset-logs/?$', admin_api_keys.weekly_reset_logs, name='admin_weekly_reset_logs'),  # GET
+    re_path(r'^admin/reset-schedule/?$', admin_api_keys.update_reset_schedule, name='admin_update_reset_schedule'),  # POST
     re_path(r'^admin/agent-plans/?$', admin_api_keys.list_agent_plans, name='admin_list_agent_plans'),  # GET ?agent_name=
     re_path(r'^admin/agent-plans/save/?$', admin_api_keys.save_agent_plans, name='admin_save_agent_plans'),  # POST
     re_path(r'^admin/token-quotas/(?P<quota_id>\d+)/?$', admin_api_keys.adjust_quota, name='admin_adjust_quota'),  # PATCH
