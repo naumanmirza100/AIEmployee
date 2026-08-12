@@ -19,7 +19,7 @@ import { ToastAction } from '@/components/ui/toast';
 import {
   listLeads, createLead, deleteLead, qualifyLead, importLeadsFromCSV,
   researchLeads, fetchApifyLeads, listIcpProfiles, getIcpProfile, saveIcpProfile,
-  bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads,
+  bulkDeleteLeads, getSdrSettings, restoreLead, bulkRestoreLeads, qualifyAllLeads,
 } from '@/services/aiSdrService';
 
 // --------------------------------------------------------------------------
@@ -46,6 +46,80 @@ const SCORE_CATEGORIES = [
 function getScoreCategory(score) {
   if (score == null) return null;
   return SCORE_CATEGORIES.find(c => score >= c.min) || SCORE_CATEGORIES[SCORE_CATEGORIES.length - 1];
+}
+
+// ── CSV preview (client-side) — mirrors the backend's flexible header mapping
+// so the modal shows exactly what will be imported. Actual import is still done
+// by the backend for correctness. ─────────────────────────────────────────────
+const CSV_FIELD_ALIASES = {
+  full_name:        ['fullname', 'name', 'contactname', 'leadname'],
+  first_name:       ['firstname', 'fname', 'givenname'],
+  last_name:        ['lastname', 'lname', 'surname', 'familyname'],
+  email:            ['email', 'emailaddress', 'workemail', 'businessemail', 'mail'],
+  phone:            ['phone', 'phonenumber', 'mobile', 'mobilenumber', 'tel', 'telephone'],
+  job_title:        ['jobtitle', 'title', 'position', 'role', 'designation'],
+  company_name:     ['companyname', 'company', 'organization', 'organisation', 'employer', 'account'],
+  company_industry: ['companyindustry', 'industry', 'sector', 'vertical'],
+  company_size:     ['companysize', 'size', 'employees', 'employeecount', 'headcount'],
+  company_location: ['companylocation', 'location', 'city', 'country', 'region', 'address'],
+  linkedin_url:     ['linkedinurl', 'linkedin', 'linkedinprofile', 'profileurl'],
+  company_website:  ['companywebsite', 'website', 'url', 'domain', 'web'],
+};
+const CSV_PREVIEW_COLUMNS = [
+  { key: 'full_name', label: 'Name' },
+  { key: 'email', label: 'Email' },
+  { key: 'job_title', label: 'Title' },
+  { key: 'company_name', label: 'Company' },
+  { key: 'company_location', label: 'Location' },
+];
+
+// Minimal RFC-4180-ish CSV line splitter (handles quoted commas).
+function splitCsvLine(line) {
+  const out = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') inQ = false;
+      else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+
+function parseCsvPreview(text) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n').filter(l => l.trim() !== '');
+  if (!lines.length) return { rows: [], columns: CSV_PREVIEW_COLUMNS, skippedEmpty: 0, total: 0 };
+  const headers = splitCsvLine(lines[0]).map(h => h.replace(/[^a-z0-9]/gi, '').toLowerCase());
+  const idxFor = (field) => {
+    for (const alias of CSV_FIELD_ALIASES[field] || []) {
+      const i = headers.indexOf(alias);
+      if (i !== -1) return i;
+    }
+    return -1;
+  };
+  const map = Object.fromEntries(Object.keys(CSV_FIELD_ALIASES).map(f => [f, idxFor(f)]));
+
+  const rows = [];
+  let skippedEmpty = 0;
+  for (let r = 1; r < lines.length; r++) {
+    const cells = splitCsvLine(lines[r]);
+    const get = (f) => (map[f] >= 0 ? (cells[map[f]] || '').trim() : '');
+    const fn = get('first_name'), ln = get('last_name');
+    const full = get('full_name') || `${fn} ${ln}`.trim();
+    const company = get('company_name');
+    const email = get('email');
+    if (!full && !company && !email) { skippedEmpty++; continue; }
+    rows.push({
+      full_name: full, email, job_title: get('job_title'),
+      company_name: company, company_location: get('company_location'),
+    });
+  }
+  return { rows, columns: CSV_PREVIEW_COLUMNS, skippedEmpty, total: rows.length };
 }
 
 const SCORE_COLOR = (s) => {
@@ -510,8 +584,11 @@ const SDRLeadsTab = () => {
   const fileInputRef = useRef(null);
 
   const [sdrKeyStatus, setSdrKeyStatus] = useState({ apollo: false, apify: false, loaded: false });
+  // CSV import preview modal state.
+  const [csvImport, setCsvImport] = useState(null); // { file, rows, columns, skippedEmpty } | null
+  const [csvImporting, setCsvImporting] = useState(false);
   const [leads, setLeads] = useState([]);
-  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, unscored: 0 });
+  const [stats, setStats] = useState({ total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0 });
   const [pagination, setPagination] = useState({ page: 1, page_size: 25, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
 
   const [loading, setLoading] = useState(true);
@@ -562,7 +639,7 @@ const SDRLeadsTab = () => {
         page_size:   opts.page_size   ?? pageSize,
       });
       setLeads(resp?.data || []);
-      setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0 });
+      setStats(resp?.stats || { total: 0, hot: 0, warm: 0, cold: 0, unscored: 0, qualifying: 0 });
       setPagination(resp?.pagination || { page: 1, page_size: pageSize, total_count: 0, total_pages: 1, has_next: false, has_prev: false });
       setSelectedIds(new Set());
     } catch (e) {
@@ -571,6 +648,14 @@ const SDRLeadsTab = () => {
   }, [search, filterTemp, filterStatus, filterSource, sortBy, page, pageSize, toast]);
 
   useEffect(() => { loadLeads(); }, []);
+
+  // While leads are being qualified in the background, poll every 12s so scores
+  // appear on their own. Stops once the queue drains.
+  useEffect(() => {
+    if (!stats.qualifying) return undefined;
+    const id = setInterval(() => loadLeads(), 12000);
+    return () => clearInterval(id);
+  }, [stats.qualifying, loadLeads]);
 
   useEffect(() => {
     setPage(1);
@@ -719,6 +804,21 @@ const SDRLeadsTab = () => {
     } finally { setQualifyingId(null); }
   };
 
+  // Qualify all currently-unscored leads (e.g. ones auto-qualify skipped when
+  // AI tokens ran out). Backend batches up to 50 per call.
+  const [qualifyingAll, setQualifyingAll] = useState(false);
+  const handleQualifyAll = async () => {
+    setQualifyingAll(true);
+    try {
+      const resp = await qualifyAllLeads();
+      const n = resp?.queued ?? resp?.data?.queued ?? 0;
+      toast({ title: `Queued ${n} lead${n === 1 ? '' : 's'} for qualification`, description: resp?.message });
+      loadLeads();
+    } catch (e) {
+      toast({ title: 'Qualify failed', description: e?.message, variant: 'destructive' });
+    } finally { setQualifyingAll(false); }
+  };
+
   const handleAddLead = async () => {
     setAddingLead(true);
     try {
@@ -733,18 +833,50 @@ const SDRLeadsTab = () => {
     } finally { setAddingLead(false); }
   };
 
+  // File chosen → parse client-side and open the preview modal (don't import yet).
   const handleCsvImport = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     try {
-      const resp = await importLeadsFromCSV(file);
-      toast({ title: `Imported ${resp.created} leads` });
+      const text = await file.text();
+      const parsed = parseCsvPreview(text);
+      if (!parsed.rows.length) {
+        toast({ title: 'Nothing to import', description: 'The file has a header row but no data rows with a name / email / company.', variant: 'destructive' });
+        return;
+      }
+      setCsvImport({ file, ...parsed });
+    } catch (err) {
+      toast({ title: 'Could not read file', description: err?.message || 'Make sure it is a valid CSV.', variant: 'destructive' });
+    }
+  };
+
+  // Download a ready-to-fill CSV template with the expected header row.
+  const downloadCsvTemplate = () => {
+    const csv = 'Full Name,Email,Job Title,Company,Industry,Employees,Location,Phone,LinkedIn URL\n'
+      + 'Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://linkedin.com/in/jane\n';
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'leads-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Confirm in the modal → actually send the file to the backend (robust parser).
+  const handleCsvConfirm = async () => {
+    if (!csvImport?.file) return;
+    setCsvImporting(true);
+    try {
+      const resp = await importLeadsFromCSV(csvImport.file);
+      toast({ title: `Imported ${resp.created} leads`, description: resp.message });
+      setCsvImport(null);
       setPage(1);
       loadLeads({ page: 1 });
-    } catch (e) {
-      toast({ title: 'Import failed', description: e.message, variant: 'destructive' });
-    }
-    e.target.value = '';
+    } catch (err) {
+      toast({ title: 'Import failed', description: err?.message, variant: 'destructive' });
+    } finally { setCsvImporting(false); }
   };
 
   const CheckIcon = ({ checked, indeterminate, size = 16 }) => {
@@ -789,8 +921,19 @@ const SDRLeadsTab = () => {
           <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,#7c3aed 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
             <Zap size={15} /> Generate Leads
           </Button>
+          {stats.qualifying > 0 && (
+            <span title="Leads are being qualified in the background." style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', borderRadius: 8, fontWeight: 600, fontSize: 13, padding: '8px 14px' }}>
+              <Loader2 size={15} className="animate-spin" /> Qualifying {stats.qualifying}…
+            </span>
+          )}
+          {stats.unscored > 0 && stats.unscored > (stats.qualifying || 0) && (
+            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`AI-qualify unscored lead(s) now`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: '#fbbf24', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
+              {qualifyingAll ? <Loader2 size={15} className="animate-spin" /> : <Brain size={15} />}
+              Qualify now
+            </Button>
+          )}
           <div style={{ width: 1, height: 28, background: '#2d1f4a' }} />
-          <Button onClick={() => fileInputRef.current?.click()} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Upload size={14} /> Import CSV
           </Button>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
@@ -961,7 +1104,7 @@ const SDRLeadsTab = () => {
                 <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,#7c3aed 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Zap size={15} /> Generate Leads
                 </Button>
-                <Button onClick={() => fileInputRef.current?.click()} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Upload size={15} /> Import CSV
                 </Button>
                 <Button onClick={() => setShowAddModal(true)} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1026,7 +1169,15 @@ const SDRLeadsTab = () => {
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: tcfg.bg, border: `1px solid ${tcfg.border}`, color: tcfg.color }}>
                           <TIcon size={11} /> {tcfg.label}
                         </span>
-                      ) : <span style={{ color: '#2d1f4a', fontSize: 12 }}>Unscored</span>}
+                      ) : (lead.qualification_status === 'pending' || lead.qualification_status === 'processing') ? (
+                        <span title="Queued for AI qualification — score will appear shortly." style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', whiteSpace: 'nowrap' }}>
+                          <Loader2 size={10} className="animate-spin" /> Qualifying…
+                        </span>
+                      ) : (
+                        <span title="This lead hasn't been AI-qualified yet — click the ✦ Qualify button to score it." style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b', whiteSpace: 'nowrap' }}>
+                          <AlertTriangle size={10} /> Not qualified
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       {(() => {
@@ -1050,9 +1201,17 @@ const SDRLeadsTab = () => {
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="AI Score" style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#c084fc' }}>
-                          {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <Brain size={12} />}
-                        </button>
+                        {lead.score == null ? (
+                          // Unscored → prominent amber "Qualify" so the user can
+                          // score leads that auto-qualify skipped (e.g. AI tokens out).
+                          <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Qualify this lead with AI" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 6, padding: '5px 9px', cursor: 'pointer', color: '#fbbf24', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <><Brain size={12} /> Qualify</>}
+                          </button>
+                        ) : (
+                          <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Re-score with AI" style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#c084fc' }}>
+                            {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <Brain size={12} />}
+                          </button>
+                        )}
                         <button onClick={() => requestDelete(lead)} title="Delete" style={{ background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#f87171' }}>
                           <Trash2 size={12} />
                         </button>
@@ -1344,6 +1503,129 @@ const SDRLeadsTab = () => {
               {deletingSingle ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
               {deletingSingle ? 'Deleting…' : 'Delete'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CSV Import Preview Modal */}
+      <Dialog open={!!csvImport} onOpenChange={(open) => { if (!open && !csvImporting) setCsvImport(null); }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 760 }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: '#e2d9f3', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Upload size={18} color="#a855f7" /> Import leads from CSV
+            </DialogTitle>
+          </DialogHeader>
+          {/* STEP 1 — no file yet: show the expected column format + guidance */}
+          {csvImport && !csvImport.file && (
+            <div style={{ padding: '4px 0' }}>
+              <p style={{ fontSize: 13, color: '#c4b5d4', marginBottom: 12 }}>
+                Your CSV needs a <b style={{ color: '#e2d9f3' }}>header row</b>. Put the columns in this order
+                (capitalisation and spacing don’t matter):
+              </p>
+
+              {/* Column guide */}
+              <div style={{ border: '1px solid #2d1f4a', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}>
+                {[
+                  { n: 1, col: 'Full Name',    req: true,  ex: 'Jane Doe' },
+                  { n: 2, col: 'Email',        req: true,  ex: 'jane@acme.com' },
+                  { n: 3, col: 'Job Title',    req: false, ex: 'VP of Sales' },
+                  { n: 4, col: 'Company',      req: false, ex: 'Acme Corp' },
+                  { n: 5, col: 'Industry',     req: false, ex: 'SaaS' },
+                  { n: 6, col: 'Employees',    req: false, ex: '150' },
+                  { n: 7, col: 'Location',     req: false, ex: 'San Francisco, CA' },
+                  { n: 8, col: 'Phone',        req: false, ex: '+1 555 000 0000' },
+                  { n: 9, col: 'LinkedIn URL', req: false, ex: 'https://linkedin.com/in/jane' },
+                ].map((r) => (
+                  <div key={r.n} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
+                    <span style={{ width: 22, height: 22, borderRadius: 6, background: 'rgba(168,85,247,0.15)', color: '#c084fc', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{r.n}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#e2d9f3', minWidth: 110 }}>{r.col}</span>
+                    {r.req
+                      ? <span style={{ fontSize: 10, fontWeight: 700, color: '#f87171', background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: 6, padding: '1px 7px' }}>Required</span>
+                      : <span style={{ fontSize: 10, color: '#6b7280' }}>optional</span>}
+                    <span style={{ marginLeft: 'auto', fontSize: 12, color: '#8b7bb5', fontFamily: 'monospace' }}>{r.ex}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Example line */}
+              <div style={{ background: '#0b0716', border: '1px solid #2d1f4a', borderRadius: 8, padding: '10px 12px', marginBottom: 14, overflowX: 'auto' }}>
+                <p style={{ fontSize: 10, color: '#6b7280', margin: '0 0 4px' }}>Example CSV</p>
+                <pre style={{ margin: 0, fontSize: 11, color: '#c4b5d4', fontFamily: 'monospace', whiteSpace: 'pre' }}>{`Full Name,Email,Job Title,Company,Industry,Employees,Location,Phone,LinkedIn URL
+Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://linkedin.com/in/jane`}</pre>
+              </div>
+
+              <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
+                Only <b style={{ color: '#c4b5d4' }}>Full Name</b> and <b style={{ color: '#c4b5d4' }}>Email</b> are required — the rest are optional. Duplicate emails are skipped automatically.
+              </p>
+            </div>
+          )}
+
+          {/* STEP 2 — file chosen: show the parsed preview */}
+          {csvImport && csvImport.file && (
+            <div style={{ padding: '4px 0' }}>
+              {/* Summary */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+                <span style={{ fontSize: 13, color: '#9ca3af', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <FileText size={14} /> {csvImport.file?.name}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 20, padding: '3px 12px' }}>
+                  {csvImport.total} lead{csvImport.total === 1 ? '' : 's'} to import
+                </span>
+                {csvImport.skippedEmpty > 0 && (
+                  <span style={{ fontSize: 12, color: '#9ca3af' }}>{csvImport.skippedEmpty} empty row{csvImport.skippedEmpty === 1 ? '' : 's'} skipped</span>
+                )}
+              </div>
+
+              {/* Preview table (first 10) */}
+              <div style={{ border: '1px solid #2d1f4a', borderRadius: 10, overflow: 'hidden', maxHeight: 340, overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#1a1333' }}>
+                    <tr>
+                      {csvImport.columns.map((c) => (
+                        <th key={c.key} style={{ textAlign: 'left', padding: '9px 12px', color: '#8b7bb5', fontWeight: 600, borderBottom: '1px solid #2d1f4a', whiteSpace: 'nowrap' }}>{c.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvImport.rows.slice(0, 10).map((row, ri) => (
+                      <tr key={ri} style={{ borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
+                        {csvImport.columns.map((c) => (
+                          <td key={c.key} style={{ padding: '8px 12px', color: row[c.key] ? '#e2d9f3' : '#4b5563', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {row[c.key] || '—'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {csvImport.total > 10 && (
+                <p style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>Showing first 10 of {csvImport.total}. All will be imported.</p>
+              )}
+              <p style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
+                Duplicate emails already in your list are skipped automatically.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            {csvImport && !csvImport.file ? (
+              <>
+                <Button variant="outline" onClick={downloadCsvTemplate} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Download size={14} /> Download template
+                </Button>
+                <Button onClick={() => fileInputRef.current?.click()} style={{ background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Upload size={14} /> Choose CSV file
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setCsvImport(null)} disabled={csvImporting} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+                <Button onClick={handleCsvConfirm} disabled={csvImporting || !csvImport?.total} style={{ background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {csvImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  {csvImporting ? 'Importing…' : `Import ${csvImport?.total || 0} leads`}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -35,6 +35,9 @@ def _serialize_integration(integration: CRMIntegration) -> dict:
         'is_active': integration.is_active,
         'last_ping_at': integration.last_ping_at,
         'last_ping_ok': integration.last_ping_ok,
+        'limit_reached': integration.limit_reached,
+        'limit_message': integration.limit_message,
+        'limit_reached_at': integration.limit_reached_at,
         'created_at': integration.created_at,
         'updated_at': integration.updated_at,
     }
