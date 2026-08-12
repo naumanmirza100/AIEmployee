@@ -2,15 +2,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
-import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
-import { getAgentNavItems } from '@/utils/agentNavItems';
-import { logoutCompany } from '@/services/companyAuthService';
 import {
   Reply,
   Loader2,
-  Lock,
   Send,
   RefreshCw,
   Check,
@@ -30,7 +26,6 @@ import {
   X,
   PenSquare,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, Settings as SettingsIcon, BarChart3, Link2 } from 'lucide-react';
@@ -96,8 +91,7 @@ const ReplyDraftAgentPage = () => {
   const [tourOpen, setTourOpen] = useState(false);
   const [hasAccess, setHasAccess] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
-  const [activeSection] = useState('reply-draft');
-  const { purchasedModules, modulesLoaded } = usePurchasedModules();
+  const { modulesLoaded } = usePurchasedModules();
 
   const [pendingReplies, setPendingReplies] = useState([]);
   // Synced Sent-folder mail (InboxEmail rows where direction='out'), shown
@@ -329,12 +323,6 @@ const ReplyDraftAgentPage = () => {
       refreshSent();
     }
   }, [hasAccess, syncDays, refreshInbox, refreshSent]);
-
-  const handleLogout = async () => {
-    // Use the shared logout so server token + all local/session flags get cleared consistently.
-    await logoutCompany();
-    navigate('/company/login');
-  };
 
   const clearSelection = () => {
     setSelectedReply(null);
@@ -794,38 +782,15 @@ const ReplyDraftAgentPage = () => {
     failed: drafts.filter((d) => d.status === 'failed').length,
   }), [pendingReplies, sentEmails, drafts]);
 
-  if (loading || checkingAccess || !modulesLoaded) {
+  // Auth, module-access gate, and loading spinner are handled by the shared
+  // AgentLayout shell that wraps this route — this component renders only its
+  // own workspace content. The page's own effects still set `hasAccess`, which
+  // gates the data-fetch/polling effects below.
+  if (loading || checkingAccess || !modulesLoaded || !companyUser || !hasAccess) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="flex items-center justify-center py-24">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
-    );
-  }
-
-  if (!companyUser) return null;
-
-  if (!hasAccess) {
-    return (
-      <>
-        <Helmet><title>Access Denied | Reply Draft Agent</title></Helmet>
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <Card className="max-w-md w-full">
-            <CardHeader>
-              <div className="flex items-center justify-center mb-4">
-                <Lock className="h-12 w-12 text-muted-foreground" />
-              </div>
-              <CardTitle className="text-center">Module Not Purchased</CardTitle>
-              <CardDescription className="text-center">
-                You need to purchase the Reply Draft Agent module to access this dashboard.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button onClick={() => navigate('/')} className="w-full">Go to Home to Purchase</Button>
-              <Button onClick={() => navigate('/company/dashboard')} variant="outline" className="w-full">Back to Dashboard</Button>
-            </CardContent>
-          </Card>
-        </div>
-      </>
     );
   }
 
@@ -872,21 +837,8 @@ const ReplyDraftAgentPage = () => {
   return (
     <>
       <Helmet><title>Reply Draft Agent | Pay Per Project</title></Helmet>
-      <div
-        className="min-h-screen"
-        style={{ background: 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)' }}
-      >
-        <DashboardNavbar
-          icon={Reply}
-          title={companyUser.companyName || 'Reply Draft Agent'}
-          subtitle={companyUser.fullName}
-          user={companyUser}
-          userRole="Company User"
-          showNavTabs={true}
-          activeSection={activeSection}
-          onLogout={handleLogout}
-          navItems={getAgentNavItems(purchasedModules, 'reply-draft', navigate)}
-        />
+      {/* Navbar + left sidebar are provided by the shared AgentLayout shell that
+          wraps this route, so it stays mounted while navigating between agents. */}
 
         {/* First-visit "how it works" summary — same modal as Marketing / Exec Meeting */}
         <HowItWorksModal
@@ -1674,7 +1626,6 @@ const ReplyDraftAgentPage = () => {
             </div>
           </div>
         </div>
-      </div>
 
       <AccountConnectModal
         open={accountModalOpen}

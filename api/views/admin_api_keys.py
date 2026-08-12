@@ -1040,17 +1040,26 @@ def weekly_reset_logs(request):
         (q.company_id, q.agent_name): q.next_reset_at
         for q in AgentTokenQuota.objects.filter(next_reset_at__isnull=False)
     }
+    # Most-recent actual reset per (company, agent), so the row can show when the
+    # last reset happened (or "not yet" for a freshly-assigned key).
+    last_reset = {}
+    for r in WeeklyResetLog.objects.order_by('-reset_at').values('company_id', 'agent_name', 'reset_at'):
+        key = (r['company_id'], r['agent_name'])
+        if key not in last_reset:
+            last_reset[key] = r['reset_at']
     upcoming = []
     for k in up_keys[:500]:
         nra = quota_next.get((k.company_id, k.agent_name))
         if not nra:
             continue
+        lra = last_reset.get((k.company_id, k.agent_name))
         upcoming.append({
             'key_id': k.id,
             'company_id': k.company_id,
             'company_name': k.company.name if k.company_id else '',
             'agent_name': k.agent_name,
             'agent_label': agent_labels.get(k.agent_name, k.agent_name),
+            'last_reset_at': lra.isoformat() if lra else None,
             'next_reset_at': nra.isoformat(),
             'reset_interval_days': getattr(k, 'reset_interval_days', 7),
             'tokens_per_period': k.tokens_per_period,

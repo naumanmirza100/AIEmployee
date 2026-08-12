@@ -6,7 +6,7 @@
 // search + agent, paginated. Read-only.
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, RefreshCw, History, Search, Building2, ChevronLeft, ChevronRight, Clock, Pencil } from 'lucide-react';
+import { Loader2, RefreshCw, History, Search, Building2, ChevronLeft, ChevronRight, Clock, Pencil, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,6 +27,16 @@ const fmtDateTime = (iso) => {
   } catch {
     return iso;
   }
+};
+
+// True when the scheduled next reset is meaningfully further out than the
+// interval implies (e.g. interval=1 day but next reset is 3 days away) — a sign
+// the interval was changed without recomputing next_reset. Editing realigns it.
+const scheduleDrifted = (row) => {
+  if (!row?.next_reset_at || !row?.reset_interval_days) return false;
+  const daysUntil = (new Date(row.next_reset_at).getTime() - Date.now()) / 86400000;
+  if (daysUntil <= 0) return false;
+  return daysUntil > row.reset_interval_days + 0.5; // half-day tolerance
 };
 
 export const ResetLogsTab = ({ agentOptions = [] }) => {
@@ -159,6 +169,7 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
                 <tr className="bg-violet-500/[0.08] text-white/60 text-xs uppercase tracking-wide">
                   <th className="text-left font-semibold px-4 py-3">Company</th>
                   <th className="text-left font-semibold px-4 py-3">Agent</th>
+                  <th className="text-left font-semibold px-4 py-3">Last reset</th>
                   <th className="text-left font-semibold px-4 py-3">Next reset</th>
                   <th className="text-left font-semibold px-4 py-3">Interval</th>
                   <th className="text-right font-semibold px-4 py-3">Tokens per reset</th>
@@ -178,8 +189,23 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
                       </span>
                     </td>
                     <td className="px-4 py-3">{u.agent_label}</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-white/50">
+                      {u.last_reset_at ? fmtDateTime(u.last_reset_at) : <span className="text-white/30">Not yet reset</span>}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap text-violet-200">{fmtDateTime(u.next_reset_at)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-white/50">every {u.reset_interval_days || 7} days</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-white/50">
+                      <span className="inline-flex items-center gap-1.5">
+                        every {u.reset_interval_days || 7} days
+                        {scheduleDrifted(u) && (
+                          <span
+                            title="Next reset is further out than the interval. Click Edit → Save to realign it from now."
+                            className="inline-flex items-center gap-0.5 text-amber-400/90 text-[11px]"
+                          >
+                            <AlertTriangle className="h-3 w-3" /> off
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-right tabular-nums text-emerald-300">
                       {u.tokens_per_period != null ? Number(u.tokens_per_period).toLocaleString() : '—'}
                     </td>

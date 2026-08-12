@@ -444,6 +444,14 @@ export const isWeekend = (ymd) => {
   return day === 0 || day === 6;
 };
 
+// Today's date as a YYYY-MM-DD string in the user's local timezone. Comparable
+// directly against a due_date string, so "past date" checks avoid UTC drift.
+export const todayStr = () => {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
 // ── Bulk-select toolbar ─────────────────────────────────────────────────────
 // A small header row with a "select all" checkbox and, once anything is
 // selected, a count + "Delete selected" button. Used by the Tasks, Documents

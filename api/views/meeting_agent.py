@@ -2158,8 +2158,12 @@ def document_draft(request):
             title=f"{doc_type.capitalize()} — {doc_title}",
             content=content,
             ai_generated=True,
+            # No linked meeting → this is a fill-in template, not built from
+            # real meeting data.
+            is_template=(meeting is None),
         )
         result['document_id'] = standalone.id
+        result['is_template'] = standalone.is_template
 
         if save and meeting:
             MeetingDocument.objects.create(
@@ -2223,6 +2227,7 @@ def standalone_document_list(request):
         {
             'id': d.id, 'doc_type': d.doc_type, 'title': d.title,
             'content': d.content, 'ai_generated': d.ai_generated,
+            'is_template': d.is_template,
             'created_at': d.created_at.isoformat(),
         }
         for d in page_items
@@ -2247,6 +2252,7 @@ def standalone_document_detail(request, doc_id):
         'document': {
             'id': doc.id, 'doc_type': doc.doc_type, 'title': doc.title,
             'content': doc.content, 'ai_generated': doc.ai_generated,
+            'is_template': doc.is_template,
             'created_at': doc.created_at.isoformat(),
         },
     })
