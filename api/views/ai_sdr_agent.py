@@ -531,21 +531,39 @@ def research_leads(request):
             created = 0
             skipped_dupes = 0
 
-            # Pre-load existing emails AND name+company pairs to catch no-email dupes (e.g. Apify)
-            existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list('email', 'full_name', 'company_name')
+            # Pre-load existing keys to catch dupes. LinkedIn URL is the most
+            # reliable (unique per profile) — essential for no-email sources like
+            # the Google scraper, where company often doesn't parse and name+company
+            # dedup misses. Also track email, name+company, and name-only.
+            existing_leads_qs = SDRLead.objects.filter(company_user=company_user).values_list(
+                'email', 'full_name', 'company_name', 'linkedin_url'
+            )
             existing_emails_lower = set()
             existing_name_company = set()
-            for em, fn, cn in existing_leads_qs:
+            existing_linkedin = set()
+            existing_names = set()
+
+            def _norm_li(url):
+                u = (url or '').strip().lower().rstrip('/')
+                return u.split('?')[0] if u else ''
+
+            for em, fn, cn, li in existing_leads_qs:
                 if em:
                     existing_emails_lower.add(em.lower())
                 if fn and cn:
                     existing_name_company.add((fn.lower().strip(), cn.lower().strip()))
+                if fn:
+                    existing_names.add(fn.lower().strip())
+                nli = _norm_li(li)
+                if nli:
+                    existing_linkedin.add(nli)
 
             from ai_sdr_agent.agents.lead_validator import validate_lead
             for ld in raw_leads:
                 full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
                 lead_email = (ld.get('email') or '').strip().lower()
                 company_name = (ld.get('company_name') or '').strip()
+                linkedin = _norm_li(ld.get('linkedin_url'))
 
                 # ── Reject leads with no name and no company (totally empty) ──
                 if not full_name.strip() and not company_name:
@@ -553,7 +571,11 @@ def research_leads(request):
                     skipped_dupes += 1
                     continue
 
-                # ── Duplicate guard — email OR name+company ──────────────────
+                # ── Duplicate guard — linkedin > email > name+company > name ──
+                if linkedin and linkedin in existing_linkedin:
+                    logger.info("SDR [research] SKIPPING duplicate linkedin=%s", linkedin)
+                    skipped_dupes += 1
+                    continue
                 if lead_email and lead_email in existing_emails_lower:
                     logger.info("SDR [research] SKIPPING duplicate email=%s", lead_email)
                     skipped_dupes += 1
@@ -563,11 +585,23 @@ def research_leads(request):
                     logger.info("SDR [research] SKIPPING duplicate name+company: %s @ %s", full_name, company_name)
                     skipped_dupes += 1
                     continue
-                # Track both for intra-batch dedup
+                # No email/company (Google scraper) → fall back to name-only so
+                # the same profile scraped twice isn't inserted again.
+                name_key = full_name.lower().strip()
+                if not lead_email and not company_name and not linkedin and name_key and name_key in existing_names:
+                    logger.info("SDR [research] SKIPPING duplicate name-only: %s", full_name)
+                    skipped_dupes += 1
+                    continue
+
+                # Track all keys for intra-batch dedup
+                if linkedin:
+                    existing_linkedin.add(linkedin)
                 if lead_email:
                     existing_emails_lower.add(lead_email)
                 if full_name and company_name:
                     existing_name_company.add(name_company_key)
+                if name_key:
+                    existing_names.add(name_key)
                 # ─────────────────────────────────────────────────────────────
 
                 validation = validate_lead({**ld, 'full_name': full_name})
@@ -661,6 +695,156 @@ def research_leads(request):
         raise
     except Exception as exc:
         logger.error("Research leads error: %s", exc)
+        return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def fetch_apify_leads(request):
+    """Import leads from the user's EXISTING Apify runs (generated in the Apify
+    Console). Works on the free Apify plan, which can't RUN paid actors via the
+    API but CAN read finished runs' datasets. No ICP filtering — pulls whatever
+    the user already generated. Auto-qualify is best-effort (skipped silently if
+    platform AI tokens are exhausted, so the import never fails on that)."""
+    company_user = request.user
+    try:
+        max_leads = min(int(request.data.get('count', 200)), 500)
+        actor = request.data.get('actor')  # optional override
+        icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
+
+        researcher = _get_research_agent(company_user.company, company_user=company_user)
+        raw_leads = researcher.fetch_apify_runs(max_leads=max_leads, actor=actor)
+        if not raw_leads:
+            return Response({'status': 'error', 'message': 'No leads found in your Apify runs.'}, status=400)
+
+        # ── Dedup against existing leads (linkedin > email > name+company > name) ──
+        existing_qs = SDRLead.objects.filter(company_user=company_user).values_list(
+            'email', 'full_name', 'company_name', 'linkedin_url'
+        )
+
+        def _norm_li(url):
+            u = (url or '').strip().lower().rstrip('/')
+            return u.split('?')[0] if u else ''
+
+        seen_email, seen_nc, seen_li, seen_name = set(), set(), set(), set()
+        for em, fn, cn, li in existing_qs:
+            if em:
+                seen_email.add(em.lower())
+            if fn and cn:
+                seen_nc.add((fn.lower().strip(), cn.lower().strip()))
+            if fn:
+                seen_name.add(fn.lower().strip())
+            nli = _norm_li(li)
+            if nli:
+                seen_li.add(nli)
+
+        from ai_sdr_agent.agents.lead_validator import validate_lead
+        created = 0
+        skipped = 0
+        for ld in raw_leads:
+            full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
+            email = (ld.get('email') or '').strip().lower()
+            company_name = (ld.get('company_name') or '').strip()
+            linkedin = _norm_li(ld.get('linkedin_url'))
+            name_key = full_name.lower().strip()
+
+            if not full_name.strip() and not company_name:
+                skipped += 1
+                continue
+            if linkedin and linkedin in seen_li:
+                skipped += 1; continue
+            if email and email in seen_email:
+                skipped += 1; continue
+            nc = (name_key, company_name.lower().strip())
+            if full_name and company_name and nc in seen_nc:
+                skipped += 1; continue
+            if not email and not company_name and not linkedin and name_key and name_key in seen_name:
+                skipped += 1; continue
+
+            if linkedin: seen_li.add(linkedin)
+            if email: seen_email.add(email)
+            if full_name and company_name: seen_nc.add(nc)
+            if name_key: seen_name.add(name_key)
+
+            validation = validate_lead({**ld, 'full_name': full_name})
+            SDRLead.objects.create(
+                company_user=company_user,
+                icp_profile=icp,
+                first_name=ld.get('first_name', ''),
+                last_name=ld.get('last_name', ''),
+                full_name=full_name,
+                email=email or ld.get('email', ''),
+                phone=ld.get('phone', ''),
+                job_title=ld.get('job_title', ''),
+                seniority_level=ld.get('seniority_level', ''),
+                department=ld.get('department', ''),
+                company_name=ld.get('company_name', ''),
+                company_domain=ld.get('company_domain', ''),
+                company_industry=ld.get('company_industry', ''),
+                company_size=ld.get('company_size') or None,
+                company_size_range=ld.get('company_size_range', ''),
+                company_location=ld.get('company_location', ''),
+                company_technologies=ld.get('company_technologies', []),
+                linkedin_url=_ensure_https(ld.get('linkedin_url', '')),
+                company_linkedin_url=_ensure_https(ld.get('company_linkedin_url', '')),
+                company_website=_ensure_https(ld.get('company_website', '')),
+                recent_news=ld.get('recent_news', []),
+                buying_signals=ld.get('buying_signals', []),
+                apollo_id=ld.get('apollo_id', ''),
+                raw_data=ld.get('raw_data', {}),
+                source='apify',
+                status='new',
+                confidence_score=validation['confidence_score'],
+                data_quality_flags=validation['data_quality_flags'],
+            )
+            created += 1
+
+        # ── Best-effort auto-qualify (never fail the import if AI tokens are out) ──
+        qualified = 0
+        if created and icp:
+            new_leads = SDRLead.objects.filter(
+                company_user=company_user, score__isnull=True
+            ).order_by('-created_at')[:created]
+            try:
+                qualifier = _get_qualification_agent(company_user.company)
+                for lead in new_leads:
+                    try:
+                        result = qualifier.qualify_lead(lead, icp)
+                        lead.score = result['score']
+                        lead.temperature = result['temperature']
+                        lead.score_breakdown = result.get('score_breakdown', {})
+                        lead.qualification_reasoning = result.get('qualification_reasoning', '')
+                        lead.key_strengths = result.get('key_strengths', [])
+                        lead.concerns = result.get('concerns', [])
+                        lead.outreach_strategy = result.get('outreach_strategy', '')
+                        lead.qualified_at = timezone.now()
+                        lead.status = 'qualified'
+                        lead.save()
+                        qualified += 1
+                    except Exception:
+                        break  # e.g. tokens exhausted — stop qualifying, keep leads
+            except Exception as exc:
+                logger.info("Fetch-from-Apify: auto-qualify unavailable: %s", exc)
+
+        msg = f'Imported {created} leads from Apify'
+        if qualified:
+            msg += f', qualified {qualified}'
+        if skipped:
+            msg += f'. Skipped {skipped} duplicates'
+        return Response({
+            'status': 'success',
+            'message': msg + '.',
+            'leads_created': created,
+            'leads_qualified': qualified,
+            'skipped_duplicates': skipped,
+            'stats': _lead_stats(company_user),
+        })
+
+    except KeyServiceError:
+        raise
+    except Exception as exc:
+        logger.error("Fetch-from-Apify error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
 
 
