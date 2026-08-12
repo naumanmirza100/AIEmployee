@@ -6,6 +6,7 @@ import { Loader2, Lock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import AgentBreadcrumb from '@/components/common/AgentBreadcrumb';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
@@ -111,6 +112,10 @@ const AgentLayout = () => {
   const hasAccess = accessBySection[section];
   const accessResolved = hasAccess !== undefined;
 
+  // Built once and shared by the navbar/sidebar and the breadcrumb so both read
+  // the same agent hierarchy.
+  const navItems = getAgentNavItems(purchasedModules, section, navigate);
+
   // Decide what goes in the content area. The shell (navbar + sidebar) is the
   // SAME element tree in every case, so React keeps it mounted and only the
   // inner content swaps — no reload/flash between agents.
@@ -169,10 +174,11 @@ const AgentLayout = () => {
           showNavTabs
           activeSection={section}
           onLogout={handleLogout}
-          navItems={getAgentNavItems(purchasedModules, section, navigate)}
+          navItems={navItems}
           sidebarLoading={modulesLoading}
         />
         <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 w-full max-w-full overflow-x-hidden">
+          {!modulesLoading && <AgentBreadcrumb navItems={navItems} activeSection={section} />}
           {content}
         </main>
       </div>
