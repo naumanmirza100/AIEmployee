@@ -67,6 +67,16 @@ def _run_send_due_steps():
         _close_db()
 
 
+def _run_qualify_queue():
+    try:
+        from ai_sdr_agent.tasks import qualify_queue_impl
+        result = qualify_queue_impl()
+        if result:
+            logger.debug("SDR qualify_queue → %s", result)
+    except Exception as exc:
+        logger.exception("SDR qualify_queue crashed: %s", exc)
+
+
 def _run_check_inbox():
     try:
         from ai_sdr_agent.tasks import check_inbox_replies_impl
@@ -179,6 +189,7 @@ def start_scheduler() -> None:
         now = datetime.datetime.now(tz=datetime.timezone.utc)
         jobs = [
             ('send_due_steps',    _run_send_due_steps,     300,    30),
+            ('qualify_queue',     _run_qualify_queue,      120,    45),
             ('check_inbox',       _run_check_inbox,         300,    60),
             ('auto_start',        _run_auto_start,          900,    90),
             ('auto_complete',     _run_auto_complete,       3600,  120),

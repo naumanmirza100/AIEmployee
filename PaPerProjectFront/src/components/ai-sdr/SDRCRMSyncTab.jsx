@@ -317,6 +317,35 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
         </button>
       </div>
 
+      {/* Account limit banner — shown when the CRM rejected writes because the
+          account is over its object/record limit (e.g. HubSpot free 1000). */}
+      {integration.limit_reached && (
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10,
+          padding: '12px 14px', borderRadius: 10,
+          background: 'rgba(245,158,11,0.08)',
+          border: '1px solid rgba(245,158,11,0.3)',
+        }}>
+          <AlertCircle size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+            <div style={{ color: '#f59e0b', fontWeight: 700, marginBottom: 2 }}>
+              Contact limit reached — sync paused
+            </div>
+            <div style={{ color: '#d1d5db' }}>
+              {cfg.label} won’t accept new records because the account is over its
+              limit{integration.provider === 'hubspot' ? ' (free tier caps contacts at 1,000)' : ''}.
+              New leads are saved locally and will sync automatically once you free
+              up space or upgrade your {cfg.label} plan.
+            </div>
+            {integration.limit_message && (
+              <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 6, fontFamily: 'monospace' }}>
+                {integration.limit_message}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Sync toggles */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {[

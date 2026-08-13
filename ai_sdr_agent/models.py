@@ -125,6 +125,23 @@ class SDRLead(models.Model):
     confidence_score = models.IntegerField(null=True, blank=True, help_text="Data accuracy confidence 0-100")
     data_quality_flags = models.JSONField(default=list, blank=True)
 
+    # Background qualification queue. Instead of scoring every new lead
+    # synchronously (which exhausts AI tokens in one burst), leads are queued and
+    # a scheduler processes them in small batches, retrying failures.
+    QUALIFICATION_STATUS_CHOICES = [
+        ('none',       'Not queued'),     # legacy / manual, not in the queue
+        ('pending',    'Queued'),         # waiting to be qualified
+        ('processing', 'Processing'),     # currently being qualified
+        ('done',       'Qualified'),      # scored successfully
+        ('failed',     'Failed'),         # errored — retried until attempts run out
+    ]
+    qualification_status = models.CharField(
+        max_length=12, choices=QUALIFICATION_STATUS_CHOICES, default='none', db_index=True,
+    )
+    qualification_attempts = models.IntegerField(default=0)
+    qualification_error = models.TextField(blank=True)
+    qualification_queued_at = models.DateTimeField(null=True, blank=True)
+
     # Workflow
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='new')
     source = models.CharField(max_length=30, choices=SOURCE_CHOICES, default='manual')
