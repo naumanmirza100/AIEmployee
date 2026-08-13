@@ -899,7 +899,7 @@ const UserDashboardPage = () => {
   // Get user role and format it for display
   const userRole = user?.role || 'user';
   const formattedRole = formatRole(userRole);
-  const dashboardTitle = `THE ${formattedRole.toUpperCase()} DASHBOARD`;
+  const dashboardTitle = formattedRole ? `${formattedRole} Dashboard` : 'My Dashboard';
   const dashboardSubtitle = 'Manage your tasks and projects';
 
   return (
@@ -913,9 +913,7 @@ const UserDashboardPage = () => {
         title={dashboardTitle}
         subtitle={dashboardSubtitle}
         user={user}
-        userRole={formattedRole}
         onLogout={handleLogout}
-        showCompanyUserOptions={false}
         onNotificationClick={(n) => {
           const type = n.type || n.notification_type || '';
           if (type.includes('meeting')) {

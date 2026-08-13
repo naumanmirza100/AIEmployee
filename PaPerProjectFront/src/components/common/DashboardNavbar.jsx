@@ -319,7 +319,7 @@ const DashboardNavbar = ({
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      onClick={() => navigate('/company/profile')}
+                      onClick={() => navigate(isCompanyUser ? '/company/profile' : '/me/profile')}
                       className="cursor-pointer"
                     >
                       <User className="mr-2 h-4 w-4" />

@@ -46,6 +46,7 @@ import AgentKeysSettingsPage from '@/pages/AgentKeysSettingsPage';
 import NotificationsPage from '@/pages/NotificationsPage';
 import ProjectManagerDashboardPage from '@/pages/ProjectManagerDashboardPage';
 import UserDashboardPage from '@/pages/UserDashboardPage';
+import UserDashboardRedirect from '@/pages/UserDashboardRedirect';
 import MarketingDashboard from '@/components/marketing/MarketingDashboard';
 import CampaignDetail from '@/components/marketing/CampaignDetail';
 import SequenceManagementPage from '@/components/marketing/SequenceManagementPage';
@@ -58,6 +59,12 @@ import HRMyProfilePage from '@/components/hr/HRMyProfilePage';
 import ReplyDraftAgentPage from '@/pages/ReplyDraftAgentPage';
 import ExecMeetingDashboard from '@/components/exec-meeting/ExecMeetingDashboard';
 import AgentLayout from '@/components/common/AgentLayout';
+import EmployeeLayout from '@/components/common/EmployeeLayout';
+import HomeView from '@/pages/me/HomeView';
+import TasksView from '@/pages/me/TasksView';
+import MeetingsView from '@/pages/me/MeetingsView';
+import ProfileView from '@/pages/me/ProfileView';
+import NotificationsView from '@/pages/me/NotificationsView';
 import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
 import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
 import OperationsDashboard from '@/components/operations/OperationsDashboard';
@@ -108,16 +115,40 @@ import { useTranslation } from 'react-i18next';
               }
             />
 
-            {/* User Dashboard (for company-created users) */}
-            <Route 
-              path="/user/dashboard" 
+            {/* /user/dashboard now sends users into the new employee shell.
+                PMs land on /project-manager/dashboard; everyone else on /me/home.
+                The legacy monolith stays reachable at /user/dashboard/classic
+                for rollback / debugging (see USER_DASHBOARD_REDESIGN.md, Chunk I). */}
+            <Route
+              path="/user/dashboard"
+              element={
+                <ProtectedRoute>
+                  <UserDashboardRedirect />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/user/dashboard/classic"
               element={
                 <ProtectedRoute>
                   <UserDashboardPage />
                 </ProtectedRoute>
-              } 
+              }
             />
-            
+
+            {/* ── Employee shell: /me/* — peer to AgentLayout but scoped to
+                 individual employees. Nav bar + sidebar mount ONCE; only the
+                 routed content swaps. See USER_DASHBOARD_REDESIGN.md. ── */}
+            <Route element={<EmployeeLayout />}>
+              <Route path="/me" element={<Navigate to="/me/home" replace />} />
+              <Route path="/me/home" element={<HomeView />} />
+              <Route path="/me/tasks" element={<TasksView />} />
+              <Route path="/me/meetings" element={<MeetingsView />} />
+              <Route path="/me/notifications" element={<NotificationsView />} />
+              <Route path="/me/profile" element={<ProfileView />} />
+            </Route>
+
+
             {/* Company routes without header/footer */}
             <Route path="/company/register" element={<CompanyRegisterPage />} />
             <Route path="/company/login" element={<CompanyLoginPage />} />
