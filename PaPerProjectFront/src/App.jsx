@@ -242,12 +242,11 @@ import { useTranslation } from 'react-i18next';
               {/* AI Executive Meeting Assistant */}
               <Route path="/exec-meeting" element={<Navigate to="/exec-meeting/dashboard" replace />} />
               <Route path="/exec-meeting/dashboard" element={<ExecMeetingDashboard />} />
-            </Route>
 
-            {/* Reply Draft keeps its own standalone shell for now (large stateful
-                inline workspace); it still shows the same sidebar via DashboardNavbar. */}
-            <Route path="/reply-draft" element={<Navigate to="/reply-draft/dashboard" replace />} />
-            <Route path="/reply-draft/dashboard" element={<ReplyDraftAgentPage />} />
+              {/* Reply Draft — now inside the shell so the sidebar stays mounted */}
+              <Route path="/reply-draft" element={<Navigate to="/reply-draft/dashboard" replace />} />
+              <Route path="/reply-draft/dashboard" element={<ReplyDraftAgentPage />} />
+            </Route>
 
             {/* Embeddable chat widget & web form (public, no auth) */}
             <Route path="/embed/chat" element={<FrontlineEmbedChatPage />} />

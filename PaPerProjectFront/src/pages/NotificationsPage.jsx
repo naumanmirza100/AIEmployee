@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/select';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { API_BASE_URL } from '@/config/apiConfig';
+import usePurchasedModules from '@/hooks/usePurchasedModules';
+import { getAgentNavItems } from '@/utils/agentNavItems';
 
 /**
  * Full-page notification list.
@@ -112,6 +114,8 @@ const StatCard = ({ icon: Icon, label, value, accent }) => (
 
 const NotificationsPage = () => {
   const navigate = useNavigate();
+  // Purchased agents drive the global left sidebar (same as the agent shell).
+  const { purchasedModules, modulesLoaded } = usePurchasedModules();
 
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -211,6 +215,9 @@ const NotificationsPage = () => {
           icon={Bell}
           title="Notifications"
           subtitle="All your alerts, reminders and updates in one place"
+          showNavTabs
+          navItems={getAgentNavItems(purchasedModules, undefined, navigate)}
+          sidebarLoading={!modulesLoaded}
         />
 
         <div className="container mx-auto px-4 py-8 max-w-5xl">

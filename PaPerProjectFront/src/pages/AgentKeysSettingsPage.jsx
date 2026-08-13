@@ -19,6 +19,8 @@ import {
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import agentKeysService from '@/services/agentKeysService';
 import { CompanyResetLogs } from '@/components/marketing/CompanyResetLogs';
+import usePurchasedModules from '@/hooks/usePurchasedModules';
+import { getAgentNavItems } from '@/utils/agentNavItems';
 
 const GRADIENT_BG = 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)';
 
@@ -904,6 +906,8 @@ const AgentKeysSettingsPage = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
+  // Purchased agents drive the global left sidebar (same as the agent shell).
+  const { purchasedModules, modulesLoaded } = usePurchasedModules();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1114,24 +1118,21 @@ const AgentKeysSettingsPage = () => {
           icon={Key}
           title="API Keys & Token Quota"
           subtitle="Manage BYOK keys, quotas, and managed-key requests"
+          showNavTabs
+          navItems={getAgentNavItems(purchasedModules, undefined, navigate)}
+          sidebarLoading={!modulesLoaded}
         />
 
         <div className="container mx-auto px-4 py-8 max-w-6xl">
-          {/* Header row */}
+          {/* Header row — title/subtitle live in the navbar above; here we keep
+              just the back link and the refresh action. */}
           <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-            <div>
-              <button
-                onClick={() => navigate('/company/dashboard')}
-                className="flex items-center gap-1 text-sm text-white/50 hover:text-white mb-2 transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" /> Back to dashboard
-              </button>
-              <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-2">
-                <Sparkles className="w-6 h-6 text-violet-400" />
-                API Keys & Token Quota
-              </h1>
-              <p className="text-sm text-white/50 mt-1">Bring your own LLM key, or request a managed one — your call.</p>
-            </div>
+            <button
+              onClick={() => navigate('/company/dashboard')}
+              className="flex items-center gap-1 text-sm text-white/50 hover:text-white transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" /> Back to dashboard
+            </button>
             <Button
               variant="outline"
               className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white"

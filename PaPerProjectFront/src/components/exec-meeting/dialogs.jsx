@@ -17,8 +17,9 @@ import {
 } from '@/components/ui/select';
 import { Loader2, Sparkles, Users, ChevronRight, Wand2 } from 'lucide-react';
 import execMeetingService from '@/services/execMeetingService';
-import { DateTimePicker, DateOnlyPicker, validateMeetingLink, isWeekend } from './shared';
+import { DateTimePicker, DateOnlyPicker, validateMeetingLink, isWeekend, todayStr } from './shared';
 import HoverTip from '@/components/common/HoverTip';
+import ConfirmDialog from '@/components/common/ConfirmDialog';
 import { AllMembersPanel } from './AllMembersPanel';
 
 // ── Schedule meeting dialog ─────────────────────────────────────────────────
@@ -826,6 +827,11 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
     }
   };
 
+  // Past-date confirmation is shown via the shared ConfirmDialog (not the native
+  // browser alert). When a past due date is detected, we stash the intent and
+  // open the dialog; confirming runs the actual create.
+  const [pastDateConfirm, setPastDateConfirm] = useState(false);
+
   const handleSubmit = async () => {
     if (!form.title) { toast({ title: 'Title is required', variant: 'destructive' }); return; }
     if (isWeekend(form.due_date)) {
@@ -837,6 +843,17 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
       toast({ title: 'Due date too late', description: `Subtask can't be due after the parent task (${parentTask.due_date}).`, variant: 'destructive' });
       return;
     }
+    // Warn (but allow) when the due date is in the past. due_date is a plain
+    // YYYY-MM-DD string, so comparing against today's local date string works
+    // without timezone drift.
+    if (form.due_date && form.due_date < todayStr()) {
+      setPastDateConfirm(true);
+      return;
+    }
+    await doCreate();
+  };
+
+  const doCreate = async () => {
     setLoading(true);
     try {
       await execMeetingService.createTask({
@@ -845,6 +862,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
         assignees: assignees.map(a => ({ id: a.id, user_type: a.user_type || 'company_user' })),
       });
       toast({ title: parentTask ? 'Subtask created!' : 'Task created!' });
+      setPastDateConfirm(false);
       onCreated(); onClose(); reset();
     } catch (err) {
       const dup = err?.status === 409 || /already exists/i.test(err?.message || '');
@@ -857,6 +875,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={v => { if (!v) reset(); onClose(); }}>
       <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-3xl' : 'max-w-lg'}`}>
         <div className="flex gap-4 items-stretch">
@@ -961,6 +980,18 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
         </div>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      open={pastDateConfirm}
+      onOpenChange={setPastDateConfirm}
+      title="Add task with a past date?"
+      description={`The due date (${form.due_date}) is in the past. Do you still want to add this task with a previous date?`}
+      confirmLabel="Add anyway"
+      cancelLabel="Cancel"
+      onConfirm={doCreate}
+      loading={loading}
+    />
+    </>
   );
 };
 
@@ -1020,11 +1051,24 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
     }
   };
 
+  const [pastDateConfirm, setPastDateConfirm] = useState(false);
+
   const handleSave = async () => {
     if (isWeekend(form.due_date)) {
       toast({ title: 'Weekend deadline', description: 'Task deadlines can\'t fall on a weekend. Pick a weekday.', variant: 'destructive' });
       return;
     }
+    // Warn (but allow) when the due date is newly set to a past date. Skip when
+    // the date is unchanged from the original, so editing other fields on an
+    // already-past task doesn't nag.
+    if (form.due_date && form.due_date < todayStr() && form.due_date !== (task.due_date || '')) {
+      setPastDateConfirm(true);
+      return;
+    }
+    await doSave();
+  };
+
+  const doSave = async () => {
     setSaving(true);
     try {
       await execMeetingService.updateTask(task.id, {
@@ -1032,6 +1076,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
         assignees: assignees.map(a => ({ id: a.id, user_type: a.user_type || 'company_user' })),
       });
       toast({ title: 'Task updated!' });
+      setPastDateConfirm(false);
       onUpdated();
       onClose();
     } catch (err) {
@@ -1040,6 +1085,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   };
 
   return (
+    <>
     <Dialog open={!!task} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-3xl' : 'max-w-lg'}`}>
         <div className="flex gap-4 items-stretch">
@@ -1125,5 +1171,17 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
         </div>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      open={pastDateConfirm}
+      onOpenChange={setPastDateConfirm}
+      title="Save task with a past date?"
+      description={`The due date (${form.due_date}) is in the past. Do you still want to save this task with a previous date?`}
+      confirmLabel="Save anyway"
+      cancelLabel="Cancel"
+      onConfirm={doSave}
+      loading={saving}
+    />
+    </>
   );
 };

@@ -299,6 +299,13 @@ class ExecStandaloneDocument(models.Model):
     title = models.CharField(max_length=255)
     content = models.TextField(help_text='Document body (markdown)')
     ai_generated = models.BooleanField(default=True)
+    # True when generated with no meeting linked — the output is a fill-in
+    # template (placeholder-based) rather than a document built from real
+    # meeting data.
+    is_template = models.BooleanField(
+        default=False,
+        help_text='Generated without a linked meeting — a fill-in template, not from real meeting data.',
+    )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

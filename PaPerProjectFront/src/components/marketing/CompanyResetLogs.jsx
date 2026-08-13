@@ -89,19 +89,25 @@ export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '',
       {/* Upcoming resets banner — shows the next reset date(s), even when no
           reset has happened yet. */}
       {!loading && upcoming.length > 0 && (
-        <div className="mb-3 rounded-lg border border-violet-400/25 bg-violet-500/[0.07] p-3">
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-300 mb-1.5">
-            <Clock className="h-3.5 w-3.5" /> Next reset
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/70">
-            {upcoming.map((u) => (
-              <span key={u.agent_name}>
-                {!locked && <span className="text-white/90 font-medium">{u.agent_label}: </span>}
-                <span className="text-violet-200">{fmtDateTime(u.next_reset_at)}</span>
-                <span className="text-white/30"> · every {u.reset_interval_days} day(s)</span>
+        <div className="mb-3 rounded-lg border border-violet-400/25 bg-violet-500/[0.07] p-3 space-y-2">
+          {upcoming.map((u) => (
+            <div key={u.agent_name} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              {!locked && <span className="text-white/90 font-medium">{u.agent_label}</span>}
+              {/* Last reset */}
+              <span className="inline-flex items-center gap-1.5 text-white/60">
+                <History className="h-3.5 w-3.5 text-white/40" /> Last reset:
+                {u.last_reset_at
+                  ? <span className="text-white/80">{fmtDateTime(u.last_reset_at)}</span>
+                  : <span className="text-white/35">Not yet reset</span>}
               </span>
-            ))}
-          </div>
+              {/* Next reset */}
+              <span className="inline-flex items-center gap-1.5 text-white/60">
+                <Clock className="h-3.5 w-3.5 text-violet-300" /> Next reset:
+                <span className="text-violet-200">{fmtDateTime(u.next_reset_at)}</span>
+                <span className="text-white/30">· every {u.reset_interval_days} day(s)</span>
+              </span>
+            </div>
+          ))}
         </div>
       )}
 

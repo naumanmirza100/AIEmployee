@@ -21,7 +21,7 @@ import {
   Loader2, LayoutDashboard, CalendarClock, ListChecks, CalendarDays,
   FileText, Bell, Plus, Menu, Clock, AlertTriangle,
   RefreshCw, Trash2, MoreHorizontal, ChevronRight,
-  Download, Sparkles, Pencil, GraduationCap, Users, Mail,
+  Download, Sparkles, Pencil, GraduationCap, Users, Mail, Info,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -420,15 +420,44 @@ const ExecMeetingDashboard = () => {
   };
 
   const generateAiDoc = async () => {
-    if (!aiDocInput.trim() && !aiDocMeetingId) {
-      toast({ title: 'Select a meeting or enter a topic first', variant: 'destructive' });
+    // Allow generation without a title/meeting as long as there's SOMETHING to
+    // work from (a meeting, a topic title, or type-specific content) — an
+    // untitled template then gets an auto-generated name below. Block only a
+    // completely empty form.
+    const hasAnyInput = !!aiDocMeetingId
+      || aiDocInput.trim() || aiDocTopics.trim()
+      || aiDocSummary.trim() || aiDocContext.trim() || aiDocAudience.trim() || aiDocPeriod.trim();
+    if (!hasAnyInput) {
+      toast({ title: 'Add something first', description: 'Select a meeting, or enter a topic/details to generate from.', variant: 'destructive' });
       return;
     }
     setAiDocLoading(true);
     try {
       // If a saved meeting is selected, pull its data to enrich the prompt
       const linkedMeeting = aiDocMeetingId ? meetings.find(m => String(m.id) === String(aiDocMeetingId)) : null;
-      const resolvedTitle = linkedMeeting ? linkedMeeting.title : aiDocInput.trim();
+      // Title precedence: linked meeting → the typed topic → an auto-generated
+      // name. When neither a meeting nor a topic is given, name the template
+      // after its type with a running number (e.g. "Meeting Agenda 1", "…2"),
+      // counting existing docs of the same type so the number keeps climbing.
+      const autoDocName = () => {
+        const base = {
+          agenda: 'Meeting Agenda',
+          minutes: 'Meeting Minutes',
+          briefing: 'Executive Briefing',
+          report: 'Report',
+        }[aiDocType] || 'Document';
+        const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`${escaped}\\s+(\\d+)\\b`);
+        let maxN = 0;
+        (Array.isArray(savedDocs) ? savedDocs : []).forEach(d => {
+          const m = re.exec(d.title || '');
+          if (m) maxN = Math.max(maxN, parseInt(m[1], 10) || 0);
+        });
+        return `${base} ${maxN + 1}`;
+      };
+      const resolvedTitle = linkedMeeting
+        ? linkedMeeting.title
+        : (aiDocInput.trim() || autoDocName());
       const resolvedAttendees = linkedMeeting?.attendees || [];
       const resolvedDuration = linkedMeeting?.duration_minutes || 60;
       const resolvedTopics = aiDocTopics.trim()
@@ -463,14 +492,15 @@ const ExecMeetingDashboard = () => {
       toast({ title: 'Document generated and saved!' });
       // Reload list so new doc appears
       loadDocuments();
-      // Auto-open viewer
-      const linkedMeetingTitle = aiDocMeetingId ? (meetings.find(m => String(m.id) === String(aiDocMeetingId))?.title || aiDocInput) : aiDocInput;
+      // Auto-open viewer — reuse resolvedTitle so an auto-named template shows
+      // the same name here as in the saved list.
       if (res.document_id) {
         setViewDoc({
           id: res.document_id,
-          title: `${aiDocType.charAt(0).toUpperCase() + aiDocType.slice(1)} — ${linkedMeetingTitle}`,
+          title: `${aiDocType.charAt(0).toUpperCase() + aiDocType.slice(1)} — ${resolvedTitle}`,
           doc_type: aiDocType,
           content: res.content || '',
+          is_template: res.is_template ?? !aiDocMeetingId,
           created_at: new Date().toISOString(),
         });
       }
@@ -1383,9 +1413,9 @@ const ExecMeetingDashboard = () => {
           className="max-w-3xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
-          {/* Header — pr-10 keeps the Download button clear of the dialog's
-              own close ✕ in the top-right corner. */}
-          <div className="flex items-center justify-between px-6 py-4 pr-10 border-b border-white/10 flex-shrink-0">
+          {/* Header — pr-14 keeps the Download button clear of the dialog's
+              own close ✕ in the top-right corner, with a comfortable gap. */}
+          <div className="flex items-center justify-between px-6 py-4 pr-14 border-b border-white/10 flex-shrink-0">
             <div className="flex items-center gap-3 min-w-0">
               {viewDoc && (
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border flex-shrink-0 ${{
@@ -1396,6 +1426,12 @@ const ExecMeetingDashboard = () => {
                   other:    'bg-white/10 text-white/50 border-white/10',
                 }[viewDoc.doc_type] || 'bg-white/10 text-white/50 border-white/10'}`}>
                   {{ agenda:'Agenda', minutes:'Minutes', briefing:'Briefing', report:'Report', other:'Other' }[viewDoc?.doc_type] || viewDoc?.doc_type}
+                </span>
+              )}
+              {viewDoc?.is_template && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-amber-400/30 bg-amber-400/10 text-amber-300 flex-shrink-0"
+                  title="Generated without a linked meeting — a fill-in template, not from real meeting data.">
+                  <Info className="h-3 w-3" /> Template
                 </span>
               )}
               <h3 className="text-white font-semibold truncate text-sm">{viewDoc?.title}</h3>
@@ -1414,6 +1450,19 @@ const ExecMeetingDashboard = () => {
           {viewDoc?.created_at && (
             <div className="px-6 py-2 border-b border-white/5 flex-shrink-0">
               <p className="text-white/30 text-xs">Generated {new Date(viewDoc.created_at).toLocaleString()}</p>
+            </div>
+          )}
+
+          {/* Template notice — no meeting was linked, so this is a fill-in draft. */}
+          {viewDoc?.is_template && (
+            <div className="px-6 py-2 border-b border-white/5 flex-shrink-0">
+              <div className="flex items-start gap-2 rounded-md border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-200/90 leading-snug">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-300" />
+                <span>
+                  This is a <span className="font-semibold">template</span> — it was generated without a linked meeting,
+                  so it contains placeholders for you to fill in rather than real meeting content.
+                </span>
+              </div>
             </div>
           )}
 

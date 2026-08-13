@@ -12,7 +12,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  Loader2, FileText, RefreshCw, Trash2, MoreHorizontal,
+  Loader2, FileText, RefreshCw, Trash2, MoreHorizontal, Info,
 } from 'lucide-react';
 import { CARD_STYLE, ROW_STYLE, EmptyState, fmtUtc, BulkSelectBar, SelectCheckbox, FilterBar, Pagination } from '../shared';
 import HoverTip from '@/components/common/HoverTip';
@@ -62,7 +62,7 @@ export const DocumentsPanel = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1">
             <Label className="text-white/70 text-xs">Document Type</Label>
-            <Select value={aiDocType} onValueChange={v => {
+            <Select value={aiDocType} disabled={aiDocLoading} onValueChange={v => {
               setAiDocType(v); setAiDocTopics(''); setAiDocSummary(''); setAiDocContext(''); setAiDocAudience(''); setAiDocPeriod('');
               // If a meeting is already linked, re-apply its data to the field
               // that the newly-chosen doc type uses.
@@ -94,7 +94,7 @@ export const DocumentsPanel = ({
 
           <div className="space-y-1">
             <Label className="text-white/70 text-xs">Link to Saved Meeting <span className="text-white/30">(optional)</span></Label>
-            <Select value={aiDocMeetingId || 'none'} onValueChange={v => {
+            <Select value={aiDocMeetingId || 'none'} disabled={aiDocLoading} onValueChange={v => {
               const val = v === 'none' ? '' : v;
               setAiDocMeetingId(val);
               if (val) {
@@ -151,8 +151,9 @@ export const DocumentsPanel = ({
             <Input
               value={aiDocInput}
               onChange={e => setAiDocInput(e.target.value)}
+              disabled={aiDocLoading}
               placeholder="e.g. Q3 Strategy Review"
-              className="bg-white/5 border-white/10 text-white"
+              className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed"
             />
           </div>
         )}
@@ -169,8 +170,9 @@ export const DocumentsPanel = ({
             <Input
               value={aiDocTopics}
               onChange={e => setAiDocTopics(e.target.value)}
+              disabled={aiDocLoading}
               placeholder="e.g. Q3 results, Budget review, Hiring plan"
-              className="bg-white/5 border-white/10 text-white"
+              className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed"
             />
           </div>
         )}
@@ -190,9 +192,10 @@ export const DocumentsPanel = ({
             <textarea
               value={aiDocSummary}
               onChange={e => { if (e.target.value.length <= 800) setAiDocSummary(e.target.value); }}
+              disabled={aiDocLoading}
               rows={5}
               placeholder="Briefly describe what was discussed, decisions made, outcomes…"
-              className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+              className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-60 disabled:cursor-not-allowed [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             />
           </div>
         )}
@@ -205,8 +208,9 @@ export const DocumentsPanel = ({
               <Input
                 value={aiDocAudience}
                 onChange={e => setAiDocAudience(e.target.value)}
+                disabled={aiDocLoading}
                 placeholder="e.g. Board of Directors, Executive Team"
-                className="bg-white/5 border-white/10 text-white"
+                className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
             <div className="space-y-1">
@@ -222,19 +226,32 @@ export const DocumentsPanel = ({
               <textarea
                 value={aiDocContext}
                 onChange={e => { if (e.target.value.length <= 800) setAiDocContext(e.target.value); }}
+                disabled={aiDocLoading}
                 rows={5}
                 placeholder="Describe the situation, problem, or opportunity. Key facts, risks, or data points to include…"
-                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                className="w-full rounded-md px-3 py-2 text-sm text-white placeholder:text-white/30 bg-white/5 border border-white/10 resize-none focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:opacity-60 disabled:cursor-not-allowed [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
               />
             </div>
           </>
         )}
 
+          {/* Template notice — with no meeting linked there's no real meeting
+              data to draw on, so the output is a fill-in-the-blanks template. */}
+          {!aiDocMeetingId && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2 text-[11px] text-amber-200/90 leading-snug">
+              <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-300" />
+              <span>
+                No meeting selected — this generates a <span className="font-semibold">template</span> for you to fill in,
+                not a document built from real meeting notes. Link a saved meeting above to generate from its content.
+              </span>
+            </div>
+          )}
+
           <div className="flex justify-end">
-            <HoverTip tip="Generate the document with AI and save it">
+            <HoverTip tip={aiDocMeetingId ? 'Generate the document with AI and save it' : 'Generate a fill-in template (no meeting linked)'}>
               <Button onClick={generateAiDoc} disabled={aiDocLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
                 {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
-                {aiDocLoading ? 'Generating…' : 'Generate & Save'}
+                {aiDocLoading ? 'Generating…' : (aiDocMeetingId ? 'Generate & Save' : 'Generate Template')}
               </Button>
             </HoverTip>
           </div>
@@ -307,6 +324,12 @@ export const DocumentsPanel = ({
                   <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] border ${DOC_TYPE_COLORS[doc.doc_type] || DOC_TYPE_COLORS.other}`}>
                     {DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type}
                   </span>
+                  {doc.is_template && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border border-amber-400/30 bg-amber-400/10 text-amber-300"
+                      title="Generated without a linked meeting — a fill-in template, not from real meeting data.">
+                      <Info className="h-3 w-3" /> Template
+                    </span>
+                  )}
                   <p className="text-white text-sm font-medium truncate">{doc.title}</p>
                 </div>
                 <p className="text-white/30 text-xs">{new Date(doc.created_at).toLocaleString()}</p>
