@@ -106,6 +106,7 @@ export const DatePicker = ({
  *   value      string  — YYYY-MM-DDTHH:mm value (or '' for none)
  *   onChange   (str)   — fires with the new YYYY-MM-DDTHH:mm (or '')
  *   minValue   string  — earliest selectable YYYY-MM-DDTHH:mm
+ *   maxValue   string  — latest selectable YYYY-MM-DDTHH:mm
  *   placeholder string
  *   id         string
  *   className  string
@@ -115,6 +116,7 @@ export const DateTimePicker = ({
   value,
   onChange,
   minValue,
+  maxValue,
   placeholder = 'Pick a date & time',
   id,
   className,
@@ -122,7 +124,12 @@ export const DateTimePicker = ({
 }) => {
   const selected = parseDateTime(value);
   const minD = parseDateTime(minValue);
-  const minDateOnly = minD || undefined;
+  const maxD = parseDateTime(maxValue);
+  // Compose disabled matchers for react-day-picker: any combination of
+  // {before} / {after} is accepted as an array of matchers.
+  const disabledMatchers = [];
+  if (minD) disabledMatchers.push({ before: minD });
+  if (maxD) disabledMatchers.push({ after: maxD });
 
   // Time portion ("HH:mm") parsed out of the current value so the <input type="time">
   // stays in sync with the picker.
@@ -174,7 +181,7 @@ export const DateTimePicker = ({
           mode="single"
           selected={selected}
           onSelect={onDayChosen}
-          disabled={minDateOnly ? { before: minDateOnly } : undefined}
+          disabled={disabledMatchers.length ? disabledMatchers : undefined}
           initialFocus
         />
         <div className="border-t border-white/10 p-3 flex items-center gap-2">

@@ -135,7 +135,16 @@ const CompanyDashboardPage = () => {
     status: 'active',
     priority: 'medium',
     project_type: 'web_app',
+    // BUG-08: parity with the Create Project form. All five previously
+    // missing from the Update modal.
+    industry_id: '',
+    budget_min: '',
+    budget_max: '',
+    start_date: '',
+    deadline: '',
   });
+  // Industries list for the Edit Project modal's industry dropdown (BUG-08).
+  const [projectIndustries, setProjectIndustries] = useState([]);
   const [taskForm, setTaskForm] = useState({
     title: '',
     description: '',
@@ -465,7 +474,21 @@ const CompanyDashboardPage = () => {
       status: project.status || 'active',
       priority: project.priority || 'medium',
       project_type: project.project_type || 'web_app',
+      // BUG-08: populate the newly-editable fields so opening Edit shows
+      // the current value instead of blank inputs.
+      industry_id: project.industry_id != null ? String(project.industry_id) : '',
+      budget_min: project.budget_min != null ? String(project.budget_min) : '',
+      budget_max: project.budget_max != null ? String(project.budget_max) : '',
+      start_date: project.start_date ? String(project.start_date).slice(0, 10) : '',
+      deadline: project.deadline ? String(project.deadline).slice(0, 10) : '',
     });
+    // Lazy-load industries the first time the modal opens.
+    if (!projectIndustries.length) {
+      fetch(`${API_BASE_URL}/industries/`)
+        .then((r) => (r.ok ? r.json() : { data: [] }))
+        .then((d) => setProjectIndustries(d?.data || []))
+        .catch(() => setProjectIndustries([]));
+    }
     setShowEditProjectModal(true);
   };
 
@@ -473,8 +496,45 @@ const CompanyDashboardPage = () => {
     e.preventDefault();
     if (!editingProject) return;
 
+    // BUG-08 + BUG-02: validate budget rules before submit so users get
+    // instant feedback (backend re-checks on save).
+    const bmin = projectForm.budget_min !== '' ? parseFloat(projectForm.budget_min) : null;
+    const bmax = projectForm.budget_max !== '' ? parseFloat(projectForm.budget_max) : null;
+    if (bmin !== null && (Number.isNaN(bmin) || bmin < 0)) {
+      toast({ title: 'Invalid budget', description: 'Minimum budget must be a non-negative number.', variant: 'destructive' });
+      return;
+    }
+    if (bmax !== null && (Number.isNaN(bmax) || bmax < 0)) {
+      toast({ title: 'Invalid budget', description: 'Maximum budget must be a non-negative number.', variant: 'destructive' });
+      return;
+    }
+    if (bmin !== null && bmax !== null && bmax < bmin) {
+      toast({ title: 'Invalid budget range', description: 'Maximum budget must be greater than or equal to the minimum.', variant: 'destructive' });
+      return;
+    }
+    if (projectForm.start_date && projectForm.deadline
+        && projectForm.deadline < projectForm.start_date) {
+      toast({ title: 'Invalid date range', description: 'Deadline must be on or after the start date.', variant: 'destructive' });
+      return;
+    }
+
+    // BUG-08: send the newly-editable fields. Send empty-string as
+    // explicit null so the backend can clear a value the user removed.
+    const payload = {
+      name: projectForm.name,
+      description: projectForm.description,
+      status: projectForm.status,
+      priority: projectForm.priority,
+      project_type: projectForm.project_type,
+      industry_id: projectForm.industry_id === '' ? null : parseInt(projectForm.industry_id, 10),
+      budget_min: projectForm.budget_min === '' ? null : parseFloat(projectForm.budget_min),
+      budget_max: projectForm.budget_max === '' ? null : parseFloat(projectForm.budget_max),
+      start_date: projectForm.start_date || null,
+      deadline: projectForm.deadline || null,
+    };
+
     try {
-      const response = await companyProjectsTasksService.updateProject(editingProject.id, projectForm);
+      const response = await companyProjectsTasksService.updateProject(editingProject.id, payload);
       if (response.status === 'success') {
         toast({
           title: 'Success',
@@ -2829,6 +2889,11 @@ const CompanyDashboardPage = () => {
               status: 'active',
               priority: 'medium',
               project_type: 'web_app',
+              industry_id: '',
+              budget_min: '',
+              budget_max: '',
+              start_date: '',
+              deadline: '',
             });
           }
         }}>
@@ -2925,7 +2990,78 @@ const CompanyDashboardPage = () => {
                   </SelectContent>
                 </Select>
               </div>
-              
+
+              {/* BUG-08: fields that used to be in Create only and impossible
+                  to edit after the fact — industry, budget, and dates. */}
+              <div className="space-y-2">
+                <Label htmlFor="project-industry">Industry</Label>
+                <Select
+                  value={projectForm.industry_id || 'none'}
+                  onValueChange={(value) =>
+                    setProjectForm({ ...projectForm, industry_id: value === 'none' ? '' : value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select industry" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {projectIndustries.map((ind) => (
+                      <SelectItem key={ind.id} value={String(ind.id)}>{ind.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="project-budget-min">Budget Min</Label>
+                  <Input
+                    id="project-budget-min"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={projectForm.budget_min}
+                    onChange={(e) => setProjectForm({ ...projectForm, budget_min: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project-budget-max">Budget Max</Label>
+                  <Input
+                    id="project-budget-max"
+                    type="number"
+                    step="0.01"
+                    min={projectForm.budget_min || '0'}
+                    value={projectForm.budget_max}
+                    onChange={(e) => setProjectForm({ ...projectForm, budget_max: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="project-start-date">Start Date</Label>
+                  <Input
+                    id="project-start-date"
+                    type="date"
+                    value={projectForm.start_date}
+                    onChange={(e) => setProjectForm({ ...projectForm, start_date: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project-deadline">Deadline</Label>
+                  <Input
+                    id="project-deadline"
+                    type="date"
+                    value={projectForm.deadline}
+                    min={projectForm.start_date || undefined}
+                    onChange={(e) => setProjectForm({ ...projectForm, deadline: e.target.value })}
+                  />
+                </div>
+              </div>
+
               <div className="flex justify-end gap-2 pt-4">
                 <Button
                   type="button"

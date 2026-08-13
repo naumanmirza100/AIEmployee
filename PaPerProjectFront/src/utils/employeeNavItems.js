@@ -8,9 +8,13 @@ import { Home, CheckSquare, Calendar, User, Bell } from 'lucide-react';
  * and company_user accounts that don't have an agent module purchased).
  *
  * Each item follows the same shape AgentSidebar expects:
- *   { section, label, icon, path, onClick, basePath?, children? }
+ *   { section, label, icon, path, onClick, basePath?, badge?, badgeTone? }
+ *
+ * `counts` is optional; when provided, matching items get a badge:
+ *   { overdueTasks, pendingMeetings, unreadNotifications }
  */
-export function getEmployeeNavItems(navigate) {
+export function getEmployeeNavItems(navigate, counts = {}) {
+  const { overdueTasks = 0, pendingMeetings = 0, unreadNotifications = 0 } = counts;
   return [
     {
       section: 'me-home',
@@ -27,6 +31,8 @@ export function getEmployeeNavItems(navigate) {
       path: '/me/tasks',
       basePath: '/me/tasks',
       onClick: () => navigate('/me/tasks'),
+      badge: overdueTasks,
+      badgeTone: overdueTasks > 0 ? 'danger' : undefined,
     },
     {
       section: 'me-meetings',
@@ -35,6 +41,7 @@ export function getEmployeeNavItems(navigate) {
       path: '/me/meetings',
       basePath: '/me/meetings',
       onClick: () => navigate('/me/meetings'),
+      badge: pendingMeetings,
     },
     {
       section: 'me-notifications',
@@ -43,6 +50,7 @@ export function getEmployeeNavItems(navigate) {
       path: '/me/notifications',
       basePath: '/me/notifications',
       onClick: () => navigate('/me/notifications'),
+      badge: unreadNotifications,
     },
     {
       section: 'me-profile',

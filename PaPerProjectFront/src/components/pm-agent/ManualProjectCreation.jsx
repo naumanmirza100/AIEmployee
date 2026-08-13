@@ -109,9 +109,38 @@ const ManualProjectCreation = ({ onProjectCreated, onSuccess }) => {
       return;
     }
 
+    // BUG-02: budget validation. Numeric HTML inputs let users type negatives
+    // and any combination of Min/Max — validate before submit.
+    const budgetMinNum = formData.budget_min !== '' ? parseFloat(formData.budget_min) : null;
+    const budgetMaxNum = formData.budget_max !== '' ? parseFloat(formData.budget_max) : null;
+    if (budgetMinNum !== null && (Number.isNaN(budgetMinNum) || budgetMinNum < 0)) {
+      toast({
+        title: 'Invalid budget',
+        description: 'Minimum budget must be a non-negative number.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (budgetMaxNum !== null && (Number.isNaN(budgetMaxNum) || budgetMaxNum < 0)) {
+      toast({
+        title: 'Invalid budget',
+        description: 'Maximum budget must be a non-negative number.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (budgetMinNum !== null && budgetMaxNum !== null && budgetMaxNum < budgetMinNum) {
+      toast({
+        title: 'Invalid budget range',
+        description: 'Maximum budget must be greater than or equal to the minimum.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       setLoading(true);
-      
+
       // Prepare data for API
       const payload = {
         name: formData.name,
@@ -128,8 +157,28 @@ const ManualProjectCreation = ({ onProjectCreated, onSuccess }) => {
       if (formData.deadline) payload.deadline = formData.deadline;
       if (formData.start_date) payload.start_date = formData.start_date;
 
-      const response = await companyApi.post('/project-manager/projects/create/', payload);
-      
+      let response;
+      try {
+        response = await companyApi.post('/project-manager/projects/create/', payload);
+      } catch (postErr) {
+        // BUG-01: server returns 409 with code=duplicate_project_name when a
+        // project with the same name already exists in this workspace. Ask
+        // the user to confirm, then retry with the opt-in flag.
+        const isDup = postErr?.status === 409 && postErr?.data?.code === 'duplicate_project_name';
+        if (!isDup) throw postErr;
+        const proceed = window.confirm(
+          `${postErr.data?.message || postErr.message || 'A project with this name already exists.'}\n\nCreate it anyway?`
+        );
+        if (!proceed) {
+          setLoading(false);
+          return;
+        }
+        response = await companyApi.post('/project-manager/projects/create/', {
+          ...payload,
+          confirm_duplicate_name: true,
+        });
+      }
+
       if (response.status === 'success') {
         toast({
           title: 'Success',
@@ -296,19 +345,21 @@ const ManualProjectCreation = ({ onProjectCreated, onSuccess }) => {
                 id="budget_min"
                 type="number"
                 step="0.01"
+                min="0"
                 value={formData.budget_min}
                 onChange={(e) => handleChange('budget_min', e.target.value)}
                 placeholder="0.00"
               />
             </div>
 
-            {/* Budget Max */}
+            {/* Budget Max — must be >= Budget Min (BUG-02). */}
             <div>
               <Label htmlFor="budget_max">Budget Max</Label>
               <Input
                 id="budget_max"
                 type="number"
                 step="0.01"
+                min={formData.budget_min || '0'}
                 value={formData.budget_max}
                 onChange={(e) => handleChange('budget_max', e.target.value)}
                 placeholder="0.00"

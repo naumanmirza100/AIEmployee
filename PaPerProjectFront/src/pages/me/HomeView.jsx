@@ -9,8 +9,8 @@ import {
   ArrowRight,
   AlertTriangle,
   Loader2,
-  ListTodo,
   Clock,
+  GraduationCap,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
@@ -18,13 +18,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import userTaskService from '@/services/userTaskService';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { isOverdue, isDueThisWeek, getStatusColor, humanStatus } from '@/utils/taskHelpers';
+import FrontlineTutorial, { resetTutorial } from '@/components/frontline/FrontlineTutorial';
+import { useTutorialNudge } from '@/components/frontline/tourUtils';
+import { USER_MAIN_TOUR_KEY, USER_MAIN_TOUR_STEPS } from '@/utils/userTutorialSteps';
 
 /**
  * HomeView — /me/home landing.
  *
- * Pulls the same endpoints the classic dashboard uses (getMyTasks +
- * /meetings) and surfaces four summary tiles plus a pending action-items
- * list — the highest-value stuff needing attention today.
+ * Real dashboard content: summary tiles, action-items list, quick-jump
+ * grid, first-run welcome banner + tour, and a "complete your profile"
+ * nudge for accounts that look empty.
  */
 export default function HomeView() {
   const navigate = useNavigate();
@@ -34,9 +37,22 @@ export default function HomeView() {
   const [tasks, setTasks] = useState([]);
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+
+  // No auto-launch — the tour button in the header glows until the user
+  // takes it, and a short-lived tooltip nudges them the first time they
+  // land here in a session. Matches the pattern PM/HR/Frontline use.
+  const { glow: tourGlow, tooltip: tourTooltip, dismiss: dismissNudge } = useTutorialNudge(USER_MAIN_TOUR_KEY);
 
   const firstName = (user?.fullName || user?.username || user?.email || 'there')
     .split(' ')[0].split('@')[0];
+
+  // Look for missing profile fields to decide whether to nudge.
+  const profileGaps = [];
+  if (!user?.fullName && !user?.username) profileGaps.push('name');
+  if (!user?.phone && !user?.phone_number) profileGaps.push('phone');
+  if (!user?.timezone) profileGaps.push('timezone');
+  const profileIncomplete = profileGaps.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -76,10 +92,8 @@ export default function HomeView() {
     { label: 'Pending invites', value: pendingInvites.length, icon: Calendar, to: '/me/meetings' },
   ];
 
-  // Prioritise: overdue first, then meeting invites, then due this week.
   const actionItems = [
     ...overdueTasks.slice(0, 3).map((t) => ({
-      kind: 'task',
       key: `t${t.id}`,
       title: t.title,
       subtitle: `Overdue • ${t.project_name || 'no project'}`,
@@ -88,7 +102,6 @@ export default function HomeView() {
       onClick: () => navigate('/me/tasks'),
     })),
     ...pendingInvites.slice(0, 3).map((m) => ({
-      kind: 'meeting',
       key: `m${m.id}`,
       title: m.title,
       subtitle: `Meeting invite • ${m.organizer_name || m.organizer_email || 'organizer'}`,
@@ -100,7 +113,6 @@ export default function HomeView() {
       .filter((t) => !overdueTasks.includes(t))
       .slice(0, 5)
       .map((t) => ({
-        kind: 'task',
         key: `w${t.id}`,
         title: t.title,
         subtitle: `Due ${new Date(t.due_date).toLocaleDateString()} • ${t.project_name || 'no project'}`,
@@ -117,14 +129,62 @@ export default function HomeView() {
     { to: '/me/profile', icon: User, label: 'My Profile' },
   ];
 
+  const replayTour = () => {
+    dismissNudge();
+    resetTutorial(USER_MAIN_TOUR_KEY);
+    setTutorialOpen(true);
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div className="text-white">
-        <h2 className="text-2xl font-bold">Hi {firstName} 👋</h2>
-        <p className="text-white/60 mt-1 text-sm">Here's what needs your attention today.</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="text-white">
+          <h2 className="text-2xl font-bold">Hi {firstName} 👋</h2>
+          <p className="text-white/60 mt-1 text-sm">Here's what needs your attention today.</p>
+        </div>
+        <div className="relative">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={replayTour}
+            className={`border-violet-500/40 text-violet-200 hover:bg-violet-500/10 hover:text-violet-100 ${tourGlow ? 'me-tour-glow' : ''}`}
+          >
+            <GraduationCap className="h-3.5 w-3.5 mr-1.5" /> Take the Tour
+          </Button>
+          {tourTooltip && (
+            <div className="absolute -bottom-11 right-0 z-10 rounded-md border border-violet-400/40 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+              👋 New here? Take a quick tour
+              <span className="absolute -top-1 right-6 h-2 w-2 bg-[#161630] border-t border-l border-violet-400/40 rotate-45" />
+            </div>
+          )}
+        </div>
       </div>
+      <style>{`
+        @keyframes meTourGlow {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4), 0 0 0 0 rgba(139, 92, 246, 0.2); }
+          50%      { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.15), 0 0 0 12px rgba(139, 92, 246, 0.08); }
+        }
+        .me-tour-glow { animation: meTourGlow 1.6s ease-in-out infinite; }
+      `}</style>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {profileIncomplete && (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            <User className="h-4 w-4 text-amber-300 shrink-0" />
+            <p className="text-xs text-amber-100/90">
+              Your profile is missing {profileGaps.join(', ')}. Filling it out helps teammates reach you.
+            </p>
+          </div>
+          <Link to="/me/profile">
+            <Button size="sm" variant="outline"
+              className="border-amber-500/40 text-amber-200 hover:bg-amber-500/10 hover:text-amber-100 h-7 text-xs">
+              Complete profile
+            </Button>
+          </Link>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-tour="me-summary">
         {tiles.map((tile) => (
           <Link key={tile.label} to={tile.to} className="group">
             <div className={`rounded-lg border p-3 transition-colors ${
@@ -146,7 +206,7 @@ export default function HomeView() {
         ))}
       </div>
 
-      <Card className="bg-white/[0.04] border-white/[0.08]">
+      <Card className="bg-white/[0.04] border-white/[0.08]" data-tour="me-action-items">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-white text-base">Action items</CardTitle>
@@ -195,7 +255,7 @@ export default function HomeView() {
         </CardContent>
       </Card>
 
-      <div>
+      <div data-tour="me-quick-jump">
         <h3 className="text-sm font-semibold text-white/70 mb-2 px-1">Jump to</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {quickLinks.map((q) => (
@@ -212,8 +272,15 @@ export default function HomeView() {
 
       <div className="text-[11px] text-white/40 text-center">
         Prefer the classic view? It still lives at{' '}
-        <Link to="/user/dashboard" className="text-violet-300 hover:text-violet-200 underline">/user/dashboard</Link>.
+        <Link to="/user/dashboard/classic" className="text-violet-300 hover:text-violet-200 underline">/user/dashboard/classic</Link>.
       </div>
+
+      <FrontlineTutorial
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
+        steps={USER_MAIN_TOUR_STEPS}
+        storageKey={USER_MAIN_TOUR_KEY}
+      />
     </div>
   );
 }
@@ -230,29 +297,3 @@ async function fetchMeetings() {
 }
 
 export { fetchMeetings };
-
-// Also export a summary hook for reuse if we want it later.
-export function useHomeCounts() {
-  const [tasks, setTasks] = useState([]);
-  const [meetings, setMeetings] = useState([]);
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const [t, m] = await Promise.all([userTaskService.getMyTasks(), fetchMeetings()]);
-        if (!alive) return;
-        setTasks(t?.data || []);
-        setMeetings(m || []);
-      } catch { /* silent */ }
-    })();
-    return () => { alive = false; };
-  }, []);
-  return {
-    openTasks: tasks.filter((t) => t.status !== 'done').length,
-    overdue: tasks.filter(isOverdue).length,
-    dueThisWeek: tasks.filter(isDueThisWeek).length,
-    pendingInvites: meetings.filter((m) =>
-      (m.status === 'pending' || m.status === 'counter_proposed') && m.status !== 'withdrawn',
-    ).length,
-  };
-}

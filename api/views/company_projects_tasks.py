@@ -68,6 +68,51 @@ def update_company_project(request, project_id):
         if 'start_date' in data:
             project.start_date = data['start_date'] if data['start_date'] else None
 
+        # BUG-08: parity with Create — the update endpoint used to silently
+        # drop industry / budget fields, making them impossible to edit
+        # after creation. Also enforce BUG-02 rules (non-negative, Max >= Min).
+        if 'industry_id' in data:
+            iid = data.get('industry_id')
+            if iid in (None, '', 'none'):
+                project.industry = None
+            else:
+                try:
+                    from core.models import Industry
+                    project.industry = Industry.objects.get(id=int(iid))
+                except (ValueError, TypeError, Industry.DoesNotExist):
+                    return Response({
+                        'status': 'error',
+                        'message': 'Invalid industry_id',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        def _parse_budget(raw, field):
+            if raw in (None, ''):
+                return None, None
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                return None, f'{field} must be a number.'
+            if val < 0:
+                return None, f'{field} must be non-negative.'
+            return val, None
+
+        if 'budget_min' in data:
+            val, err = _parse_budget(data.get('budget_min'), 'budget_min')
+            if err:
+                return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
+            project.budget_min = val
+        if 'budget_max' in data:
+            val, err = _parse_budget(data.get('budget_max'), 'budget_max')
+            if err:
+                return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
+            project.budget_max = val
+        if project.budget_min is not None and project.budget_max is not None \
+                and project.budget_max < project.budget_min:
+            return Response({
+                'status': 'error',
+                'message': 'budget_max must be greater than or equal to budget_min.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         project.save()
 
         return Response({
@@ -80,6 +125,9 @@ def update_company_project(request, project_id):
                 'status': project.status,
                 'priority': project.priority,
                 'project_type': project.project_type,
+                'industry_id': project.industry_id,
+                'budget_min': float(project.budget_min) if project.budget_min is not None else None,
+                'budget_max': float(project.budget_max) if project.budget_max is not None else None,
                 'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
                 'start_date': project.start_date.isoformat() if project.start_date else None,
             }

@@ -263,8 +263,15 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       toast({ title: 'Invalid file type', description: `Use ${allowed.join(', ')}`, variant: 'destructive' });
       return;
     }
+    // BUG-07: empty files fail non-obviously on the backend parser — reject
+    // them here with a clear message before dispatching.
+    if (file.size === 0) {
+      toast({ title: 'Empty file', description: 'This file is empty (0 bytes). Please choose another.', variant: 'destructive' });
+      return;
+    }
     if (file.size > 10 * 1024 * 1024) {
-      toast({ title: 'File too large', description: 'Max 10MB', variant: 'destructive' });
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      toast({ title: 'File too large', description: `${mb} MB exceeds the 10 MB limit.`, variant: 'destructive' });
       return;
     }
     setSelectedFile(file);

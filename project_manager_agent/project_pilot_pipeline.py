@@ -648,13 +648,33 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
             try:
                 project_id_for_task = action.get("project_id")
                 project_name = action.get("project_name")
-                
+
+                # BUG-04: any project_id emitted by the LLM MUST belong to this
+                # company user. Without this check the pilot happily created
+                # tasks against arbitrary project IDs (including projects owned
+                # by other tenants). If ownership check fails, drop the id so
+                # we fall through to name-based resolution and — if that also
+                # misses — reject the whole task rather than silently
+                # redirecting it to some other project.
+                if project_id_for_task:
+                    owns_project = Project.objects.filter(
+                        id=project_id_for_task,
+                        created_by_company_user=company_user,
+                    ).exists()
+                    if not owns_project:
+                        logger.warning(
+                            "Project Pilot: rejecting task '%s' — project_id %s "
+                            "does not exist or is not owned by company_user %s.",
+                            action.get("task_title"), project_id_for_task, company_user.id,
+                        )
+                        project_id_for_task = None
+
                 # If project_id is null but project_name is provided, look it up
                 if not project_id_for_task and project_name:
                     if project_name in created_projects:
                         project_id_for_task = created_projects[project_name]
                     else:
-                        # Try to find existing project
+                        # Try to find existing project (already company-scoped)
                         try:
                             existing_project = Project.objects.get(
                                 name=project_name,
@@ -663,17 +683,40 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
                             project_id_for_task = existing_project.id
                         except Project.DoesNotExist:
                             pass
-                
-                # If still no project_id, use the default (first created project)
-                if not project_id_for_task and default_project_id:
+
+                # BUG-04: silent fallback to `default_project_id` (the first
+                # project we happened to create this turn) has caused tasks to
+                # land on the wrong project. Only fall back when the LLM
+                # provided NO project reference at all AND we created exactly
+                # one project this turn (unambiguous), so an explicit but
+                # mistyped project_name still surfaces as an error.
+                if (
+                    not project_id_for_task
+                    and not action.get("project_id")
+                    and not project_name
+                    and default_project_id
+                    and len(created_projects) == 1
+                ):
                     project_id_for_task = default_project_id
-                    logger.info(f"Using default project {project_id_for_task} for task '{action.get('task_title')}'")
-                
+                    logger.info(
+                        "Project Pilot: task '%s' had no project reference; "
+                        "attaching to the single project created this turn (id=%s).",
+                        action.get("task_title"), project_id_for_task,
+                    )
+
                 if not project_id_for_task:
+                    hint = (
+                        f"project_name '{project_name}' was not found in this workspace"
+                        if project_name
+                        else "no project_id or project_name was specified"
+                    )
                     action_results.append({
                         "action": "create_task",
                         "success": False,
-                        "error": f"Could not determine project for task '{action.get('task_title')}'. No project was created or specified.",
+                        "error": (
+                            f"Rejected task '{action.get('task_title')}': target "
+                            f"project not found — {hint}."
+                        ),
                     })
                     continue
                 
