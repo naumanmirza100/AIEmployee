@@ -59,10 +59,15 @@ def project_manager_dashboard(request):
         projects = Project.objects.filter(created_by_company_user=company_user)
         tasks = Task.objects.filter(project__created_by_company_user=company_user)
         
-        # Calculate statistics
+        # Calculate statistics.
+        # Note: dashboard tiles read these counts directly (BUG-03 fix) —
+        # `projects_data` below is capped at 10 for the "recent projects"
+        # panel, and using its length for the tiles caused the counter
+        # to freeze at 10.
         stats = {
             'total_projects': projects.count(),
-            'active_projects': projects.filter(status='active').count(),
+            'active_projects': projects.filter(status__in=['active', 'in_progress']).count(),
+            'planning_projects': projects.filter(status='planning').count(),
             'completed_projects': projects.filter(status='completed').count(),
             'total_tasks': tasks.count(),
             'completed_tasks': tasks.filter(status='done').count(),
@@ -109,6 +114,11 @@ def project_manager_dashboard(request):
                 'tasks_count': project_tasks.count(),
                 'tasks': tasks_data,
                 'created_at': p.created_at.isoformat() if p.created_at else None,
+                # BUG-06: expose project timeline so the task-creation form can
+                # constrain the due-date picker to the project's window.
+                'start_date': p.start_date.isoformat() if p.start_date else None,
+                'deadline': (p.effective_deadline.isoformat()
+                             if p.effective_deadline else None),
             })
         
         return Response({

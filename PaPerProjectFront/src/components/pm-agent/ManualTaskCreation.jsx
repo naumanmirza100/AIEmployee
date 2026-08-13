@@ -101,6 +101,23 @@ const ManualTaskCreation = ({ onTaskCreated, onSuccess, defaultProjectId }) => {
     return new Date(d.getTime() - off).toISOString().slice(0, 16);
   };
 
+  // BUG-06: parent project timeline drives the task due-date bounds.
+  // Project dates come from the dashboard endpoint as YYYY-MM-DD; we convert
+  // to datetime-local strings so DateTimePicker can compare against them.
+  const selectedProject = projects.find(
+    (p) => String(p.id) === String(formData.project_id),
+  );
+  const projectStartMin = selectedProject?.start_date
+    ? `${selectedProject.start_date}T00:00`
+    : null;
+  const projectDeadlineMax = selectedProject?.deadline
+    ? `${selectedProject.deadline}T23:59`
+    : null;
+  // Lower bound: the LATER of "now" and project start.
+  const dueMin = projectStartMin && projectStartMin > nowDatetimeLocal()
+    ? projectStartMin
+    : nowDatetimeLocal();
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -126,6 +143,25 @@ const ManualTaskCreation = ({ onTaskCreated, onSuccess, defaultProjectId }) => {
       toast({
         title: 'Invalid deadline',
         description: 'Task deadline cannot be in the past.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // BUG-06: task deadline must be within parent project's timeline (only
+    // enforced when the project actually has those dates set).
+    if (formData.due_date && projectStartMin && formData.due_date < projectStartMin) {
+      toast({
+        title: 'Before project start',
+        description: `This task is due before the project starts (${selectedProject.start_date}). Move it later or shift the project's start date.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (formData.due_date && projectDeadlineMax && formData.due_date > projectDeadlineMax) {
+      toast({
+        title: 'After project deadline',
+        description: `This task is due after the project deadline (${selectedProject.deadline}). Move it earlier or extend the project deadline first.`,
         variant: 'destructive',
       });
       return;
@@ -287,9 +323,19 @@ const ManualTaskCreation = ({ onTaskCreated, onSuccess, defaultProjectId }) => {
                 id="due_date"
                 value={formData.due_date}
                 onChange={(v) => handleChange('due_date', v)}
-                minValue={nowDatetimeLocal()}
+                minValue={dueMin}
+                maxValue={projectDeadlineMax || undefined}
                 placeholder="Pick a deadline"
               />
+              {/* BUG-06: surface the project's timeline so the user knows why
+                  the picker is bounded. */}
+              {(selectedProject?.start_date || selectedProject?.deadline) && (
+                <p className="text-[11px] text-white/50 mt-1">
+                  Project window:{' '}
+                  {selectedProject.start_date || 'no start set'} →{' '}
+                  {selectedProject.deadline || 'no deadline set'}
+                </p>
+              )}
             </div>
 
             {/* Estimated Hours */}

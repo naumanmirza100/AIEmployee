@@ -104,6 +104,10 @@ const PM_TAB_ITEMS = [
 
 const ProjectManagerDashboardPage = () => {
   const [projects, setProjects] = useState([]);
+  // Server-side aggregate counts (BUG-03). `projects` is capped at 10 for
+  // the "recent" panel, so tiles must read from stats to reflect the true
+  // total once the workspace has more than 10 projects.
+  const [projectStats, setProjectStats] = useState(null);
   const [loading, setLoading] = useState(true);
   // Tab state lives in the URL as `?tab=...` so browser reload keeps you on
   // the tab you were on. Falls back to 'project-pilot' when the param is
@@ -334,6 +338,9 @@ const ProjectManagerDashboardPage = () => {
         response = await companyApi.get('/project-manager/dashboard');
         if (response.status === 'success' && response.data.projects) {
           setProjects(response.data.projects);
+          // Server-computed counts across ALL projects, unaffected by
+          // the recent-projects [:10] slice (BUG-03).
+          if (response.data.stats) setProjectStats(response.data.stats);
           setLoading(false);
           return;
         }
@@ -536,7 +543,9 @@ const ProjectManagerDashboardPage = () => {
             {[
               {
                 label: 'Total Projects',
-                value: projects.length,
+                // BUG-03: prefer server-side count; fall back to local list
+                // length only when stats isn't available (non-company path).
+                value: projectStats?.total_projects ?? projects.length,
                 sub: 'All projects',
                 icon: FolderKanban,
                 color: '#a78bfa',
@@ -547,7 +556,7 @@ const ProjectManagerDashboardPage = () => {
               },
               {
                 label: 'Active Projects',
-                value: projects.filter(p => p.status === 'active' || p.status === 'in_progress').length,
+                value: projectStats?.active_projects ?? projects.filter(p => p.status === 'active' || p.status === 'in_progress').length,
                 sub: 'In progress',
                 icon: TrendingUp,
                 color: '#34d399',
@@ -558,7 +567,7 @@ const ProjectManagerDashboardPage = () => {
               },
               {
                 label: 'Planning',
-                value: projects.filter(p => p.status === 'planning').length,
+                value: projectStats?.planning_projects ?? projects.filter(p => p.status === 'planning').length,
                 sub: 'In planning phase',
                 icon: Clock,
                 color: '#fbbf24',
@@ -569,7 +578,7 @@ const ProjectManagerDashboardPage = () => {
               },
               {
                 label: 'Completed',
-                value: projects.filter(p => p.status === 'completed').length,
+                value: projectStats?.completed_projects ?? projects.filter(p => p.status === 'completed').length,
                 sub: 'Successfully delivered',
                 icon: Sparkles,
                 color: '#60a5fa',

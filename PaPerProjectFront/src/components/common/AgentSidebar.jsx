@@ -182,8 +182,32 @@ const AgentSidebar = ({
                   title={collapsed ? item.label : undefined}
                   className={`flex items-center min-w-0 flex-1 ${collapsed ? 'justify-center' : 'gap-3'}`}
                 >
-                  {Icon && <Icon className={`shrink-0 ${collapsed ? 'h-5 w-5' : 'h-[18px] w-[18px]'}`} />}
+                  <span className="relative shrink-0">
+                    {Icon && <Icon className={`${collapsed ? 'h-5 w-5' : 'h-[18px] w-[18px]'}`} />}
+                    {/* Collapsed sidebar: badge sits on the icon so it stays visible. */}
+                    {collapsed && item.badge > 0 && (
+                      <span
+                        className={`absolute -top-1 -right-1.5 min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center ${
+                          item.badgeTone === 'danger' ? 'bg-red-500 text-white' : 'bg-violet-500 text-white'
+                        }`}
+                      >
+                        {item.badge > 9 ? '9+' : item.badge}
+                      </span>
+                    )}
+                  </span>
                   {!collapsed && <span className="text-sm font-medium truncate">{item.label}</span>}
+                  {/* Expanded sidebar: badge sits at the end of the row. */}
+                  {!collapsed && item.badge > 0 && (
+                    <span
+                      className={`ml-auto min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center ${
+                        item.badgeTone === 'danger'
+                          ? 'bg-red-500/90 text-white'
+                          : active ? 'bg-white/20 text-white' : 'bg-violet-500/80 text-white'
+                      }`}
+                    >
+                      {item.badge > 99 ? '99+' : item.badge}
+                    </span>
+                  )}
                 </button>
                 {/* Expand/collapse chevron — only when there are children */}
                 {!collapsed && hasChildren && (

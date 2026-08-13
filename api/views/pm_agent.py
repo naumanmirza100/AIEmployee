@@ -2977,7 +2977,37 @@ def create_project_manual(request):
             if err:
                 return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
             project_data['budget_max'] = val
-        
+
+        # BUG-02: cross-field check. Max must be >= Min when both are given.
+        bmin = project_data.get('budget_min')
+        bmax = project_data.get('budget_max')
+        if bmin is not None and bmax is not None and bmax < bmin:
+            return Response({
+                'status': 'error',
+                'message': 'budget_max must be greater than or equal to budget_min.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # BUG-01: soft duplicate-name guard, scoped to this company user's
+        # projects. Client opts into the duplicate by re-sending with
+        # `confirm_duplicate_name: true` (frontend shows a confirm dialog).
+        confirm_duplicate = bool(request.data.get('confirm_duplicate_name'))
+        if not confirm_duplicate:
+            duplicate = Project.objects.filter(
+                created_by_company_user=company_user,
+                name__iexact=name,
+            ).first()
+            if duplicate:
+                return Response({
+                    'status': 'error',
+                    'code': 'duplicate_project_name',
+                    'message': (
+                        f'A project named "{duplicate.name}" already exists in '
+                        f'this workspace. Resubmit with confirm_duplicate_name=true '
+                        f'to create it anyway.'
+                    ),
+                    'data': {'existing_project_id': duplicate.id},
+                }, status=status.HTTP_409_CONFLICT)
+
         # Parse dates
         from datetime import datetime
         if deadline:
@@ -3184,7 +3214,44 @@ def create_task_manual(request):
                     task_data['due_date'] = due_date
             except Exception as e:
                 logger.warning(f"Failed to parse due_date: {e}")
-        
+
+        # BUG-06: bound task due_date by the parent project's timeline.
+        # If the project has neither start_date nor deadline, no bounds
+        # apply (project is still in a planning-only state).
+        _dd = task_data.get('due_date')
+        if _dd is not None:
+            from django.utils import timezone as _tz
+            from datetime import datetime as _dt, time as _time
+            def _to_aware_dt(d):
+                if d is None:
+                    return None
+                if hasattr(d, 'hour'):
+                    return d if _tz.is_aware(d) else _tz.make_aware(d)
+                # DateField → treat as end-of-day (23:59:59) local
+                return _tz.make_aware(_dt.combine(d, _time(23, 59, 59)))
+            proj_start = _to_aware_dt(getattr(project, 'start_date', None))
+            proj_deadline = _to_aware_dt(project.effective_deadline)
+            if proj_start and _dd < proj_start:
+                return Response({
+                    'status': 'error',
+                    'code': 'task_before_project_start',
+                    'message': (
+                        f'Task due_date ({_dd.date().isoformat()}) is before the '
+                        f'project start date ({proj_start.date().isoformat()}). '
+                        f'Move the task later or shift the project start.'
+                    ),
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if proj_deadline and _dd > proj_deadline:
+                return Response({
+                    'status': 'error',
+                    'code': 'task_after_project_deadline',
+                    'message': (
+                        f'Task due_date ({_dd.date().isoformat()}) is after the '
+                        f'project deadline ({proj_deadline.date().isoformat()}). '
+                        f'Move the task earlier or extend the project deadline first.'
+                    ),
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         # Handle estimated hours
         if estimated_hours:
             try:
@@ -3194,7 +3261,7 @@ def create_task_manual(request):
                     'status': 'error',
                     'message': 'Invalid estimated_hours value'
                 }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Create task
         task = Task.objects.create(**task_data)
         
@@ -3279,6 +3346,42 @@ FILE_MAGIC_BYTES = {
     '.pdf': b'%PDF',
     '.docx': b'PK',  # DOCX is a ZIP file
 }
+
+# BUG-07: MIME-type second layer on top of the extension whitelist. This is
+# the browser-reported content_type — trivially spoofable on its own but a
+# useful sanity check that catches "renamed .exe to .txt" style mistakes.
+# `application/octet-stream` is accepted for DOCX because some browsers
+# report Office docs as octet-stream depending on how they were saved.
+ALLOWED_FILE_MIMES = {
+    '.txt': {'text/plain', 'text/x-plain', 'application/text'},
+    '.pdf': {'application/pdf', 'application/x-pdf'},
+    '.docx': {
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/octet-stream',
+    },
+}
+
+
+def _sanitize_upload_filename(raw_name: str, fallback_ext: str) -> str:
+    """
+    BUG-07: sanitise a user-supplied upload filename before we store it on
+    disk. `os.path.basename` alone is not enough — filenames can carry null
+    bytes, control chars, embedded quotes, or be pathologically long. Also
+    guarantees a non-empty result.
+    """
+    name = os.path.basename(raw_name or '')
+    # Strip control chars (including null bytes).
+    name = re.sub(r'[\x00-\x1f\x7f]', '', name)
+    # Collapse any parent-dir sequences that survived basename() on Windows.
+    name = name.replace('..', '')
+    # Cap length preserving the extension.
+    if len(name) > 200:
+        stem, ext = os.path.splitext(name)
+        name = stem[: 200 - len(ext)] + ext
+    # If we sanitised everything away, fall back to a safe default.
+    if not name.strip().strip('.'):
+        name = f'upload{fallback_ext}'
+    return name
 
 
 def _extract_text_from_file(file):
@@ -3405,7 +3508,7 @@ def project_pilot_from_file(request):
         uploaded_file = request.FILES['file']
 
         allowed_extensions = ['.txt', '.pdf', '.docx']
-        file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+        file_extension = os.path.splitext(uploaded_file.name or '')[1].lower()
         if file_extension not in allowed_extensions:
             return Response(
                 {"status": "error",
@@ -3418,13 +3521,30 @@ def project_pilot_from_file(request):
                  "message": f"File too large ({uploaded_file.size // (1024*1024)}MB). Maximum is 10MB."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # BUG-07: MIME-type second layer. content_type is client-reported so
+        # not a security boundary on its own — the extension whitelist + the
+        # actual parser downstream (which will error on genuinely wrong
+        # content) still do the heavy lifting.
+        client_mime = (getattr(uploaded_file, 'content_type', '') or '').lower()
+        if client_mime and client_mime not in ALLOWED_FILE_MIMES.get(file_extension, set()):
+            return Response(
+                {"status": "error",
+                 "message": (
+                     f"File's declared type ({client_mime}) does not match its "
+                     f"extension ({file_extension}). Please upload a real "
+                     f"{file_extension} file."
+                 )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Persist the file under MEDIA_ROOT so the Celery worker (different
         # process, possibly different machine) can read it back.
         subdir = Path('project_pilot_uploads') / str(uuid.uuid4())
         abs_dir = Path(_dj_settings.MEDIA_ROOT) / subdir
         abs_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = os.path.basename(uploaded_file.name)
+        # BUG-07: full filename sanitisation (basename + strip control chars,
+        # cap length, ensure non-empty).
+        safe_name = _sanitize_upload_filename(uploaded_file.name, file_extension)
         abs_path = abs_dir / safe_name
         with open(abs_path, 'wb') as fh:
             for chunk in uploaded_file.chunks():
