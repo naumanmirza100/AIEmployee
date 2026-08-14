@@ -141,6 +141,10 @@
         scrollbar-width: thin;
         scrollbar-color: rgba(139,92,246,0.35) transparent;
       }
+      .custom-sidebar-scroll {
+        scrollbar-width: thin; /* Firefox */
+        scrollbar-color: rgba(139,92,246,0.45) transparent; /* Firefox */
+      }
       .custom-sidebar-scroll::-webkit-scrollbar {
         width: 5px;
       }

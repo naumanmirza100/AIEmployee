@@ -118,6 +118,13 @@ export const DocumentsPanel = ({
                 if (aiDocType === 'briefing') {
                   applyMeetingNotesToDoc(val, 'briefing');
                 }
+              } else {
+                // Switched back to "None": clear the fields that were auto-filled
+                // from the previously-linked meeting so they don't linger as a
+                // stale template input.
+                setAiDocTopics('');
+                setAiDocSummary('');
+                setAiDocContext('');
               }
             }}>
               <SelectTrigger className="bg-white/5 border-white/10 text-white">

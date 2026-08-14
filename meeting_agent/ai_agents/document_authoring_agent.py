@@ -68,7 +68,7 @@ class DocumentAuthoringAgent(BaseAgent):
             total = start_hour * 60 + start_min + offset_minutes
             return f"{total // 60:02d}:{total % 60:02d}"
 
-        attendees_for_prompt = attendees_text if has_attendees else '[Name, Role]'
+        attendees_for_prompt = attendees_text if has_attendees else 'No attendees'
 
         # No topics and no attendees — return static template, skip AI
         if not has_topics and not has_attendees:
@@ -76,7 +76,7 @@ class DocumentAuthoringAgent(BaseAgent):
 
 **Date:** {display_datetime or '[DD MMM YYYY at HH:MM]'}
 **Duration:** {duration_minutes} minutes
-**Attendees:** [Name, Role]
+**Attendees:** No attendees
 
 ---
 
@@ -202,7 +202,7 @@ STRICT RULES:
         ])
         decisions_text = '\n'.join([f"- {d}" for d in decisions[:15]])
 
-        attendees_for_prompt = ', '.join(attendees) if attendees else '[Name, Role]'
+        attendees_for_prompt = ', '.join(attendees) if attendees else 'No attendees'
 
         # If no real data at all — return a static template directly (no AI call)
         if not has_summary and not has_actions and not has_decisions:
