@@ -1354,6 +1354,23 @@ def task_prioritization(request):
             for m in members
         ]
 
+        # UX-15: refuse upfront when the target project has 0 tasks so the
+        # LLM isn't invoked with an empty list only to return a hollow
+        # "success" result. This is a project-scoped call — a global sweep
+        # (no `project_id`) can legitimately span many projects and we
+        # don't block it here.
+        if project_id and len(tasks) == 0:
+            return Response({
+                "status": "error",
+                "code": "no_tasks_to_analyse",
+                "message": (
+                    "This project has no tasks yet. Create at least one task "
+                    "before running prioritisation, bottleneck analysis, or "
+                    "delegation suggestions."
+                ),
+                "data": {"project_id": project_id, "tasks_count": 0},
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # For delegation (and to avoid empty team): include users who are assignees on project tasks but not in TeamMember
         action = request.data.get("action", "prioritize")
         if action == "delegation" or not team:
@@ -1558,8 +1575,33 @@ def generate_subtasks(request):
         ]
         
         if not tasks:
+            # UX-16: distinguish "project has 0 tasks" from "all existing
+            # tasks already have subtasks" — the old message said the latter
+            # for both cases, misleading users into thinking the generator
+            # ran when there was literally nothing to run against.
+            total_project_tasks = tasks_queryset.count()
+            if total_project_tasks == 0:
+                return Response(
+                    {
+                        "status": "error",
+                        "code": "no_tasks_to_subtask",
+                        "message": (
+                            "This project has no tasks yet. Create at least "
+                            "one task before generating subtasks."
+                        ),
+                        "data": {"saved_count": 0, "skipped_count": 0, "total_tasks": 0},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response(
-                {"status": "success", "message": "All tasks already have subtasks. No new subtasks generated.", "data": {"saved_count": 0, "skipped_count": len(tasks_with_subtasks)}},
+                {
+                    "status": "success",
+                    "message": (
+                        f"All {total_project_tasks} task(s) in this project "
+                        f"already have subtasks. Nothing to generate."
+                    ),
+                    "data": {"saved_count": 0, "skipped_count": len(tasks_with_subtasks)},
+                },
                 status=status.HTTP_200_OK,
             )
 

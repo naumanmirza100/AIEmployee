@@ -60,6 +60,46 @@ const getCompanyUser = () => {
 };
 
 /**
+ * BUG-09: shared 401/403 handler. When a request against a bearer/company
+ * session comes back unauthorised, wipe the tokens and bounce to the
+ * appropriate login page. Without this, apps kept showing the dashboard
+ * shell while every API call silently failed after the server-side
+ * session was revoked (logout in another browser, token deletion, etc.).
+ *
+ * Called from both `apiRequest` and `api.upload`. Skips redirects for
+ * the logout endpoint itself (which is allowed to fail during teardown).
+ */
+const _redirectDeadSession = (status, endpoint) => {
+  if (status !== 401 && status !== 403) return false;
+  // Logout endpoints are allowed to fail — we're already tearing down state.
+  if (typeof endpoint === 'string' && /\/(auth|company)\/logout/i.test(endpoint)) {
+    return false;
+  }
+  // Only redirect if we actually had a session to invalidate — anonymous
+  // requests hitting a protected endpoint should surface the 401 normally.
+  const hadToken = !!localStorage.getItem('auth_token');
+  const hadCompany = !!localStorage.getItem('company_auth_token');
+  if (!hadToken && !hadCompany) return false;
+
+  try {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user');
+    if (hadCompany) {
+      localStorage.removeItem('company_auth_token');
+      localStorage.removeItem('company_user');
+      localStorage.removeItem('company_purchased_modules');
+    }
+  } catch { /* ignore storage errors */ }
+
+  const target = hadCompany ? '/company/login' : '/login';
+  if (typeof window !== 'undefined' && window.location.pathname !== target) {
+    // Use replace() so Back doesn't return to the dead-auth screen.
+    window.location.replace(target);
+  }
+  return true;
+};
+
+/**
  * Base API request function
  */
 const apiRequest = async (endpoint, options = {}) => {
@@ -117,6 +157,15 @@ const apiRequest = async (endpoint, options = {}) => {
     }
     
     if (!response.ok) {
+      // BUG-09: dead session → clear tokens and bounce to login rather
+      // than letting every caller render its own 403.
+      if (_redirectDeadSession(response.status, endpoint)) {
+        const err = new Error('Your session has ended. Please log in again.');
+        err.status = response.status;
+        err.data = data;
+        err.sessionExpired = true;
+        throw err;
+      }
       // Handle error responses
       const errorMessage = data?.message || data?.error || `HTTP error! status: ${response.status}`;
       const error = new Error(errorMessage);
@@ -124,7 +173,7 @@ const apiRequest = async (endpoint, options = {}) => {
       error.data = data;
       throw error;
     }
-    
+
     return data;
   } catch (error) {
     // Check if it's a network error (CORS, connection failed, etc.)
@@ -217,14 +266,22 @@ export const api = {
       });
       
       const data = await response.json();
-      
+
       if (!response.ok) {
+        // BUG-09: same dead-session bounce as apiRequest above.
+        if (_redirectDeadSession(response.status, endpoint)) {
+          const err = new Error('Your session has ended. Please log in again.');
+          err.status = response.status;
+          err.data = data;
+          err.sessionExpired = true;
+          throw err;
+        }
         const error = new Error(data.message || `HTTP error! status: ${response.status}`);
         error.status = response.status;
         error.data = data;
         throw error;
       }
-      
+
       return data;
     } catch (error) {
       console.error('API Upload Error:', error);

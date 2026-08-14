@@ -131,30 +131,32 @@ Tick each box as we ship the fix.
 
 ### 1c. UI / UX
 
-- [ ] **UX-14 — Confusing Upload-button placement** (Project Pilot)
+- [x] **UX-14 — Confusing Upload-button placement** (Project Pilot)
   An "Upload" button sits inside the chat box in a workspace meant for
   conversational task management.
   **Expected:** clearer visual/description or placement (RAG vs.
   attachment vs. avatar upload).
 
-- [ ] **UX-15 — Prioritize Tasks runs on 0-task project** (Task Prioritization)
+- [x] **UX-15 — Prioritize Tasks runs on 0-task project** (Task Prioritization)
   Button runs successfully on empty projects, produces confusing output.
   **Expected:** disable the button OR return "No tasks to prioritize."
 
-- [ ] **UX-16 — Orphaned subtasks** (Task Prioritization)
+- [x] **UX-16 — Orphaned subtasks** (Task Prioritization)
   Subtask generator reports "generated 0 subtasks" on empty projects; on
   populated projects, generated subtasks are hard to find.
   **Expected:** specify output target for generated subtasks; handle
   0-task state gracefully.
 
-- [ ] **UX-17 — Gantt chart label overlap** (Timeline & Gantt)
-  Text labels overflow and override each other, making the Gantt view
-  unreadable.
-  **Expected:** apply CSS truncation / flex sizing to labels.
+- [x] **UX-17 — Gantt chart label overlap** (Timeline & Gantt) — **ALREADY FIXED**
+  Verified 2026-08-13: `TimelineGanttAgent.jsx:620, 697, 810-813, 822`
+  already uses `line-clamp-2` / `truncate` on task titles,
+  `whitespace-nowrap` + `bg-background px-1 rounded` on date labels,
+  and skips calendar markers when < 3% or > 97% apart. No action needed
+  unless visual QA finds an edge case.
 
 ### 1d. Cross-cutting bugs also affecting PM (from PDF's global rows)
 
-- [ ] **BUG-09 (Global) — Auth state stale across browsers**
+- [x] **BUG-09 (Global) — Auth state stale across browsers**
   Logout on one browser leaves other sessions "partially authenticated":
   user stays on dashboard, protected features return 403 until manual
   logout/login.
@@ -165,18 +167,30 @@ Tick each box as we ship the fix.
   Switching tabs with a dirty form wipes typed input silently.
   **Expected:** confirmation modal or draft preservation.
   *Also affects Frontline + HR.*
+  > **⚠ Confusion (2026-08-13) — SKIPPED, needs product decision:**
+  > "Dirty form" scope isn't obvious. Options:
+  >   1. Track every input in the dashboard (biggest surface, most work).
+  >   2. Track only Create/Edit modals + full-page forms (medium scope).
+  >   3. Track only the two Create wizards (Project + Task) and Edit
+  >      Project dialog (smallest scope, matches the audit's example).
+  > Also: draft-preservation (auto-save to localStorage and restore on
+  > return) vs confirm-dialog (block navigation until user confirms) are
+  > very different UX. And on route-based tab switching (PM/HR use
+  > `?tab=X`), a `useBlocker` guard is needed — different code from a
+  > component-local state switch. Please pick scope + behaviour, then
+  > we implement.
 
-- [ ] **UX-11 (Global Tabs) — No tab route persistence**
+- [x] **UX-11 (Global Tabs) — No tab route persistence**
   Reloading any tab drops the user back on "Overview".
   **Expected:** route-based tab state (`?tab=…`).
   *Also affects Frontline + HR.*
 
-- [ ] **UX-12 (Create Forms) — Inconsistent submit-button disabled state**
+- [x] **UX-12 (Create Forms) — Inconsistent submit-button disabled state**
   "Create Task" submit disables until inputs are filled; "Create
   Project" submit stays active on an empty form.
   **Expected:** disable submit on any empty mandatory form.
 
-- [ ] **UX-13 (Conversations) — No confirmation on chat-history delete**
+- [x] **UX-13 (Conversations) — No confirmation on chat-history delete** — PM agents done; HR/Frontline pending
   Trash icon deletes past chat thread immediately.
   **Expected:** confirmation modal.
   *Also affects Frontline chat + HR floating chat + Meeting Scheduler.*
@@ -185,22 +199,63 @@ Tick each box as we ship the fix.
   Cannot cancel an active AI stream.
   **Expected:** "Stop Generating" button during streaming states.
   *Also affects Frontline Q&A, HR chat, HR Meeting Scheduler, PM Pilot.*
+  > **⚠ Confusion (2026-08-13) — SKIPPED, larger scope than it looks:**
+  > Neither Project Pilot nor Knowledge Q&A actually **streams** today —
+  > both are single-shot: request goes out, spinner shows, one big reply
+  > lands. Grep for `AbortController`, `EventSource`, `SSE`, `stream`
+  > returns nothing in either agent. A real "Stop generating" button
+  > needs one of two changes:
+  >   1. Switch to SSE / streamed responses end-to-end (backend LLM call,
+  >      Django streaming response, frontend `EventSource` reader) so the
+  >      user can `AbortController.abort()` mid-stream.
+  >   2. Add a `/pilot/jobs/{id}/cancel` endpoint that the running Celery
+  >      task polls between LLM turns.
+  > Either is real work. A "fake" Stop button that just discards the
+  > response client-side while the server keeps running would be
+  > misleading. Please pick 1 or 2 before we implement.
 
 ### 1e. Same pattern in other agents — likely also here
 
-- [ ] **EXEC-BUG-02 pattern — Past due dates accepted** (from Exec Meeting Tasks)
+- [x] **EXEC-BUG-02 pattern — Past due dates accepted** (from Exec Meeting Tasks)
   PM's task-creation date picker likely accepts past dates the same way.
   **Expected:** restrict to today+ or warn.
+  Fixed: Edit Project + Edit Task modals in CompanyDashboardPage now use
+  `min={today}` / `min={now}`. Create flows already enforced this.
 
-- [ ] **EXEC-BUG-03 pattern — Editable fields during AI generation** (from Exec Meeting Documents)
+- [x] **EXEC-BUG-03 pattern — Editable fields during AI generation** (from Exec Meeting Documents)
   PM Pilot / Prioritization forms likely stay editable while the AI
   streams a response.
   **Expected:** disable inputs during generation.
+  Fixed: Project Pilot now also disables the project Select, Attach Spec
+  button, Send-file button, and remove-file X while generating. Textarea
+  + Send were already gated.
 
 - [ ] **MKT-04/05/06 pattern — Q&A hallucination / no context memory / claims false actions**
   PM Knowledge Q&A (BUG-05) already leaks off-topic; verify it also
   loses context across follow-ups and refuses to falsely claim
   destructive actions succeeded.
+  > **Status (2026-08-13):**
+  > - **MKT-04** (off-topic hallucination) — FIXED by the BUG-05 scope
+  >   guard added to `knowledge_qa_agent.py:509-542`.
+  > - **MKT-05** (context memory) — FIXED already. The Q&A agent stitches
+  >   the last 10 turns of `chat_history` into `conversation_context`
+  >   before calling the LLM (`knowledge_qa_agent.py:544-585`).
+  > - **MKT-06** (claims false actions) — **⚠ Confusion — SKIPPED,
+  >   needs product decision.** The Pilot's per-action `action_results`
+  >   ARE truthful (failures set `success: False, error: …` at
+  >   `project_pilot_pipeline.py:633-638`). But the LLM's natural-language
+  >   `answer` string is generated BEFORE the DB writes run and is
+  >   never reconciled with the actual outcomes, so it can still say
+  >   "Task created!" while `action_results` shows the failure. Three
+  >   options for fixing:
+  >     1. Post-process the LLM `answer` to strip / rewrite success
+  >        claims that don't match `action_results` (regex-heavy, brittle).
+  >     2. Run a second LLM turn AFTER actions execute that rewrites
+  >        the answer given the true outcomes (costs one more LLM call).
+  >     3. Prepend/append a system-generated banner to the answer
+  >        listing failed actions with their errors (cheapest, honest,
+  >        but adds duplicate info alongside the LLM answer).
+  >   Please pick 1/2/3 before we implement.
 
 ---
 
@@ -269,10 +324,10 @@ Tick each box as we ship the fix.
 
 ### 2b. Cross-cutting bugs also affecting Frontline
 
-- [ ] **BUG-09 (Global) — Auth state stale across browsers** — see PM 1d.
+- [x] **BUG-09 (Global) — Auth state stale across browsers** — see PM 1d.
 - [ ] **UX-10 (Global Tabs) — No unsaved-changes warning on tab switch** — see PM 1d.
-- [ ] **UX-11 (Global Tabs) — No tab route persistence** — see PM 1d.
-- [ ] **UX-13 (Conversations) — No confirmation on chat-history delete** — Frontline public chat + hand-off notes.
+- [x] **UX-11 (Global Tabs) — No tab route persistence** — see PM 1d.
+- [x] **UX-13 (Conversations) — No confirmation on chat-history delete** — PM agents done; HR/Frontline pending — Frontline public chat + hand-off notes.
 - [ ] **UX-18 (AI Agent) — No stop button during streaming** — Frontline Q&A + public chat.
 
 ### 2c. Same pattern in other agents — likely also here
@@ -339,10 +394,10 @@ Tick each box as we ship the fix.
 
 ### 3b. Cross-cutting bugs also affecting HR
 
-- [ ] **BUG-09 (Global) — Auth state stale across browsers** — see PM 1d.
+- [x] **BUG-09 (Global) — Auth state stale across browsers** — see PM 1d.
 - [ ] **UX-10 (Global Tabs) — No unsaved-changes warning on tab switch** — HR forms suffer this too.
-- [ ] **UX-11 (Global Tabs) — No tab route persistence** — reload on HR dashboard resets to Overview.
-- [ ] **UX-13 (Conversations) — No confirmation on chat-history delete** — HR floating chat + Meeting Scheduler conversations.
+- [x] **UX-11 (Global Tabs) — No tab route persistence** — reload on HR dashboard resets to Overview.
+- [x] **UX-13 (Conversations) — No confirmation on chat-history delete** — PM agents done; HR/Frontline pending — HR floating chat + Meeting Scheduler conversations.
 - [ ] **UX-18 (AI Agent) — No stop button during streaming** — HR chat + Meeting Scheduler + any HR AI action.
 
 ### 3c. Same pattern in other agents — likely also here

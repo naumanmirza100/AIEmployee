@@ -434,6 +434,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
 
   const deleteChat = async (e, chatId) => {
     e.stopPropagation();
+    // UX-13: confirm before destroying a chat thread — the trash icon is
+    // one click away from real conversation history and used to delete
+    // silently.
+    const chat = chats.find((c) => c.id === chatId);
+    const label = chat?.title ? `"${chat.title}"` : 'this chat';
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
     try {
       const res = await pmAgentService.deleteProjectPilotChat(chatId);
       if (res.status === 'success') {
@@ -948,13 +954,21 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             <div className="flex items-center gap-2 mb-2">
               <div data-tour-pm-pp="project-select" className="flex items-center gap-1.5 flex-1 min-w-0">
                 <InfoHint {...PM_HINTS.pmPpProjectSelect} />
-                <Select value={selectedProjectId || 'all'} onValueChange={(v) => {
-                  setSelectedProjectId(v === 'all' ? '' : v);
-                  if (v && v !== 'all') {
-                    const p = safeProjects.find((x) => String(x.id) === String(v));
-                    if (p) trackPMRecentlyViewed({ kind: 'project', id: p.id, title: p.title || p.name });
-                  }
-                }}>
+                {/* EXEC-BUG-03: freeze the project selector while the AI is
+                    generating. Changing the target project mid-flight
+                    detaches the response from the tasks the user asked
+                    about. */}
+                <Select
+                  value={selectedProjectId || 'all'}
+                  disabled={loading}
+                  onValueChange={(v) => {
+                    setSelectedProjectId(v === 'all' ? '' : v);
+                    if (v && v !== 'all') {
+                      const p = safeProjects.find((x) => String(x.id) === String(v));
+                      if (p) trackPMRecentlyViewed({ kind: 'project', id: p.id, title: p.title || p.name });
+                    }
+                  }}
+                >
                   <SelectTrigger className="h-8 text-xs flex-1 min-w-0">
                     <SelectValue placeholder="All projects" />
                   </SelectTrigger>
@@ -983,15 +997,22 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
               />
               {!selectedFile ? (
                 <div data-tour-pm-pp="file-upload" className="flex items-center gap-1.5 shrink-0">
+                  {/* UX-14: label reads "Attach spec" (not the ambiguous
+                      "Upload") so users see at a glance that the button
+                      attaches a document to the chat context — not a
+                      generic uploader. Hover-tooltip still carries the
+                      longer explanation. */}
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     className="h-8 text-xs shrink-0"
                     onClick={() => fileInputRef.current?.click()}
+                    disabled={loading}
+                    title="Attach a spec, brief, or notes (.txt / .pdf / .docx) for the agent to read"
                   >
                     <Upload className="h-3.5 w-3.5 mr-1" />
-                    Upload
+                    Attach spec
                   </Button>
                   <InfoHint {...PM_HINTS.pmPpFileUpload} />
                 </div>
@@ -999,11 +1020,16 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                 <div className="flex items-center gap-1 shrink-0">
                   <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
                   <span className="text-xs truncate max-w-[80px]">{selectedFile.name}</span>
+                  {/* EXEC-BUG-03: block file send + file-remove while an
+                      answer is streaming. Removing the file mid-upload
+                      loses the reference; sending twice queues a second
+                      job with the same file. */}
                   <Button
                     type="button"
                     size="sm"
                     className="h-7 text-xs px-2"
                     onClick={handleFileUpload}
+                    disabled={loading}
                   >
                     <Send className="h-3 w-3" />
                   </Button>
@@ -1013,6 +1039,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                     size="icon"
                     className="h-7 w-7"
                     onClick={() => { setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                    disabled={loading}
                   >
                     <X className="h-3.5 w-3.5" />
                   </Button>

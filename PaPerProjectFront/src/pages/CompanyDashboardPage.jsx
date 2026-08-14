@@ -44,6 +44,16 @@ const toLocaleDateStr = (date) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+// EXEC-BUG-02: today (YYYY-MM-DD) + now (YYYY-MM-DDTHH:mm), local TZ.
+// Used as the `min` bound on Edit Project's dates and Edit Task's due
+// date so calendar pickers don't offer past dates for newly-set values.
+const todayIsoLocal = () => toLocaleDateStr(new Date());
+const nowDatetimeLocal = () => {
+  const d = new Date();
+  const off = d.getTimezoneOffset() * 60_000;
+  return new Date(d.getTime() - off).toISOString().slice(0, 16);
+};
+
 const CompanyDashboardPage = () => {
   const navigate = useNavigate();
   const { tab: tabParam } = useParams();
@@ -3043,10 +3053,14 @@ const CompanyDashboardPage = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="project-start-date">Start Date</Label>
+                  {/* EXEC-BUG-02: start date accepts today onward — an already-
+                      past start value is kept in `value` (backend accepts it
+                      unchanged), but the picker won't offer new past dates. */}
                   <Input
                     id="project-start-date"
                     type="date"
                     value={projectForm.start_date}
+                    min={todayIsoLocal()}
                     onChange={(e) => setProjectForm({ ...projectForm, start_date: e.target.value })}
                   />
                 </div>
@@ -3056,7 +3070,7 @@ const CompanyDashboardPage = () => {
                     id="project-deadline"
                     type="date"
                     value={projectForm.deadline}
-                    min={projectForm.start_date || undefined}
+                    min={projectForm.start_date || todayIsoLocal()}
                     onChange={(e) => setProjectForm({ ...projectForm, deadline: e.target.value })}
                   />
                 </div>
@@ -3200,10 +3214,14 @@ const CompanyDashboardPage = () => {
               
               <div className="space-y-2">
                 <Label htmlFor="task-due-date">Due Date (Deadline)</Label>
+                {/* EXEC-BUG-02: due-date picker only offers now+ for new
+                    values. Existing past values remain editable (see
+                    project start_date note above). */}
                 <Input
                   id="task-due-date"
                   type="datetime-local"
                   value={taskForm.due_date}
+                  min={nowDatetimeLocal()}
                   onChange={(e) => setTaskForm({ ...taskForm, due_date: e.target.value })}
                 />
                 <p className="text-xs text-muted-foreground">

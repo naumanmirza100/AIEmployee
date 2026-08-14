@@ -322,6 +322,11 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
 
   const deleteChat = async (e, chatId) => {
     e.stopPropagation();
+    // UX-13: confirm before wiping a chat thread — the trash icon is one
+    // misclick from destroying real Q&A history.
+    const chat = chats.find((c) => c.id === chatId);
+    const label = chat?.title ? `"${chat.title}"` : 'this chat';
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
     try {
       const res = await pmAgentService.deleteKnowledgeQAChat(chatId);
       if (res.status === 'success') {
