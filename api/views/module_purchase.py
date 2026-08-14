@@ -630,6 +630,7 @@ def verify_session(request):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def get_module_prices(request):
     """Get pricing information for all modules (public endpoint).
 
@@ -670,6 +671,7 @@ def get_module_prices(request):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def get_module_plans(request, module_name):
     """Active plans for a single module (public endpoint), used by the buy card."""
     try:

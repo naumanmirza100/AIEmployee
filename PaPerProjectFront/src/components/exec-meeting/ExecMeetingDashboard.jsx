@@ -172,6 +172,10 @@ const ExecMeetingDashboard = () => {
   const [workStartHour, setWorkStartHour] = useState(9);  // task-scheduling window
   const [workEndHour, setWorkEndHour] = useState(17);
 
+  // The meeting whose detail card pop-up is open (details + participants + notes
+  // all in one modal). Clicking a meeting row opens it.
+  const [openMeetingId, setOpenMeetingId] = useState(null);
+
   // Participants
   const [participantsOpenId, setParticipantsOpenId] = useState(null);
   const [participantsMap, setParticipantsMap] = useState({});  // { [meetingId]: [...] }
@@ -420,17 +424,10 @@ const ExecMeetingDashboard = () => {
   };
 
   const generateAiDoc = async () => {
-    // Allow generation without a title/meeting as long as there's SOMETHING to
-    // work from (a meeting, a topic title, or type-specific content) — an
-    // untitled template then gets an auto-generated name below. Block only a
-    // completely empty form.
-    const hasAnyInput = !!aiDocMeetingId
-      || aiDocInput.trim() || aiDocTopics.trim()
-      || aiDocSummary.trim() || aiDocContext.trim() || aiDocAudience.trim() || aiDocPeriod.trim();
-    if (!hasAnyInput) {
-      toast({ title: 'Add something first', description: 'Select a meeting, or enter a topic/details to generate from.', variant: 'destructive' });
-      return;
-    }
+    // No hard requirement: with no meeting/title/content the output is simply an
+    // auto-named blank template (the backend returns a placeholder skeleton).
+    // So generating is always allowed — repeated presses keep producing
+    // Meeting Agenda 1, 2, 3… templates.
     setAiDocLoading(true);
     try {
       // If a saved meeting is selected, pull its data to enrich the prompt
@@ -583,6 +580,35 @@ const ExecMeetingDashboard = () => {
       const data = await execMeetingService.getMeetingNotes(meetingId);
       if (data.notes) setMeetingNotes(prev => ({ ...prev, [meetingId]: data.notes }));
     } catch { /* no notes yet */ }
+  };
+
+  // Open a meeting's detail card pop-up. Unlike openParticipants/openNotes (which
+  // are mutually exclusive inline toggles), this loads BOTH participants and
+  // notes so the single card can show everything. Also marks the participants/
+  // notes "open" ids so their prop-driven UI (search input, transcript box) is
+  // bound to this meeting.
+  const openMeetingCard = async (meetingId) => {
+    setOpenMeetingId(meetingId);
+    setParticipantsOpenId(meetingId);
+    setNotesOpenId(meetingId);
+    setUserSearchQ(''); setUserSearchResults([]);
+    try {
+      const data = await execMeetingService.getParticipants(meetingId);
+      setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
+    } catch { setParticipantsMap(prev => ({ ...prev, [meetingId]: [] })); }
+    if (!meetingNotes[meetingId]) {
+      try {
+        const data = await execMeetingService.getMeetingNotes(meetingId);
+        if (data.notes) setMeetingNotes(prev => ({ ...prev, [meetingId]: data.notes }));
+      } catch { /* no notes yet */ }
+    }
+  };
+
+  const closeMeetingCard = () => {
+    setOpenMeetingId(null);
+    setParticipantsOpenId(null);
+    setNotesOpenId(null);
+    setUserSearchQ(''); setUserSearchResults([]);
   };
 
   const submitTranscript = async (meetingId) => {
@@ -1109,6 +1135,7 @@ const ExecMeetingDashboard = () => {
         loadMeetings={refreshMeetings} setShowMeetingDialog={setShowMeetingDialog}
         onCreateWithAI={() => setAiCreateMode('meeting')}
         setEditingMeeting={setEditingMeeting} openParticipants={openParticipants}
+        openMeetingId={openMeetingId} openMeetingCard={openMeetingCard} closeMeetingCard={closeMeetingCard}
         openNotes={openNotes} removeParticipant={removeParticipant}
         setConfirmRemoveMap={setConfirmRemoveMap} addParticipant={addParticipant}
         setPendingAddMap={setPendingAddMap} setUserSearchQ={setUserSearchQ}

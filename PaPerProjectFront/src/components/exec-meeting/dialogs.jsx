@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select';
 import { Loader2, Sparkles, Users, ChevronRight, Wand2 } from 'lucide-react';
 import execMeetingService from '@/services/execMeetingService';
-import { DateTimePicker, DateOnlyPicker, validateMeetingLink, isWeekend, todayStr } from './shared';
+import { DateTimePicker, DateOnlyPicker, validateMeetingLink, todayStr } from './shared';
 import HoverTip from '@/components/common/HoverTip';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
 import { AllMembersPanel } from './AllMembersPanel';
@@ -231,7 +231,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
           <div className="space-y-4">
             <div className="space-y-1">
               <Label>Title *</Label>
-              <Input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Q3 Strategy Review" className="bg-white/5 border-white/10 text-white" />
+              <Input value={form.title} onChange={e => set('title', e.target.value)} disabled={loading} placeholder="Q3 Strategy Review" className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed" />
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between">
@@ -248,16 +248,16 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
                   </button>
                 </HoverTip>
               </div>
-              <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Jot a few points — title + these will be expanded into a description and agenda" rows={3}
-                className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
+              <Textarea value={form.description} onChange={e => set('description', e.target.value)} disabled={loading} placeholder="Jot a few points — title + these will be expanded into a description and agenda" rows={3}
+                className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
             </div>
             <div className="space-y-1">
               <Label>Date & Time *</Label>
-              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} />
+              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} disabled={loading} />
             </div>
             <div className="space-y-1">
               <Label>Duration</Label>
-              <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
+              <Select value={form.duration_minutes} disabled={loading} onValueChange={v => set('duration_minutes', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
@@ -305,9 +305,10 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
               <Input
                 value={searchQ}
                 onChange={e => searchUsers(e.target.value)}
+                disabled={loading}
                 placeholder="Type name or email to add…"
                 autoComplete="off"
-                className="bg-white/5 border-white/10 text-white text-sm" />
+                className="bg-white/5 border-white/10 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed" />
               {searchLoading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
               {searchResults.length > 0 && (
                 <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
@@ -335,9 +336,9 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
               <p className="text-white/20 text-xs mt-2">Search above to add team members.</p>)}
            <div className="space-y-1">
               <Label>Video Call Link <span className="text-white/30 text-xs">(leave blank to auto-generate)</span></Label>
-              <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
+              <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)} disabled={loading}
                 placeholder="https://meet.google.com/xxx-yyyy-zzz"
-                className={`bg-white/5 border-white/10 text-white ${linkError ? 'border-red-500/60' : ''}`} />
+                className={`bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed ${linkError ? 'border-red-500/60' : ''}`} />
               {linkError && <p className="text-red-400 text-[11px] mt-0.5">{linkError}</p>}
               <p className="text-white/25 text-[10px]">Supported: Google Meet, Zoom, Teams, Jitsi, Webex</p>
             </div>
@@ -553,8 +554,8 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
           <div className="space-y-4">
             <div className="space-y-1">
               <Label>Title *</Label>
-              <Input value={form.title} onChange={e => set('title', e.target.value)}
-                className="bg-white/5 border-white/10 text-white" />
+              <Input value={form.title} onChange={e => set('title', e.target.value)} disabled={loading}
+                className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed" />
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between">
@@ -563,7 +564,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
                   <button
                     type="button"
                     onClick={handleGenerateDescription}
-                    disabled={generatingDesc}
+                    disabled={generatingDesc || loading}
                     className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
                   >
                     {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
@@ -571,12 +572,12 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
                   </button>
                 </HoverTip>
               </div>
-              <Textarea value={form.description} onChange={e => set('description', e.target.value)}
-                rows={3} className="bg-white/5 border-white/10 text-white [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
+              <Textarea value={form.description} onChange={e => set('description', e.target.value)} disabled={loading}
+                rows={3} className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" />
             </div>
             <div className="space-y-1">
               <Label>Date & Time *</Label>
-              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} />
+              <DateTimePicker value={form.scheduled_at} onChange={v => set('scheduled_at', v)} disabled={loading} />
             </div>
           </div>
 
@@ -584,7 +585,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
           <div className="space-y-4">
             <div className="space-y-1">
               <Label>Duration</Label>
-              <Select value={form.duration_minutes} onValueChange={v => set('duration_minutes', v)}>
+              <Select value={form.duration_minutes} disabled={loading} onValueChange={v => set('duration_minutes', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {['15','30','45','60','90','120','180'].map(d => (
@@ -595,7 +596,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
             </div>
             <div className="space-y-1">
               <Label>Status</Label>
-              <Select value={form.status} onValueChange={v => set('status', v)}>
+              <Select value={form.status} disabled={loading} onValueChange={v => set('status', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {['scheduled','in_progress','completed','cancelled'].map(s => (
@@ -606,9 +607,9 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
             </div>
             <div className="space-y-1">
               <Label>Video Call Link</Label>
-              <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)}
+              <Input value={form.meeting_link} onChange={e => set('meeting_link', e.target.value)} disabled={loading}
                 placeholder="https://meet.google.com/xxx"
-                className={`bg-white/5 border-white/10 text-white ${linkError ? 'border-red-500/60' : ''}`} />
+                className={`bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed ${linkError ? 'border-red-500/60' : ''}`} />
               {linkError && <p className="text-red-400 text-[11px] mt-0.5">{linkError}</p>}
               <p className="text-white/25 text-[10px]">Supported: Google Meet, Zoom, Teams, Jitsi, Webex</p>
             </div>
@@ -765,6 +766,8 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const [assignees, setAssignees] = useState([]);
   const [generatingDesc, setGeneratingDesc] = useState(false);
+  // When adding a subtask, allow its due date to be after the parent's.
+  const [allowAfterParent, setAllowAfterParent] = useState(false);
 
   // On every open, (re)initialise the form from the AI draft if there is one,
   // or to a clean blank state if there isn't. The dialog is not unmounted when
@@ -785,6 +788,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
       setForm({ title: '', description: '', priority: 'medium', due_date: '' });
       setAssignees([]);
     }
+    setAllowAfterParent(false);
     setShowAllMembers(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, prefill]);
@@ -834,13 +838,10 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
 
   const handleSubmit = async () => {
     if (!form.title) { toast({ title: 'Title is required', variant: 'destructive' }); return; }
-    if (isWeekend(form.due_date)) {
-      toast({ title: 'Weekend deadline', description: 'Task deadlines can\'t fall on a weekend. Pick a weekday.', variant: 'destructive' });
-      return;
-    }
-    // A subtask can't be due after its parent task.
-    if (parentTask?.due_date && form.due_date && form.due_date > parentTask.due_date) {
-      toast({ title: 'Due date too late', description: `Subtask can't be due after the parent task (${parentTask.due_date}).`, variant: 'destructive' });
+    // A subtask can't be due after its parent task — unless the user ticked
+    // "Allow due date after parent".
+    if (!allowAfterParent && parentTask?.due_date && form.due_date && form.due_date > parentTask.due_date) {
+      toast({ title: 'Due date too late', description: `Subtask can't be due after the parent task (${parentTask.due_date}). Tick "Allow due date after parent" to override.`, variant: 'destructive' });
       return;
     }
     // Warn (but allow) when the due date is in the past. due_date is a plain
@@ -859,6 +860,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
       await execMeetingService.createTask({
         ...form,
         parent_task_id: parentTask?.id || null,
+        allow_after_parent: allowAfterParent,
         assignees: assignees.map(a => ({ id: a.id, user_type: a.user_type || 'company_user' })),
       });
       toast({ title: parentTask ? 'Subtask created!' : 'Task created!' });
@@ -913,7 +915,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
         <div className="space-y-4 py-2">
           <div className="space-y-1">
             <Label>Title *</Label>
-            <Input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Review Q3 report" className="bg-white/5 border-white/10 text-white" />
+            <Input value={form.title} onChange={e => set('title', e.target.value)} disabled={loading} placeholder="Review Q3 report" className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed" />
           </div>
           <div className="space-y-1">
             <div className="flex items-center justify-between">
@@ -930,12 +932,12 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
                 </button>
               </HoverTip>
             </div>
-            <Textarea value={form.description} onChange={e => set('description', e.target.value)} placeholder="Optional — leave blank and Generate with AI drafts it from the task name, or jot a few points for more context" className="bg-white/5 border-white/10 text-white" rows={3} />
+            <Textarea value={form.description} onChange={e => set('description', e.target.value)} disabled={loading} placeholder="Optional — leave blank and Generate with AI drafts it from the task name, or jot a few points for more context" className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed" rows={3} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Priority</Label>
-              <Select value={form.priority} onValueChange={v => set('priority', v)}>
+              <Select value={form.priority} disabled={loading} onValueChange={v => set('priority', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {['low','medium','high'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -944,9 +946,25 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
             </div>
             <div className="space-y-1">
               <Label>Due Date</Label>
-              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} disableWeekends />
+              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} disabled={loading} />
               {parentTask?.due_date && (
-                <p className="text-white/30 text-[10px]">Must be on or before parent's due date: {parentTask.due_date}</p>
+                <>
+                  <label className="flex items-center gap-2 mt-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={allowAfterParent}
+                      onChange={e => setAllowAfterParent(e.target.checked)}
+                      disabled={loading}
+                      className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-violet-500 cursor-pointer disabled:cursor-not-allowed"
+                    />
+                    <span className="text-white/60 text-[11px]">Allow due date after parent</span>
+                  </label>
+                  <p className="text-white/30 text-[10px]">
+                    {allowAfterParent
+                      ? `Any date allowed (parent is due ${parentTask.due_date}).`
+                      : `Must be on or before parent's due date: ${parentTask.due_date}`}
+                  </p>
+                </>
               )}
             </div>
           </div>
@@ -1004,6 +1022,9 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   const [assignees, setAssignees] = useState([]);
   // "View all members" side panel (rendered at dialog level, beside the form).
   const [showAllMembers, setShowAllMembers] = useState(false);
+  // Must live above the early `return null` below — a hook after a conditional
+  // return breaks the rules-of-hooks ("rendered more hooks…") error.
+  const [pastDateConfirm, setPastDateConfirm] = useState(false);
   const aKey = (u) => `${u?.user_type || 'company_user'}-${u?.id}`;
   const toggleAssignee = (u) => {
     setAssignees(prev =>
@@ -1051,13 +1072,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
     }
   };
 
-  const [pastDateConfirm, setPastDateConfirm] = useState(false);
-
   const handleSave = async () => {
-    if (isWeekend(form.due_date)) {
-      toast({ title: 'Weekend deadline', description: 'Task deadlines can\'t fall on a weekend. Pick a weekday.', variant: 'destructive' });
-      return;
-    }
     // Warn (but allow) when the due date is newly set to a past date. Skip when
     // the date is unchanged from the original, so editing other fields on an
     // already-past task doesn't nag.
@@ -1096,7 +1111,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
         <div className="space-y-4 py-2">
           <div className="space-y-1">
             <Label>Title *</Label>
-            <Input value={form.title} onChange={e => set('title', e.target.value)} className="bg-white/5 border-white/10 text-white" />
+            <Input value={form.title} onChange={e => set('title', e.target.value)} disabled={saving} className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed" />
           </div>
           <div className="space-y-1">
             <div className="flex items-center justify-between">
@@ -1105,7 +1120,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
                 <button
                   type="button"
                   onClick={handleGenerateDescription}
-                  disabled={generatingDesc}
+                  disabled={generatingDesc || saving}
                   className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
                 >
                   {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
@@ -1113,12 +1128,12 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
                 </button>
               </HoverTip>
             </div>
-            <Textarea value={form.description} onChange={e => set('description', e.target.value)} className="bg-white/5 border-white/10 text-white" rows={3} />
+            <Textarea value={form.description} onChange={e => set('description', e.target.value)} disabled={saving} className="bg-white/5 border-white/10 text-white disabled:opacity-60 disabled:cursor-not-allowed" rows={3} />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
               <Label>Status</Label>
-              <Select value={form.status} onValueChange={v => set('status', v)}>
+              <Select value={form.status} disabled={saving} onValueChange={v => set('status', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {['todo','in_progress','review','done','blocked'].map(s => (
@@ -1129,7 +1144,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
             </div>
             <div className="space-y-1">
               <Label>Priority</Label>
-              <Select value={form.priority} onValueChange={v => set('priority', v)}>
+              <Select value={form.priority} disabled={saving} onValueChange={v => set('priority', v)}>
                 <SelectTrigger className="bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {['low','medium','high'].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -1138,7 +1153,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
             </div>
             <div className="space-y-1">
               <Label>Due Date</Label>
-              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} disableWeekends />
+              <DateOnlyPicker value={form.due_date} onChange={v => set('due_date', v)} disabled={saving} />
             </div>
           </div>
           <div className="space-y-1">
