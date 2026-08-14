@@ -148,9 +148,6 @@ import { useTranslation } from 'react-i18next';
             <Route path="/candidate-portal" element={<CandidatePortalPage />} />
             <Route path="/candidate-portal/:token" element={<CandidatePortalPage />} />
 
-            {/* Candidate detail is a standalone full page (outside the agent shell) */}
-            <Route path="/recruitment/candidates/:id" element={<CandidateDetailPage />} />
-
             {/* ── Shared agent shell: navbar + left sidebar mount ONCE; only the
                  routed content below swaps when moving between agents. ── */}
             <Route element={<AgentLayout />}>
@@ -173,6 +170,7 @@ import { useTranslation } from 'react-i18next';
               <Route path="/recruitment/saved-prompts" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/job-descriptions" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/candidates" element={<RecruitmentDashboard />} />
+              <Route path="/recruitment/candidates/:id" element={<CandidateDetailPage />} />
               <Route path="/recruitment/interviews" element={<RecruitmentDashboard />} />
               <Route path="/recruitment/settings" element={<Navigate to="/recruitment/settings/email" replace />} />
               <Route path="/recruitment/settings/email" element={<RecruitmentDashboard />} />

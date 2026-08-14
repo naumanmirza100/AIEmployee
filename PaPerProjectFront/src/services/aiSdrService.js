@@ -183,6 +183,16 @@ export const researchLeads = async ({ count = 20, source = 'auto' } = {}) => {
   }
 };
 
+/** Import leads already generated in the Apify Console (works on the free plan). */
+export const fetchApifyLeads = async ({ count = 200, actor } = {}) => {
+  try {
+    return await companyApi.post('/sdr/leads/fetch-apify/', actor ? { count, actor } : { count });
+  } catch (error) {
+    console.error('Fetch Apify leads error:', error);
+    throw error;
+  }
+};
+
 export const getResearchSources = async () => {
   try {
     return await companyApi.get('/sdr/leads/research/sources/');
