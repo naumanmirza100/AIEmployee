@@ -169,6 +169,7 @@
 
 # # DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+
 # # # Auth settings
 # # LOGIN_REDIRECT_URL = '/dashboard/'  # After login, go to dashboard
 # # LOGOUT_REDIRECT_URL = '/'  # After logout, go to home
@@ -474,11 +475,13 @@ LOGIN_URL = '/login/'
 # AI / API Settings
 # --------------------
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
-# NOTE: `llama-3.1-8b-instant` started returning 404 model_not_found from Groq
-# (retired / no key access), so the default is now llama-3.3-70b-versatile — a
-# currently-supported Groq production model. Override via env if needed.
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')
-GROQ_FALLBACK_MODEL = os.getenv('GROQ_FALLBACK_MODEL', 'llama-3.3-70b-versatile')
+# NOTE: The company's managed Groq key has NO access to any llama-* chat model
+# (verified via the /models endpoint — only gpt-oss / compound / qwen / audio
+# models are granted), so llama-3.1-8b-instant and llama-3.3-70b-versatile both
+# 404 with model_not_found. Default is now openai/gpt-oss-20b, which the key can
+# actually use. Override via env if a different key exposes other models.
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'openai/gpt-oss-20b')
+GROQ_FALLBACK_MODEL = os.getenv('GROQ_FALLBACK_MODEL', 'openai/gpt-oss-120b')
 
 # Per-agent LLM configuration overrides
 # Keys: agent class name (lowercase), Values: { model, temperature, max_tokens }
