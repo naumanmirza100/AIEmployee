@@ -55,7 +55,7 @@ class MarketingBaseAgent:
             self.embedding_model = getattr(settings, 'OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')
             self.model = None
         else:
-            self.model = model or 'llama-3.1-8b-instant'
+            self.model = model or getattr(settings, 'GROQ_MODEL', 'llama-3.3-70b-versatile')
             self.embedding_model = None
 
         self.agent_name = self.__class__.__name__
@@ -125,7 +125,7 @@ class MarketingBaseAgent:
         if resolved_client is not None:
             call_client = resolved_client
             if key_ctx.provider == 'groq':
-                model_to_use = model or self.model or getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+                model_to_use = model or self.model or getattr(settings, 'GROQ_MODEL', 'llama-3.3-70b-versatile')
             else:
                 model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
         else:

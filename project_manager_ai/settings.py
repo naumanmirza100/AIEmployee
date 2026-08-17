@@ -474,7 +474,10 @@ LOGIN_URL = '/login/'
 # AI / API Settings
 # --------------------
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
+# NOTE: `llama-3.1-8b-instant` started returning 404 model_not_found from Groq
+# (retired / no key access), so the default is now llama-3.3-70b-versatile — a
+# currently-supported Groq production model. Override via env if needed.
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')
 GROQ_FALLBACK_MODEL = os.getenv('GROQ_FALLBACK_MODEL', 'llama-3.3-70b-versatile')
 
 # Per-agent LLM configuration overrides
