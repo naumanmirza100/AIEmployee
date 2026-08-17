@@ -67,6 +67,131 @@ DEFAULT_WIDGET_CONFIG: Dict[str, Any] = {
 _DAY_KEYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
 
 
+# --- FRONTLINE-BUG-04: theme validation ------------------------------------
+# The Chat Widget config used to accept any string in colour / length fields
+# (e.g. `primary_color: "1@@@3"`, `border_radius: "---000"`), which then
+# rendered as invalid CSS and turned the public chat into a solid black
+# unreadable box. This module-level validator refuses obviously-invalid
+# values before they hit the DB.
+
+import re as _re
+
+_HEX_COLOR_RE = _re.compile(r'^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$')
+# Accept CSS lengths like `12px`, `0.75rem`, `50%`, `1em`, `0`. We deliberately
+# forbid `calc()` / `var()` here — those are power-user features that don't
+# belong in a form-driven theme configuration and open XSS-adjacent surface.
+_CSS_LENGTH_RE = _re.compile(
+    r'^(?:0|-?\d+(?:\.\d+)?\s*(?:px|rem|em|%|vh|vw|pt))$'
+)
+_VALID_POSITIONS = {'bottom-right', 'bottom-left'}
+_MAX_CSS_OVERRIDES_CHARS = 5000
+_MAX_FONT_FAMILY_CHARS = 200
+_MAX_LAUNCHER_TEXT_CHARS = 80
+
+_THEME_COLOR_KEYS = (
+    'primary_color', 'header_bg', 'header_text_color',
+    'bubble_bg_user', 'bubble_bg_agent',
+)
+
+
+def validate_widget_config(payload):
+    """
+    Walk the incoming widget-config payload and reject invalid values.
+
+    Returns (cleaned_payload, error_message). If `error_message` is not
+    None, the caller should return a 400 with that message and NOT save.
+    Values that are None or empty string are treated as "clear this
+    field" and pass through unchanged.
+    """
+    if not isinstance(payload, dict):
+        return payload, None
+
+    theme = payload.get('theme')
+    if isinstance(theme, dict):
+        for key in _THEME_COLOR_KEYS:
+            val = theme.get(key)
+            if val in (None, ''):
+                continue
+            if not isinstance(val, str) or not _HEX_COLOR_RE.match(val.strip()):
+                return payload, (
+                    f'theme.{key} must be a hex colour like "#7c3aed" '
+                    f'(got: {val!r}).'
+                )
+
+        br = theme.get('border_radius')
+        if br not in (None, ''):
+            if not isinstance(br, str) or not _CSS_LENGTH_RE.match(br.strip()):
+                return payload, (
+                    'theme.border_radius must be a CSS length like "12px" '
+                    'or "0.75rem" (got: {!r}).'.format(br)
+                )
+
+        pos = theme.get('position')
+        if pos not in (None, '') and pos not in _VALID_POSITIONS:
+            return payload, (
+                f'theme.position must be one of {sorted(_VALID_POSITIONS)} '
+                f'(got: {pos!r}).'
+            )
+
+        css = theme.get('css_overrides')
+        if isinstance(css, str) and len(css) > _MAX_CSS_OVERRIDES_CHARS:
+            return payload, (
+                f'theme.css_overrides is too long ({len(css)} chars, '
+                f'max {_MAX_CSS_OVERRIDES_CHARS}).'
+            )
+
+        ff = theme.get('font_family')
+        if isinstance(ff, str) and len(ff) > _MAX_FONT_FAMILY_CHARS:
+            return payload, (
+                f'theme.font_family is too long (max {_MAX_FONT_FAMILY_CHARS} chars).'
+            )
+
+        lt = theme.get('launcher_text')
+        if isinstance(lt, str) and len(lt) > _MAX_LAUNCHER_TEXT_CHARS:
+            return payload, (
+                f'theme.launcher_text is too long (max {_MAX_LAUNCHER_TEXT_CHARS} chars).'
+            )
+
+    return payload, None
+
+
+# --- FRONTLINE-BUG-09: allowed_origins sanitisation ------------------------
+# Frontend used to send raw CSV strings verbatim, so `"a.com, , , b.com,"`
+# saved with duplicates + empty entries and broke CORS matching. This
+# helper normalises the string: split, strip, drop empties + duplicates.
+
+_ORIGIN_RE = _re.compile(
+    r'^https?://[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*(?::\d+)?$'
+)
+
+
+def sanitize_allowed_origins(raw):
+    """
+    Return (cleaned_csv, invalid_tokens).
+
+    - Splits on comma, trims whitespace, drops empties, dedupes.
+    - Validates each token loosely as scheme://host[:port] (no path).
+    - `invalid_tokens` is a list of strings that failed the URL check;
+      caller can decide whether to reject the whole request or just log.
+    """
+    if raw in (None, ''):
+        return '', []
+    if not isinstance(raw, str):
+        raw = str(raw)
+    seen = []
+    invalid = []
+    for chunk in raw.split(','):
+        token = chunk.strip().rstrip('/')
+        if not token:
+            continue
+        if not _ORIGIN_RE.match(token):
+            invalid.append(token)
+            continue
+        if token not in seen:
+            seen.append(token)
+    return ', '.join(seen), invalid
+
+
 def _deep_merge_defaults(override: Any, default: Any) -> Any:
     """Return a config dict where missing keys fall through to the defaults.
     Lists are taken whole from override if present (no per-element merge)."""

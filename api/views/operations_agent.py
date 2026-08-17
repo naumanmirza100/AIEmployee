@@ -148,8 +148,19 @@ def upload_document(request):
     except KeyServiceError:
         raise
     except Exception as e:
-        logger.error(f'Upload document error: {e}', exc_info=True)
-        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # OPS-01: don't leak `str(e)` (raw stack-trace-style errors like
+        # "Errno 13 permission denied" or "utf-8 decoding failed at
+        # position 42") to the user. Log server-side for support, return
+        # a stable friendly message.
+        logger.exception('upload_document failed (returning friendly message): %s', e)
+        return Response({
+            'status': 'error',
+            'message': (
+                "Something went wrong while processing this file. "
+                "Please try a different file, or contact support if it "
+                "keeps happening."
+            ),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])

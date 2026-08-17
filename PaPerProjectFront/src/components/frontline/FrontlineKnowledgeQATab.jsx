@@ -565,10 +565,17 @@ export default function FrontlineKnowledgeQATab(props) {
                                 // disabled prevents picking a doc that will hang.
                                 const status = d.processing_status || (d.is_indexed ? 'ready' : 'pending');
                                 const notReady = status !== 'ready';
-                                const badge = { processing: '⏳ processing', pending: '⏳ queued', failed: '⚠️ failed' }[status];
+                                // FRONTLINE-BUG-07: outdated docs stayed
+                                // selectable in the dropdown, leading to
+                                // dead-end Q&A loops on stale content.
+                                const outdated = !!d.is_outdated;
+                                const badge = outdated ? '⚠️ outdated' : {
+                                  processing: '⏳ processing', pending: '⏳ queued', failed: '⚠️ failed',
+                                }[status];
+                                const disabled = notReady || outdated;
                                 return (
-                                  <SelectItem key={d.id} value={String(d.id)} disabled={notReady}>
-                                    <span className={notReady ? 'opacity-60' : ''}>
+                                  <SelectItem key={d.id} value={String(d.id)} disabled={disabled}>
+                                    <span className={disabled ? 'opacity-60' : ''}>
                                       {d.title || `Document ${d.id}`}
                                       {badge ? ` — ${badge}` : ''}
                                     </span>

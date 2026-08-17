@@ -263,22 +263,22 @@ Tick each box as we ship the fix.
 
 ### 2a. Explicit Frontline bugs (FRONTLINE-BUG-01 … 12)
 
-- [ ] **FRONTLINE-BUG-01 — "Accept Hand-off" crashes the panel** (Hand-offs Tab)
+- [x] **FRONTLINE-BUG-01 — "Accept Hand-off" crashes the panel** (Hand-offs Tab)
   React error boundary: `RotateCcw is not defined`.
   **Expected:** ticket assignment updates; status smoothly transitions
   to active without crash.
 
-- [ ] **FRONTLINE-BUG-02 — "Reassign" throws JS TypeError** (Hand-offs Tab)
+- [x] **FRONTLINE-BUG-02 — "Reassign" throws JS TypeError** (Hand-offs Tab)
   `frontlineAgentService.listWorkflowCompanyUs...is not a function` —
   typo/missing export.
   **Expected:** dropdown of available team members.
 
-- [ ] **FRONTLINE-BUG-03 — Public Chat crashes on gibberish input** (Public Chat Widget)
+- [x] **FRONTLINE-BUG-03 — Public Chat crashes on gibberish input** (Public Chat Widget)
   Random text → backend 500 → "Failed to process question" red box.
   **Expected:** graceful fallback message: "I didn't quite catch that.
   Could you please rephrase?"
 
-- [ ] **FRONTLINE-BUG-04 — Chat Widget saves corrupted CSS** (Chat Widget Config)
+- [x] **FRONTLINE-BUG-04 — Chat Widget saves corrupted CSS** (Chat Widget Config)
   Garbage like `---000` for font or `1@@@3` for colors saves without
   validation; public chat renders as a solid unreadable box.
   **Expected:** validate hex colors + CSS length units; block save on
@@ -288,39 +288,66 @@ Tick each box as we ship the fix.
   Agent does semantic search instead of registry lookup — returns
   random chunks from unrelated PDFs.
   **Expected:** query the document metadata table directly.
+  > **⚠ Confusion (2026-08-13) — SKIPPED, needs product decision:**
+  > `answer_question` in `core/Frontline_agent/frontline_agent.py:111-334`
+  > is a single-LLM-call retrieval flow with no OpenAI/Anthropic
+  > function-calling tool schema anywhere. Adding "list documents /
+  > get metadata" is a **design decision** with two very different
+  > shapes:
+  >   1. **Tool-use path** — convert the Q&A agent to a
+  >      function-calling loop so the LLM can call
+  >      `list_documents()` / `get_document_metadata(name)` when the
+  >      user asks about the KB itself. Real refactor of the LLM
+  >      pipeline + prompt.
+  >   2. **UI-panel path** — leave the LLM retrieval-only, but expose
+  >      a "Documents in scope" side-panel on the Q&A tab so the user
+  >      reads the metadata directly. Cheaper, less magic, but doesn't
+  >      answer "when was test.txt uploaded?" via chat.
+  > Please pick 1 or 2 before we implement.
 
-- [ ] **FRONTLINE-BUG-06 — "Send Reply" fails on internal KB-gap tickets** (Hand-offs Tab)
+- [x] **FRONTLINE-BUG-06 — "Send Reply" fails on internal KB-gap tickets** (Hand-offs Tab)
   Internal tickets have no customer → "Send failed: No recipient available".
   **Expected:** disable Send Reply for internal tickets, or replace
   with "Internal Note / Resolve" button.
 
-- [ ] **FRONTLINE-BUG-07 — Outdated docs still selectable in Q&A dropdown** (Knowledge Q&A)
+- [x] **FRONTLINE-BUG-07 — Outdated docs still selectable in Q&A dropdown** (Knowledge Q&A)
   Marking a document outdated doesn't filter it from the "Add document"
   dropdown, causing dead-end UX loop.
   **Expected:** filter outdated files OR show them disabled with
   "(Outdated)" badge.
 
-- [ ] **FRONTLINE-BUG-08 — Analytics date picker accepts impossible dates** (Analytics Tab)
+- [x] **FRONTLINE-BUG-08 — Analytics date picker accepts impossible dates** (Analytics Tab)
   `02/31/0343` and 6-digit years like `232333` accepted, queried.
   **Expected:** validate calendar boundaries + enforce reasonable year
   range.
 
-- [ ] **FRONTLINE-BUG-09 — Allowed-origins field accepts malformed strings** (Chat Widget Config)
+- [x] **FRONTLINE-BUG-09 — Allowed-origins field accepts malformed strings** (Chat Widget Config)
   Double commas, empty entries saved verbatim → breaks CORS matching.
   **Expected:** sanitize, trim, dedupe origins on save.
 
-- [ ] **FRONTLINE-BUG-10 — Analytics confuses "Documents" with "Tickets"** (Analytics Tab)
+- [x] **FRONTLINE-BUG-10 — Analytics confuses "Documents" with "Tickets"** (Analytics Tab)
   "How many documents exist?" returns the ticket count (4) instead of
   the actual doc count (5).
   **Expected:** query the correct source OR clarify the metric name.
 
-- [ ] **FRONTLINE-BUG-11 — "Choose File" button invisible in dark mode** (Documents Tab)
+- [x] **FRONTLINE-BUG-11 — "Choose File" button invisible in dark mode** (Documents Tab)
   Dark grey button on dark grey modal — essentially unfindable.
   **Expected:** high-contrast background.
 
 - [ ] **FRONTLINE-BUG-12 — "Save Prompt" active on failed generations** (AI Graphs Tab)
   Save button remains clickable even after "No data available".
   **Expected:** disable Save on failed/empty generation.
+  > **⚠ Confusion (2026-08-13) — SKIPPED, needs repro clarification:**
+  > `FrontlineAIGraphs.jsx:402-411` already hides Save Prompt behind
+  > `{generatedChart && (…)}`, and `handleGenerate` sets
+  > `setGeneratedChart(null)` before every attempt (line 234). So an
+  > HTTP-error failure already hides the button. The reported bug
+  > probably happens on an HTTP-200 that returns an empty/malformed
+  > chart (e.g. `chart: {}` or `chart: {data: []}`). Need repro steps /
+  > sample response body so we know exactly which "empty" shape to
+  > guard against — otherwise we might over-block genuine "0 data points
+  > over this window" answers. Please confirm the reproduction flow
+  > before we implement.
 
 ### 2b. Cross-cutting bugs also affecting Frontline
 
@@ -332,12 +359,12 @@ Tick each box as we ship the fix.
 
 ### 2c. Same pattern in other agents — likely also here
 
-- [ ] **MKT-03 pattern — "Choose File" invisible / hard-to-see uploader**
+- [x] **MKT-03 pattern — "Choose File" invisible / hard-to-see uploader**
   Same as FRONTLINE-BUG-11 (Documents Tab) — Marketing Add-Leads
   uploader has the same styling bug. If we fix one shared component it
   clears both.
 
-- [ ] **OPS-01 pattern — Faulty document upload shows technical error, not human message**
+- [x] **OPS-01 pattern — Faulty document upload shows technical error, not human message**
   Ops Documents tab returns raw stack-trace-style errors on bad CSV.
   Frontline document upload has the same shape; likely same failure
   mode.
@@ -345,6 +372,21 @@ Tick each box as we ship the fix.
 - [ ] **REC-BUG-01 pattern — LLM hallucinates when data truncated / missing** — same
   class as FRONTLINE-BUG-05 (Q&A can't see doc list). Any Frontline
   agent that truncates retrieval context will hallucinate confidently.
+  > **⚠ Confusion (2026-08-13) — SKIPPED, larger refactor:**
+  > Frontline hard-slices context strings before the LLM in three
+  > places:
+  >   - `core/Frontline_agent/services.py:435` doc content `[:2000]`
+  >   - `core/Frontline_agent/services.py:648` reranker preview `[:1500]`
+  >   - `core/Frontline_agent/frontline_agent.py:863` analytics JSON
+  >     `[:4000]` and `:890` `[:3500]`
+  > All chop mid-token with no marker, and the LLM confidently
+  > hallucinates around the missing tail. The real fix is
+  > token-budget-aware trimming with an explicit `…[truncated: N chars
+  > omitted]` marker, and — for analytics — pruning fields rather than
+  > slicing serialised JSON. This is a real refactor across three
+  > files and needs a token-count strategy decision (tiktoken vs
+  > char-count approximation vs the LLM provider's own counter).
+  > Please pick before we implement.
 
 ---
 

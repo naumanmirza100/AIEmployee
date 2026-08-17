@@ -380,11 +380,25 @@ export default function FrontlineAIGraphs() {
               <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">From</Label>
-                  <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[140px]" />
+                  {/* FRONTLINE-BUG-08: cap to today + enforce From <= To. */}
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    max={dateTo || new Date().toISOString().slice(0, 10)}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="w-[140px]"
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">To</Label>
-                  <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[140px]" />
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    min={dateFrom || undefined}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="w-[140px]"
+                  />
                 </div>
                 <Button onClick={handleGenerate} disabled={generating}>
                   {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <BarChart3 className="h-4 w-4" />}
