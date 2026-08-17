@@ -137,6 +137,20 @@ def _run_daily_analytics():
         _close_db()
 
 
+def _run_token_resets():
+    """Apply any managed-token quota resets that are due, so resets happen on
+    schedule even when a company isn't actively using the agent."""
+    try:
+        from core.api_key_service import run_due_token_resets
+        result = run_due_token_resets()
+        if result and result.get('applied'):
+            logger.info("Token resets applied → %s", result)
+    except Exception as exc:
+        logger.exception("Token reset job crashed: %s", exc)
+    finally:
+        _close_db()
+
+
 # ── APScheduler event listener ───────────────────────────────────────────────
 
 def _on_job_event(event):
@@ -195,6 +209,8 @@ def start_scheduler() -> None:
             ('auto_complete',     _run_auto_complete,       3600,  120),
             ('meeting_reminders', _run_meeting_reminders,   3600,  150),
             ('daily_analytics',   _run_daily_analytics,    86400,  180),
+            # Apply due managed-token resets every 5 min (first run 45 s in).
+            ('token_resets',      _run_token_resets,        300,    45),
         ]
 
         for job_id, func, interval, delay in jobs:

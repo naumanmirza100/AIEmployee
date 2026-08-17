@@ -109,7 +109,8 @@ export const MeetingsPanel = ({
             value: filters.participant,
             onChange: v => setFilters(f => ({ ...f, participant: v })),
             placeholder: 'Any participant', allLabel: 'Any participant',
-            options: filterUsers,
+            // FilterBar expects { value, label }; the API returns { id, full_name, email }.
+            options: (filterUsers || []).map(u => ({ value: String(u.id), label: u.full_name || u.email })),
           },
         ]}
         date={filters.date}
@@ -445,6 +446,14 @@ export const MeetingsPanel = ({
                     />
                   </div>
                 )}
+
+                {/* Changes save instantly; Done just closes the panel. */}
+                <div className="flex justify-end pt-1">
+                  <Button size="sm" onClick={() => { setPeopleOpen(false); setShowAllMembers(false); }}
+                    className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
+                    <Check className="h-4 w-4" /> Done
+                  </Button>
+                </div>
               </div>
             );
           })()}
@@ -454,7 +463,7 @@ export const MeetingsPanel = ({
       {/* ── Notes modal ── */}
       <Dialog open={notesModalOpen && !!openMeeting} onOpenChange={setNotesModalOpen}>
         <DialogContent
-          className="max-w-lg w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
+          className="max-w-2xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
           {openMeeting && (() => {
@@ -462,7 +471,7 @@ export const MeetingsPanel = ({
             const notes = meetingNotes[m.id];
             return (
               <>
-                <div className="flex items-center justify-between px-6 py-4 pr-14 border-b border-white/10 flex-shrink-0">
+                <div className="flex items-center justify-between px-6 py-4 pr-20 border-b border-white/10 flex-shrink-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <FileText className="h-4 w-4 text-sky-300 flex-shrink-0" />
                     <h3 className="text-white font-semibold text-sm truncate">Notes — {m.title}</h3>
@@ -470,7 +479,7 @@ export const MeetingsPanel = ({
                   {notes && (
                     <HoverTip tip="Clear all notes, decisions and action items">
                       <button type="button" onClick={() => clearMeetingNotes(m.id)}
-                        className="text-[10px] text-white/30 hover:text-red-400 inline-flex items-center gap-1 transition-colors flex-shrink-0 ml-3">
+                        className="text-[11px] text-white/40 hover:text-red-400 inline-flex items-center gap-1 transition-colors flex-shrink-0 ml-4 border border-white/10 rounded-md px-2 py-1">
                         <Trash2 className="h-3 w-3" /> Clear
                       </button>
                     </HoverTip>
@@ -548,6 +557,14 @@ export const MeetingsPanel = ({
                       </Button>
                     </HoverTip>
                   </div>
+                </div>
+
+                {/* Notes save as you go; Done just closes the panel. */}
+                <div className="flex justify-end px-6 py-3 border-t border-white/10 flex-shrink-0">
+                  <Button size="sm" onClick={() => setNotesModalOpen(false)}
+                    className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
+                    <Check className="h-4 w-4" /> Done
+                  </Button>
                 </div>
               </>
             );

@@ -34,7 +34,6 @@ import {
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
   Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2, Lock
 } from 'lucide-react';
-import { createCheckoutSession } from '@/services/modulePurchaseService';
 
 const toLocaleDateStr = (date) => {
   const d = date instanceof Date ? date : new Date(date);
@@ -198,20 +197,13 @@ const CompanyDashboardPage = () => {
   const [loadingTicketTasks, setLoadingTicketTasks] = useState(false);
   const [resolvingTaskId, setResolvingTaskId] = useState(null);
 
-  const handlePurchaseAgain = async (moduleName) => {
-    setPurchasingModule(moduleName);
-    try {
-      const response = await createCheckoutSession(moduleName);
-      if (response.status === 'success' && response.url) {
-        window.location.href = response.url;
-      } else {
-        toast({ title: 'Error', description: response.message || 'Failed to start purchase', variant: 'destructive' });
-      }
-    } catch (error) {
-      toast({ title: 'Error', description: error.message || 'Failed to start purchase', variant: 'destructive' });
-    } finally {
-      setPurchasingModule(null);
-    }
+  const handlePurchaseAgain = (moduleName) => {
+    // Buying an agent now requires choosing one of the admin-defined plans
+    // (duration + price). Rather than starting a plan-less checkout (which the
+    // backend rejects), send the user to the AI Agents marketplace where each
+    // agent card shows its plans. Pass the module in the hash so the target can
+    // scroll to / preselect it.
+    navigate(`/#ai-modules${moduleName ? `?agent=${encodeURIComponent(moduleName)}` : ''}`);
   };
 
   const formatDate = (dateString) => {
@@ -2518,15 +2510,10 @@ const CompanyDashboardPage = () => {
                                 {canRepurchase && (
                                   <Button
                                     onClick={() => handlePurchaseAgain(agent.module_name)}
-                                    disabled={purchasingModule === agent.module_name}
                                     className="bg-violet-600 hover:bg-violet-700 text-white w-full"
                                     size="sm"
                                   >
-                                    {purchasingModule === agent.module_name ? (
-                                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                    ) : (
-                                      <RotateCcw className="h-4 w-4 mr-2" />
-                                    )}
+                                    <RotateCcw className="h-4 w-4 mr-2" />
                                     Purchase Again
                                   </Button>
                                 )}
