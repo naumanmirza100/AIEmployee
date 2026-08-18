@@ -670,6 +670,8 @@ def get_module_prices(request):
 
 
 @api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def get_module_plans(request, module_name):
     """Active plans for a single module (public endpoint), used by the buy card."""
     try:

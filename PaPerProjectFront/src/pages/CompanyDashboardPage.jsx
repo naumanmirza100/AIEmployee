@@ -34,7 +34,7 @@ import {
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
   Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2, Lock
 } from 'lucide-react';
-import { createCheckoutSession } from '@/services/modulePurchaseService';
+import { createCheckoutSession, getModulePlans } from '@/services/modulePurchaseService';
 
 const toLocaleDateStr = (date) => {
   const d = date instanceof Date ? date : new Date(date);
@@ -188,10 +188,39 @@ const CompanyDashboardPage = () => {
   const [loadingTicketTasks, setLoadingTicketTasks] = useState(false);
   const [resolvingTaskId, setResolvingTaskId] = useState(null);
 
+  // Plan picker for "Purchase Again" — checkout REQUIRES a plan_id, so we must
+  // let the user choose an admin-defined plan (duration + price) first.
+  const [planPicker, setPlanPicker] = useState(null); // { moduleName, plans, selectedPlanId }
+  const [loadingPlans, setLoadingPlans] = useState(false);
+
   const handlePurchaseAgain = async (moduleName) => {
+    // Fetch the module's plans and open the picker; only start checkout once
+    // the user has selected a plan (backend rejects an empty plan_id).
+    setLoadingPlans(true);
+    setPlanPicker({ moduleName, plans: [], selectedPlanId: null });
+    try {
+      const res = await getModulePlans(moduleName);
+      const plans = res?.plans || res?.data?.plans || [];
+      if (!plans.length) {
+        setPlanPicker(null);
+        toast({ title: 'Not available', description: res?.message || 'No plans available for this agent yet.', variant: 'destructive' });
+        return;
+      }
+      setPlanPicker({ moduleName, plans, selectedPlanId: plans[0].id });
+    } catch (error) {
+      setPlanPicker(null);
+      toast({ title: 'Error', description: error.message || 'Failed to load plans', variant: 'destructive' });
+    } finally {
+      setLoadingPlans(false);
+    }
+  };
+
+  const confirmPurchaseAgain = async () => {
+    if (!planPicker?.moduleName || !planPicker?.selectedPlanId) return;
+    const { moduleName, selectedPlanId } = planPicker;
     setPurchasingModule(moduleName);
     try {
-      const response = await createCheckoutSession(moduleName);
+      const response = await createCheckoutSession(moduleName, selectedPlanId);
       if (response.status === 'success' && response.url) {
         window.location.href = response.url;
       } else {
@@ -3240,6 +3269,58 @@ const CompanyDashboardPage = () => {
           loading={confirm.loading}
           onConfirm={confirm.onConfirm}
         />
+
+        {/* Plan picker for "Purchase Again" — user must choose a plan before checkout */}
+        <Dialog open={!!planPicker} onOpenChange={(open) => { if (!open) setPlanPicker(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Choose a plan</DialogTitle>
+              <DialogDescription>
+                Select a subscription plan to continue with this agent.
+              </DialogDescription>
+            </DialogHeader>
+
+            {loadingPlans ? (
+              <div className="py-8 text-center text-sm text-white/60">Loading plans…</div>
+            ) : (
+              <div className="flex flex-col gap-2 py-2">
+                {(planPicker?.plans || []).map((p) => {
+                  const active = p.id === planPicker?.selectedPlanId;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setPlanPicker((prev) => ({ ...prev, selectedPlanId: p.id }))}
+                      className="flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all"
+                      style={active
+                        ? { borderColor: '#a259ff', background: 'rgba(162,89,255,0.12)', boxShadow: '0 0 8px 0 #a259ff55' }
+                        : { borderColor: 'rgba(255,255,255,0.15)' }}
+                    >
+                      <div>
+                        <div className="font-medium text-white">{p.label || `${p.duration_days} days`}</div>
+                        <div className="text-xs text-white/50">{p.duration_days} days access</div>
+                      </div>
+                      <div className="text-lg font-semibold text-white">
+                        ${Number(p.price_usd).toLocaleString()}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-2 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setPlanPicker(null)}>Cancel</Button>
+              <Button
+                onClick={confirmPurchaseAgain}
+                disabled={!planPicker?.selectedPlanId || !!purchasingModule}
+                className="bg-violet-600 hover:bg-violet-700"
+              >
+                {purchasingModule ? 'Redirecting…' : 'Continue to payment'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </>
   );

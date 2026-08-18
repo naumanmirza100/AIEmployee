@@ -68,6 +68,7 @@ class SDRLead(models.Model):
     ]
     SOURCE_CHOICES = [
         ('apollo', 'Apollo.io'),
+        ('apify', 'Apify'),
         ('manual', 'Manual'),
         ('csv_import', 'CSV Import'),
         ('ai_generated', 'AI Generated'),
