@@ -203,12 +203,12 @@ def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIK
     if now < quota.next_reset_at:
         return
 
-    # Advance next_reset_at by the key's interval (default 7 days) until it is
-    # in the future. Admin-configurable per (company, agent).
+    # Next reset is anchored to when this reset actually happens (`now`), so the
+    # displayed "Last reset" and "Next reset" stay consistent: next = last +
+    # interval. (Previously it advanced the old scheduled next_reset, which could
+    # leave next_reset on a different clock time than last_reset.)
     interval_days = getattr(managed_key, 'reset_interval_days', 7) or 7
-    next_reset = quota.next_reset_at
-    while next_reset <= now:
-        next_reset = next_reset + timedelta(days=interval_days)
+    next_reset = now + timedelta(days=interval_days)
 
     # Capture how many managed tokens were used this week BEFORE we zero it,
     # so the reset-log records the real usage for the period.
@@ -262,6 +262,52 @@ def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIK
             )
     except Exception as exc:
         _log.warning("Failed to send weekly reset notification: %s", exc)
+
+
+def run_due_token_resets() -> dict:
+    """Apply every managed-token reset that is due right now.
+
+    The per-request path (`_apply_weekly_reset_if_due`) only runs when a company
+    actually uses the agent, so a company that doesn't call the agent would never
+    see its quota reset and no WeeklyResetLog row would be written. This function
+    is meant to run on a schedule (APScheduler) to apply all due resets
+    proactively, independent of usage.
+
+    Returns a small summary dict for logging.
+    """
+    import logging
+    from core.models import AgentTokenQuota, CompanyAPIKey
+    _log = logging.getLogger(__name__)
+    now = timezone.now()
+
+    applied = 0
+    checked = 0
+    # Only quotas whose reset time has passed are candidates.
+    due_quotas = AgentTokenQuota.objects.filter(
+        next_reset_at__isnull=False, next_reset_at__lte=now,
+    )
+    for quota in due_quotas:
+        checked += 1
+        managed_key = CompanyAPIKey.objects.filter(
+            company_id=quota.company_id, agent_name=quota.agent_name,
+            mode='managed', status='active',
+        ).exclude(renewal_period='none').first()
+        if not managed_key:
+            continue
+        try:
+            before = quota.next_reset_at
+            _apply_weekly_reset_if_due(quota, managed_key)
+            # _apply_weekly_reset_if_due advances next_reset_at on success.
+            if quota.next_reset_at and quota.next_reset_at != before:
+                applied += 1
+        except Exception as exc:
+            _log.warning(
+                "run_due_token_resets: reset failed for company=%s agent=%s: %s",
+                quota.company_id, quota.agent_name, exc,
+            )
+    if applied:
+        _log.info("run_due_token_resets: applied %s reset(s) of %s due", applied, checked)
+    return {'checked': checked, 'applied': applied}
 
 
 def _check_key_expiry(managed_key: 'CompanyAPIKey', company, agent_name: str) -> None:
