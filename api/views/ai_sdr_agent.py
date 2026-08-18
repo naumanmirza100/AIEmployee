@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import re
 from datetime import timedelta
 
 from django.conf import settings
@@ -133,6 +134,7 @@ def _serialize_lead(lead: SDRLead) -> dict:
         'data_quality_flags': lead.data_quality_flags if hasattr(lead, 'data_quality_flags') else [],
         'email_bounced': lead.email_bounced,
         'status': lead.status,
+        'qualification_status': lead.qualification_status,
         'source': lead.source,
         'qualified_at': lead.qualified_at.isoformat() if lead.qualified_at else None,
         'created_at': lead.created_at.isoformat(),
@@ -164,6 +166,8 @@ def _lead_stats(company_user) -> dict:
         'warm': qs.filter(temperature='warm').count(),
         'cold': qs.filter(temperature='cold').count(),
         'unscored': qs.filter(score__isnull=True).count(),
+        # Leads waiting in / running through the background qualification queue.
+        'qualifying': qs.filter(qualification_status__in=['pending', 'processing']).count(),
     }
 
 
@@ -433,42 +437,28 @@ def qualify_lead(request, lead_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def qualify_all_leads(request):
-    """Batch-qualify up to 50 unscored leads."""
+    """Queue all unscored leads for background qualification (token-safe)."""
     company_user = request.user
     try:
         icp = SDRIcpProfile.objects.filter(company_user=company_user, is_active=True).first()
         if not icp:
             return Response({'status': 'error', 'message': 'Set up your ICP profile first.'}, status=400)
 
-        unscored = SDRLead.objects.filter(company_user=company_user, score__isnull=True)[:50]
-        agent = _get_qualification_agent(company_user.company)
-        qualified = errors = 0
-
-        for lead in unscored:
-            try:
-                result = agent.qualify_lead(lead, icp)
-                lead.score = result['score']
-                lead.temperature = result['temperature']
-                lead.score_breakdown = result.get('score_breakdown', {})
-                lead.qualification_reasoning = result.get('qualification_reasoning', '')
-                lead.key_strengths = result.get('key_strengths', [])
-                lead.concerns = result.get('concerns', [])
-                lead.outreach_strategy = result.get('outreach_strategy', '')
-                lead.qualified_at = timezone.now()
-                lead.status = 'qualified'
-                lead.save()
-                qualified += 1
-            except KeyServiceError:
-                raise
-            except Exception as exc:
-                logger.error("Qualify lead %s error: %s", lead.id, exc)
-                errors += 1
+        # Put every unscored lead (that isn't already qualifying) into the queue.
+        # The scheduler drains it in small batches, retrying failures — so this
+        # never blocks or exhausts tokens in one shot.
+        queued = SDRLead.objects.filter(
+            company_user=company_user, score__isnull=True,
+        ).exclude(qualification_status__in=['pending', 'processing']).update(
+            qualification_status='pending', qualification_queued_at=timezone.now(),
+            qualification_attempts=0, qualification_error='',
+        )
 
         return Response({
             'status': 'success',
-            'message': f'Qualified {qualified} leads. {errors} errors.',
-            'qualified': qualified,
-            'errors': errors,
+            'message': f'Queued {queued} leads — they’ll be qualified in the background shortly.',
+            'qualified': 0,
+            'queued': queued,
             'stats': _lead_stats(company_user),
         })
     except KeyServiceError:
@@ -638,45 +628,35 @@ def research_leads(request):
                 )
                 created += 1
 
-            # Auto-qualify newly created leads
-            new_leads = SDRLead.objects.filter(
-                company_user=company_user, score__isnull=True
-            ).order_by('-created_at')[:created]
-
-            qualifier = _get_qualification_agent(company_user.company)
-            qualified = 0
-            for lead in new_leads:
-                try:
-                    result = qualifier.qualify_lead(lead, icp)
-                    lead.score = result['score']
-                    lead.temperature = result['temperature']
-                    lead.score_breakdown = result.get('score_breakdown', {})
-                    lead.qualification_reasoning = result.get('qualification_reasoning', '')
-                    lead.key_strengths = result.get('key_strengths', [])
-                    lead.concerns = result.get('concerns', [])
-                    lead.outreach_strategy = result.get('outreach_strategy', '')
-                    lead.qualified_at = timezone.now()
-                    lead.status = 'qualified'
-                    lead.save()
-                    qualified += 1
-                except KeyServiceError:
-                    raise
-                except Exception as exc:
-                    logger.error("Auto-qualify lead %s: %s", lead.id, exc)
+            # Queue newly created leads for background qualification instead of
+            # scoring them synchronously — the scheduler drains the queue in small
+            # batches so AI tokens aren't exhausted in one burst, and retries
+            # failures automatically. Returns instantly with no token error.
+            queued = SDRLead.objects.filter(
+                company_user=company_user, score__isnull=True, qualification_status='none',
+            ).update(qualification_status='pending', qualification_queued_at=timezone.now())
 
             job.status = 'completed'
             job.total_found = len(raw_leads)
             job.leads_created = created
-            job.leads_qualified = qualified
+            job.leads_qualified = 0
             job.source = researcher.source_label
             job.completed_at = timezone.now()
             job.save()
 
+            if queued:
+                message = (
+                    f'Found {created} leads. Qualifying {queued} in the background — '
+                    f'scores will appear shortly. Skipped {skipped_dupes} duplicates.'
+                )
+            else:
+                message = f'Found {created} leads. Skipped {skipped_dupes} duplicates.'
+
             return Response({
                 'status': 'success',
-                'message': f'Found {created} leads, qualified {qualified}. Skipped {skipped_dupes} duplicates.',
+                'message': message,
                 'leads_created': created,
-                'leads_qualified': qualified,
+                'leads_queued': queued,
                 'skipped_duplicates': skipped_dupes,
                 'source': job.source,
                 'stats': _lead_stats(company_user),
@@ -868,6 +848,7 @@ def import_leads_csv(request):
 
         created = 0
         skipped_dupes = 0
+        skipped_empty = 0
         errors = []
 
         # Pre-load existing emails once to avoid per-row DB hits
@@ -877,16 +858,51 @@ def import_leads_csv(request):
             .values_list('email', flat=True) if e
         )
 
-        for i, row in enumerate(reader, start=2):
+        def _norm_key(k):
+            # "Full Name" / "FULL_NAME" / "full-name" → "fullname"
+            return re.sub(r'[^a-z0-9]', '', (k or '').strip().lower())
+
+        # Map each CSV field to the header variations that should feed it.
+        FIELD_ALIASES = {
+            'full_name':        ['fullname', 'name', 'contactname', 'leadname'],
+            'first_name':       ['firstname', 'fname', 'givenname'],
+            'last_name':        ['lastname', 'lname', 'surname', 'familyname'],
+            'email':            ['email', 'emailaddress', 'workemail', 'businessemail', 'mail'],
+            'phone':            ['phone', 'phonenumber', 'mobile', 'mobilenumber', 'tel', 'telephone'],
+            'job_title':        ['jobtitle', 'title', 'position', 'role', 'designation'],
+            'company_name':     ['companyname', 'company', 'organization', 'organisation', 'employer', 'account'],
+            'company_industry': ['companyindustry', 'industry', 'sector', 'vertical'],
+            'company_size':     ['companysize', 'size', 'employees', 'employeecount', 'headcount'],
+            'company_location': ['companylocation', 'location', 'city', 'country', 'region', 'address'],
+            'linkedin_url':     ['linkedinurl', 'linkedin', 'linkedinprofile', 'profileurl'],
+            'company_website':  ['companywebsite', 'website', 'url', 'domain', 'web'],
+        }
+
+        for i, raw_row in enumerate(reader, start=2):
             try:
-                full_name = (
-                    row.get('full_name')
-                    or row.get('name')
-                    or f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
-                )
-                raw_size = row.get('company_size', '').strip()
-                company_size = int(raw_size) if raw_size.isdigit() else None
-                row_email = (row.get('email') or '').strip().lower()
+                # Normalise this row's keys once, then pick fields by alias.
+                norm = {_norm_key(k): (v or '').strip() for k, v in raw_row.items() if k}
+
+                def pick(field):
+                    for alias in FIELD_ALIASES.get(field, []):
+                        if norm.get(alias):
+                            return norm[alias]
+                    return ''
+
+                first_name = pick('first_name')
+                last_name = pick('last_name')
+                full_name = pick('full_name') or f"{first_name} {last_name}".strip()
+                company_name = pick('company_name')
+                row_email = pick('email').lower()
+
+                # Skip completely blank rows (no name, no company, no email).
+                if not full_name and not company_name and not row_email:
+                    skipped_empty += 1
+                    continue
+
+                raw_size = pick('company_size')
+                digits = re.sub(r'[^\d]', '', raw_size)
+                company_size = int(digits) if digits else None
 
                 # ── Duplicate guard ──────────────────────────────────────────
                 if row_email and row_email in existing_emails_lower:
@@ -899,18 +915,18 @@ def import_leads_csv(request):
 
                 SDRLead.objects.create(
                     company_user=company_user,
-                    first_name=row.get('first_name', ''),
-                    last_name=row.get('last_name', ''),
+                    first_name=first_name,
+                    last_name=last_name,
                     full_name=full_name,
-                    email=row_email or row.get('email', ''),
-                    phone=row.get('phone', ''),
-                    job_title=row.get('job_title') or row.get('title', ''),
-                    company_name=row.get('company_name') or row.get('company', ''),
-                    company_industry=row.get('company_industry') or row.get('industry', ''),
+                    email=row_email,
+                    phone=pick('phone'),
+                    job_title=pick('job_title'),
+                    company_name=company_name,
+                    company_industry=pick('company_industry'),
                     company_size=company_size,
-                    company_location=row.get('company_location') or row.get('location', ''),
-                    linkedin_url=row.get('linkedin_url') or row.get('linkedin', ''),
-                    company_website=row.get('company_website') or row.get('website', ''),
+                    company_location=pick('company_location'),
+                    linkedin_url=pick('linkedin_url'),
+                    company_website=pick('company_website'),
                     source='csv_import',
                     status='new',
                 )
@@ -920,11 +936,19 @@ def import_leads_csv(request):
             except Exception as exc:
                 errors.append(f"Row {i}: {exc}")
 
+        msg = f'Imported {created} leads. Skipped {skipped_dupes} duplicates'
+        if skipped_empty:
+            msg += f', {skipped_empty} empty rows'
+        msg += '.'
+        if created == 0 and not errors:
+            msg = ('No leads imported — check the CSV has a header row with columns like '
+                   'full_name / email / company_name (any capitalisation).')
         return Response({
             'status': 'success',
-            'message': f'Imported {created} leads. Skipped {skipped_dupes} duplicates.',
+            'message': msg,
             'created': created,
             'skipped_duplicates': skipped_dupes,
+            'skipped_empty': skipped_empty,
             'errors': errors[:5],
         })
     except KeyServiceError:

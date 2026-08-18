@@ -721,14 +721,23 @@ def company_reset_logs(request):
         q.agent_name: q.next_reset_at
         for q in AgentTokenQuota.objects.filter(company=company, next_reset_at__isnull=False)
     }
+    # Most-recent actual reset per agent (from the logged history), so the row
+    # can show "Last reset" or "Not yet reset" — mirrors the admin view.
+    from core.models import WeeklyResetLog
+    last_reset = {}
+    for r in WeeklyResetLog.objects.filter(company=company).order_by('-reset_at').values('agent_name', 'reset_at'):
+        if r['agent_name'] not in last_reset:
+            last_reset[r['agent_name']] = r['reset_at']
     upcoming = []
     for k in up_keys[:100]:
         nra = quota_next.get(k.agent_name)
         if not nra:
             continue
+        lra = last_reset.get(k.agent_name)
         upcoming.append({
             'agent_name': k.agent_name,
             'agent_label': agent_labels.get(k.agent_name, k.agent_name),
+            'last_reset_at': lra.isoformat() if lra else None,
             'next_reset_at': nra.isoformat(),
             'reset_interval_days': getattr(k, 'reset_interval_days', 7),
             'tokens_per_period': k.tokens_per_period,

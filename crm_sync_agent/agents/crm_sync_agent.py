@@ -52,6 +52,9 @@ class CRMSyncAgent:
             CRMIntegration.objects.filter(company=company, is_active=True)
         )
         self._connector_cache: dict[int, BaseCRMConnector] = {}
+        # Set True mid-cycle when the CRM reports an account object-limit error;
+        # tells the poll loop to stop processing the rest of this batch.
+        self._quota_blocked = False
 
     # ------------------------------------------------------------------ #
     # Public enqueue helpers — called by signals
@@ -196,6 +199,7 @@ class CRMSyncAgent:
         )
 
         stats = {'processed': 0, 'succeeded': 0, 'failed': 0, 'skipped': 0}
+        self._quota_blocked = False
         for item in items:
             if item.attempts >= item.max_attempts:
                 stats['skipped'] += 1
@@ -206,6 +210,19 @@ class CRMSyncAgent:
                 stats['succeeded'] += 1
             else:
                 stats['failed'] += 1
+            # If the CRM told us the account is over its object limit (e.g.
+            # HubSpot free-tier 1000-contact cap), every remaining create in
+            # this cycle will hit the same wall. Stop now instead of burning
+            # API calls and flooding the logs with identical 402s.
+            if self._quota_blocked:
+                remaining = max(0, len(items) - stats['processed'])
+                logger.warning(
+                    'CRM sync [%s]: account object limit reached — aborting cycle, '
+                    '%d item(s) deferred to next run',
+                    getattr(self.company, 'pk', self.company), remaining,
+                )
+                stats['skipped'] += remaining
+                break
         return stats
 
     def _process_item(self, item: CRMSyncQueue) -> bool:
@@ -225,12 +242,17 @@ class CRMSyncAgent:
         try:
             crm_id = self._dispatch(connector, item)
         except CRMError as exc:
+            if self._is_quota_error(exc):
+                self._quota_blocked = True
+                self._mark_limit_reached(item.integration, str(exc))
             return self._fail_item(item, str(exc), retriable=exc.retriable)
         except Exception as exc:
             logger.exception('Unexpected error processing CRM queue item %d', item.pk)
             return self._fail_item(item, f'Unexpected: {exc}', retriable=True)
 
-        # Success
+        # Success — a write went through, so the account is no longer over its
+        # limit (user freed up space / upgraded). Clear any stale limit flag.
+        self._clear_limit_reached(item.integration)
         item.status = CRMSyncQueue.STATUS_DONE
         item.error_message = ''
         item.save(update_fields=['status', 'error_message'])
@@ -481,6 +503,40 @@ class CRMSyncAgent:
             payload=payload,
         )
 
+    @staticmethod
+    def _is_quota_error(exc: CRMError) -> bool:
+        """
+        True when the CRM rejected the write because the account is over its
+        object/record limit (e.g. HubSpot free-tier 1000-contact cap). These
+        are account-wide: every other create in the same cycle will fail the
+        same way, so the caller aborts the run instead of retrying each item.
+        """
+        if getattr(exc, 'status_code', None) == 402:
+            return True
+        msg = str(exc).lower()
+        return 'exceeded the limit' in msg or 'cannot create another' in msg
+
+    @staticmethod
+    def _mark_limit_reached(integration: CRMIntegration, message: str) -> None:
+        """Flag the integration as over its object limit (idempotent)."""
+        if integration.limit_reached and integration.limit_message == message[:2000]:
+            return
+        integration.limit_reached = True
+        integration.limit_message = message[:2000]
+        if not integration.limit_reached_at:
+            integration.limit_reached_at = timezone.now()
+        integration.save(update_fields=['limit_reached', 'limit_message', 'limit_reached_at'])
+
+    @staticmethod
+    def _clear_limit_reached(integration: CRMIntegration) -> None:
+        """Clear the over-limit flag after a successful write."""
+        if not integration.limit_reached:
+            return
+        integration.limit_reached = False
+        integration.limit_message = ''
+        integration.limit_reached_at = None
+        integration.save(update_fields=['limit_reached', 'limit_message', 'limit_reached_at'])
+
     def _fail_item(self, item: CRMSyncQueue, error: str, retriable: bool) -> bool:
         if retriable and item.attempts < item.max_attempts:
             delay = _backoff_delay(item.attempts)
@@ -488,9 +544,17 @@ class CRMSyncAgent:
             item.error_message = error[:2000]
             item.scheduled_at = timezone.now() + timedelta(seconds=delay)
         else:
+            # Permanent failure (bad token / bad payload / quota exceeded / max
+            # attempts reached). Force attempts to max so the poller's
+            # `attempts__lt=max_attempts` filter never re-selects this item —
+            # otherwise a non-retriable error keeps getting re-processed every
+            # cycle until attempts organically climbs to max, spamming the CRM
+            # API and the logs with the same failure.
             item.status = CRMSyncQueue.STATUS_FAILED
             item.error_message = error[:2000]
-        item.save(update_fields=['status', 'error_message', 'scheduled_at'])
+            if item.attempts < item.max_attempts:
+                item.attempts = item.max_attempts
+        item.save(update_fields=['status', 'error_message', 'scheduled_at', 'attempts'])
         self._write_log(item, status=CRMSyncLog.STATUS_FAILED, error=error)
         logger.warning(
             'CRM sync failed [%s] item=%d attempt=%d retriable=%s: %s',

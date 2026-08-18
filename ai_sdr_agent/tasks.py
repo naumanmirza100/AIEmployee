@@ -657,3 +657,108 @@ def auto_research_leads_impl(leads_per_run: int = 10):
 @shared_task(bind=True, name='ai_sdr_agent.tasks.auto_research_leads_task', max_retries=1)
 def auto_research_leads_task(self):
     return auto_research_leads_impl()
+
+
+# ---------------------------------------------------------------------------
+# Lead qualification queue — background, batched, self-retrying
+# ---------------------------------------------------------------------------
+QUALIFY_BATCH_SIZE = 5        # leads scored per scheduler tick
+QUALIFY_MAX_ATTEMPTS = 3      # give up after this many failed attempts
+
+
+def qualify_queue_impl():
+    """Score a small batch of queued leads. Runs every ~2 min via the scheduler.
+
+    - Picks the oldest 'pending' (or retryable 'failed') leads across all
+      companies, capped at QUALIFY_BATCH_SIZE, so AI tokens are spent gradually
+      instead of all at once.
+    - On a key/quota error for a company, that company's leads are left 'pending'
+      and retried on the next tick (never burns the whole batch on a dead key).
+    - Other errors bump the attempt count; after QUALIFY_MAX_ATTEMPTS the lead is
+      marked 'failed' and stops retrying.
+    """
+    from django.db.models import Q as _Q
+    from ai_sdr_agent.models import SDRLead, SDRIcpProfile
+    from core.api_key_service import KeyServiceError
+    from api.views.ai_sdr_agent import _get_qualification_agent
+
+    now = timezone.now()
+    # pending, or failed-but-still-retryable, oldest first.
+    batch = list(
+        SDRLead.objects.filter(
+            _Q(qualification_status='pending')
+            | _Q(qualification_status='failed', qualification_attempts__lt=QUALIFY_MAX_ATTEMPTS)
+        )
+        .select_related('company_user__company')
+        .order_by('qualification_queued_at', 'created_at')[:QUALIFY_BATCH_SIZE]
+    )
+    if not batch:
+        return {'processed': 0, 'qualified': 0, 'failed': 0, 'pending': 0}
+
+    qualified = 0
+    failed = 0
+    # Cache one agent + active ICP per company; skip companies whose key is out.
+    agents: dict = {}
+    icps: dict = {}
+    blocked_companies: set = set()
+
+    for lead in batch:
+        company = lead.company_user.company
+        cu_id = lead.company_user_id
+        if cu_id in blocked_companies:
+            continue  # key already out for this company this tick
+
+        try:
+            if cu_id not in agents:
+                agents[cu_id] = _get_qualification_agent(company)
+                icps[cu_id] = SDRIcpProfile.objects.filter(
+                    company_user=lead.company_user, is_active=True
+                ).first()
+
+            lead.qualification_status = 'processing'
+            lead.save(update_fields=['qualification_status', 'updated_at'])
+
+            result = agents[cu_id].qualify_lead(lead, icps[cu_id])
+            lead.score = result['score']
+            lead.temperature = result['temperature']
+            lead.score_breakdown = result.get('score_breakdown', {})
+            lead.qualification_reasoning = result.get('qualification_reasoning', '')
+            lead.key_strengths = result.get('key_strengths', [])
+            lead.concerns = result.get('concerns', [])
+            lead.outreach_strategy = result.get('outreach_strategy', '')
+            lead.qualified_at = now
+            lead.status = 'qualified'
+            lead.qualification_status = 'done'
+            lead.qualification_error = ''
+            lead.save()
+            qualified += 1
+        except KeyServiceError as exc:
+            # Tokens/key exhausted for this company — leave the lead pending and
+            # stop touching this company for the rest of the tick.
+            lead.qualification_status = 'pending'
+            lead.qualification_error = 'AI tokens exhausted — will retry.'
+            lead.save(update_fields=['qualification_status', 'qualification_error', 'updated_at'])
+            blocked_companies.add(cu_id)
+            logger.warning("SDR qualify-queue: key/quota out for company_user=%s: %s", cu_id, exc)
+        except Exception as exc:
+            lead.qualification_attempts = (lead.qualification_attempts or 0) + 1
+            lead.qualification_error = str(exc)[:500]
+            lead.qualification_status = (
+                'failed' if lead.qualification_attempts >= QUALIFY_MAX_ATTEMPTS else 'pending'
+            )
+            lead.save(update_fields=[
+                'qualification_attempts', 'qualification_error', 'qualification_status', 'updated_at',
+            ])
+            failed += 1
+            logger.error("SDR qualify-queue: lead %s attempt %s failed: %s",
+                         lead.id, lead.qualification_attempts, exc)
+
+    remaining = SDRLead.objects.filter(qualification_status='pending').count()
+    logger.info("SDR [qualify-queue] processed=%d qualified=%d failed=%d pending_left=%d",
+                len(batch), qualified, failed, remaining)
+    return {'processed': len(batch), 'qualified': qualified, 'failed': failed, 'pending': remaining}
+
+
+@shared_task(bind=True, name='ai_sdr_agent.tasks.qualify_queue_task', max_retries=1)
+def qualify_queue_task(self):
+    return qualify_queue_impl()

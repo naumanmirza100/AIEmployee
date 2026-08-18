@@ -1637,12 +1637,8 @@ def task_list(request):
             status=status.HTTP_409_CONFLICT,
         )
 
+    # Weekend deadlines are allowed — any date may be picked for a task.
     due_date = request.data.get('due_date') or None
-    if _is_weekend(due_date):
-        return Response(
-            {'status': 'error', 'message': 'Task deadlines can\'t fall on a weekend. Pick a weekday.'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
     parent_task_id = request.data.get('parent_task_id') or None
     parent = None
     if parent_task_id:
@@ -1651,9 +1647,10 @@ def task_list(request):
         parent = get_object_or_404(ExecutiveTask, id=parent_task_id, company_user=company_user)
         if parent.parent_task_id:
             return Response({'status': 'error', 'message': 'Subtasks cannot be nested more than one level deep.'}, status=status.HTTP_400_BAD_REQUEST)
-        # A subtask must finish on or before its parent — a due date after the
-        # parent's makes no sense for a piece of that parent's work.
-        if due_date and parent.due_date:
+        # A subtask normally must finish on or before its parent. The client can
+        # opt out (checkbox) by sending allow_after_parent=true.
+        allow_after_parent = bool(request.data.get('allow_after_parent', False))
+        if not allow_after_parent and due_date and parent.due_date:
             try:
                 sub_dt = datetime.strptime(str(due_date), '%Y-%m-%d').date()
                 if sub_dt > parent.due_date:
@@ -1721,12 +1718,7 @@ def task_detail(request, task_id):
                     {'status': 'error', 'message': f'A task titled “{new_title}” already exists.'},
                     status=status.HTTP_409_CONFLICT,
                 )
-        # No weekend deadlines.
-        if 'due_date' in request.data and _is_weekend(request.data.get('due_date')):
-            return Response(
-                {'status': 'error', 'message': 'Task deadlines can\'t fall on a weekend. Pick a weekday.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # Weekend deadlines are allowed — any date may be set for a task.
         for field in ['title', 'description', 'status', 'priority', 'due_date', 'ai_reasoning']:
             if field in request.data:
                 setattr(task, field, request.data[field] or None if field == 'due_date' else request.data[field])
@@ -1811,12 +1803,11 @@ def task_prioritize_ai(request):
         agent = _get_agent('task_prioritization', company_user)
         result = agent.prioritize_tasks(tasks_data, context)
 
-        from datetime import timedelta as _timedelta
         today = timezone.now().date()
 
         def _sanitize_suggested_date(raw):
-            """AI dates can be past or on a weekend. Pull anything before today up
-            to today, then push any Saturday/Sunday forward to the next Monday."""
+            """AI dates can land in the past. Pull anything before today up to
+            today. Weekends are allowed, so they are left as-is."""
             if not raw:
                 return None
             try:
@@ -1825,8 +1816,6 @@ def task_prioritize_ai(request):
                 return None
             if d < today:
                 d = today
-            while d.weekday() >= 5:  # 5=Sat, 6=Sun -> move to Monday
-                d = d + _timedelta(days=1)
             return d
 
         # Apply AI priorities back to DB. Priority is clamped to low/medium/high
@@ -2158,8 +2147,12 @@ def document_draft(request):
             title=f"{doc_type.capitalize()} — {doc_title}",
             content=content,
             ai_generated=True,
+            # No linked meeting → this is a fill-in template, not built from
+            # real meeting data.
+            is_template=(meeting is None),
         )
         result['document_id'] = standalone.id
+        result['is_template'] = standalone.is_template
 
         if save and meeting:
             MeetingDocument.objects.create(
@@ -2223,6 +2216,7 @@ def standalone_document_list(request):
         {
             'id': d.id, 'doc_type': d.doc_type, 'title': d.title,
             'content': d.content, 'ai_generated': d.ai_generated,
+            'is_template': d.is_template,
             'created_at': d.created_at.isoformat(),
         }
         for d in page_items
@@ -2247,6 +2241,7 @@ def standalone_document_detail(request, doc_id):
         'document': {
             'id': doc.id, 'doc_type': doc.doc_type, 'title': doc.title,
             'content': doc.content, 'ai_generated': doc.ai_generated,
+            'is_template': doc.is_template,
             'created_at': doc.created_at.isoformat(),
         },
     })

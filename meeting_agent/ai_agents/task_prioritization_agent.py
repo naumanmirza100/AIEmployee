@@ -66,12 +66,12 @@ Return ONLY a JSON array, one object per task:
     "title": "task title",
     "priority": "low|medium|high",
     "ai_reasoning": "2-3 sentences. State the priority, then justify it by naming the specific deadline (e.g. 'due in 2 days'), the concrete business impact, and any dependency. Be specific to THIS task — no generic phrases.",
-    "suggested_due_date": "YYYY-MM-DD — must be a weekday on or AFTER {today}; never a past date or a Saturday/Sunday. Use null if you can't justify a date.",
+    "suggested_due_date": "YYYY-MM-DD — on or AFTER {today}; never a past date. Weekends are allowed. Use null if you can't justify a date.",
     "delegate_suggestion": "name or null"
   }}
 ]
 
-Rules: priority MUST be exactly one of low/medium/high (no 'critical', no other words). suggested_due_date must never be before {today} and never on a weekend. Return ONLY the JSON array."""
+Rules: priority MUST be exactly one of low/medium/high (no 'critical', no other words). suggested_due_date must never be before {today}. Return ONLY the JSON array."""
         raw = self._call_llm(prompt, self.system_prompt, temperature=0.2, max_tokens=1400)
         return self._extract_json_array(raw)
 
@@ -179,7 +179,10 @@ Use today's date as reference: {today}.
 Rules:
 - Infer a sensible title from the request even if none is stated explicitly.
 - priority MUST be one of low, medium, high (default "medium" if unclear).
-- due_date must be a weekday (Mon-Fri) if a date is implied; null if none.
+- due_date: use the EXACT date the user states. Resolve it faithfully — an
+  explicit calendar date ("15 August", "2026-08-15") wins over a relative phrase
+  ("this Friday") if both appear. Weekends (Saturday/Sunday) ARE allowed — never
+  shift a date to a weekday. Return null only when no date is implied at all.
 - assignee_hints: extract any people mentioned ("ask Noor", "assign to ali@x.com"); empty list if none.
 - Return ONLY the JSON object, no explanation, no markdown fences."""
 

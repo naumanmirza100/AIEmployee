@@ -40,6 +40,14 @@ class CRMIntegration(models.Model):
     last_ping_at = models.DateTimeField(null=True, blank=True)
     last_ping_ok = models.BooleanField(null=True, blank=True)
 
+    # Set True when the provider rejects writes because the account is over its
+    # object/record limit (e.g. HubSpot free-tier 1000-contact cap). While True
+    # the sync poller keeps deferring items; cleared automatically on the next
+    # successful write. Surfaced in the UI so the user knows sync is paused.
+    limit_reached = models.BooleanField(default=False)
+    limit_message = models.TextField(blank=True)
+    limit_reached_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
