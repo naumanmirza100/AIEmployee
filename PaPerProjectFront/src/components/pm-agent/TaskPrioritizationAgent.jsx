@@ -84,6 +84,16 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
   // Ensure projects is always an array
   const safeProjects = Array.isArray(projects) ? projects : [];
 
+  // UX-15 / UX-16: refuse to run any Prioritization action against a project
+  // that currently has 0 tasks — the LLM used to be invoked with an empty
+  // list and return an empty / confusing "success" result. `tasks_count`
+  // is populated by the /project-manager/dashboard endpoint.
+  const selectedProject = safeProjects.find(
+    (p) => String(p.id) === String(selectedProjectId),
+  );
+  const selectedProjectTaskCount = Number(selectedProject?.tasks_count ?? 0);
+  const projectHasNoTasks = !!selectedProject && selectedProjectTaskCount === 0;
+
   const actions = [
     { value: 'prioritize_and_order', label: 'Prioritize & Order Tasks', icon: Target },
     { value: 'bottlenecks', label: 'Find Bottlenecks', icon: AlertTriangle },
@@ -215,16 +225,29 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
               </SelectTrigger>
               <SelectContent>
                 {safeProjects.length > 0 ? (
-                  safeProjects.map((project) => (
-                    <SelectItem key={project.id} value={String(project.id)}>
-                      {project.title || project.name}
-                    </SelectItem>
-                  ))
+                  safeProjects.map((project) => {
+                    const tc = Number(project.tasks_count ?? 0);
+                    return (
+                      <SelectItem key={project.id} value={String(project.id)}>
+                        {project.title || project.name}
+                        {tc === 0 ? ' — 0 tasks' : ''}
+                      </SelectItem>
+                    );
+                  })
                 ) : (
                   <SelectItem value="none" disabled>No projects available</SelectItem>
                 )}
               </SelectContent>
             </Select>
+            {/* UX-15 / UX-16: explain why the action buttons below are
+                disabled so the user knows the fix (create tasks first). */}
+            {projectHasNoTasks && (
+              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                This project has no tasks yet — create at least one task before
+                prioritising or generating subtasks.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -241,7 +264,7 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
                   <Button
                     variant={action === actionItem.value ? 'default' : 'outline'}
                     onClick={() => handleAction(actionItem.value)}
-                    disabled={loading || !selectedProjectId}
+                    disabled={loading || !selectedProjectId || projectHasNoTasks}
                     className="justify-start flex-1"
                   >
                     <Icon className="h-4 w-4 mr-2" />
@@ -257,7 +280,7 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
           <Button
             variant="outline"
             onClick={handleGenerateSubtasks}
-            disabled={loading || !selectedProjectId}
+            disabled={loading || !selectedProjectId || projectHasNoTasks}
             className="w-full"
           >
             {loading && runningAction === 'generate_subtasks' ? (
@@ -985,15 +1008,25 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
               </div>
             )}
 
-            {/* Subtask Generation Results */}
+            {/* Subtask Generation Results (UX-16: tell the user WHERE the
+                generated subtasks appear now — they nest under each task's
+                row on the Tasks tab, and used to appear only as this toast). */}
             {result.data?.saved_count !== undefined && (
               <div className="p-4 bg-emerald-50 border border-emerald-200/40 rounded-lg dark:bg-emerald-950 dark:border-emerald-800">
                 <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
-                  Generated {result.data.saved_count} subtasks successfully
+                  {result.data.saved_count === 0
+                    ? 'No new subtasks were generated'
+                    : `Generated ${result.data.saved_count} subtask${result.data.saved_count === 1 ? '' : 's'} successfully`}
                 </p>
                 {result.data.reasoning_updated_count > 0 && (
                   <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
                     Updated reasoning for {result.data.reasoning_updated_count} tasks
+                  </p>
+                )}
+                {result.data.saved_count > 0 && (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
+                    They now nest under each task on the <b>Tasks</b> tab —
+                    open a task's row to review or edit them.
                   </p>
                 )}
               </div>

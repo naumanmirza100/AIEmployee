@@ -393,7 +393,10 @@ const ManualProjectCreation = ({ onProjectCreated, onSuccess }) => {
 
           <div className="flex justify-end items-center gap-2" data-tour-pm-cp="submit">
             <InfoHint {...PM_HINTS.pmCpSubmit} />
-            <Button type="submit" disabled={loading}>
+            {/* UX-12: submit stays disabled until the sole required field
+                (name) is filled — matches the pattern in Create Task and
+                keeps the button state consistent across PM forms. */}
+            <Button type="submit" disabled={loading || !formData.name.trim()}>
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

@@ -377,7 +377,9 @@ const ManualTaskCreation = ({ onTaskCreated, onSuccess, defaultProjectId }) => {
 
           <div className="flex justify-end items-center gap-2" data-tour-pm-ct="submit">
             <InfoHint {...PM_HINTS.pmCtSubmit} />
-            <Button type="submit" disabled={loading || !formData.project_id}>
+            {/* UX-12: also gate on required title, not just project_id, so
+                the disabled state truly reflects "form is complete". */}
+            <Button type="submit" disabled={loading || !formData.project_id || !formData.title.trim()}>
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

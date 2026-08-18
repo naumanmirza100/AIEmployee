@@ -630,6 +630,7 @@ def verify_session(request):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def get_module_prices(request):
     """Get pricing information for all modules (public endpoint).
 

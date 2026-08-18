@@ -143,7 +143,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
 
 // ── DateTimePicker component ────────────────────────────────────────────────
-export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
+export const DateTimePicker = ({ value, onChange, allowPast = false, disabled = false }) => {
   const [calOpen, setCalOpen] = useState(false);
 
   // Parse ISO string → { date, hour, minute }
@@ -199,11 +199,12 @@ export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
   return (
     <div className="flex gap-2">
       {/* Calendar popover */}
-      <Popover open={calOpen} onOpenChange={setCalOpen}>
+      <Popover open={calOpen} onOpenChange={o => { if (!disabled) setCalOpen(o); }}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
-            className="flex-1 justify-start text-left font-normal bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white"
+            disabled={disabled}
+            className="flex-1 justify-start text-left font-normal bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <CalendarIcon className="mr-2 h-4 w-4 text-violet-400 flex-shrink-0" />
             {selectedDate ? format(selectedDate, 'dd MMM yyyy') : <span className="text-white/40">Pick a date</span>}
@@ -245,7 +246,7 @@ export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
       </Popover>
 
       {/* Hour select */}
-      <Select value={selectedHour} onValueChange={handleHourChange}>
+      <Select value={selectedHour} disabled={disabled} onValueChange={handleHourChange}>
         <SelectTrigger className="w-20 bg-white/5 border-white/10 text-white">
           <SelectValue />
         </SelectTrigger>
@@ -255,7 +256,7 @@ export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
       </Select>
 
       {/* Minute select */}
-      <Select value={selectedMin} onValueChange={handleMinChange}>
+      <Select value={selectedMin} disabled={disabled} onValueChange={handleMinChange}>
         <SelectTrigger className="w-20 bg-white/5 border-white/10 text-white">
           <SelectValue />
         </SelectTrigger>
@@ -268,7 +269,7 @@ export const DateTimePicker = ({ value, onChange, allowPast = false }) => {
 };
 
 // ── Date-only picker (for tasks) ────────────────────────────────────────────
-export const DateOnlyPicker = ({ value, onChange, disableWeekends = false }) => {
+export const DateOnlyPicker = ({ value, onChange, disableWeekends = false, disabled = false }) => {
   const [open, setOpen] = useState(false);
   const selected = value ? new Date(value + 'T00:00:00') : null;
 
@@ -280,11 +281,12 @@ export const DateOnlyPicker = ({ value, onChange, disableWeekends = false }) => 
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={o => { if (!disabled) setOpen(o); }}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          className="w-full justify-start text-left font-normal bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white"
+          disabled={disabled}
+          className="w-full justify-start text-left font-normal bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
         >
           <CalendarIcon className="mr-2 h-4 w-4 text-violet-400 flex-shrink-0" />
           {selected && !isNaN(selected)

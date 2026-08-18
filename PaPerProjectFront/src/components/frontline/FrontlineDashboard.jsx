@@ -86,6 +86,11 @@ import {
   Square,
   X as XIcon,
   Paperclip,
+  // FRONTLINE-BUG-01: RotateCcw was used in the Hand-offs panel (line
+  // ~1889) but never imported, crashing the whole panel when a user
+  // clicked "Accept hand-off" with a React error boundary message
+  // "RotateCcw is not defined".
+  RotateCcw,
 } from 'lucide-react';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 import FrontlineTutorial, { resetTutorial } from './FrontlineTutorial';
@@ -1902,12 +1907,36 @@ export function HandoffQueueTab() {
                 </Button>
               )}
               <div className="ml-auto">
-                <Button onClick={handleSend} disabled={drawer.sending || !drawer.reply.trim()}>
-                  {drawer.sending
-                    ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                    : <Send className="h-4 w-4 mr-1" />}
-                  Send reply
-                </Button>
+                {/* FRONTLINE-BUG-06: KB-gap tickets are created internally
+                    when the widget can't answer a public question and have
+                    no customer to email back — "Send reply" always fails
+                    with "No recipient available" on those. Detect that
+                    shape and disable the button (with a tooltip explaining
+                    why) instead of letting the click round-trip and toast
+                    the raw error. */}
+                {(() => {
+                  const t = drawer.ticket;
+                  const isInternalKbGap = !!t && (
+                    t.category === 'knowledge_gap' &&
+                    !t.contact &&
+                    !t.contact_email &&
+                    !t.customer_email
+                  );
+                  return (
+                    <Button
+                      onClick={handleSend}
+                      disabled={drawer.sending || !drawer.reply.trim() || isInternalKbGap}
+                      title={isInternalKbGap
+                        ? "This is an internal knowledge-gap ticket with no customer to reply to. Add an internal note or resolve it instead."
+                        : undefined}
+                    >
+                      {drawer.sending
+                        ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                        : <Send className="h-4 w-4 mr-1" />}
+                      {isInternalKbGap ? 'No recipient' : 'Send reply'}
+                    </Button>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -2170,11 +2199,28 @@ export function FrontlineAnalyticsTab() {
           <div className="pb-2"><InfoHint {...HINTS.analyticsRange} /></div>
           <div className="space-y-1">
             <Label>From</Label>
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[160px]" />
+            {/* FRONTLINE-BUG-08: reject impossible dates + future dates.
+                Native `type="date"` blocks Feb-31-style calendar values;
+                `max={today}` prevents future dates; also cap `To` at
+                `today` and lower-bound it by the current `From`. */}
+            <Input
+              type="date"
+              value={dateFrom}
+              max={dateTo || new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-[160px]"
+            />
           </div>
           <div className="space-y-1">
             <Label>To</Label>
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[160px]" />
+            <Input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-[160px]"
+            />
           </div>
           <Button variant="outline" onClick={load} disabled={loading}>Load</Button>
           <Button variant="outline" onClick={handleExport} disabled={exporting}>Export CSV</Button>
@@ -3453,6 +3499,11 @@ const FrontlineDashboard = () => {
 
   const deleteChat = async (e, chatId) => {
     e.stopPropagation();
+    // UX-13: confirm before wiping a Q&A chat thread — the trash icon
+    // used to delete silently on the first click.
+    const chat = chats.find((c) => c.id === chatId);
+    const label = chat?.title ? `"${chat.title}"` : 'this chat';
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
     try {
       const res = await frontlineAgentService.deleteQAChat(chatId);
       if (res.status === 'success') {
@@ -4933,18 +4984,24 @@ const FrontlineDashboard = () => {
                                       // the user from picking a doc that will hang.
                                       const status = d.processing_status || (d.is_indexed ? 'ready' : 'pending');
                                       const notReady = status !== 'ready';
-                                      const badge = {
+                                      // FRONTLINE-BUG-07: outdated docs stayed
+                                      // selectable, making Q&A a dead-end loop —
+                                      // pick outdated doc, get outdated answer,
+                                      // wonder why. Disable + tag them here.
+                                      const outdated = !!d.is_outdated;
+                                      const badge = outdated ? '⚠️ outdated' : {
                                         processing: '⏳ processing',
                                         pending:    '⏳ queued',
                                         failed:     '⚠️ failed',
                                       }[status];
+                                      const disabled = notReady || outdated;
                                       return (
                                         <SelectItem
                                           key={d.id}
                                           value={String(d.id)}
-                                          disabled={notReady}
+                                          disabled={disabled}
                                         >
-                                          <span className={notReady ? 'opacity-60' : ''}>
+                                          <span className={disabled ? 'opacity-60' : ''}>
                                             {d.title || `Document ${d.id}`}
                                             {badge ? ` — ${badge}` : ''}
                                           </span>
@@ -5306,11 +5363,13 @@ const FrontlineDashboard = () => {
                     <SelectItem value="other">Other</SelectItem>
                   </SelectContent>
                 </Select>
+                {/* FRONTLINE-BUG-08: same bounds as the Analytics tab. */}
                 <Input
                   type="date"
                   placeholder="From"
                   className="w-[140px]"
                   value={ticketFilters.date_from}
+                  max={ticketFilters.date_to || new Date().toISOString().slice(0, 10)}
                   onChange={(e) => { setTicketFilters((f) => ({ ...f, date_from: e.target.value })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}
                 />
                 <Input
@@ -5318,6 +5377,8 @@ const FrontlineDashboard = () => {
                   placeholder="To"
                   className="w-[140px]"
                   value={ticketFilters.date_to}
+                  min={ticketFilters.date_from || undefined}
+                  max={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => { setTicketFilters((f) => ({ ...f, date_to: e.target.value })); setTicketsPagination((p) => ({ ...p, page: 1 })); }}
                 />
                 <Button variant="outline" size="sm" onClick={() => setTicketFilters({ status: '', priority: '', category: '', date_from: '', date_to: '' })}>Clear filters</Button>
@@ -5756,11 +5817,16 @@ const FrontlineDashboard = () => {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="file">File</Label>
+              {/* FRONTLINE-BUG-11: without these `file:` classes the
+                  Choose-File button rendered as dark grey on the dark
+                  modal and was effectively invisible. Matches the
+                  Operations tab's styling for consistency. */}
               <Input
                 id="file"
                 type="file"
                 accept=".pdf,.docx,.doc,.txt,.md,.html"
                 onChange={(e) => setUploadFile(e.target.files[0])}
+                className="file:mr-3 file:rounded-md file:border file:border-input file:bg-primary file:px-3 file:py-1 file:text-primary-foreground file:font-medium file:cursor-pointer hover:file:bg-primary/90"
               />
             </div>
             <div className="space-y-2">

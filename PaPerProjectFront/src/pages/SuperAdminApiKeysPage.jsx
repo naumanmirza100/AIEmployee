@@ -16,7 +16,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
   Send, Trash2, ChevronLeft, ChevronRight, ChevronDown, RefreshCw, DollarSign, Gauge,
-  Inbox, Building2, Sparkles, Save, Plus, Info, Settings, Globe, Search, Clock, CreditCard
+  Inbox, Building2, Sparkles, Save, Plus, Info, Settings, Globe, Search, Clock, CreditCard, Pencil
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import adminApiKeysService from '@/services/adminApiKeysService';
@@ -815,7 +815,7 @@ const REQUEST_STATUS_META = {
 };
 
 // Single timeline entry for one KeyRequest record (or a synthetic revocation node)
-const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, pricing }) => {
+const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pricing }) => {
   const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
   const { Icon } = meta;
   const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
@@ -896,13 +896,21 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, pricing })
                 <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2" onClick={() => onApprove(r)}>
                   <CheckCircle2 className="w-3 h-3 mr-1" />Approve
                 </Button>
+                <Button size="sm" variant="outline" className="h-7 border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs px-2" onClick={() => onEdit(r)}>
+                  <Pencil className="w-3 h-3 mr-1" />Edit
+                </Button>
                 <Button size="sm" variant="outline" className="h-7 border-red-500/40 text-red-300 hover:bg-red-500/10 text-xs px-2" onClick={() => onReject(r)}>
                   <XCircle className="w-3 h-3 mr-1" />Reject
                 </Button>
               </>
             )}
             {!r._synthetic && r.status === 'payment_pending' && (
-              <span className="text-[10px] text-yellow-300/70 italic">Awaiting payment</span>
+              <>
+                <Button size="sm" variant="outline" className="h-7 border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs px-2" onClick={() => onEdit(r)}>
+                  <Pencil className="w-3 h-3 mr-1" />Edit
+                </Button>
+                <span className="text-[10px] text-yellow-300/70 italic">Awaiting payment</span>
+              </>
             )}
             {!r._synthetic && r.status === 'payment_received' && (
               <Button size="sm" className="h-7 bg-violet-600 hover:bg-violet-700 text-white text-xs px-2" onClick={() => onAssignKey(r)}>
@@ -976,7 +984,7 @@ function expandEntries(requests) {
 }
 
 // Grouped card: one card per (company, agent) showing full timeline
-const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, pricing }) => {
+const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, onEdit, pricing }) => {
   const [expanded, setExpanded] = useState(group.hasAction);
 
   // Expand revoked-assignment records into two timeline nodes each
@@ -1069,6 +1077,7 @@ const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, pricing }) 
               onApprove={onApprove}
               onAssignKey={onAssignKey}
               onReject={onReject}
+              onEdit={onEdit}
               pricing={pricing}
             />
           ))}
@@ -1078,7 +1087,7 @@ const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, pricing }) 
   );
 };
 
-const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, filter, setFilter, onRefresh, loading, pricing }) => {
+const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, onEdit, filter, setFilter, onRefresh, loading, pricing }) => {
   // Group by (company_id + agent_name), sorted oldest→newest within each group
   const groups = React.useMemo(() => {
     const map = {};
@@ -1151,6 +1160,7 @@ const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, filter, setFi
               onApprove={onApprove}
               onAssignKey={onAssignKey}
               onReject={onReject}
+              onEdit={onEdit}
               pricing={pricing}
             />
           ))}
@@ -1239,6 +1249,9 @@ const SuperAdminApiKeysPage = () => {
   const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '', reset_interval_days: '7' });
   const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '' });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
+  // Edit a request's price/duration/note before payment (pending / payment_pending).
+  const [editModal, setEditModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' });
+  const [editing, setEditing] = useState(false);
   const [adjustModal, setAdjustModal] = useState({ open: false, quota: null, action: '', value: '' });
   const [confirmDialog, setConfirmDialog] = useState({ open: false, title: '', description: '', onConfirm: null });
 
@@ -1485,6 +1498,28 @@ const SuperAdminApiKeysPage = () => {
     } finally { setSubmitting(false); }
   };
 
+  const submitEdit = async () => {
+    setEditing(true);
+    try {
+      const discPct = Math.min(100, Math.max(0, parseFloat(editModal.discount_pct) || 0));
+      const rawKey = Number(editModal.key_cost) || 0;
+      const rawSvc = Number(editModal.service_charge) || 0;
+      const multiplier = 1 - discPct / 100;
+      await adminApiKeysService.editRequest(editModal.request.id, {
+        key_cost: parseFloat((rawKey * multiplier).toFixed(2)),
+        service_charge: parseFloat((rawSvc * multiplier).toFixed(2)),
+        discount_pct: discPct,
+        preferred_duration: editModal.preferred_duration,
+        admin_note: editModal.admin_note,
+      });
+      toast({ title: 'Request updated', description: editModal.request.status === 'payment_pending' ? 'Company notified of the new amount due.' : 'Changes saved.' });
+      setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' });
+      reloadRequests(); loadAll();
+    } catch (e) {
+      toast({ title: 'Update failed', description: String(e.message || e), variant: 'destructive' });
+    } finally { setEditing(false); }
+  };
+
   const submitReject = async () => {
     setSubmitting(true);
     try {
@@ -1599,6 +1634,22 @@ const SuperAdminApiKeysPage = () => {
                 }}
                 onAssignKey={(r) => openAssign(null, r)}
                 onReject={(r) => setRejectModal({ open: true, request: r, note: '' })}
+                onEdit={(r) => {
+                  // Prefill from the request's current snapshot; fall back to
+                  // pricing config for a still-pending request with no price yet.
+                  const p = pricing.find(x => x.agent_name === r.agent_name);
+                  const hasSnapshot = r.key_cost_snapshot != null || r.service_charge_snapshot != null;
+                  const keyCost = hasSnapshot ? (r.key_cost_snapshot ?? 0) : parseFloat(p?.monthly_flat_usd || 0);
+                  const svcCharge = hasSnapshot ? (r.service_charge_snapshot ?? 0) : parseFloat(p?.service_charge_usd || 0);
+                  setEditModal({
+                    open: true, request: r,
+                    key_cost: String(keyCost),
+                    service_charge: String(svcCharge),
+                    discount_pct: String(r.discount_pct_snapshot ?? 0),
+                    preferred_duration: r.preferred_duration || 'monthly',
+                    admin_note: r.admin_note || '',
+                  });
+                }}
                 filter={requestFilter}
                 setFilter={setRequestFilter}
                 onRefresh={reloadRequests}
@@ -2094,6 +2145,79 @@ const SuperAdminApiKeysPage = () => {
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setRejectModal({ open: false, request: null, note: '' })}>Cancel</Button>
             <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={submitReject} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Reject
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Request Modal — price/duration/note before payment */}
+      <Dialog open={editModal.open} onOpenChange={(o) => !o && setEditModal({ ...editModal, open: false })}>
+        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white sm:max-w-lg w-full">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="w-5 h-5 text-violet-400" /> Edit Request
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              {editModal.request?.company_name} — {editModal.request?.agent_label} ({editModal.request?.provider?.toUpperCase()})
+              {editModal.request?.status === 'payment_pending' && (
+                <span className="ml-1 text-yellow-300/80">· editable until the company pays</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label className="text-white/70 text-sm">Billing duration</Label>
+              <Select value={editModal.preferred_duration} onValueChange={(v) => setEditModal({ ...editModal, preferred_duration: v })}>
+                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="yearly">Yearly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label className="text-white/70 text-xs">Key Cost ($)</Label>
+                <Input type="number" min="0" step="0.01" className="bg-[#1a1333] border-[#3a295a] text-white"
+                  value={editModal.key_cost}
+                  onChange={(e) => setEditModal({ ...editModal, key_cost: e.target.value })} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-white/70 text-xs">Service ($)</Label>
+                <Input type="number" min="0" step="0.01" className="bg-[#1a1333] border-[#3a295a] text-white"
+                  value={editModal.service_charge}
+                  onChange={(e) => setEditModal({ ...editModal, service_charge: e.target.value })} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-white/70 text-xs">Discount (%)</Label>
+                <Input type="number" min="0" max="100" step="1" className="bg-[#1a1333] border-[#3a295a] text-white"
+                  value={editModal.discount_pct}
+                  onChange={(e) => setEditModal({ ...editModal, discount_pct: e.target.value })} />
+              </div>
+            </div>
+            {(() => {
+              const disc = Math.min(100, Math.max(0, parseFloat(editModal.discount_pct) || 0));
+              const raw = (Number(editModal.key_cost) || 0) + (Number(editModal.service_charge) || 0);
+              const net = (raw * (1 - disc / 100));
+              return (
+                <p className="text-xs text-white/60">
+                  Amount due after discount: <span className="text-emerald-300 font-semibold">${net.toFixed(2)}</span>
+                  {disc > 0 && <span className="text-white/30 ml-1 line-through">${raw.toFixed(2)}</span>}
+                </p>
+              );
+            })()}
+            <div className="space-y-1.5">
+              <Label className="text-white/70 text-sm">Admin note (optional)</Label>
+              <Textarea rows={2} className="bg-[#1a1333] border-[#3a295a] text-white"
+                value={editModal.admin_note}
+                onChange={(e) => setEditModal({ ...editModal, admin_note: e.target.value })}
+                placeholder="Internal / company-facing note…" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' })}>Cancel</Button>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitEdit} disabled={editing}>
+              {editing && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -41,7 +41,7 @@ class GroqClient:
                 is_auth_error=True,
             )
         self.api_key = api_key
-        self.model = model or "llama-3.1-8b-instant"
+        self.model = model or "openai/gpt-oss-20b"
         self.base_url = base_url or "https://api.groq.com/openai/v1/chat/completions"
         self.timeout = timeout
         self.last_token_usage: Optional[Dict] = None  # Tracks token usage of last API call

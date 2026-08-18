@@ -723,7 +723,9 @@ def company_reset_logs(request):
     }
     # Most-recent actual reset per agent (from the logged history), so the row
     # can show "Last reset" or "Not yet reset" — mirrors the admin view.
-    from core.models import WeeklyResetLog
+    # (WeeklyResetLog is already imported at module level — a local import here
+    # would shadow it and make the earlier `qs = WeeklyResetLog...` an
+    # UnboundLocalError.)
     last_reset = {}
     for r in WeeklyResetLog.objects.filter(company=company).order_by('-reset_at').values('agent_name', 'reset_at'):
         if r['agent_name'] not in last_reset:

@@ -683,19 +683,51 @@ def update_frontline_widget_config(request):
     """Save the tenant's widget theming + operating hours + pre-chat config.
     Also accepts `allowed_origins` (CSV) for origin pinning."""
     try:
-        from Frontline_agent.widget_utils import DEFAULT_WIDGET_CONFIG, resolved_widget_config
+        from Frontline_agent.widget_utils import (
+            DEFAULT_WIDGET_CONFIG,
+            resolved_widget_config,
+            validate_widget_config,
+            sanitize_allowed_origins,
+        )
         company = request.user.company
         data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
 
         if 'allowed_origins' in data:
-            company.frontline_allowed_origins = str(data['allowed_origins'] or '')[:2000]
+            # FRONTLINE-BUG-09: normalise (split / strip / dedupe / URL-check)
+            # instead of storing the raw CSV verbatim, which used to break
+            # CORS matching when the input had double commas or empties.
+            cleaned, invalid = sanitize_allowed_origins(data['allowed_origins'])
+            if invalid:
+                return Response(
+                    {
+                        'status': 'error',
+                        'message': (
+                            'These allowed_origins entries are not valid '
+                            'scheme://host[:port] URLs: '
+                            + ', '.join(repr(x) for x in invalid[:5])
+                            + (' (…)' if len(invalid) > 5 else '')
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            company.frontline_allowed_origins = cleaned[:2000]
 
         if 'config' in data and isinstance(data['config'], dict):
+            # FRONTLINE-BUG-04: reject invalid hex colours / CSS lengths /
+            # over-long overrides BEFORE writing. Prior code trusted whatever
+            # the client sent and the widget then rendered as unreadable
+            # black on next load.
+            cleaned_config, err = validate_widget_config(data['config'])
+            if err:
+                return Response(
+                    {'status': 'error', 'message': err},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             # Shallow-validate against the known top-level keys so garbage fields
             # don't poison the JSON column. Deep structure is the tenant's call.
             allowed_top_level = set(DEFAULT_WIDGET_CONFIG.keys())
             saved = company.frontline_widget_config or {}
-            for k, v in data['config'].items():
+            for k, v in cleaned_config.items():
                 if k in allowed_top_level:
                     saved[k] = v
             company.frontline_widget_config = saved
@@ -1015,11 +1047,17 @@ def upload_document(request):
     except KeyServiceError:
         raise
     except Exception as e:
-        logger.exception("upload_document failed")
-        return Response(
-            {'status': 'error', 'message': 'Failed to upload document', 'error': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        # OPS-01 pattern: don't leak `str(e)` to the client. Log
+        # server-side for support, return a stable friendly message.
+        logger.exception("upload_document failed (returning friendly message): %s", e)
+        return Response({
+            'status': 'error',
+            'message': (
+                "Something went wrong while processing this file. "
+                "Please try a different file, or contact support if it "
+                "keeps happening."
+            ),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])
@@ -1536,11 +1574,29 @@ def public_qa(request):
     except KeyServiceError:
         raise
     except Exception as e:
-        logger.exception("public_qa failed")
-        return Response(
-            {'status': 'error', 'message': 'Failed to process question', 'error': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        # FRONTLINE-BUG-03: gibberish / weird input used to blow up inside
+        # retrieval or embedding calls and surface as a raw 500 with the
+        # exception string leaking to the public widget. Log server-side
+        # but return the same friendly no-verified-info shape the happy
+        # path uses so the widget renders a normal "couldn't find that,
+        # please rephrase" message instead of a red error box.
+        logger.exception("public_qa failed — returning friendly fallback: %s", e)
+        return Response({
+            'status': 'success',
+            'data': {
+                'answer': (
+                    "I didn't quite catch that — could you rephrase your "
+                    "question? Try including specific product names, ticket "
+                    "IDs, or a bit more context."
+                ),
+                'has_verified_info': False,
+                'confidence': 0.0,
+                'sources': [],
+                'citations': [],
+                'best_score': 0.0,
+                'fallback': True,
+            },
+        }, status=status.HTTP_200_OK)
 
 
 @api_view(["POST"])
@@ -5009,6 +5065,60 @@ def _compute_frontline_analytics_data(company_user, date_from_str=None, date_to_
     avg_resolution_hours = sum(resolution_times) / len(resolution_times) if resolution_times else None
     # Line/area charts need [{ label, value }]; bar/pie can use object { "Label": count }
     tickets_by_date_sorted = sorted(by_date.items())
+
+    # FRONTLINE-BUG-10: include documents dimension so the analytics agent
+    # can answer "how many documents" without confusing docs with tickets.
+    # Scope: uploaded_by the same Django user we resolved above (matches
+    # how `list_documents` builds its per-user KB view).
+    try:
+        from Frontline_agent.models import Document as _FLDocument
+        doc_qs = _FLDocument.objects.filter(uploaded_by=user)
+        if date_from_str:
+            try:
+                doc_qs = doc_qs.filter(uploaded_at__date__gte=datetime.strptime(date_from_str, '%Y-%m-%d').date())
+            except Exception:
+                pass
+        if date_to_str:
+            try:
+                doc_qs = doc_qs.filter(uploaded_at__date__lte=datetime.strptime(date_to_str, '%Y-%m-%d').date())
+            except Exception:
+                pass
+        docs = list(doc_qs.only(
+            'id', 'file_format', 'processing_status', 'is_outdated',
+        ))
+        docs_by_format = {}
+        docs_by_status = {}
+        outdated_docs_count = 0
+        for d in docs:
+            fmt = getattr(d, 'file_format', None) or 'other'
+            docs_by_format[fmt] = docs_by_format.get(fmt, 0) + 1
+            st = getattr(d, 'processing_status', None) or 'ready'
+            docs_by_status[st] = docs_by_status.get(st, 0) + 1
+            if getattr(d, 'is_outdated', False):
+                outdated_docs_count += 1
+        docs_summary = {
+            'total_documents': len(docs),
+            'ready_documents': docs_by_status.get('ready', 0),
+            'outdated_documents': outdated_docs_count,
+            'documents_by_format': [{'format': k, 'count': v} for k, v in docs_by_format.items()],
+            'documents_by_format_obj': dict(docs_by_format),
+            'documents_by_status': [{'status': k, 'count': v} for k, v in docs_by_status.items()],
+            'documents_by_status_obj': dict(docs_by_status),
+        }
+    except Exception:
+        # Analytics is best-effort — never let a docs-count failure break
+        # the whole tickets payload.
+        logger.exception('_compute_frontline_analytics_data: docs summary failed')
+        docs_summary = {
+            'total_documents': 0,
+            'ready_documents': 0,
+            'outdated_documents': 0,
+            'documents_by_format': [],
+            'documents_by_format_obj': {},
+            'documents_by_status': [],
+            'documents_by_status_obj': {},
+        }
+
     return {
         'tickets_by_date': [{'date': k, 'count': v} for k, v in tickets_by_date_sorted],
         'tickets_by_date_line': [{'label': k, 'value': v} for k, v in tickets_by_date_sorted],
@@ -5021,6 +5131,9 @@ def _compute_frontline_analytics_data(company_user, date_from_str=None, date_to_
         'total_tickets': len(tickets),
         'avg_resolution_hours': round(avg_resolution_hours, 2) if avg_resolution_hours is not None else None,
         'auto_resolved_count': sum(1 for t in tickets if t.auto_resolved),
+        # BUG-10: documents dimension, so the analytics LLM knows the
+        # difference between docs and tickets.
+        **docs_summary,
     }
 
 

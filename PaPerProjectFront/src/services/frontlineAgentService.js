@@ -1348,6 +1348,12 @@ export default {
   listWorkflowVersions,
   rollbackWorkflow,
   listWorkflowExecutions,
+  // FRONTLINE-BUG-02: was declared as a named export at line ~703 but
+  // omitted from this default-export object, so the Reassign dropdown
+  // called `frontlineAgentService.listWorkflowCompanyUsers()` → undefined
+  // → "…is not a function". Every consumer that reassigns tickets uses
+  // the default import, so add it here.
+  listWorkflowCompanyUsers,
   getFrontlineAnalytics,
   askFrontlineAnalytics,
   generateFrontlineGraph,

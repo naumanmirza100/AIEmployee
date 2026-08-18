@@ -12,7 +12,7 @@
 // state, so meeting/task creation logic is unchanged.
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Loader2, Check, X, Search, Users } from 'lucide-react';
+import { Loader2, Check, Search, Users } from 'lucide-react';
 import execMeetingService from '@/services/execMeetingService';
 
 // Stable key for a member across the two backing user types (CompanyUser vs
@@ -75,22 +75,15 @@ export const AllMembersPanel = ({ open, onClose, selected = [], onToggle, fullWi
     // content (rendered by the parent inside the same portal), sitting flush
     // against it rather than overlaying it.
     <div className={`flex flex-col rounded-2xl border border-white/10 bg-[#0d0b1f] text-white overflow-hidden ${fullWidth ? 'w-full max-h-64' : 'w-72 shrink-0 max-h-[80vh]'}`}>
-      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
-        <div className="flex items-center gap-2 min-w-0">
-          <Users className="h-4 w-4 text-violet-300 shrink-0" />
-          <span className="text-sm font-semibold truncate">All members</span>
-          {members.length > 0 && (
-            <span className="text-[11px] text-white/40">({members.length})</span>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close members panel"
-          className="p-1 rounded-md text-white/50 hover:text-white hover:bg-white/10 transition"
-        >
-          <X className="h-4 w-4" />
-        </button>
+      {/* No close ✕ here — the panel is toggled from its parent ("View all
+          members" / "Hide all members"), and its own ✕ used to overlap the host
+          dialog's built-in close button. */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
+        <Users className="h-4 w-4 text-violet-300 shrink-0" />
+        <span className="text-sm font-semibold truncate">All members</span>
+        {members.length > 0 && (
+          <span className="text-[11px] text-white/40">({members.length})</span>
+        )}
       </div>
 
       {/* Filter */}
@@ -107,7 +100,7 @@ export const AllMembersPanel = ({ open, onClose, selected = [], onToggle, fullWi
       </div>
 
       {/* Vertical member list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto custom-sidebar-scroll">
         {loading ? (
           <div className="flex items-center gap-2 justify-center py-10 text-white/40 text-xs">
             <Loader2 className="h-4 w-4 animate-spin" />

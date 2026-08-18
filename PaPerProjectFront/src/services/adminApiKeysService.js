@@ -70,6 +70,13 @@ export const approveRequest = (requestId, payload) =>
     body: JSON.stringify(payload),
   });
 
+// Edit a request's pricing/duration/admin note before the company pays.
+export const editRequest = (requestId, payload) =>
+  req(`/admin/key-requests/${requestId}/edit`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
 export const rejectRequest = (requestId, adminNote) =>
   req(`/admin/key-requests/${requestId}/reject`, {
     method: 'POST',
@@ -105,6 +112,7 @@ export default {
   saveAgentPlans,
   listRequests,
   approveRequest,
+  editRequest,
   rejectRequest,
   listPlatformKeys,
   upsertPlatformKey,
