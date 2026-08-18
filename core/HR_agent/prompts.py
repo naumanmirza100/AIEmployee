@@ -92,7 +92,18 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
         parts.append("<knowledge_excerpts>\n")
         for i, r in enumerate(knowledge_results[:5], start=1):
             title = r.get('title') or r.get('document_title') or f'Excerpt {i}'
-            body = (r.get('content') or r.get('answer') or '')[:2000]
+            raw = r.get('content') or r.get('answer') or ''
+            # REC-BUG-01 pattern: mark the boundary so the LLM knows the
+            # tail is missing and can invite a follow-up rather than
+            # confidently invent the missing content.
+            if len(raw) > 2000:
+                body = raw[:2000] + (
+                    "\n\n[…truncated for length — "
+                    f"{len(raw) - 2000} more characters not shown. Ask a more "
+                    "specific follow-up if the answer needs the rest.]"
+                )
+            else:
+                body = raw
             parts.append(f"--- Source {i}: {title} ---\n{body}\n\n")
         parts.append("</knowledge_excerpts>\n\n")
 

@@ -394,41 +394,47 @@ Tick each box as we ship the fix.
 
 ### 3a. Explicit HR bugs (from PDF "HR Support Agent" section)
 
-- [ ] **HR-BUG-01 — Deactivate / Anonymize use browser alerts, not styled modals** (Employees tab)
+- [x] **HR-BUG-01 — Deactivate / Anonymize use browser alerts, not styled modals** (Employees tab)
   Native `alert()` / `confirm()` dialogs on Deactivate and Anonymize
   actions.
   **Expected:** styled in-app confirmation modal matching the rest of
   the HR UI.
 
-- [ ] **HR-BUG-02 — "Review Cycles" date picker not visible** (Employees → Review Cycles)
+- [x] **HR-BUG-02 — "Review Cycles" date picker not visible** (Employees → Review Cycles)
   Date-picker inputs in the "Performance review cycles" dialog render
   invisibly (styling issue).
   **Expected:** legible/clickable date-picker component.
 
-- [ ] **HR-BUG-03 — Leave-Balances "Apply" button does nothing** (Employees → Leave Balances → Adjust)
+- [x] **HR-BUG-03 — Leave-Balances "Apply" button does nothing** (Employees → Leave Balances → Adjust) — **ALREADY WORKING**
+  Verified 2026-08-13: `HREmployeeDetailDrawer.jsx:1256` Apply wires
+  `onClick={handleAdjustBalance}` (:420-453), which POSTs to
+  `/hr/employees/:id/leave-balances/adjust` (view at
+  `api/views/hr_agent.py:4783`). Full chain intact. If a user still
+  sees "nothing", check the network tab — likely a validation error
+  the toast is now surfacing rather than a wiring bug.
   Clicking Apply in the "Adjust leave balance" modal has no effect.
   **Expected:** apply the change, persist, close modal, refresh row.
 
-- [ ] **HR-BUG-04 — Compensation form has no numeric validation** (Employees → Compensation History → Add)
+- [x] **HR-BUG-04 — Compensation form has no numeric validation** (Employees → Compensation History → Add)
   Negative numbers accepted for base salary, bonus target %, equity
   grant value, and grade/band. Notes field accepts giant unfiltered
   strings.
   **Expected:** enforce non-negative numerics + reasonable maxima;
   reasonable notes length.
 
-- [ ] **HR-BUG-05 — "Add Goal" form has no numeric or date validation** (Employees → Goals & OKRs → Add Goal)
+- [x] **HR-BUG-05 — "Add Goal" form has no numeric or date validation** (Employees → Goals & OKRs → Add Goal)
   Negative Target / Progress / Weight accepted; due date accepts
   invalid values like `08/07/2333`.
   **Expected:** validate numerics (non-negative, sensible ranges) and
   clamp date to sane year range.
 
-- [ ] **HR-BUG-06 — Meeting Scheduler loses participants across turns** (Meeting Scheduler)
+- [x] **HR-BUG-06 — Meeting Scheduler loses participants across turns** (Meeting Scheduler)
   Multi-turn conversation forgets participants previously selected in
   earlier turns.
   **Expected:** persist participant selection across the full
   scheduling flow.
 
-- [ ] **HR-BUG-07 — Meeting Scheduler misinterprets relative weekdays** (Meeting Scheduler)
+- [x] **HR-BUG-07 — Meeting Scheduler misinterprets relative weekdays** (Meeting Scheduler)
   "Schedule for Friday" resolves to the wrong date (e.g., past
   Thursday, or a Feb-30 style non-date).
   **Expected:** correctly resolve relative weekday phrases against the
@@ -462,6 +468,28 @@ Tick each box as we ship the fix.
   - Off-topic / hallucinated answers when a policy isn't indexed
   - Lost context across follow-up turns
   - Claims to have performed employee-record changes it can't actually do
+  > **Status (2026-08-13):**
+  > - **Context (MKT-05):** FIXED already. HR chat threads history in at
+  >   `api/views/hr_agent.py:515-527` (sync) and `:611-623` (stream).
+  > - **False success (MKT-06):** LOW RISK. Ask-HR is read-only (no
+  >   mutation endpoints); Meeting Scheduler already instructs the LLM
+  >   "NEVER claim to have scheduled a meeting" at
+  >   `api/views/hr_agent.py:2997-2999` and overrides the reply on
+  >   success at `:3189-3195`.
+  > - **Scope (MKT-04): ⚠ Confusion — SKIPPED, needs product decision.**
+  >   `core/HR_agent/prompts.py:16-42` explicitly WIDENS scope beyond HR
+  >   ("the knowledge base can contain any document…") — deliberately
+  >   so, so tenants with a single KB can use Ask-HR as their general
+  >   Q&A. Adding a "refuse off-topic" rule like the PM Knowledge Q&A
+  >   agent got would BREAK that flow for those tenants. Two options:
+  >     1. **Hard-scope to HR:** refuse anything not obviously HR-adjacent
+  >        (leave, benefits, policy, payroll, onboarding, reviews).
+  >        Cleaner but breaks single-KB tenants.
+  >     2. **Retrieval-confidence gate:** answer any topic if retrieval
+  >        confidence is high (docs actually match), refuse when it's
+  >        weak. Doesn't require any explicit topic list, keeps
+  >        single-KB usage working.
+  >   Please pick 1 or 2 before we implement.
 
 - [ ] **REC-BUG-01 pattern — LLM hallucinates on truncated retrieval**
   If HR's employee/policy retrieval hard-truncates fields, HR chat will
