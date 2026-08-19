@@ -212,8 +212,10 @@ def icp_profile(request):
                 'company_size_max': data.get('company_size_max') or None,
                 'locations': data.get('locations', []),
                 'keywords': data.get('keywords', []),
-                'hot_threshold': int(data.get('hot_threshold', 70)),
-                'warm_threshold': int(data.get('warm_threshold', 40)),
+                # Defaults must match SDRICPProfile model defaults (75 / 60) so
+                # hot/warm bucketing is consistent regardless of code path.
+                'hot_threshold': int(data.get('hot_threshold', 75)),
+                'warm_threshold': int(data.get('warm_threshold', 60)),
             },
         )
         return Response({'status': 'success', 'message': 'ICP saved.', 'data': _serialize_icp(icp)})
@@ -343,6 +345,10 @@ def leads_list(request):
             company_website=d.get('company_website', ''),
             source='manual',
             status='new',
+            # Queue for background qualification so manually-added leads get
+            # scored automatically like research/CSV leads.
+            qualification_status='pending',
+            qualification_queued_at=timezone.now(),
         )
         return Response({'status': 'success', 'data': _serialize_lead(lead)}, status=201)
     except KeyServiceError:
@@ -519,6 +525,7 @@ def research_leads(request):
             raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
+            created_ids = []
             skipped_dupes = 0
 
             # Pre-load existing keys to catch dupes. LinkedIn URL is the most
@@ -596,7 +603,7 @@ def research_leads(request):
 
                 validation = validate_lead({**ld, 'full_name': full_name})
 
-                SDRLead.objects.create(
+                new_lead = SDRLead.objects.create(
                     company_user=company_user,
                     icp_profile=icp,
                     first_name=ld.get('first_name', ''),
@@ -627,13 +634,15 @@ def research_leads(request):
                     data_quality_flags=validation['data_quality_flags'],
                 )
                 created += 1
+                created_ids.append(new_lead.pk)
 
-            # Queue newly created leads for background qualification instead of
-            # scoring them synchronously — the scheduler drains the queue in small
-            # batches so AI tokens aren't exhausted in one burst, and retries
-            # failures automatically. Returns instantly with no token error.
+            # Queue ONLY the leads created by this run for background
+            # qualification — the scheduler drains the queue in small batches so
+            # AI tokens aren't exhausted in one burst, and retries failures
+            # automatically. Scoping to created_ids avoids sweeping up unrelated
+            # pre-existing unscored leads (e.g. CSV/manual imports).
             queued = SDRLead.objects.filter(
-                company_user=company_user, score__isnull=True, qualification_status='none',
+                pk__in=created_ids, score__isnull=True, qualification_status='none',
             ).update(qualification_status='pending', qualification_queued_at=timezone.now())
 
             job.status = 'completed'
@@ -777,46 +786,26 @@ def fetch_apify_leads(request):
                 status='new',
                 confidence_score=validation['confidence_score'],
                 data_quality_flags=validation['data_quality_flags'],
+                # Queue for background qualification instead of scoring inline —
+                # a synchronous loop here blocked the request for minutes and hit
+                # AI token limits. The scheduler drains the queue in small batches.
+                qualification_status='pending',
+                qualification_queued_at=timezone.now(),
             )
             created += 1
 
-        # ── Best-effort auto-qualify (never fail the import if AI tokens are out) ──
-        qualified = 0
-        if created and icp:
-            new_leads = SDRLead.objects.filter(
-                company_user=company_user, score__isnull=True
-            ).order_by('-created_at')[:created]
-            try:
-                qualifier = _get_qualification_agent(company_user.company)
-                for lead in new_leads:
-                    try:
-                        result = qualifier.qualify_lead(lead, icp)
-                        lead.score = result['score']
-                        lead.temperature = result['temperature']
-                        lead.score_breakdown = result.get('score_breakdown', {})
-                        lead.qualification_reasoning = result.get('qualification_reasoning', '')
-                        lead.key_strengths = result.get('key_strengths', [])
-                        lead.concerns = result.get('concerns', [])
-                        lead.outreach_strategy = result.get('outreach_strategy', '')
-                        lead.qualified_at = timezone.now()
-                        lead.status = 'qualified'
-                        lead.save()
-                        qualified += 1
-                    except Exception:
-                        break  # e.g. tokens exhausted — stop qualifying, keep leads
-            except Exception as exc:
-                logger.info("Fetch-from-Apify: auto-qualify unavailable: %s", exc)
+        queued = created  # every imported lead is queued for qualification
 
         msg = f'Imported {created} leads from Apify'
-        if qualified:
-            msg += f', qualified {qualified}'
+        if queued:
+            msg += '. Qualifying them in the background — scores will appear shortly'
         if skipped:
             msg += f'. Skipped {skipped} duplicates'
         return Response({
             'status': 'success',
             'message': msg + '.',
             'leads_created': created,
-            'leads_qualified': qualified,
+            'leads_queued': queued,
             'skipped_duplicates': skipped,
             'stats': _lead_stats(company_user),
         })
@@ -929,6 +918,10 @@ def import_leads_csv(request):
                     company_website=pick('company_website'),
                     source='csv_import',
                     status='new',
+                    # Queue for background qualification so imported leads get
+                    # scored automatically instead of sitting permanently unscored.
+                    qualification_status='pending',
+                    qualification_queued_at=timezone.now(),
                 )
                 created += 1
             except KeyServiceError:
@@ -940,6 +933,8 @@ def import_leads_csv(request):
         if skipped_empty:
             msg += f', {skipped_empty} empty rows'
         msg += '.'
+        if created:
+            msg += ' Qualifying them in the background — scores will appear shortly.'
         if created == 0 and not errors:
             msg = ('No leads imported — check the CSV has a header row with columns like '
                    'full_name / email / company_name (any capitalisation).')

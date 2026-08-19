@@ -139,7 +139,12 @@ const HRFloatingChat = () => {
     setShowHistory(false);
     setTimeout(() => inputRef.current?.focus(), 50);
   };
-  const removeHistoryEntry = (id) => { deleteHRChatConversation(id); refreshHistory(); };
+  const removeHistoryEntry = (id) => {
+    // UX-13: confirm before deleting a floating-chat history entry.
+    if (!window.confirm('Delete this conversation from history?')) return;
+    deleteHRChatConversation(id);
+    refreshHistory();
+  };
 
   // ---- Slash commands --------------------------------------------------
 

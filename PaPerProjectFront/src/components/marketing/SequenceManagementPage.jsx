@@ -2633,11 +2633,13 @@ const SequenceManagementPage = ({ embedded = false }) => {
             <LeadsUploadFields />
             <div>
               <Label>File (CSV, XLSX, XLS)</Label>
+              {/* MKT-03: dark-mode Choose-File visibility — same fix as
+                  FRONTLINE-BUG-11. */}
               <Input
                 type="file"
                 accept=".csv,.xlsx,.xls"
                 onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                className="mt-1"
+                className="mt-1 file:mr-3 file:rounded-md file:border file:border-input file:bg-primary file:px-3 file:py-1 file:text-primary-foreground file:font-medium file:cursor-pointer hover:file:bg-primary/90"
               />
               {uploadFile && (
                 <p className="mt-1.5 text-xs text-muted-foreground">

@@ -889,8 +889,22 @@ class FrontlineAgent(BaseAgent):
             import json as _json
             data_str = _json.dumps(analytics_data, indent=0)[:3500]
             prompt = (
-                "The user asked a question about support ticket analytics. Answer using ONLY the data below. "
-                "Be concise (2-5 sentences). Use numbers from the data. If the question cannot be answered from the data, say so.\n\n"
+                "The user asked a question about their support workspace's "
+                "analytics. Answer using ONLY the data below. Be concise "
+                "(2-5 sentences). Use numbers from the data. If the question "
+                "cannot be answered from the data, say so.\n\n"
+                # FRONTLINE-BUG-10: force the model to distinguish docs from
+                # tickets — old prompt only said "support ticket analytics"
+                # which made it read "how many documents" as "how many tickets".
+                "The data has TWO independent dimensions:\n"
+                " • Tickets — see fields prefixed `tickets_by_*`, `total_tickets`, "
+                "`avg_resolution_hours`, `auto_resolved_count`.\n"
+                " • Documents (knowledge-base files) — see `total_documents`, "
+                "`ready_documents`, `outdated_documents`, `documents_by_format`, "
+                "`documents_by_status`.\n"
+                "If the user asks about documents/files/PDFs/knowledge base, "
+                "answer from the documents fields — never substitute the ticket "
+                "count. If ambiguous, ask which dimension they mean.\n\n"
                 "User question: " + (question or "").strip() + "\n\nAnalytics data:\n" + data_str + "\n\n"
                 "After your answer, on a new line write exactly one of: CHART: by_date | CHART: by_status | CHART: by_category | CHART: none "
                 "to suggest which chart would help (by_date=over time, by_status=by status, by_category=by category, none=no chart)."
@@ -983,6 +997,18 @@ By category (use tickets_by_category_obj for bar/pie): {_json.dumps(data.get('ti
 By priority (use tickets_by_priority_obj for bar/pie): {_json.dumps(data.get('tickets_by_priority_obj', {}))}
 
 Over time - daily (use tickets_by_date_line for line/area): {_json.dumps((data.get('tickets_by_date_line') or [])[-20:])}
+
+DOCUMENTS DATA (knowledge-base files uploaded by this user — DISTINCT from tickets):
+- Total documents: {data.get('total_documents', 0)}
+- Ready-to-query documents: {data.get('ready_documents', 0)}
+- Outdated documents: {data.get('outdated_documents', 0)}
+By format (use documents_by_format_obj for bar/pie): {_json.dumps(data.get('documents_by_format_obj', {}))}
+By processing status (use documents_by_status_obj for bar/pie): {_json.dumps(data.get('documents_by_status_obj', {}))}
+
+IMPORTANT — "documents" ≠ "tickets": if the user asks about DOCUMENTS
+(files, PDFs, knowledge-base entries), answer from the DOCUMENTS section
+above. If they ask about TICKETS (support requests, cases, issues),
+answer from the TICKETS section. Never conflate the two counts.
 """
             system = """You are an AI that generates chart configurations for a support/frontline dashboard.
 Use ONLY the data provided below. Return ONLY a valid JSON object (no markdown, no explanation).

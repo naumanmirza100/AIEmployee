@@ -685,6 +685,8 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
               className="border-t border-white/[0.06] px-3 py-3 flex flex-col sm:flex-row items-end gap-2"
             >
               <InfoHint {...HR_HINTS.hrQaInput} className="mb-2 sm:mb-0" />
+              {/* EXEC-BUG-03: freeze the input while the AI is answering
+                  so users can't queue a new question mid-generation. */}
               <Textarea
                 data-tour-hrqa="input"
                 rows={2}
@@ -697,6 +699,7 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
                   }
                 }}
                 placeholder='Ask about HR policy, leave, benefits...  (Shift+Enter for newline)'
+                disabled={loading}
                 className="flex-1 resize-none bg-white/[0.03] border-white/[0.08] focus-visible:ring-violet-500/50"
               />
               <Button data-tour-hrqa="send" type="submit" disabled={loading || !question.trim()}>

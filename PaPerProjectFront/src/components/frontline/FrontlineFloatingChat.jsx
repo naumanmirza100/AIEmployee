@@ -189,6 +189,8 @@ const FrontlineFloatingChat = () => {
   };
 
   const clearCurrentConversation = () => {
+    // UX-13: don't wipe the current conversation without a confirm.
+    if (!window.confirm('Clear this conversation? This cannot be undone.')) return;
     deleteChatConversation(conversationId);
     setMessages([]);
     setInput('');
@@ -204,6 +206,8 @@ const FrontlineFloatingChat = () => {
   };
 
   const removeHistoryEntry = (id) => {
+    // UX-13: same guard on individual history entries.
+    if (!window.confirm('Delete this conversation from history?')) return;
     deleteChatConversation(id);
     refreshHistory();
   };
