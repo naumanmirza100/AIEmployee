@@ -34,6 +34,27 @@ const DURATION_UNITS = [
   { value: 'month', label: 'Month(s)' },
 ];
 
+// Validate an age-range string. Returns an error message string, or '' if valid.
+// Accepts: '' (any age), a single number ("30"), or a "min-max" range ("25-45").
+// Rejects negatives, non-numbers, min > max, and out-of-range (0–120) values.
+function validateAgeRange(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return ''; // empty = no age restriction
+  const inRange = (n) => Number.isInteger(n) && n >= 0 && n <= 120;
+  const m = s.match(/^(\d+)\s*[-–]\s*(\d+)$/); // "25-45"
+  if (m) {
+    const lo = parseInt(m[1], 10);
+    const hi = parseInt(m[2], 10);
+    if (!inRange(lo) || !inRange(hi)) return 'Ages must be between 0 and 120.';
+    if (lo > hi) return 'The minimum age can\'t be greater than the maximum age.';
+    return '';
+  }
+  if (/^\d+$/.test(s)) { // single number
+    return inRange(parseInt(s, 10)) ? '' : 'Age must be between 0 and 120.';
+  }
+  return 'Enter a single age (e.g. 30) or a range (e.g. 25-45). No negatives.';
+}
+
 const COMPANY_SIZES = [
   { value: '__any__', label: 'Any' },
   { value: '1-10', label: '1-10 employees' },
@@ -691,6 +712,24 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       }
     }
 
+    // Start date must not be after end date.
+    if (startDate && endDate && startDate > endDate) {
+      toast({
+        title: 'Invalid dates',
+        description: 'Start date can\'t be after the end date. Fix the campaign dates.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Age range: reject negatives / malformed input. Accepts "" (any age),
+    // a single number ("30"), or a "min-max" range ("25-45").
+    const ageErr = validateAgeRange(ageRange);
+    if (ageErr) {
+      toast({ title: 'Invalid age range', description: ageErr, variant: 'destructive' });
+      return;
+    }
+
     setLoading(true);
     try {
       const campaignData = buildCampaignData();
@@ -1106,6 +1145,9 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                   <div className="space-y-2">
                     <Label htmlFor="age" className="text-white/90">Age range</Label>
                     <Input id="age" placeholder="e.g. 25-45" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} />
+                    {validateAgeRange(ageRange) && (
+                      <p className="text-[11px] text-red-400">{validateAgeRange(ageRange)}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="loc" className="text-white/90">Location</Label>

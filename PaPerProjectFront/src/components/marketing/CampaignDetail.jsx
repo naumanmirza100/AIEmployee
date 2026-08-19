@@ -40,6 +40,7 @@ import {
   ListOrdered,
   FileText,
   Users,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   Chart as ChartJS,
@@ -243,6 +244,13 @@ const CampaignDetail = () => {
   const [accountDraftId, setAccountDraftId] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMessage, setUploadMessage] = useState('');
+  // Client-side preview of the chosen file (headers + all rows) so the user can
+  // verify the columns/data before uploading. { headers, rows } | null.
+  const [uploadPreview, setUploadPreview] = useState(null);
+  const [uploadParsing, setUploadParsing] = useState(false);
+  // The backend result of the last upload attempt (kept in the dialog so
+  // per-row rejection errors can be shown). null until an upload happens.
+  const [uploadResult, setUploadResult] = useState(null);
   // Persists the last upload's row breakdown so it stays visible on the Leads
   // tab (not just a toast that disappears) until the next upload replaces it.
   const [lastUploadSummary, setLastUploadSummary] = useState(null);
@@ -452,6 +460,36 @@ const CampaignDetail = () => {
     }
   };
 
+  // Parse the chosen file client-side (CSV / XLSX) into headers + all rows for
+  // the preview. Uses the xlsx lib (already a dependency) so it handles both.
+  const handleUploadFileChange = async (file) => {
+    setUploadFile(file);
+    setUploadPreview(null);
+    setUploadResult(null);
+    setUploadMessage('');
+    if (!file) return;
+    setUploadParsing(true);
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      // header:1 → array-of-arrays; first row = headers.
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+      if (!aoa.length) { setUploadPreview({ headers: [], rows: [] }); return; }
+      const headers = (aoa[0] || []).map((h) => String(h ?? '').trim());
+      const rows = aoa.slice(1)
+        .filter((r) => Array.isArray(r) && r.some((c) => String(c ?? '').trim() !== ''))
+        .map((r) => headers.map((_, i) => String(r[i] ?? '')));
+      setUploadPreview({ headers, rows });
+    } catch (err) {
+      setUploadPreview(null);
+      setUploadMessage('Could not read this file for preview — you can still try uploading it.');
+    } finally {
+      setUploadParsing(false);
+    }
+  };
+
   const handleUploadLeads = async () => {
     if (!uploadFile) {
       setUploadMessage('Please select a file');
@@ -475,12 +513,28 @@ const CampaignDetail = () => {
           }`,
         });
         setLastUploadSummary({ ...d, reasonParts });
+        fetchDetail(true);
+        // Keep the dialog open when rows were rejected so the user can see the
+        // per-row errors and fix their file; close it on a fully-clean upload.
+        if (d.rejected_count) {
+          setUploadResult({ ...d, reasonParts });
+          setUploadFile(null);
+          setUploadPreview(null);
+        } else {
+          setUploadLeadsOpen(false);
+          setUploadFile(null);
+          setUploadPreview(null);
+          setUploadResult(null);
+        }
+        return;
       } else {
         toast({ title: 'Success', description: 'Leads uploaded' });
         setLastUploadSummary(null);
       }
       setUploadLeadsOpen(false);
       setUploadFile(null);
+      setUploadPreview(null);
+      setUploadResult(null);
       fetchDetail(true);
     } catch (e) {
       setUploadMessage(e.message || 'Upload failed');
@@ -1486,44 +1540,119 @@ const CampaignDetail = () => {
       </Dialog>
 
       {/* Upload leads modal */}
-      <Dialog open={uploadLeadsOpen} onOpenChange={setUploadLeadsOpen}>
+      <Dialog open={uploadLeadsOpen} onOpenChange={(o) => { setUploadLeadsOpen(o); if (!o) { setUploadFile(null); setUploadPreview(null); setUploadResult(null); setUploadMessage(''); } }}>
         <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar">
           <DialogHeader>
             <DialogTitle>Upload leads</DialogTitle>
             <CardDescription>
-              Upload a CSV or Excel file. Match the column headers below — names are
-              case-insensitive and a single space is treated the same as an underscore
-              (so both <code className="font-mono text-[11px] bg-muted px-1 rounded">first_name</code>
-              {' '}and <code className="font-mono text-[11px] bg-muted px-1 rounded">First Name</code> work).
+              Upload a CSV or Excel file, then review the preview before uploading.
             </CardDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <LeadsUploadFields />
+            {/* Column reference — collapsed by default */}
+            <LeadsUploadFields defaultOpen={false} />
 
-            {/* File picker */}
+            {/* File picker — a clearly-styled "Choose file" button */}
             <div>
               <Label>File (CSV, XLSX, XLS)</Label>
-              <Input
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                className="mt-1"
-              />
-              {uploadFile && (
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Selected: <span className="font-medium text-foreground">{uploadFile.name}</span>
-                </p>
-              )}
+              <div className="mt-1 flex items-center gap-3 flex-wrap">
+                <input
+                  id="leads-file-input"
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={(e) => handleUploadFileChange(e.target.files?.[0] || null)}
+                  className="hidden"
+                />
+                <Button type="button" variant="outline" onClick={() => document.getElementById('leads-file-input')?.click()}>
+                  <Upload className="h-4 w-4 mr-2" /> Choose file
+                </Button>
+                {uploadFile ? (
+                  <span className="text-xs text-muted-foreground">
+                    Selected: <span className="font-medium text-foreground">{uploadFile.name}</span>
+                    {uploadPreview && <span className="ml-1">· {uploadPreview.rows.length} row(s)</span>}
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">No file chosen</span>
+                )}
+                {uploadParsing && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              </div>
             </div>
+
+            {/* Preview of the chosen file — headers + all rows */}
+            {uploadPreview && uploadPreview.headers.length > 0 && (
+              <div className="rounded-lg border">
+                <div className="px-3 py-2 border-b bg-muted/40 text-xs font-medium flex items-center justify-between">
+                  <span>Preview — {uploadPreview.rows.length} row(s), {uploadPreview.headers.length} column(s)</span>
+                  <span className="text-muted-foreground font-normal">Verify columns/data, then Upload</span>
+                </div>
+                <div className="max-h-64 overflow-auto no-scrollbar">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-muted/60">
+                      <tr>
+                        <th className="text-left font-semibold px-2 py-1.5 text-muted-foreground w-10">#</th>
+                        {uploadPreview.headers.map((h, i) => (
+                          <th key={i} className="text-left font-semibold px-2 py-1.5 whitespace-nowrap">{h || <span className="text-muted-foreground italic">(blank)</span>}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {uploadPreview.rows.map((r, ri) => (
+                        <tr key={ri} className="border-t hover:bg-muted/20">
+                          <td className="px-2 py-1 text-muted-foreground tabular-nums">{ri + 2}</td>
+                          {uploadPreview.headers.map((_, ci) => (
+                            <td key={ci} className="px-2 py-1 whitespace-nowrap max-w-[220px] truncate" title={r[ci]}>{r[ci]}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Row-level rejection errors from the last upload attempt */}
+            {uploadResult && uploadResult.rejected_count > 0 && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06]">
+                <div className="px-3 py-2 border-b border-amber-500/20 text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {uploadResult.created_count} added · {uploadResult.rejected_count} rejected
+                </div>
+                {Array.isArray(uploadResult.rejected_rows) && uploadResult.rejected_rows.length > 0 ? (
+                  <div className="max-h-56 overflow-auto no-scrollbar">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-amber-500/10">
+                        <tr>
+                          <th className="text-left font-semibold px-3 py-1.5 w-16">Row</th>
+                          <th className="text-left font-semibold px-3 py-1.5 w-28">Field</th>
+                          <th className="text-left font-semibold px-3 py-1.5">Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {uploadResult.rejected_rows.map((er, i) => (
+                          <tr key={i} className="border-t border-amber-500/10">
+                            <td className="px-3 py-1 tabular-nums text-amber-200">{er.row}</td>
+                            <td className="px-3 py-1 text-amber-200/80">{er.field || '—'}</td>
+                            <td className="px-3 py-1 text-amber-100/90">{er.reason}{er.value ? <span className="text-amber-200/50"> ({er.value})</span> : null}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="px-3 py-2 text-xs text-amber-200/80">Some rows were rejected but no per-row detail is available.</p>
+                )}
+              </div>
+            )}
+
             {uploadMessage && <p className="text-sm text-destructive">{uploadMessage}</p>}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUploadLeadsOpen(false)}>Cancel</Button>
-            <Button onClick={handleUploadLeads} disabled={actionLoading === 'upload'}>
+            <Button variant="outline" onClick={() => { setUploadLeadsOpen(false); setUploadFile(null); setUploadPreview(null); setUploadResult(null); }}>{uploadResult ? 'Close' : 'Cancel'}</Button>
+            <Button onClick={handleUploadLeads} disabled={actionLoading === 'upload' || !uploadFile}>
               {actionLoading === 'upload' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Upload
+              {uploadResult ? 'Re-upload' : 'Upload'}
             </Button>
           </DialogFooter>
         </DialogContent>

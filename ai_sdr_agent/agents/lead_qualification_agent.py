@@ -71,7 +71,7 @@ class LeadQualificationAgent:
         else:
             logger.warning("LeadQualificationAgent initialised without a company — no LLM key resolved.")
 
-        self.model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+        self.model = getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
 
     def qualify_lead(self, lead, icp_profile) -> dict:
         if self.groq_client:
