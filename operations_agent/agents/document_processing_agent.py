@@ -265,10 +265,16 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             elif file_type == 'txt':
                 return self._extract_txt(file_path)
             else:
-                return False, '', 0, f'Unsupported file type: {file_type}'
+                return False, '', 0, (
+                    f"This file type (.{file_type}) isn't supported. "
+                    "Please upload a PDF, Word, Excel, CSV, PowerPoint, or text file."
+                )
         except Exception as e:
             logger.error(f'Text extraction failed for {file_path}: {e}', exc_info=True)
-            return False, '', 0, str(e)
+            return False, '', 0, (
+                "We couldn't read this file. It may be corrupted or in an unsupported format — "
+                "please check it opens correctly and re-upload."
+            )
 
     @staticmethod
     def _extract_pdf(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
@@ -287,9 +293,13 @@ class DocumentProcessingAgent(MarketingBaseAgent):
                 pages_text = [p.extract_text() or '' for p in reader.pages]
                 return True, '\n\n'.join(pages_text), len(pages_text), None
             except ImportError:
-                return False, '', 0, 'No PDF library available (install pdfplumber or PyPDF2)'
+                return False, '', 0, 'The server is missing a required library to read PDF files. Please contact support.'
         except Exception as e:
-            return False, '', 0, f'PDF extraction failed: {e}'
+            logger.error('PDF extraction failed for %s: %s', file_path, e, exc_info=True)
+            return False, '', 0, (
+                "We couldn't read this PDF. It may be corrupted, password-protected, or a scanned image — "
+                "please check it opens correctly and re-upload."
+            )
 
     @staticmethod
     def _extract_docx(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
@@ -300,9 +310,13 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             page_count = max(1, len(paragraphs) // 40)  # ~40 paragraphs per page estimate
             return True, '\n\n'.join(paragraphs), page_count, None
         except ImportError:
-            return False, '', 0, 'python-docx not installed'
+            return False, '', 0, 'The server is missing a required library to read Word files. Please contact support.'
         except Exception as e:
-            return False, '', 0, f'DOCX extraction failed: {e}'
+            logger.error('DOCX extraction failed for %s: %s', file_path, e, exc_info=True)
+            return False, '', 0, (
+                "We couldn't read this Word document. It may be corrupted or in an older/unsupported format — "
+                "please check it opens correctly and re-upload."
+            )
 
     @staticmethod
     def _extract_xlsx(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
@@ -316,20 +330,45 @@ class DocumentProcessingAgent(MarketingBaseAgent):
                 all_text.append(df.to_string(index=False))
             return True, '\n\n'.join(all_text), len(xls.sheet_names), None
         except ImportError:
-            return False, '', 0, 'pandas/openpyxl not installed'
+            return False, '', 0, 'The server is missing a required library to read Excel files. Please contact support.'
         except Exception as e:
-            return False, '', 0, f'Excel extraction failed: {e}'
+            logger.error('Excel extraction failed for %s: %s', file_path, e, exc_info=True)
+            return False, '', 0, (
+                "We couldn't read this Excel file. It may be corrupted or password-protected — "
+                "please check it opens correctly and re-upload."
+            )
 
     @staticmethod
     def _extract_csv(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
         try:
             import pandas as pd
-            df = pd.read_csv(file_path)
+            try:
+                df = pd.read_csv(file_path)
+            except pd.errors.ParserError:
+                # Ragged rows (uneven column counts) are the most common cause of
+                # a "failed" CSV. Retry tolerantly by skipping the bad lines so a
+                # slightly-malformed file still imports instead of hard-failing.
+                logger.warning('CSV %s had malformed rows; retrying with on_bad_lines=skip', file_path)
+                df = pd.read_csv(file_path, on_bad_lines='skip', engine='python')
+            if df.empty:
+                return False, '', 0, (
+                    "This CSV appears to be empty or has no readable rows. "
+                    "Please check the file has a header row and at least one data row, then re-upload."
+                )
             return True, df.to_string(index=False), 1, None
         except ImportError:
-            return False, '', 0, 'pandas not installed'
+            return False, '', 0, 'The server is missing a required library to read CSV files. Please contact support.'
+        except UnicodeDecodeError:
+            return False, '', 0, (
+                "We couldn't read this CSV — it may use an unsupported text encoding. "
+                "Try re-saving it as UTF-8 CSV and upload again."
+            )
         except Exception as e:
-            return False, '', 0, f'CSV extraction failed: {e}'
+            logger.error('CSV extraction failed for %s: %s', file_path, e, exc_info=True)
+            return False, '', 0, (
+                "We couldn't read this CSV file. It looks malformed — please make sure every row has the "
+                "same number of columns (no extra commas), then re-upload."
+            )
 
     @staticmethod
     def _extract_pptx(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
@@ -346,9 +385,13 @@ class DocumentProcessingAgent(MarketingBaseAgent):
                     slides_text.append(f'--- Slide {i} ---\n' + '\n'.join(texts))
             return True, '\n\n'.join(slides_text), len(prs.slides), None
         except ImportError:
-            return False, '', 0, 'python-pptx not installed'
+            return False, '', 0, 'The server is missing a required library to read PowerPoint files. Please contact support.'
         except Exception as e:
-            return False, '', 0, f'PPTX extraction failed: {e}'
+            logger.error('PPTX extraction failed for %s: %s', file_path, e, exc_info=True)
+            return False, '', 0, (
+                "We couldn't read this PowerPoint file. It may be corrupted or in an unsupported format — "
+                "please check it opens correctly and re-upload."
+            )
 
     @staticmethod
     def _extract_txt(file_path: str) -> Tuple[bool, str, int, Optional[str]]:
@@ -358,7 +401,11 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             page_count = max(1, len(text) // 3000)
             return True, text, page_count, None
         except Exception as e:
-            return False, '', 0, f'Text extraction failed: {e}'
+            logger.error('Text extraction failed for %s: %s', file_path, e, exc_info=True)
+            return False, '', 0, (
+                "We couldn't read this text file. It may be corrupted or use an unsupported encoding — "
+                "please re-save it as UTF-8 and upload again."
+            )
 
     # ------------------------------------------------------------------
     # Chunking + embedding (RAG)

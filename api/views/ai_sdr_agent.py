@@ -13,6 +13,7 @@ import logging
 import os
 import re
 from datetime import timedelta
+from typing import Optional
 
 from django.conf import settings
 from django.core.paginator import Paginator
@@ -48,6 +49,45 @@ def _ensure_https(url: str) -> str:
     if url and not url.startswith(('http://', 'https://')):
         return f'https://{url}'
     return url
+
+
+_EMAIL_RE = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+
+
+def _validate_lead_input(full_name, email, linkedin_url, company_size) -> Optional[str]:
+    """Server-side validation for a manually-created lead. Mirrors the frontend
+    checks so invalid data can't be saved by bypassing the UI. Returns an error
+    message string, or None when the input is valid.
+    """
+    name = (full_name or '').strip()
+    email = (email or '').strip()
+    linkedin = (linkedin_url or '').strip()
+
+    if not name and not email:
+        return 'Enter at least a name or a business email.'
+    if email and not _EMAIL_RE.match(email):
+        return 'Enter a valid business email like jane@company.com.'
+    if linkedin:
+        url = linkedin if re.match(r'^https?://', linkedin, re.I) else f'https://{linkedin}'
+        host = re.sub(r'^https?://', '', url, flags=re.I).split('/')[0].lower()
+        if not (host == 'linkedin.com' or host.endswith('.linkedin.com')):
+            return 'Enter a valid LinkedIn URL like https://linkedin.com/in/jane.'
+    if company_size not in (None, '') and not str(company_size).strip().isdigit():
+        return 'Employees must be a whole number.'
+    return None
+
+
+def _validate_url_optional(value, error_message) -> Optional[str]:
+    """Validate an optional URL field. Empty is allowed. Returns error_message
+    when the value is present but not a plausible http(s) URL, else None."""
+    v = (value or '').strip()
+    if not v:
+        return None
+    url = v if re.match(r'^https?://', v, re.I) else f'https://{v}'
+    host = re.sub(r'^https?://', '', url, flags=re.I).split('/')[0]
+    if not host or '.' not in host or ' ' in host:
+        return error_message
+    return None
 
 
 def _get_research_agent(company, company_user=None) -> LeadResearchAgent:
@@ -314,8 +354,17 @@ def leads_list(request):
         d = request.data
         full_name = d.get('full_name') or f"{d.get('first_name', '')} {d.get('last_name', '')}".strip()
 
-        # ── Duplicate guard ──────────────────────────────────────────────────
+        # ── Validation (mirrors the frontend; never trust the client) ─────────
         email_input = (d.get('email') or '').strip().lower()
+        linkedin_input = (d.get('linkedin_url') or '').strip()
+        size_input = d.get('company_size')
+
+        err = _validate_lead_input(full_name, email_input, linkedin_input, size_input)
+        if err:
+            return Response({'status': 'error', 'message': err}, status=400)
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── Duplicate guard ──────────────────────────────────────────────────
         if email_input:
             existing = SDRLead.objects.filter(
                 company_user=company_user, email__iexact=email_input
@@ -1269,6 +1318,18 @@ def sdr_campaigns_list(request):
     try:
         d = request.data
         start_date = d.get('start_date') or None  # ISO date string or None
+
+        # ── Validation (mirrors the frontend; never trust the client) ─────────
+        if not (d.get('name') or '').strip():
+            return Response({'status': 'error', 'message': 'Campaign name is required.'}, status=400)
+        cal_err = _validate_url_optional(
+            d.get('calendar_link'),
+            'Enter a valid calendar link like https://calendly.com/you/30min.',
+        )
+        if cal_err:
+            return Response({'status': 'error', 'message': cal_err}, status=400)
+        # ─────────────────────────────────────────────────────────────────────
+
         # If start_date provided → status='scheduled' (Celery will auto-activate)
         initial_status = 'scheduled' if start_date else 'draft'
 

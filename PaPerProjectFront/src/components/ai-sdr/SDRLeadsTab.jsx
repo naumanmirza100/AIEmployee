@@ -187,11 +187,12 @@ const EXPORT_COLUMNS = [
 
 async function exportToExcel(leads, filename = 'leads') {
   const XLSX = await import('xlsx');
-  const rows = leads.map(l =>
-    Object.fromEntries(EXPORT_COLUMNS.map(c => [c.label, l[c.key] ?? '']))
-  );
+  const rows = leads.map((l, i) => ({
+    'Sr#': i + 1,
+    ...Object.fromEntries(EXPORT_COLUMNS.map(c => [c.label, l[c.key] ?? ''])),
+  }));
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = EXPORT_COLUMNS.map(c => ({ wch: Math.max(c.label.length + 2, 16) }));
+  ws['!cols'] = [{ wch: 6 }, ...EXPORT_COLUMNS.map(c => ({ wch: Math.max(c.label.length + 2, 16) }))];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Leads');
   XLSX.writeFile(wb, `${filename}.xlsx`);
@@ -216,15 +217,20 @@ async function exportToPdf(leads, filename = 'leads') {
   doc.setDrawColor(200, 200, 200);
   doc.setLineWidth(0.3);
   doc.line(14, 30, 283, 30);
-  const columns = EXPORT_COLUMNS.slice(0, 10);
+  // Fit fewer data columns to leave room for the leading Sr# column.
+  const columns = EXPORT_COLUMNS.slice(0, 9);
   autoTable(doc, {
     startY: 34,
-    head: [columns.map(c => c.label)],
-    body: leads.map(l => columns.map(c => { const v = l[c.key]; return v === null || v === undefined || v === '' ? '—' : String(v); })),
+    // Prepend a "Sr#" column so any lead can be referenced by row number.
+    head: [['Sr#', ...columns.map(c => c.label)]],
+    body: leads.map((l, i) => [
+      String(i + 1),
+      ...columns.map(c => { const v = l[c.key]; return v === null || v === undefined || v === '' ? '—' : String(v); }),
+    ]),
     styles: { fontSize: 8, cellPadding: { top: 3, bottom: 3, left: 4, right: 4 }, textColor: [30, 30, 30], fillColor: [255, 255, 255], lineColor: [220, 220, 220], lineWidth: 0.25, overflow: 'linebreak' },
     headStyles: { fillColor: [124, 58, 237], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5, halign: 'left' },
     alternateRowStyles: { fillColor: [248, 245, 255] },
-    columnStyles: { 0: { cellWidth: 36 }, 1: { cellWidth: 44 }, 2: { cellWidth: 24 }, 3: { cellWidth: 36 }, 4: { cellWidth: 28 }, 5: { cellWidth: 22 }, 6: { cellWidth: 18 }, 7: { cellWidth: 22 }, 8: { cellWidth: 14 }, 9: { cellWidth: 18 } },
+    columnStyles: { 0: { cellWidth: 12, halign: 'right' }, 1: { cellWidth: 34 }, 2: { cellWidth: 42 }, 3: { cellWidth: 24 }, 4: { cellWidth: 34 }, 5: { cellWidth: 26 }, 6: { cellWidth: 22 }, 7: { cellWidth: 16 }, 8: { cellWidth: 22 }, 9: { cellWidth: 14 } },
     margin: { left: 14, right: 14 },
     didDrawPage: (data) => {
       const pageCount = doc.internal.getNumberOfPages();
@@ -820,6 +826,37 @@ const SDRLeadsTab = () => {
   };
 
   const handleAddLead = async () => {
+    // ── Validation ──────────────────────────────────────────────────────────
+    // A lead needs at least a name or an email to be useful, and any email /
+    // LinkedIn URL provided must be well-formed (previously anything was saved).
+    const name = `${newLead.first_name || ''} ${newLead.last_name || ''}`.trim();
+    const email = (newLead.email || '').trim();
+    const linkedin = (newLead.linkedin_url || '').trim();
+
+    if (!name && !email) {
+      toast({ title: 'Missing details', description: 'Enter at least a name or a business email.', variant: 'destructive' });
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast({ title: 'Invalid email', description: 'Enter a valid business email like jane@company.com.', variant: 'destructive' });
+      return;
+    }
+    if (linkedin) {
+      let ok = false;
+      try {
+        const u = new URL(/^https?:\/\//i.test(linkedin) ? linkedin : `https://${linkedin}`);
+        ok = /(^|\.)linkedin\.com$/i.test(u.hostname);
+      } catch { ok = false; }
+      if (!ok) {
+        toast({ title: 'Invalid LinkedIn URL', description: 'Enter a valid LinkedIn URL like https://linkedin.com/in/jane.', variant: 'destructive' });
+        return;
+      }
+    }
+    if (newLead.company_size && !/^\d+$/.test(String(newLead.company_size).trim())) {
+      toast({ title: 'Invalid employees', description: 'Employees must be a whole number.', variant: 'destructive' });
+      return;
+    }
+
     setAddingLead(true);
     try {
       await createLead({ ...newLead, company_size: newLead.company_size ? parseInt(newLead.company_size) : null });
