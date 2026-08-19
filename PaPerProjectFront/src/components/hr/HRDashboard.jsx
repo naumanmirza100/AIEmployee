@@ -1410,24 +1410,41 @@ const HRDashboard = () => {
                         <Input placeholder="Cycle name (e.g. H1 2026) *" value={cycleDialog.name}
                                onChange={(e) => setCycleDialog((s) => ({ ...s, name: e.target.value }))} />
                         <div className="grid grid-cols-2 gap-2">
+                          {/* HR-BUG-02 + EXEC-BUG-02: force dark colour-scheme
+                              so the native date-picker text is legible against
+                              the dark modal (default browser text is black on
+                              black otherwise). `min={today}` blocks past
+                              dates on new review cycles — review cycles are
+                              forward-looking, so past-dating them makes no
+                              sense. */}
                           <div>
                             <Label className="text-xs">Period start *</Label>
                             <Input type="date" value={cycleDialog.period_start}
+                                   min={new Date().toISOString().slice(0, 10)}
+                                   className="[color-scheme:dark]"
                                    onChange={(e) => setCycleDialog((s) => ({ ...s, period_start: e.target.value }))} />
                           </div>
                           <div>
                             <Label className="text-xs">Period end *</Label>
                             <Input type="date" value={cycleDialog.period_end}
+                                   min={cycleDialog.period_start || new Date().toISOString().slice(0, 10)}
+                                   className="[color-scheme:dark]"
                                    onChange={(e) => setCycleDialog((s) => ({ ...s, period_end: e.target.value }))} />
                           </div>
                           <div>
                             <Label className="text-xs">Self-review due</Label>
                             <Input type="date" value={cycleDialog.self_review_due}
+                                   min={cycleDialog.period_start || new Date().toISOString().slice(0, 10)}
+                                   max={cycleDialog.period_end || undefined}
+                                   className="[color-scheme:dark]"
                                    onChange={(e) => setCycleDialog((s) => ({ ...s, self_review_due: e.target.value }))} />
                           </div>
                           <div>
                             <Label className="text-xs">Manager-review due</Label>
                             <Input type="date" value={cycleDialog.manager_review_due}
+                                   min={cycleDialog.self_review_due || cycleDialog.period_start || new Date().toISOString().slice(0, 10)}
+                                   max={cycleDialog.period_end || undefined}
+                                   className="[color-scheme:dark]"
                                    onChange={(e) => setCycleDialog((s) => ({ ...s, manager_review_due: e.target.value }))} />
                           </div>
                         </div>

@@ -2800,6 +2800,77 @@ def _hr_message_has_time_reference(message: str) -> bool:
     return bool(_HR_TIME_REGEX.search(message))
 
 
+# HR-BUG-07: deterministic weekday / relative-date resolver.
+# The LLM occasionally miscomputes "next Friday" or "tomorrow" from the
+# `now_iso` we pass in — it can be off by a week, or land on the wrong
+# weekday entirely. This helper computes the intended date locally and
+# is used to correct the LLM's `scheduled_at` after the fact.
+_HR_WEEKDAY_TOKENS = {
+    'monday': 0, 'mon': 0,
+    'tuesday': 1, 'tue': 1, 'tues': 1,
+    'wednesday': 2, 'wed': 2,
+    'thursday': 3, 'thu': 3, 'thur': 3, 'thurs': 3,
+    'friday': 4, 'fri': 4,
+    'saturday': 5, 'sat': 5,
+    'sunday': 6, 'sun': 6,
+}
+
+
+def _hr_resolve_relative_date(message, now_dt):
+    """
+    Return a `datetime.date` (or None) if the message contains a
+    resolvable relative reference ("tomorrow", "next Friday", "in 2
+    weeks", "Monday"). Interpretation rules:
+      * "today"                       → today
+      * "tomorrow"                    → today + 1
+      * "in N days"                   → today + N
+      * "in N weeks"                  → today + 7N
+      * "next <weekday>"              → the FOLLOWING week's weekday
+                                        (today+7 if today matches)
+      * "this <weekday>"              → the coming occurrence this week
+                                        (today+7 if today matches, so
+                                        "this Friday" on a Friday means
+                                        one week from today rather than
+                                        today itself)
+      * bare "<weekday>"              → next occurrence (today+7 if
+                                        today matches)
+    """
+    import re as _re
+    from datetime import timedelta as _td
+    msg = (message or '').lower()
+    if not msg:
+        return None
+    today = now_dt.date()
+
+    if _re.search(r'\btomorrow\b', msg):
+        return today + _td(days=1)
+    if _re.search(r'\btoday\b', msg):
+        return today
+
+    m = _re.search(r'\bin\s+(\d{1,3})\s+day', msg)
+    if m:
+        return today + _td(days=int(m.group(1)))
+    m = _re.search(r'\bin\s+(\d{1,2})\s+week', msg)
+    if m:
+        return today + _td(weeks=int(m.group(1)))
+
+    for token, wd in _HR_WEEKDAY_TOKENS.items():
+        if not _re.search(rf'\b{token}\b', msg):
+            continue
+        days_ahead = (wd - today.weekday()) % 7
+        if _re.search(rf'\bnext\s+{token}\b', msg):
+            # "next Friday": one week from now (or +7 if today is Friday)
+            days_ahead = 7 if days_ahead == 0 else days_ahead + 7
+        else:
+            # "this friday" and bare "friday" both mean the NEXT
+            # occurrence. On the matching weekday itself, prefer +7.
+            if days_ahead == 0:
+                days_ahead = 7
+        return today + _td(days=days_ahead)
+
+    return None
+
+
 def _hr_find_users_in_message(message: str, all_emps):
     """Deterministically scan the raw user message for employee references.
     Mirrors the two-pass algorithm from the PM meeting scheduler agent so
@@ -3111,6 +3182,46 @@ def hr_meeting_schedule(request):
             ).values_list('id', flat=True))
             validated_ids.update(allowed)
 
+        # HR-BUG-06: if the CURRENT turn didn't name anyone AND the LLM
+        # didn't extract any participant_names, fall back to participants
+        # detected in prior USER turns. Fixes the "OK, make it tomorrow
+        # at 3pm" flow where the scheduler used to drop everyone.
+        # If the current turn DOES name someone (even one person), we
+        # treat that as the definitive list — this preserves the user's
+        # ability to change the participants mid-flow.
+        current_turn_named = bool(all_matched_emps or raw_names)
+        if not current_turn_named and isinstance(history, list) and history:
+            historical_matches = []
+            historical_ids = set()
+            # Only scan USER turns — assistant turns quote back the
+            # names in reply text and would double-count.
+            for turn in history[-6:]:
+                if not isinstance(turn, dict):
+                    continue
+                if (turn.get('role') or '').lower() != 'user':
+                    continue
+                content = (turn.get('content') or '')[:1000]
+                if not content:
+                    continue
+                hit = _hr_find_users_in_message(content, all_emps)
+                for e in hit.get('all_matched') or []:
+                    if e.id not in historical_ids:
+                        historical_ids.add(e.id)
+                        historical_matches.append(e)
+            if historical_ids:
+                validated_ids.update(historical_ids)
+                # Also merge into all_matched_emps so downstream
+                # code that iterates that list (e.g. participant
+                # display / event-invite generation) sees them.
+                for e in historical_matches:
+                    if e.id not in {x.id for x in all_matched_emps}:
+                        all_matched_emps.append(e)
+                logger.info(
+                    "hr_meeting_schedule: HR-BUG-06 fallback resolved %d "
+                    "participant(s) from history since current turn named none",
+                    len(historical_ids),
+                )
+
         if intent == 'create':
             # ---- Time resolution + hallucination guard -------------------
             # The LLM will sometimes invent a time ("tomorrow at midnight")
@@ -3120,6 +3231,34 @@ def hr_meeting_schedule(request):
             sched = None
             if _hr_message_has_time_reference(message):
                 sched = _parse_iso_dt(parsed.get('scheduled_at'))
+
+            # HR-BUG-07: correct the DATE portion when we can resolve it
+            # deterministically from the user's message. The LLM has
+            # been observed to miscompute "next Friday" / "tomorrow"
+            # from `now_iso` by a week or land on the wrong weekday
+            # entirely; a local weekday calculation is authoritative.
+            # We preserve the LLM's time-of-day.
+            if sched is not None:
+                try:
+                    from datetime import datetime as _dt, timezone as _dt_tz
+                    now_dt = timezone.now().astimezone(_dt_tz.utc)
+                    resolved_date = _hr_resolve_relative_date(message, now_dt)
+                    if resolved_date is not None and resolved_date != sched.date():
+                        corrected = sched.replace(
+                            year=resolved_date.year,
+                            month=resolved_date.month,
+                            day=resolved_date.day,
+                        )
+                        logger.info(
+                            "hr_meeting_schedule: HR-BUG-07 corrected LLM date "
+                            "%s → %s (message=%r)",
+                            sched.date().isoformat(),
+                            corrected.date().isoformat(),
+                            (message or '')[:200],
+                        )
+                        sched = corrected
+                except Exception:
+                    logger.exception('hr_meeting_schedule: relative-date correction failed')
 
             if not sched:
                 # We still know who this meeting is (probably) with — return
@@ -4180,6 +4319,30 @@ def create_compensation(request, employee_id):
     except Exception:
         return Response({'status': 'error', 'message': 'base_salary must be numeric'},
                         status=status.HTTP_400_BAD_REQUEST)
+    # HR-BUG-04: reject negatives + out-of-range values. Frontend now
+    # blocks these, but a rogue API client or an older frontend still
+    # needs the backend guard.
+    if base_salary < 0:
+        return Response({'status': 'error', 'message': 'base_salary must be non-negative'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if d.get('bonus_target_pct') not in (None, ''):
+        try:
+            btp = Decimal(str(d['bonus_target_pct']))
+        except Exception:
+            return Response({'status': 'error', 'message': 'bonus_target_pct must be numeric'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if btp < 0 or btp > 100:
+            return Response({'status': 'error', 'message': 'bonus_target_pct must be between 0 and 100'},
+                            status=status.HTTP_400_BAD_REQUEST)
+    if d.get('equity_grant_value') not in (None, ''):
+        try:
+            eq = Decimal(str(d['equity_grant_value']))
+        except Exception:
+            return Response({'status': 'error', 'message': 'equity_grant_value must be numeric'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if eq < 0:
+            return Response({'status': 'error', 'message': 'equity_grant_value must be non-negative'},
+                            status=status.HTTP_400_BAD_REQUEST)
     try:
         eff = datetime.fromisoformat(d['effective_date']).date()
     except (TypeError, ValueError):
@@ -4898,6 +5061,20 @@ def create_employee_goal(request, employee_id):
         except (TypeError, ValueError):
             return Response({'status': 'error', 'message': 'due_date must be YYYY-MM-DD'},
                             status=status.HTTP_400_BAD_REQUEST)
+        # HR-BUG-05 / EXEC-BUG-02: reject past dates AND obviously-bogus
+        # far-future years (e.g. `08/07/2333` from typing 4-digit year
+        # in a year that autoscans). 5 years out is well past any
+        # realistic performance-goal horizon.
+        from datetime import date as _date, timedelta as _timedelta
+        today = _date.today()
+        if due_date < today:
+            return Response({'status': 'error', 'message': 'due_date cannot be in the past'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if due_date > today + _timedelta(days=365 * 5):
+            return Response({
+                'status': 'error',
+                'message': 'due_date is too far in the future (max ~5 years).',
+            }, status=status.HTTP_400_BAD_REQUEST)
     cycle_id = d.get('cycle_id')
     if cycle_id and not PerformanceReviewCycle.objects.filter(
             company=request.user.company, pk=cycle_id).exists():

@@ -25,7 +25,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, User, Briefcase, Building2, Mail, CalendarClock, FileText,
   ClipboardList, ChevronRight, DollarSign, Plus, Trash2, Star,
-  Pencil, Shield, Target, Download,
+  Pencil, Shield, Target, Download, AlertTriangle,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 
@@ -123,6 +123,29 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
     if (!p.base_salary || !p.effective_date) {
       toast({ title: 'effective_date and base_salary are required', variant: 'destructive' });
       return;
+    }
+    // HR-BUG-04: reject negatives / out-of-range values before submit.
+    // `min="0"` on the inputs doesn't get enforced without checkValidity,
+    // so negatives (or a pasted "-987" for bonus_target_pct) sailed
+    // through to the DB.
+    const baseNum = Number(p.base_salary);
+    if (!Number.isFinite(baseNum) || baseNum < 0) {
+      toast({ title: 'Base salary must be a non-negative number', variant: 'destructive' });
+      return;
+    }
+    if (p.bonus_target_pct !== '' && p.bonus_target_pct != null) {
+      const btp = Number(p.bonus_target_pct);
+      if (!Number.isFinite(btp) || btp < 0 || btp > 100) {
+        toast({ title: 'Bonus target must be between 0 and 100', variant: 'destructive' });
+        return;
+      }
+    }
+    if (p.equity_grant_value !== '' && p.equity_grant_value != null) {
+      const eq = Number(p.equity_grant_value);
+      if (!Number.isFinite(eq) || eq < 0) {
+        toast({ title: 'Equity grant value must be non-negative', variant: 'destructive' });
+        return;
+      }
     }
     setCompForm((s) => ({ ...s, saving: true }));
     try {
@@ -281,6 +304,37 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
       toast({ title: 'Title is required', variant: 'destructive' });
       return;
     }
+    // HR-BUG-05: reject out-of-range percentages and past/absurd due
+    // dates before submit. `min="0" max="100"` on the pct inputs isn't
+    // enforced because `checkValidity` never runs, and `due_date` had no
+    // `min` at all so `08/07/2333` and past dates both slipped through.
+    // (Target / Current are free-text — e.g. "$50k ARR" — so we don't
+    // number-validate those.)
+    for (const [field, label] of [['weight_pct', 'Weight %'], ['progress_pct', 'Progress %']]) {
+      const raw = payload[field];
+      if (raw === '' || raw == null) continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        toast({ title: `${label} must be between 0 and 100`, variant: 'destructive' });
+        return;
+      }
+    }
+    if (payload.due_date) {
+      const today = new Date().toISOString().slice(0, 10);
+      // Cap the year at 5 years out — accidental `2333`-style entries
+      // are always typos, and legitimate long-horizon goals fit inside
+      // 5 years for review-cycle purposes.
+      const dueYear = Number((payload.due_date.split('-')[0]) || '0');
+      const maxYear = new Date().getFullYear() + 5;
+      if (payload.due_date < today) {
+        toast({ title: 'Due date cannot be in the past', variant: 'destructive' });
+        return;
+      }
+      if (!Number.isFinite(dueYear) || dueYear > maxYear) {
+        toast({ title: `Due date year is out of range (must be ≤ ${maxYear})`, variant: 'destructive' });
+        return;
+      }
+    }
     setGoalForm((s) => ({ ...s, saving: true }));
     try {
       const body = {
@@ -330,53 +384,59 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
     }
   };
 
-  const handleAnonymize = async () => {
-    const emp = data?.employee;
-    if (!emp) return;
-    const tag = emp.full_name || emp.work_email || `#${emp.id}`;
-    const ok = confirm(
-      `Anonymize ${tag}?\n\n` +
-      `This irreversibly scrubs PII (name, emails, phone, DOB, personal docs) ` +
-      `and marks the employee row as anonymized. Audit history and aggregate ` +
-      `data are preserved. This action cannot be undone.`
-    );
-    if (!ok) return;
-    try {
-      const res = await hrAgentService.anonymizeHREmployee(emp.id);
-      toast({
-        title: 'Employee anonymized',
-        description: `${res?.data?.documents_scrubbed || 0} personal document(s) scrubbed.`,
-      });
-      // Reload to reflect the redacted state
-      const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
-      setData(refreshed?.data || null);
-    } catch (e) {
-      toast({ title: 'Anonymize failed', description: e.message, variant: 'destructive' });
-    }
-  };
+  // HR-BUG-01: destructive-action confirmation dialog. Both Anonymize
+  // and Deactivate used to trigger `window.confirm` / `window.prompt`
+  // — native browser modals with no styling and no audit-log reason
+  // field for anonymize. This single dialog handles both actions with
+  // a styled UI matching the rest of HR, plus an optional reason for
+  // the audit log.
+  const [dangerDialog, setDangerDialog] = useState({
+    open: false,
+    action: null, // 'anonymize' | 'deactivate'
+    reason: '',
+    busy: false,
+  });
 
-  const handleDeactivate = async () => {
+  const openDangerDialog = (action) => setDangerDialog({
+    open: true, action, reason: '', busy: false,
+  });
+  const closeDangerDialog = () => setDangerDialog((s) => ({ ...s, open: false }));
+
+  const handleAnonymize = () => openDangerDialog('anonymize');
+  const handleDeactivate = () => openDangerDialog('deactivate');
+
+  const runDangerAction = async () => {
     const emp = data?.employee;
-    if (!emp) return;
-    const tag = emp.full_name || emp.work_email || `#${emp.id}`;
-    const reason = prompt(`Deactivate (offboard) ${tag}?\n\nOptional reason for the audit log:`, '');
-    if (reason === null) return; // cancelled
+    if (!emp || !dangerDialog.action) return;
+    setDangerDialog((s) => ({ ...s, busy: true }));
     try {
-      const res = await hrAgentService.deactivateHREmployee(emp.id, reason);
-      toast({
-        title: 'Employee deactivated',
-        description: res?.data?.already_offboarded
-          ? 'Was already offboarded — no change.'
-          : `Previous status: ${res?.data?.previous_status || '—'}.`,
-      });
+      if (dangerDialog.action === 'anonymize') {
+        const res = await hrAgentService.anonymizeHREmployee(emp.id);
+        toast({
+          title: 'Employee anonymized',
+          description: `${res?.data?.documents_scrubbed || 0} personal document(s) scrubbed.`,
+        });
+      } else {
+        const res = await hrAgentService.deactivateHREmployee(emp.id, dangerDialog.reason || '');
+        toast({
+          title: 'Employee deactivated',
+          description: res?.data?.already_offboarded
+            ? 'Was already offboarded — no change.'
+            : `Previous status: ${res?.data?.previous_status || '—'}.`,
+        });
+      }
       const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
       setData(refreshed?.data || null);
+      setDangerDialog({ open: false, action: null, reason: '', busy: false });
     } catch (e) {
       toast({
-        title: 'Deactivate failed',
+        title: dangerDialog.action === 'anonymize' ? 'Anonymize failed' : 'Deactivate failed',
         description: e?.response?.data?.message || e.message,
         variant: 'destructive',
       });
+      // Keep the dialog open on failure so the user can retry / cancel;
+      // just clear the in-flight flag.
+      setDangerDialog((s) => ({ ...s, busy: false }));
     }
   };
 
@@ -1049,7 +1109,12 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
             </div>
             <div>
               <Label className="text-xs">Due date</Label>
+              {/* HR-BUG-05 / EXEC-BUG-02: block past dates + force dark
+                  colour-scheme so the picker text is visible on the
+                  dark modal. */}
               <Input type="date" value={goalForm.payload.due_date || ''}
+                min={new Date().toISOString().slice(0, 10)}
+                className="[color-scheme:dark]"
                 onChange={(ev) => setGoalField('due_date', ev.target.value)} />
             </div>
           </div>
@@ -1256,6 +1321,75 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
           <Button onClick={handleAdjustBalance} disabled={balanceForm.saving}>
             {balanceForm.saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
             Apply
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* HR-BUG-01: styled confirm for Anonymize / Deactivate, replacing
+        the old `window.confirm` / `window.prompt` popups. Same dialog
+        drives both actions — only the copy changes based on
+        `dangerDialog.action`. */}
+    <Dialog open={dangerDialog.open} onOpenChange={(o) => {
+      if (!dangerDialog.busy) setDangerDialog((s) => ({ ...s, open: o }));
+    }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-rose-300 flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            {dangerDialog.action === 'anonymize' ? 'Anonymize employee?' : 'Deactivate (offboard) employee?'}
+          </DialogTitle>
+          <DialogDescription>
+            {(() => {
+              const emp = data?.employee;
+              const tag = emp ? (emp.full_name || emp.work_email || `#${emp.id}`) : 'this employee';
+              if (dangerDialog.action === 'anonymize') {
+                return (
+                  <>
+                    You are about to <strong>anonymize {tag}</strong>. This
+                    irreversibly scrubs PII (name, emails, phone, DOB, personal
+                    documents) and marks the employee row as anonymized.
+                    Audit history and aggregate data are preserved.{' '}
+                    <span className="text-rose-300">This cannot be undone.</span>
+                  </>
+                );
+              }
+              return (
+                <>
+                  You are about to <strong>deactivate (offboard) {tag}</strong>.
+                  Their status flips to inactive and access is revoked.
+                  Their record and history stay intact — you can reactivate
+                  later if needed.
+                </>
+              );
+            })()}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label className="text-xs">Reason (optional — written to the audit log)</Label>
+          <Textarea
+            rows={2}
+            value={dangerDialog.reason}
+            placeholder={dangerDialog.action === 'anonymize'
+              ? 'e.g. GDPR erasure request — Ticket #1234'
+              : 'e.g. Voluntary resignation — last day 2026-08-31'}
+            onChange={(e) => setDangerDialog((s) => ({ ...s, reason: e.target.value }))}
+            disabled={dangerDialog.busy}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline"
+            onClick={closeDangerDialog}
+            disabled={dangerDialog.busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={runDangerAction}
+            disabled={dangerDialog.busy}
+            className="bg-rose-600 hover:bg-rose-700 text-white"
+          >
+            {dangerDialog.busy && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+            {dangerDialog.action === 'anonymize' ? 'Anonymize permanently' : 'Deactivate employee'}
           </Button>
         </DialogFooter>
       </DialogContent>
