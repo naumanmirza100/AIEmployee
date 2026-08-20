@@ -463,6 +463,20 @@ const SDROutreachTab = () => {
     if (!newCampaign.name.trim()) {
       toast({ title: 'Campaign name is required', variant: 'destructive' }); return;
     }
+    // Validate the optional calendar link — it's inserted into outgoing emails,
+    // so a malformed value would ship a broken booking link to prospects.
+    const cal = (newCampaign.calendar_link || '').trim();
+    if (cal) {
+      let ok = false;
+      try {
+        const u = new URL(/^https?:\/\//i.test(cal) ? cal : `https://${cal}`);
+        ok = (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname.includes('.');
+      } catch { ok = false; }
+      if (!ok) {
+        toast({ title: 'Invalid calendar link', description: 'Enter a valid URL like https://calendly.com/you/30min.', variant: 'destructive' });
+        return;
+      }
+    }
     setCreating(true);
     try {
       const resp = await createCampaign(newCampaign);
@@ -1423,8 +1437,17 @@ const SDROutreachTab = () => {
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                       >
                         <td style={{ padding: '10px 12px' }}>
+                          {/* Toggle on the checkbox itself. stopPropagation stops the
+                              row onClick from firing too (which would double-toggle
+                              and cancel it out — that made the box feel unclickable). */}
                           <input type="checkbox" checked={selectedLeadIds.includes(lead.id)}
-                            onChange={() => {}} onClick={e => e.stopPropagation()} />
+                            onChange={() => {}}
+                            onClick={e => {
+                              e.stopPropagation();
+                              setSelectedLeadIds(prev =>
+                                prev.includes(lead.id) ? prev.filter(id => id !== lead.id) : [...prev, lead.id]
+                              );
+                            }} />
                         </td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 13 }}>{lead.full_name}</div>
