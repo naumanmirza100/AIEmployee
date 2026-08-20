@@ -580,6 +580,14 @@ def create_campaign(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+        # Validate date order + age range (mirrors the agent create path).
+        from marketing_agent.agents.outreach_campaign_agent import validate_campaign_dates_and_age
+        _err = validate_campaign_dates_and_age(
+            data.get('start_date'), data.get('end_date'), data.get('age_range', ''),
+        )
+        if _err:
+            return Response({'status': 'error', 'message': _err}, status=status.HTTP_400_BAD_REQUEST)
+
         campaign = Campaign.objects.create(
             name=name,
             description=data.get('description', ''),
@@ -677,6 +685,13 @@ def update_campaign(request, campaign_id):
                         {'status': 'error', 'message': 'Email account not found or not owned by you.'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
+
+        # Validate the resulting date order + age range before saving.
+        from marketing_agent.agents.outreach_campaign_agent import validate_campaign_dates_and_age
+        _err = validate_campaign_dates_and_age(campaign.start_date, campaign.end_date, campaign.age_range)
+        if _err:
+            return Response({'status': 'error', 'message': _err}, status=status.HTTP_400_BAD_REQUEST)
+
         campaign.save()
         return Response({
             'status': 'success',
@@ -975,12 +990,18 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
     total_rows = len(df)
     created_count = 0
     rejected_reasons = {'missing_email': 0, 'missing_name': 0, 'other': 0}
+    # Per-row rejection detail so the UI can tell the user exactly which row /
+    # field / reason failed. Row number is spreadsheet-friendly: header = row 1,
+    # so the first data row is row 2 (index 0 → row 2).
+    rejected_rows = []
     with transaction.atomic():
         for index, row in df.iterrows():
+            row_no = int(index) + 2
             try:
-                email = str(row['email']).strip().lower()
-                if not email or pd.isna(row['email']) or email == 'nan':
+                email = '' if 'email' not in row else str(row['email']).strip().lower()
+                if not email or ('email' in row and pd.isna(row['email'])) or email == 'nan':
                     rejected_reasons['missing_email'] += 1
+                    rejected_rows.append({'row': row_no, 'field': 'email', 'reason': 'Missing email', 'value': ''})
                     continue
                 first = _get(row, 'first_name', 'first name')
                 last = _get(row, 'last_name', 'last name')
@@ -995,6 +1016,7 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                 # missing email, so personalization tokens are never silently blank.
                 if not first and not last:
                     rejected_reasons['missing_name'] += 1
+                    rejected_rows.append({'row': row_no, 'field': 'name', 'reason': 'Missing name (first/last or name)', 'value': email})
                     continue
                 lead, created = Lead.objects.get_or_create(
                     email=email, owner=user,
@@ -1036,8 +1058,9 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                         'current_step': 0,
                     }
                 )
-            except Exception:
+            except Exception as row_exc:
                 rejected_reasons['other'] += 1
+                rejected_rows.append({'row': row_no, 'field': '', 'reason': f'Error: {str(row_exc)[:120]}', 'value': ''})
                 continue
     rejected_count = sum(rejected_reasons.values())
     return ({
@@ -1045,6 +1068,8 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
         'created_count': created_count,
         'rejected_count': rejected_count,
         'rejected_reasons': rejected_reasons,
+        # Cap the list so a huge bad file doesn't bloat the response.
+        'rejected_rows': rejected_rows[:200],
     }, None)
 
 

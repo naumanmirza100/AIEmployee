@@ -8,11 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
-  Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight, Trash2, Check, X, Wand2, Users,
+  Loader2, CalendarClock, FileText, Plus, Pencil, RefreshCw, ChevronRight, ChevronLeft, Trash2, Check, X, Wand2, Users,
 } from 'lucide-react';
 import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar, Pagination } from '../shared';
 import HoverTip from '@/components/common/HoverTip';
 import { AllMembersPanel } from '../AllMembersPanel';
+import { useToast } from '@/components/ui/use-toast';
 
 const MEETING_STATUS_OPTIONS = [
   { value: 'scheduled', label: 'Scheduled' },
@@ -35,12 +36,126 @@ export const MeetingsPanel = ({
   filters = {}, setFilters = () => {}, filterUsers = [],
   pageMeta = null, onPageChange = () => {},
 }) => {
+  const { toast } = useToast();
   const filtersActive = !!(filters.search || filters.status || filters.date || filters.participant);
   // People / Notes open in their own modals, layered over the meeting card.
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [notesModalOpen, setNotesModalOpen] = useState(false);
   // "View all members" list inside the People modal.
   const [showAllMembers, setShowAllMembers] = useState(false);
+  // Participant IDs ticked for bulk removal (People modal).
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState(() => new Set());
+  const toggleParticipantSel = (pid) => setSelectedParticipantIds(prev => {
+    const next = new Set(prev);
+    next.has(pid) ? next.delete(pid) : next.add(pid);
+    return next;
+  });
+  const clearParticipantSel = () => setSelectedParticipantIds(new Set());
+
+  // ── People modal draft ──────────────────────────────────────────────────
+  // Add/remove are staged locally and only committed (API calls + emails) when
+  // the user clicks Done. Closing via ✕ / outside-click discards everything.
+  const [draftParts, setDraftParts] = useState([]);       // working participant list
+  const [draftAddUsers, setDraftAddUsers] = useState([]); // new users to add on save
+  const [draftRemoveIds, setDraftRemoveIds] = useState(() => new Set()); // existing participant IDs to remove on save
+
+  // Seed the draft from the real participants whenever the People modal opens
+  // for a meeting (or its backing participant list first loads).
+  const peopleMeetingId = openMeetingId;
+  useEffect(() => {
+    if (peopleOpen && peopleMeetingId != null) {
+      setDraftParts((participantsMap[peopleMeetingId] || []).map(p => ({ ...p })));
+      setDraftAddUsers([]);
+      setDraftRemoveIds(new Set());
+      setSelectedParticipantIds(new Set());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peopleOpen, peopleMeetingId]);
+
+  // Stage a new user (no API call yet). Skip if already present or already staged.
+  const draftAddParticipant = (user) => {
+    const uid = String(user.id);
+    const exists = draftParts.some(p => String(p.user_id) === uid);
+    if (exists) return;
+    setDraftParts(prev => [...prev, { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending', __new: true }]);
+    setDraftAddUsers(prev => [...prev, user]);
+    setUserSearchQ(''); setUserSearchResults([]);
+  };
+
+  // Un-stage a participant from the draft list. Existing (saved) ones are queued
+  // for deletion on save; not-yet-saved additions are just dropped.
+  const draftRemoveParticipant = (p) => {
+    setDraftParts(prev => prev.filter(x => String(x.user_id) !== String(p.user_id)));
+    if (p.__new) {
+      setDraftAddUsers(prev => prev.filter(u => String(u.id) !== String(p.user_id)));
+    } else if (p.id) {
+      setDraftRemoveIds(prev => new Set(prev).add(p.id));
+    }
+    setSelectedParticipantIds(prev => { const n = new Set(prev); if (p.id) n.delete(p.id); return n; });
+  };
+
+  // Commit staged changes. The modal closes immediately; the actual add/remove
+  // API calls (and their emails) run in the background, and a SINGLE summary
+  // toast reports the outcome — no more one-toast-per-participant.
+  const commitPeopleChanges = (meetingId) => {
+    const removes = [...draftRemoveIds]
+      .map(pid => (participantsMap[meetingId] || []).find(p => p.id === pid))
+      .filter(Boolean);
+    const adds = [...draftAddUsers];
+
+    // Close the modal right away — user doesn't wait on the network.
+    setPeopleOpen(false);
+    setShowAllMembers(false);
+    clearParticipantSel();
+    setDraftAddUsers([]);
+    setDraftRemoveIds(new Set());
+
+    if (removes.length === 0 && adds.length === 0) return;
+
+    // Immediate feedback so the user knows work is happening in the background.
+    const total = adds.length + removes.length;
+    const working = toast({
+      title: 'Updating participants…',
+      description: `Applying ${total} change${total === 1 ? '' : 's'} and sending notification emails.`,
+    });
+
+    // Fire the work in the background.
+    (async () => {
+      let added = 0, removed = 0, failed = 0;
+      for (const orig of removes) {
+        try { await removeParticipant(meetingId, orig.id, orig.user_id, orig.full_name, { silent: true }); removed++; }
+        catch { failed++; }
+      }
+      for (const u of adds) {
+        try { await addParticipant(meetingId, u, { silent: true }); added++; }
+        catch { failed++; }
+      }
+      const bits = [];
+      if (added) bits.push(`${added} added`);
+      if (removed) bits.push(`${removed} removed`);
+      // Replace the "updating…" toast with the final result.
+      const result = {
+        title: bits.length ? `Participants updated — ${bits.join(', ')}` : 'No changes applied',
+        description: failed
+          ? `${failed} change${failed === 1 ? '' : 's'} failed. Notification emails sent for the rest.`
+          : 'Notification emails have been sent.',
+        variant: failed ? 'destructive' : undefined,
+      };
+      if (working && typeof working.update === 'function') working.update({ id: working.id, ...result });
+      else toast(result);
+    })();
+  };
+
+  // Discard: close without applying anything.
+  const discardPeopleChanges = () => {
+    setPeopleOpen(false);
+    setShowAllMembers(false);
+    clearParticipantSel();
+    setDraftAddUsers([]);
+    setDraftRemoveIds(new Set());
+  };
+
+  const hasDraftChanges = draftAddUsers.length > 0 || draftRemoveIds.size > 0;
 
   // When a notification navigates here, scroll the target meeting into view and
   // briefly highlight it, then clear the focus so it doesn't stick.
@@ -294,32 +409,80 @@ export const MeetingsPanel = ({
       </Dialog>
 
       {/* ── People modal ── */}
-      <Dialog open={peopleOpen && !!openMeeting} onOpenChange={o => { setPeopleOpen(o); if (!o) setShowAllMembers(false); }}>
-        <DialogContent className="max-w-md w-full bg-[#0d0b1f] border-white/10 text-white max-h-[85vh] overflow-y-auto no-scrollbar">
+      <Dialog open={peopleOpen && !!openMeeting} onOpenChange={o => { if (!o) discardPeopleChanges(); else setPeopleOpen(true); }}>
+        <DialogContent className={`w-full bg-[#0d0b1f] border-white/10 text-white flex flex-col overflow-hidden transition-[max-width] duration-200 ${showAllMembers ? 'max-w-3xl h-[80vh]' : 'max-w-md max-h-[85vh]'}`}>
           {openMeeting && (() => {
             const m = openMeeting;
-            const parts = participantsMap[m.id] || [];
-            const pendingUser = pendingAddMap[m.id] || null;
+            const parts = draftParts;
+            const pendingUser = null; // draft flow adds directly; no pending-confirm bar
             const confirmRemoveId = confirmRemoveMap[m.id] || null;
             return (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4 text-violet-300" />
-                  <h3 className="text-white font-semibold text-sm">Participants{parts.length ? ` (${parts.length})` : ''}</h3>
-                </div>
+              <>
+              <div className={showAllMembers ? 'grid md:grid-cols-2 gap-5 items-stretch flex-1 min-h-0' : 'space-y-3 flex-1 min-h-0 overflow-y-auto no-scrollbar'}>
+              <div className="space-y-3 min-w-0 flex flex-col md:min-h-0">
+                {(() => {
+                  const selCount = parts.filter(p => selectedParticipantIds.has(p.user_id)).length;
+                  return (
+                    <div className="flex items-center justify-between gap-2 pr-8">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Users className="h-4 w-4 text-violet-300 shrink-0" />
+                        <h3 className="text-white font-semibold text-sm truncate">Participants{parts.length ? ` (${parts.length})` : ''}</h3>
+                      </div>
+                      {parts.length > 0 && (
+                        selCount > 0 ? (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={clearParticipantSel}
+                              className="text-[11px] text-white/40 hover:text-white/70 transition-colors">
+                              Clear
+                            </button>
+                            <button
+                              onClick={() => {
+                                parts.filter(p => selectedParticipantIds.has(p.user_id)).forEach(p => draftRemoveParticipant(p));
+                                clearParticipantSel();
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors font-medium">
+                              <Trash2 className="h-3 w-3" />
+                              Remove ({selCount})
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setSelectedParticipantIds(new Set(parts.map(p => p.user_id)))}
+                            className="shrink-0 text-[11px] text-white/40 hover:text-violet-300 transition-colors">
+                            Select all
+                          </button>
+                        )
+                      )}
+                    </div>
+                  );
+                })()}
                 <p className="text-white/40 text-xs -mt-1">{m.title}</p>
 
                 {parts.length > 0 && (
-                  <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
-                    {parts.map(p => (
+                  <div className={`space-y-1 overflow-y-auto custom-sidebar-scroll pr-1 ${showAllMembers ? 'flex-1 min-h-0' : 'max-h-64'}`}>
+                    {parts.map(p => {
+                      const checked = selectedParticipantIds.has(p.user_id);
+                      return (
                       <div key={p.user_id}>
-                        <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-white/5">
-                          <div>
+                        <div className={`flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${checked ? 'bg-red-500/10 ring-1 ring-red-500/30' : 'bg-white/5'}`}>
+                          {/* Selection checkbox */}
+                          <button
+                            type="button"
+                            onClick={() => toggleParticipantSel(p.user_id)}
+                            className={`h-4 w-4 shrink-0 rounded flex items-center justify-center border transition-colors ${checked ? 'bg-red-500 border-red-500 text-white' : 'border-white/25 hover:border-violet-400'}`}
+                            aria-label={checked ? 'Deselect' : 'Select'}
+                          >
+                            {checked && <Check className="h-3 w-3" />}
+                          </button>
+                          <div className="min-w-0 flex-1 truncate">
                             <span className="text-white text-xs font-medium">{p.full_name}</span>
                             <span className="text-white/40 text-xs ml-2">{p.email}</span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            {p.response && p.response !== 'pending' && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            {p.__new ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300">new</span>
+                            ) : p.response && p.response !== 'pending' && (
                               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
                                 p.response === 'accepted' ? 'bg-emerald-500/20 text-emerald-400' :
                                 p.response === 'rejected' ? 'bg-red-500/20 text-red-400' :
@@ -327,37 +490,20 @@ export const MeetingsPanel = ({
                                 'bg-white/10 text-white/40'
                               }`}>{p.response}</span>
                             )}
-                            {!p.id ? (
-                              <span className="text-white/20 text-[10px]">syncing…</span>
-                            ) : confirmRemoveId === p.id ? (
-                              <div className="flex items-center gap-1">
-                                <span className="text-white/50 text-[10px]">Remove?</span>
-                                <button
-                                  onClick={() => { removeParticipant(m.id, p.id, p.user_id, p.full_name); setConfirmRemoveMap(prev => ({ ...prev, [m.id]: null })); }}
-                                  className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">
-                                  Yes
-                                </button>
-                                <button
-                                  onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: null }))}
-                                  className="px-2 py-0.5 rounded text-[10px] bg-white/10 text-white/50 hover:bg-white/20 transition-colors">
-                                  No
-                                </button>
-                              </div>
-                            ) : (
-                              <HoverTip tip="Remove this participant">
-                                <button
-                                  onClick={() => setConfirmRemoveMap(prev => ({ ...prev, [m.id]: p.id }))}
-                                  className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
-                              </HoverTip>
-                            )}
+                            <HoverTip tip="Remove from this list">
+                              <button
+                                onClick={() => draftRemoveParticipant(p)}
+                                className="text-white/30 hover:text-red-400 text-xs transition-colors">✕</button>
+                            </HoverTip>
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
-                {/* Pending add confirmation bar */}
+                {/* Pending add confirmation bar (disabled in draft flow) */}
                 {pendingUser && (
                   <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-violet-500/10 border border-violet-500/30">
                     <div className="flex items-center gap-2">
@@ -400,7 +546,7 @@ export const MeetingsPanel = ({
                       <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl max-h-56 overflow-y-auto">
                         {userSearchResults.map(u => (
                           <button key={u.id}
-                            onClick={() => { setPendingAddMap(prev => ({ ...prev, [m.id]: u })); setUserSearchResults([]); }}
+                            onClick={() => { draftAddParticipant(u); setUserSearchResults([]); }}
                             className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
                             <div className="h-7 w-7 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 text-xs font-bold flex-shrink-0">
                               {u.full_name?.[0]?.toUpperCase() || '?'}
@@ -419,42 +565,55 @@ export const MeetingsPanel = ({
                   </div>
                 )}
 
-                {/* View all members — pick from the full roster instead of typing */}
+                {/* View all members — toggles the side-by-side roster panel */}
                 {!pendingUser && (
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowAllMembers(v => !v)}
-                      className="inline-flex items-center gap-1.5 text-xs text-violet-300 hover:text-violet-200 transition-colors"
-                    >
-                      <Users className="h-3.5 w-3.5" />
-                      {showAllMembers ? 'Hide all members' : 'View all members'}
-                    </button>
-                    <AllMembersPanel
-                      open={showAllMembers}
-                      onClose={() => setShowAllMembers(false)}
-                      fullWidth
-                      selected={parts.map(p => ({ id: p.user_id, user_type: p.user_type || 'company_user' }))}
-                      onToggle={(u) => {
-                        const existing = parts.find(p => String(p.user_id) === String(u.id));
-                        if (existing) {
-                          if (existing.id) removeParticipant(m.id, existing.id, existing.user_id, existing.full_name);
-                        } else {
-                          addParticipant(m.id, u);
-                        }
-                      }}
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAllMembers(v => !v)}
+                    className="inline-flex items-center gap-1.5 text-xs text-violet-300 hover:text-violet-200 transition-colors"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    {showAllMembers ? 'Hide all members' : 'View all members'}
+                  </button>
                 )}
-
-                {/* Changes save instantly; Done just closes the panel. */}
-                <div className="flex justify-end pt-1">
-                  <Button size="sm" onClick={() => { setPeopleOpen(false); setShowAllMembers(false); }}
-                    className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
-                    <Check className="h-4 w-4" /> Done
-                  </Button>
-                </div>
               </div>
+
+              {/* Right column: full member roster, shown side-by-side */}
+              {showAllMembers && (
+                <div className="min-w-0 md:min-h-0 md:overflow-y-auto no-scrollbar md:border-l md:border-white/10 md:pl-5">
+                  <AllMembersPanel
+                    open={showAllMembers}
+                    onClose={() => setShowAllMembers(false)}
+                    fullWidth
+                    selected={parts.map(p => ({ id: p.user_id, user_type: p.user_type || 'company_user' }))}
+                    onToggle={(u) => {
+                      const existing = parts.find(p => String(p.user_id) === String(u.id));
+                      if (existing) {
+                        draftRemoveParticipant(existing);
+                      } else {
+                        draftAddParticipant(u);
+                      }
+                    }}
+                  />
+                </div>
+              )}
+              </div>
+
+              {/* Footer — changes only apply (and emails only send) on Done.
+                  Cancel / ✕ / outside-click discards everything. */}
+              <div className="flex items-center justify-between gap-3 pt-4 mt-1 border-t border-white/10">
+                <p className="text-[11px] text-white/40 min-w-0 truncate">
+                  {hasDraftChanges
+                    ? `Unsaved: ${draftAddUsers.length ? `+${draftAddUsers.length} ` : ''}${draftRemoveIds.size ? `−${draftRemoveIds.size}` : ''} · emails send on save`
+                    : 'No changes'}
+                </p>
+                <Button size="sm" onClick={() => commitPeopleChanges(m.id)}
+                  className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5 shrink-0">
+                  <Check className="h-4 w-4" />
+                  {hasDraftChanges ? 'Save & send' : 'Done'}
+                </Button>
+              </div>
+              </>
             );
           })()}
         </DialogContent>
@@ -463,6 +622,7 @@ export const MeetingsPanel = ({
       {/* ── Notes modal ── */}
       <Dialog open={notesModalOpen && !!openMeeting} onOpenChange={setNotesModalOpen}>
         <DialogContent
+          hideClose
           className="max-w-2xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
@@ -471,7 +631,7 @@ export const MeetingsPanel = ({
             const notes = meetingNotes[m.id];
             return (
               <>
-                <div className="flex items-center justify-between px-6 py-4 pr-20 border-b border-white/10 flex-shrink-0">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <FileText className="h-4 w-4 text-sky-300 flex-shrink-0" />
                     <h3 className="text-white font-semibold text-sm truncate">Notes — {m.title}</h3>
@@ -559,11 +719,11 @@ export const MeetingsPanel = ({
                   </div>
                 </div>
 
-                {/* Notes save as you go; Done just closes the panel. */}
+                {/* Notes save as you go; this just closes the panel and goes back. */}
                 <div className="flex justify-end px-6 py-3 border-t border-white/10 flex-shrink-0">
                   <Button size="sm" onClick={() => setNotesModalOpen(false)}
                     className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
-                    <Check className="h-4 w-4" /> Done
+                    <ChevronLeft className="h-4 w-4" /> Back
                   </Button>
                 </div>
               </>

@@ -539,7 +539,9 @@ const ExecMeetingDashboard = () => {
     finally { setUserSearchLoading(false); }
   };
 
-  const addParticipant = async (meetingId, user) => {
+  // `silent` suppresses the per-item toast — used by the People modal's batch
+  // commit, which shows ONE summary toast instead of one per participant.
+  const addParticipant = async (meetingId, user, { silent = false } = {}) => {
     // Optimistic update — show instantly, sync with real IDs in background
     const optimistic = { user_id: user.id, full_name: user.full_name, email: user.email, role: user.role, response: 'pending' };
     setParticipantsMap(prev => ({ ...prev, [meetingId]: [...(prev[meetingId] || []), optimistic] }));
@@ -549,25 +551,27 @@ const ExecMeetingDashboard = () => {
       // Reload from backend to replace optimistic entry with real CompanyUser ID (needed for correct DELETE)
       const data = await execMeetingService.getParticipants(meetingId);
       setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
-      toast({ title: `${user.full_name} added`, description: 'An invitation email has been sent to them.' });
+      if (!silent) toast({ title: `${user.full_name} added`, description: 'An invitation email has been sent to them.' });
     } catch (err) {
       // Roll back optimistic update on failure
       setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.user_id !== user.id) }));
-      toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' });
+      if (!silent) toast({ title: 'Failed to add participant', description: err.message, variant: 'destructive' });
+      throw err;
     }
   };
 
-  const removeParticipant = async (meetingId, participantId, userId, name) => {
+  const removeParticipant = async (meetingId, participantId, userId, name, { silent = false } = {}) => {
     // Optimistic remove — hide instantly
     setParticipantsMap(prev => ({ ...prev, [meetingId]: (prev[meetingId] || []).filter(p => p.id !== participantId && p.user_id !== userId) }));
     try {
       await execMeetingService.removeParticipant(meetingId, participantId, userId);
-      toast({ title: `${name} removed`, description: 'They have been notified by email.' });
+      if (!silent) toast({ title: `${name} removed`, description: 'They have been notified by email.' });
     } catch (err) {
       // Roll back on failure
       const data = await execMeetingService.getParticipants(meetingId).catch(() => ({ participants: [] }));
       setParticipantsMap(prev => ({ ...prev, [meetingId]: data.participants || [] }));
-      toast({ title: 'Failed to remove', description: err.message, variant: 'destructive' });
+      if (!silent) toast({ title: 'Failed to remove', description: err.message, variant: 'destructive' });
+      throw err;
     }
   };
 
@@ -602,6 +606,16 @@ const ExecMeetingDashboard = () => {
         if (data.notes) setMeetingNotes(prev => ({ ...prev, [meetingId]: data.notes }));
       } catch { /* no notes yet */ }
     }
+  };
+
+  // Clicking a row in the Overview's "Recent Meetings": jump to the Meetings
+  // tab, scroll/highlight the row, and open its detail card so the meeting
+  // opens fully, not just scrolled into view.
+  const openMeetingFromOverview = (meetingId) => {
+    loadMeetings();
+    setActiveTab('meetings');
+    setFocusMeetingId(meetingId);
+    openMeetingCard(meetingId);
   };
 
   const closeMeetingCard = () => {
@@ -909,16 +923,38 @@ const ExecMeetingDashboard = () => {
 
       {/* Daily digest */}
       <div className="rounded-2xl p-5" style={CARD_STYLE}>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <h3 className="text-white font-semibold flex items-center gap-2">
             <LayoutDashboard className="h-4 w-4 text-violet-400" />
             Daily Digest
           </h3>
-          <HoverTip tip="Regenerate today's digest">
-            <Button size="sm" variant="ghost" onClick={loadDigest} disabled={digestLoading} className="text-white/50 hover:text-white">
-              <RefreshCw className={`h-4 w-4 ${digestLoading ? 'animate-spin' : ''}`} />
-            </Button>
-          </HoverTip>
+          <div className="flex items-center gap-2">
+            <HoverTip tip="Go to Meetings and schedule a new one">
+              <Button
+                size="sm"
+                onClick={() => { setActiveTab('meetings'); setShowMeetingDialog(true); }}
+                className="bg-violet-500 hover:bg-violet-700 text-white font-semibold gap-1.5 h-8"
+              >
+                <CalendarClock className="h-4 w-4" />
+                New Meeting
+              </Button>
+            </HoverTip>
+            <HoverTip tip="Go to Tasks and add a new one">
+              <Button
+                size="sm"
+                onClick={() => { setActiveTab('tasks'); setShowTaskDialog(true); }}
+                className="bg-sky-500 hover:bg-sky-700 text-white font-semibold gap-1.5 h-8"
+              >
+                <ListChecks className="h-4 w-4" />
+                New Task
+              </Button>
+            </HoverTip>
+            <HoverTip tip="Regenerate today's digest">
+              <Button size="sm" variant="ghost" onClick={loadDigest} disabled={digestLoading} className="text-white/50 hover:text-white h-8 w-8 p-0">
+                <RefreshCw className={`h-4 w-4 ${digestLoading ? 'animate-spin' : ''}`} />
+              </Button>
+            </HoverTip>
+          </div>
         </div>
         {digestLoading ? (
           <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-violet-400" /></div>
@@ -987,7 +1023,15 @@ const ExecMeetingDashboard = () => {
           <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-violet-400" /></div>
         ) : Array.isArray(meetings) && meetings.length > 0 ? (
           meetings.slice(0, 5).map(m => (
-            <div key={m.id} className="flex items-center justify-between py-2.5" style={ROW_STYLE}>
+            <div
+              key={m.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => openMeetingFromOverview(m.id)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openMeetingFromOverview(m.id); } }}
+              className="flex items-center justify-between py-2.5 px-2 -mx-2 rounded-lg cursor-pointer transition-colors hover:bg-white/5"
+              style={ROW_STYLE}
+            >
               <div className="min-w-0">
                 <p className="text-white text-sm font-medium truncate">{m.title}</p>
                 <p className="text-white/40 text-xs">{fmtUtc(m.scheduled_at)}</p>

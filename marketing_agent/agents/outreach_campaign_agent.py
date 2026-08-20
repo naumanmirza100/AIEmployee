@@ -14,6 +14,41 @@ import json
 import re
 
 
+def validate_campaign_dates_and_age(start_date, end_date, age_range):
+    """Validate campaign date order and age range. Returns an error string, or
+    None if valid. start_date/end_date may be date objects or 'YYYY-MM-DD'
+    strings (or None); age_range is a string ('' = any age)."""
+    def _as_date(d):
+        if not d:
+            return None
+        if isinstance(d, str):
+            try:
+                return datetime.strptime(d[:10], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                return None
+        return d
+    sd, ed = _as_date(start_date), _as_date(end_date)
+    if sd and ed and sd > ed:
+        return "Start date can't be after the end date."
+    s = str(age_range or '').strip()
+    if s:
+        def _ok(n):
+            return 0 <= n <= 120
+        m = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', s)  # "25-45"
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if not _ok(lo) or not _ok(hi):
+                return "Ages must be between 0 and 120."
+            if lo > hi:
+                return "The minimum age can't be greater than the maximum age."
+        elif re.match(r'^\d+$', s):
+            if not _ok(int(s)):
+                return "Age must be between 0 and 120."
+        else:
+            return "Age must be a single number (e.g. 30) or a range (e.g. 25-45); no negatives."
+    return None
+
+
 class OutreachCampaignAgent(MarketingBaseAgent):
     """
     Outreach & Campaign Agent
@@ -478,7 +513,12 @@ Respond with comma-separated category keys only (from: any, positive, negative, 
                     end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
                 except (ValueError, TypeError):
                     end_date = None
-            
+
+            # Reject bad date order / age range.
+            _err = validate_campaign_dates_and_age(start_date, end_date, age_range)
+            if _err:
+                return {'success': False, 'error': _err}
+
             campaign_name = (campaign_data.get('name') or 'New Campaign').strip() or 'New Campaign'
             if Campaign.objects.filter(owner_id=user_id, name__iexact=campaign_name).exists():
                 return {
