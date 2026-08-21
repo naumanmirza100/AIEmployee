@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, Settings as SettingsIcon, BarChart3, Link2 } from 'lucide-react';
+import { CheckCircle2, Settings as SettingsIcon, BarChart3, Link2, LayoutDashboard } from 'lucide-react';
 // Sparkles, RefreshCw and Inbox are already imported in the main lucide block above.
 import HoverTip from '@/components/common/HoverTip';
 import HowItWorksModal from '@/components/common/HowItWorksModal';
@@ -68,11 +68,12 @@ import {
   PAGE_SIZE,
 } from '@/components/replyDraft/replyDraftConstants';
 import { humanizeSendError, humanizeAiError, formatRelative, formatDateTime, looksLikeHtml } from '@/components/replyDraft/replyDraftHelpers';
-import { Avatar, EmptyState, Paginator, StatCard } from '@/components/replyDraft/SharedUI';
+import { Avatar, EmptyState, Paginator, StatCard, FolderTile } from '@/components/replyDraft/SharedUI';
 import { HtmlBody } from '@/components/replyDraft/HtmlBody';
 import { AttachmentLoading, AttachmentList, DraftAttachmentsSection } from '@/components/replyDraft/Attachments';
 import { EmailBody } from '@/components/replyDraft/EmailBody';
 import { InboxItem, DraftItem } from '@/components/replyDraft/ListItems';
+import { EmailActivityChart } from '@/components/replyDraft/EmailActivityChart';
 import { SyncSourceCard, AttachedAccountButton } from '@/components/replyDraft/SyncSourceCard';
 import { ComposeModal } from '@/components/replyDraft/ComposeModal';
 import { AccountConnectModal } from '@/components/replyDraft/AccountConnectModal';
@@ -80,6 +81,13 @@ import { SettingsModal } from '@/components/replyDraft/SettingsModal';
 
 const ReplyDraftAgentPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  // Two views share this component: the Dashboard (stats + actions) at
+  // /reply-draft/dashboard, and the mail workspace (Inbox / Sent / Drafts)
+  // at /reply-draft/emails. Data-fetch + polling stay common to both so the
+  // dashboard counters are always live.
+  const view = location.pathname.startsWith('/reply-draft/emails') ? 'emails' : 'dashboard';
+
   const { toast } = useToast();
   const [companyUser, setCompanyUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -116,13 +124,39 @@ const ReplyDraftAgentPage = () => {
   const [accountModalMode, setAccountModalMode] = useState('add'); // 'add' | 'edit'
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
-  const [syncDays, setSyncDays] = useState(30);       // view-only filter; Celery always pre-syncs the full 120-day window
+  // View-only filter. Its ceiling is whatever window the account was
+  // configured to sync — offering "Last 90 days" on an account that only
+  // ever pulled 30 would just show an empty-looking list, so the options
+  // are clamped and the initial value matches the account's own setting.
+  const [syncDays, setSyncDays] = useState(null);
+  // The account's configured window is the ceiling for the view filter:
+  // mail older than it was never pulled, so a wider option would just
+  // render an empty list. Also the fallback until the account loads, so
+  // the first fetch never sends a "null" days param.
+  const accountSyncDays = Number(syncAccounts?.[0]?.imap_sync_days) || 90;
+  const effectiveSyncDays = syncDays ?? accountSyncDays;
+  // Chart refetch signal. Both caps affect what's stored — the window
+  // directly, the per-30-day email cap via the sync's pruning pass — and
+  // last_sync_completed_at moves when a sync (and therefore that pruning)
+  // finishes. Any of the three changing means the chart's numbers are stale.
+  const analyticsKey = [
+    accountSyncDays,
+    syncAccounts?.[0]?.imap_sync_email_limit,
+    syncAccounts?.[0]?.last_sync_completed_at,
+  ].join('|');
   const [activeTab, setActiveTab] = useState('inbox'); // inbox | drafts | sent
   const [search, setSearch] = useState('');
   // 1-based current page for the active list. Reset to 1 whenever the tab
   // or search changes (below) so the user never lands on an out-of-range
   // page after the result set shrinks.
   const [listPage, setListPage] = useState(1);
+  // Jump to the Emails page with a specific folder pre-selected. Used by the
+  // dashboard's stat cards, folder tiles and "View all" links.
+  const openEmails = useCallback((tab) => {
+    if (tab) setActiveTab(tab);
+    setListPage(1);
+    navigate('/reply-draft/emails');
+  }, [navigate]);
   // Reply composer is hidden by default for inbox rows — the user has to
   // click the "Reply" button to reveal the AI-draft generator. Drafts on
   // the other hand land straight in the composer (the user came to review
@@ -162,19 +196,19 @@ const ReplyDraftAgentPage = () => {
   const refreshInbox = useCallback(async () => {
     setInboxLoading(true);
     try {
-      const res = await listPendingReplies({ days: String(syncDays), direction: 'in' });
+      const res = await listPendingReplies({ days: String(effectiveSyncDays), direction: 'in' });
       setPendingReplies(res?.data || []);
     } catch (e) {
       toast({ title: 'Failed to load inbox', description: e.message, variant: 'destructive' });
     } finally {
       setInboxLoading(false);
     }
-  }, [toast, syncDays]);
+  }, [toast, effectiveSyncDays]);
 
   const refreshSent = useCallback(async () => {
     setSentLoading(true);
     try {
-      const res = await listPendingReplies({ days: String(syncDays), direction: 'out' });
+      const res = await listPendingReplies({ days: String(effectiveSyncDays), direction: 'out' });
       setSentEmails(res?.data || []);
     } catch (e) {
       // Non-fatal — Sent tab will just show its empty state.
@@ -182,7 +216,7 @@ const ReplyDraftAgentPage = () => {
     } finally {
       setSentLoading(false);
     }
-  }, [syncDays]);
+  }, [effectiveSyncDays]);
 
   const refreshDrafts = useCallback(async () => {
     try {
@@ -322,7 +356,7 @@ const ReplyDraftAgentPage = () => {
       refreshInbox();
       refreshSent();
     }
-  }, [hasAccess, syncDays, refreshInbox, refreshSent]);
+  }, [hasAccess, effectiveSyncDays, refreshInbox, refreshSent]);
 
   const clearSelection = () => {
     setSelectedReply(null);
@@ -363,10 +397,18 @@ const ReplyDraftAgentPage = () => {
           try {
             const attRes = await fetchInboxAttachments(r.id);
             const attData = attRes?.data;
+            // The endpoint also hands back a freshly rendered body_html —
+            // inline cid: images can only be swapped for data: URIs once
+            // these files exist on disk, so the copy we rendered a moment
+            // ago still shows them as broken. Patch it in rather than
+            // making the user reopen the email.
+            const attHtml = attRes?.body_html;
             if (Array.isArray(attData)) {
               setSelectedReply((current) => {
                 if (!current || current.id !== r.id || current.source !== r.source) return current;
-                return { ...current, attachments: attData, attachments_fetched: true };
+                const next = { ...current, attachments: attData, attachments_fetched: true };
+                if (attHtml) next.body_html = attHtml;
+                return next;
               });
             } else {
               // Server returned something we can't render — flip the
@@ -433,10 +475,13 @@ const ReplyDraftAgentPage = () => {
           try {
             const attRes = await fetchInboxAttachments(parent.id);
             const attData = attRes?.data;
+            const attHtml = attRes?.body_html;
             if (Array.isArray(attData)) {
               setSelectedReply((current) => {
                 if (!current || current.id !== parent.id || current.source !== 'inbox') return current;
-                return { ...current, attachments: attData, attachments_fetched: true };
+                const next = { ...current, attachments: attData, attachments_fetched: true };
+                if (attHtml) next.body_html = attHtml;
+                return next;
               });
             } else {
               setSelectedReply((current) => {
@@ -747,6 +792,20 @@ const ReplyDraftAgentPage = () => {
   // Reset to the first page whenever the tab or search term changes — the
   // visible list is different, so keeping the old page number would show a
   // blank/wrong slice.
+  const timeWindowOptions = useMemo(
+    () => TIME_WINDOW_OPTIONS.filter((o) => o.value <= accountSyncDays),
+    [accountSyncDays]
+  );
+  // Track the account's setting: null on first load, and re-clamped if the
+  // user later edits the account down to a smaller window (a filter left on
+  // "90 days" would otherwise stick around after the account moved to 30).
+  useEffect(() => {
+    setSyncDays((prev) => {
+      if (prev == null) return accountSyncDays;
+      return prev > accountSyncDays ? accountSyncDays : prev;
+    });
+  }, [accountSyncDays]);
+
   useEffect(() => { setListPage(1); }, [activeTab, search]);
 
   // The current list's items and its page slice. Derived from the active
@@ -767,8 +826,8 @@ const ReplyDraftAgentPage = () => {
   // mid-tour and reset the user's step.
   const hasAttachedAccount = syncAccounts.length > 0;
   const tourSteps = useMemo(
-    () => buildReplyDraftTourSteps(hasAttachedAccount),
-    [hasAttachedAccount]
+    () => buildReplyDraftTourSteps(hasAttachedAccount, view),
+    [hasAttachedAccount, view]
   );
 
   const stats = useMemo(() => ({
@@ -860,54 +919,86 @@ const ReplyDraftAgentPage = () => {
         />
 
         <div className="container mx-auto px-4 sm:px-6 py-6 max-w-[1500px]">
-          {/* Header: title + Refresh */}
+          {/* Header: title on the left, action bar hard-right. The bar wraps
+              to its own line on narrow viewports instead of squeezing the
+              title, and the subtitle truncates rather than wrapping. */}
           <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
-            <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               <div className="min-w-0">
-                <h1 className="text-lg font-bold text-white truncate">Reply Draft Workspace</h1>
-                <p className="text-xs text-gray-400">
+                <h1 className="text-lg font-bold text-white truncate">
+                  {view === 'emails' ? 'Emails' : 'Reply Draft Dashboard'}
+                </h1>
+                <p className="text-xs text-gray-400 truncate">
                   {refreshing
                     ? 'Syncing from your mailbox…'
-                    : 'Click refresh to pull the latest from your inbox and drafts.'}
+                    : view === 'emails'
+                      ? 'Inbox, Sent and Drafts from your attached mailbox.'
+                      : 'Live counters and quick actions for your reply agent.'}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3 flex-wrap justify-end">
-              <span className="text-xs text-gray-400 hidden sm:inline">
-                {isSyncRunning ? 'Polling every 5s while syncing' : 'Auto-refreshes every 30s'}
-              </span>
+            {/* Action bar — mostly square icon buttons with hover tooltips so
+                the row stays compact. "How it works" and "Take the Tour" keep
+                visible labels since they're the onboarding entry points. */}
+            <div className="flex items-center gap-1.5 flex-nowrap justify-end ml-auto shrink-0">
+              {/* Emails page: a way back to the Dashboard, since all the
+                  setup / analytics controls now live there. */}
+              {view === 'emails' && (
+                <HoverTip tip="Back to the reply agent dashboard">
+                  <Button
+                    variant="outline"
+                    aria-label="Dashboard"
+                    className="h-9 w-9 p-0 shrink-0 bg-white/5 border-white/15 text-white/80 hover:bg-white/10 hover:text-white"
+                    onClick={() => navigate('/reply-draft/dashboard')}
+                  >
+                    <LayoutDashboard className="h-4 w-4" />
+                  </Button>
+                </HoverTip>
+              )}
 
-              {/* How it works — re-open the onboarding summary any time */}
-              <HoverTip tip="See how this agent works — a quick walkthrough of drafting and sending replies">
-                <Button
-                  variant="outline"
-                  className="bg-white/5 border-white/15 text-white/80 hover:bg-white/10 hover:text-white gap-2"
-                  onClick={() => setHowItWorksOpen(true)}
-                >
-                  <Sparkles className="h-4 w-4" />
-                  <span className="hidden sm:inline text-xs font-medium">How it works</span>
-                </Button>
-              </HoverTip>
+              {/* Setup + learning controls live on the Dashboard only —
+                  the Emails page keeps just Compose and Refresh so the
+                  header stays out of the way while reading mail. */}
+              {view === 'dashboard' && (
+                <>
+                  {/* How it works — re-open the onboarding summary any time.
+                      Keeps its full label: it's the entry point a first-time
+                      user looks for, and an icon alone doesn't announce it. */}
+                  <HoverTip tip="See how this agent works — a quick walkthrough of drafting and sending replies">
+                    <Button
+                      variant="outline"
+                      className="h-9 w-9 p-0 sm:w-auto sm:px-3 shrink-0 gap-2 bg-white/5 border-white/15 text-white/80 hover:bg-white/10 hover:text-white"
+                      onClick={() => setHowItWorksOpen(true)}
+                    >
+                      <Sparkles className="h-4 w-4 shrink-0" />
+                      <span className="hidden sm:inline text-xs font-medium whitespace-nowrap">How it works</span>
+                    </Button>
+                  </HoverTip>
 
-              {/* Take the Tour — replay the interactive step-by-step walkthrough */}
-              <HoverTip tip="Take an interactive tour that highlights each part of the workspace">
-                <Button
-                  data-tour="rd-replay"
-                  variant="outline"
-                  className="bg-white/5 border-amber-500/30 text-amber-200 hover:bg-amber-500/10 hover:text-amber-100 gap-2"
-                  onClick={() => setTourOpen(true)}
-                >
-                  <GraduationCap className="h-4 w-4" />
-                  <span className="hidden sm:inline text-xs font-medium">Take the Tour</span>
-                </Button>
-              </HoverTip>
+                  {/* Take the Tour — replay the interactive walkthrough.
+                      Also keeps its label, for the same reason. */}
+                  <HoverTip tip="Take an interactive tour that highlights each part of the workspace">
+                    <Button
+                      data-tour="rd-replay"
+                      variant="outline"
+                      className="h-9 w-9 p-0 sm:w-auto sm:px-3 shrink-0 gap-2 bg-white/5 border-amber-500/30 text-amber-200 hover:bg-amber-500/10 hover:text-amber-100"
+                      onClick={() => setTourOpen(true)}
+                    >
+                      <GraduationCap className="h-4 w-4 shrink-0" />
+                      <span className="hidden sm:inline text-xs font-medium whitespace-nowrap">Take the Tour</span>
+                    </Button>
+                  </HoverTip>
 
-              <span data-tour="rd-account" className="inline-flex">
-                <AttachedAccountButton
-                  syncAccounts={syncAccounts}
-                  onAddNew={openAddAccountModal}
-                />
-              </span>
+                  {/* Attached account keeps its label — it shows *which*
+                      mailbox is connected, which an icon can't convey. */}
+                  <span data-tour="rd-account" className="inline-flex shrink-0">
+                    <AttachedAccountButton
+                      syncAccounts={syncAccounts}
+                      onAddNew={openAddAccountModal}
+                    />
+                  </span>
+                </>
+              )}
 
               {/* Compose: opens a Gmail-style new-email modal. Hidden
                   until the user attaches an inbox account, since the
@@ -917,110 +1008,236 @@ const ReplyDraftAgentPage = () => {
                   <Button
                     data-tour="rd-compose"
                     variant="outline"
-                    className="bg-white/5 border-fuchsia-500/30 text-fuchsia-200 hover:bg-fuchsia-500/10 hover:text-fuchsia-100 gap-2"
+                    aria-label="Compose"
+                    className="h-9 w-9 p-0 shrink-0 bg-white/5 border-fuchsia-500/30 text-fuchsia-200 hover:bg-fuchsia-500/10 hover:text-fuchsia-100"
                     onClick={() => setComposeOpen(true)}
                   >
                     <PenSquare className="h-4 w-4" />
-                    <span className="hidden sm:inline text-xs font-medium">Compose</span>
                   </Button>
                 </HoverTip>
               )}
 
-              {syncAccounts.length > 0 && (
+              {/* Settings + analytics: Dashboard only, and only once an
+                  inbox account is attached. */}
+              {view === 'dashboard' && syncAccounts.length > 0 && (
                 <HoverTip tip="Inbox analytics and attached-account settings">
                   <Button
                     data-tour="rd-settings"
                     variant="outline"
-                    className="bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white gap-2"
+                    aria-label="Settings"
+                    className="h-9 w-9 p-0 shrink-0 bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white"
                     onClick={() => setSettingsOpen(true)}
                   >
                     <SettingsIcon className="h-4 w-4" />
-                    <span className="hidden sm:inline text-xs font-medium">Settings</span>
                   </Button>
                 </HoverTip>
               )}
 
-              <Button
-                data-tour="rd-refresh"
-                onClick={refreshAll}
-                disabled={refreshing}
-                className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 disabled:opacity-60"
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Refreshing…' : 'Refresh'}
-              </Button>
+              {/* Refresh is icon-only — the label was the widest thing in
+                  the row and the spinning icon already says "refreshing". */}
+              <HoverTip tip={refreshing ? 'Refreshing…' : 'Pull the latest from your inbox and drafts'}>
+                <Button
+                  data-tour="rd-refresh"
+                  onClick={refreshAll}
+                  disabled={refreshing}
+                  aria-label="Refresh"
+                  className="h-9 w-9 p-0 shrink-0 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/20 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                </Button>
+              </HoverTip>
             </div>
           </div>
 
-          {/* Contextual Stats */}
-          <div data-tour="rd-stats" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300" />
-            <StatCard icon={FileText} label="Drafts to Review" value={stats.draftsPending} tint="from-amber-500/20 to-orange-500/10" iconTint="text-amber-300" />
-            <StatCard icon={Send} label="Sent" value={stats.sent} tint="from-emerald-500/20 to-teal-500/10" iconTint="text-emerald-300" />
-            <StatCard icon={AlertCircle} label="Failed" value={stats.failed} tint="from-rose-500/20 to-red-500/10" iconTint="text-rose-300" />
-          </div>
+          {/* ---------------- DASHBOARD VIEW ---------------- */}
+          {/* Stats and the sync-source card live on the Dashboard only — the
+              Emails page is kept clean so the full height goes to the mail
+              list and the reply composer. */}
+          {view === 'dashboard' && (
+            <>
+              {/* Contextual Stats — each card deep-links into the matching
+                  tab of the Emails page. */}
+              <div data-tour="rd-stats" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                <StatCard icon={Inbox} label="Pending Replies" value={stats.pending} tint="from-cyan-500/20 to-blue-500/10" iconTint="text-cyan-300"
+                  onClick={() => openEmails('inbox')} />
+                <StatCard icon={FileText} label="Drafts to Review" value={stats.draftsPending} tint="from-amber-500/20 to-orange-500/10" iconTint="text-amber-300"
+                  onClick={() => openEmails('drafts')} />
+                <StatCard icon={Send} label="Sent" value={stats.sent} tint="from-emerald-500/20 to-teal-500/10" iconTint="text-emerald-300"
+                  onClick={() => openEmails('sent')} />
+                <StatCard icon={AlertCircle} label="Failed" value={stats.failed} tint="from-rose-500/20 to-red-500/10" iconTint="text-rose-300"
+                  onClick={() => openEmails('drafts')} />
+              </div>
 
-          {/* Sync Source card — tells the user exactly which mailbox feeds
-              this inbox, or prompts them to configure one if it's empty. */}
-          <SyncSourceCard
-            accounts={syncAccounts}
-            onConfigure={() => setAccountModalOpen(true)}
-          />
+              {/* Sync Source card — tells the user exactly which mailbox feeds
+                  this inbox, or prompts them to configure one if it's empty. */}
+              <SyncSourceCard
+                accounts={syncAccounts}
+                onConfigure={() => setAccountModalOpen(true)}
+              />
 
-          {/* Main Workspace */}
+            <div className="mt-4 space-y-4">
+              {/* Mail folders — three tiles that jump straight into the
+                  Emails page with the right tab already selected. */}
+              <div data-tour="rd-folders" className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <FolderTile
+                  icon={Inbox}
+                  label="Inbox"
+                  count={pendingReplies.length}
+                  subtitle="Incoming mail waiting on a reply"
+                  accent="cyan"
+                  onClick={() => openEmails('inbox')}
+                />
+                <FolderTile
+                  icon={Edit3}
+                  label="Drafts"
+                  count={unsentDrafts.length}
+                  subtitle="AI replies you haven't sent yet"
+                  accent="fuchsia"
+                  onClick={() => openEmails('drafts')}
+                />
+                <FolderTile
+                  icon={Check}
+                  label="Sent"
+                  count={sentEmails.length}
+                  subtitle="Replies already delivered"
+                  accent="emerald"
+                  onClick={() => openEmails('sent')}
+                />
+              </div>
+
+              {/* Email activity — received-vs-sent volume over 30/60/90
+                  days. Same component the Settings dialog renders, so the
+                  numbers can't drift between the two places. Needs an
+                  attached account to have anything to chart. */}
+              {syncAccounts.length > 0 && (
+                <div data-tour="rd-activity">
+                  <EmailActivityChart active variant="dashboard" days={accountSyncDays} refreshKey={analyticsKey} />
+                </div>
+              )}
+
+              {/* Recent activity — the newest few inbox rows and drafts, so
+                  the dashboard is useful without leaving it. Each row opens
+                  the message inside the Emails page. */}
+              <div data-tour="rd-recent" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                    <div className="flex items-center gap-2">
+                      <Inbox className="h-4 w-4 text-cyan-300" />
+                      <span className="text-sm font-semibold text-white">Latest inbox</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openEmails('inbox')}
+                      className="text-xs text-cyan-300 hover:text-cyan-200 font-medium"
+                    >
+                      View all
+                    </button>
+                  </div>
+                  {pendingReplies.length === 0 ? (
+                    <EmptyState icon={Inbox} title="Inbox is clear" subtitle="New mail will show up here." />
+                  ) : (
+                    <div className="divide-y divide-white/5">
+                      {pendingReplies.slice(0, 5).map((r) => (
+                        <InboxItem
+                          key={r.id}
+                          reply={r}
+                          active={false}
+                          onClick={() => { handleSelectReply(r); openEmails('inbox'); }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                    <div className="flex items-center gap-2">
+                      <Edit3 className="h-4 w-4 text-fuchsia-300" />
+                      <span className="text-sm font-semibold text-white">Drafts to review</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openEmails('drafts')}
+                      className="text-xs text-fuchsia-300 hover:text-fuchsia-200 font-medium"
+                    >
+                      View all
+                    </button>
+                  </div>
+                  {unsentDrafts.length === 0 ? (
+                    <EmptyState icon={FileText} title="No drafts yet" subtitle="Generated drafts land here for review." />
+                  ) : (
+                    <div className="divide-y divide-white/5">
+                      {unsentDrafts.slice(0, 5).map((d) => (
+                        <DraftItem
+                          key={d.id}
+                          draft={d}
+                          active={false}
+                          onClick={() => { handleSelectDraft(d); openEmails('drafts'); }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            </>
+          )}
+
+          {/* ---------------- EMAILS VIEW (workspace) ---------------- */}
+          {view === 'emails' && (
           <div className="grid grid-cols-12 gap-4 items-stretch">
             {/* LEFT: List */}
-            <div className="col-span-12 lg:col-span-4 xl:col-span-3">
-              <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-220px)]">
+            <div className="col-span-12 lg:col-span-5 xl:col-span-4">
+              <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-160px)]">
                 {/* Tabs */}
-                <div data-tour="rd-tabs" className="p-2 border-b border-white/10 flex items-center gap-2">
-                  <div className="flex-1 flex">
-                    <HoverTip tip="Incoming replies waiting for you to draft an answer" className="flex-1">
+                <div data-tour="rd-tabs" className="p-1.5 border-b border-white/10 flex items-center">
+                  <div className="flex-1 flex gap-1 min-w-0">
+                    <HoverTip tip="Incoming replies waiting for you to draft an answer" className="flex-1 min-w-0">
                       <button
                         onClick={() => setActiveTab('inbox')}
-                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'inbox'
+                        className={`w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'inbox'
                             ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-200 border border-cyan-500/30'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                           }`}
                       >
-                        <Inbox className="h-4 w-4" />
+                        <Inbox className="h-4 w-4 shrink-0" />
                         Inbox
                         {pendingReplies.length > 0 && (
-                          <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-cyan-500/30 text-cyan-100' : 'bg-white/10 text-gray-300'}`}>
+                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'inbox' ? 'bg-cyan-500/30 text-cyan-100' : 'bg-white/10 text-gray-300'}`}>
                             {pendingReplies.length}
                           </span>
                         )}
                       </button>
                     </HoverTip>
-                    <HoverTip tip="AI-written reply drafts you haven't sent yet" className="flex-1">
+                    <HoverTip tip="AI-written reply drafts you haven't sent yet" className="flex-1 min-w-0">
                       <button
                         onClick={() => setActiveTab('drafts')}
-                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'drafts'
+                        className={`w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'drafts'
                             ? 'bg-gradient-to-r from-fuchsia-500/20 to-purple-500/20 text-fuchsia-200 border border-fuchsia-500/30'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                           }`}
                       >
-                        <Edit3 className="h-4 w-4" />
+                        <Edit3 className="h-4 w-4 shrink-0" />
                         Drafts
                         {unsentDrafts.length > 0 && (
-                          <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
+                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'drafts' ? 'bg-fuchsia-500/30 text-fuchsia-100' : 'bg-white/10 text-gray-300'}`}>
                             {unsentDrafts.length}
                           </span>
                         )}
                       </button>
                     </HoverTip>
-                    <HoverTip tip="Replies you've already approved and sent" className="flex-1">
+                    <HoverTip tip="Replies you've already approved and sent" className="flex-1 min-w-0">
                       <button
                         onClick={() => setActiveTab('sent')}
-                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'sent'
+                        className={`w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'sent'
                             ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-200 border border-emerald-500/30'
                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                           }`}
                       >
-                        <Check className="h-4 w-4" />
+                        <Check className="h-4 w-4 shrink-0" />
                         Sent
                         {sentEmails.length > 0 && (
-                          <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'sent' ? 'bg-emerald-500/30 text-emerald-100' : 'bg-white/10 text-gray-300'}`}>
+                          <span className={`ml-0.5 shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === 'sent' ? 'bg-emerald-500/30 text-emerald-100' : 'bg-white/10 text-gray-300'}`}>
                             {sentEmails.length}
                           </span>
                         )}
@@ -1050,12 +1267,12 @@ const ReplyDraftAgentPage = () => {
 
                   {(activeTab === 'inbox' || activeTab === 'sent') && (
                     <select
-                      value={syncDays}
+                      value={effectiveSyncDays}
                       onChange={(e) => setSyncDays(Number(e.target.value))}
                       title="Filter to a rolling time window. Mail is pre-synced in the background, so switching is instant."
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition"
                     >
-                      {TIME_WINDOW_OPTIONS.map((o) => (
+                      {timeWindowOptions.map((o) => (
                         <option key={o.value} value={o.value} className="bg-gray-900">
                           {o.label}
                         </option>
@@ -1150,9 +1367,9 @@ const ReplyDraftAgentPage = () => {
             </div>
 
             {/* RIGHT: Detail + Composer */}
-            <div className="col-span-12 lg:col-span-8 xl:col-span-9 space-y-4 pr-1 lg:h-[calc(100vh-220px)] lg:overflow-y-auto custom-scrollbar">
+            <div className="col-span-12 lg:col-span-7 xl:col-span-8 space-y-4 pr-1 lg:h-[calc(100vh-160px)] lg:overflow-y-auto custom-scrollbar">
               {!selectedReply && !selectedDraft && (
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm min-h-[68vh] flex items-center justify-center">
+                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm min-h-[60vh] lg:min-h-0 lg:h-full flex items-center justify-center">
                   <div className="text-center max-w-md px-6">
                     <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500/20 to-fuchsia-500/20 border border-white/10 flex items-center justify-center mb-5">
                       <MailOpen className="h-10 w-10 text-cyan-300" />
@@ -1167,7 +1384,7 @@ const ReplyDraftAgentPage = () => {
               )}
 
               {/* Original Email Viewer — always stretched to match the
-                  left list panel's exact height (calc(100vh-220px)).
+                  left list panel's exact height (calc(100vh-160px)).
                   Using `h-` (not `min-h-`) so the card forces the full
                   height even when the email body is short. When the
                   composer opens it appears *below* this card and the
@@ -1181,7 +1398,7 @@ const ReplyDraftAgentPage = () => {
                 // Fixed-height layout (`lg:h-[calc(...)]`) is also dropped
                 // for compose so the composer underneath rises up to the
                 // top of the pane like a Gmail compose window.
-                <div className={`rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:flex-shrink-0 ${isComposeDraft ? '' : 'lg:h-[calc(100vh-220px)]'
+                <div className={`rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:flex-shrink-0 ${isComposeDraft ? '' : 'lg:h-[calc(100vh-160px)]'
                   }`}>
                   <div className={isComposeDraft ? 'p-4' : 'p-5 border-b border-white/10'}>
                     <div className="flex items-start justify-between gap-4 mb-4">
@@ -1488,8 +1705,7 @@ const ReplyDraftAgentPage = () => {
                               <button
                                 type="button"
                                 onClick={() => setShowBodyPreview(false)}
-                                className={`px-2.5 py-1 transition ${!showBodyPreview ? 'bg-cyan-500/20 text-cyan-200' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-                              >
+                                className={`px-2.5 py-1 transition ${!showBodyPreview ? 'bg-cyan-500/20 text-cyan-200' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}>
                                 Edit
                               </button>
                               <button
@@ -1625,6 +1841,7 @@ const ReplyDraftAgentPage = () => {
               )}
             </div>
           </div>
+          )}
         </div>
 
       <AccountConnectModal

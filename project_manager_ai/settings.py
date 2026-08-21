@@ -625,15 +625,59 @@ LOGGING = {
     # doesn't silently drop SQL debug output in prod.
     'loggers': {
         'django.db.backends': {'level': 'WARNING'},
-        # Full debug output for SDR email sending — helps diagnose duplicate emails.
-        # Set to WARNING to reduce noise once the issue is resolved.
+
+        # ── Third-party chatter ───────────────────────────────
+        # httpx logs a line for EVERY outbound API call ("HTTP Request: POST
+        # https://api.groq.com/... 200 OK"), which buries our own output.
+        # Warnings and errors still come through.
+        'httpx': {'level': 'WARNING'},
+        'httpcore': {'level': 'WARNING'},
+        'openai': {'level': 'WARNING'},
+        'groq': {'level': 'WARNING'},
+        'anthropic': {'level': 'WARNING'},
+        'urllib3': {'level': 'WARNING'},
+        'apscheduler': {'level': 'WARNING'},
+        'asyncio': {'level': 'WARNING'},
+
+        # ── Background schedulers ─────────────────────────────
+        # These run on a timer and log the same "nothing to do" lines forever
+        # (follow-up checks every few seconds, interview scans, token resets).
+        # At WARNING they stay silent unless something actually goes wrong.
+        'recruitment_agent.middleware': {'level': 'WARNING'},
+        'recruitment_agent.tasks': {'level': 'WARNING'},
+        'ai_sdr_agent.scheduler': {'level': 'WARNING'},
+        'marketing_agent.tasks': {'level': 'WARNING'},
+
+        # SDR: the send loop runs on a timer and logs START/END every minute
+        # even when there is nothing to send. WARNING keeps real problems
+        # (blocked keys, send failures) and drops the heartbeat.
         'ai_sdr_agent': {
             'handlers': ['console'],
-            'level': 'DEBUG',
+            'level': 'WARNING',
             'propagate': False,
         },
+        'ai_sdr_agent.tasks': {'level': 'WARNING'},
+        'ai_sdr_agent.middleware': {'level': 'WARNING'},
+
+        # Startup import warnings ("PyPDF2 not available") repeat on every boot
+        # and are not actionable during normal work.
+        'api.views.pm_agent': {'level': 'ERROR'},
     },
 }
+
+# Opt back in when you need the noise for debugging:
+#   VERBOSE_LOGS=1 python manage.py runserver
+if os.getenv('VERBOSE_LOGS', '').strip().lower() in ('1', 'true', 'yes'):
+    for _name in (
+        'httpx', 'httpcore', 'openai', 'groq', 'anthropic', 'urllib3',
+        'apscheduler', 'asyncio',
+        'recruitment_agent.middleware', 'recruitment_agent.tasks',
+        'ai_sdr_agent.scheduler', 'ai_sdr_agent.tasks',
+        'ai_sdr_agent.middleware', 'marketing_agent.tasks',
+        'api.views.pm_agent',
+    ):
+        LOGGING['loggers'][_name]['level'] = 'INFO'
+    LOGGING['loggers']['ai_sdr_agent']['level'] = 'DEBUG'
 
 
 # --------------------

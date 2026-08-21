@@ -41,6 +41,7 @@ import {
   FileText,
   Users,
   AlertTriangle,
+  X,
 } from 'lucide-react';
 import {
   Chart as ChartJS,
@@ -344,6 +345,14 @@ const CampaignDetail = () => {
     }
     if (launchEnd && launchEnd < todayStr) {
       toast({ title: 'Invalid date', description: 'End date cannot be in the past. Use today or a future date.', variant: 'destructive' });
+      return;
+    }
+    if (launchEnd && launchEnd < launchStart) {
+      toast({ title: 'Invalid dates', description: "Start date can't be after the end date.", variant: 'destructive' });
+      return;
+    }
+    if (launchEnd && launchEnd === launchStart) {
+      toast({ title: 'Invalid dates', description: "Start and end date can't be the same — a campaign needs at least one day of duration. Pick a later end date.", variant: 'destructive' });
       return;
     }
     setActionLoading('launch');
@@ -1554,9 +1563,9 @@ const CampaignDetail = () => {
             <LeadsUploadFields defaultOpen={false} />
 
             {/* File picker — a clearly-styled "Choose file" button */}
-            <div>
-              <Label>File (CSV, XLSX, XLS)</Label>
-              <div className="mt-1 flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Label className="shrink-0 mb-0">File (CSV, XLSX, XLS)</Label>
+              <div className="flex items-center gap-3 flex-wrap">
                 <input
                   id="leads-file-input"
                   type="file"
@@ -1564,7 +1573,12 @@ const CampaignDetail = () => {
                   onChange={(e) => handleUploadFileChange(e.target.files?.[0] || null)}
                   className="hidden"
                 />
-                <Button type="button" variant="outline" onClick={() => document.getElementById('leads-file-input')?.click()}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => document.getElementById('leads-file-input')?.click()}
+                  className="border-purple-500/50 bg-purple-500/10 text-purple-200 hover:bg-purple-500/20 hover:text-purple-100 hover:border-purple-400"
+                >
                   <Upload className="h-4 w-4 mr-2" /> Choose file
                 </Button>
                 {uploadFile ? (
@@ -1581,14 +1595,25 @@ const CampaignDetail = () => {
 
             {/* Preview of the chosen file — headers + all rows */}
             {uploadPreview && uploadPreview.headers.length > 0 && (
-              <div className="rounded-lg border">
-                <div className="px-3 py-2 border-b bg-muted/40 text-xs font-medium flex items-center justify-between">
-                  <span>Preview — {uploadPreview.rows.length} row(s), {uploadPreview.headers.length} column(s)</span>
-                  <span className="text-muted-foreground font-normal">Verify columns/data, then Upload</span>
+              <div className="rounded-lg border border-purple-500/30">
+                <div className="px-3 py-2 border-b border-purple-500/20 bg-purple-500/10 text-xs font-medium flex items-center justify-between gap-3">
+                  <span className="text-purple-100">Preview — {uploadPreview.rows.length} row(s), {uploadPreview.headers.length} column(s)</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-purple-300/70 font-normal">Verify columns/data, then Upload</span>
+                    <button
+                      type="button"
+                      onClick={() => { setUploadFile(null); setUploadPreview(null); setUploadResult(null); setUploadMessage(''); const el = document.getElementById('leads-file-input'); if (el) el.value = ''; }}
+                      className="rounded-md p-1 text-purple-300/70 hover:text-purple-100 hover:bg-purple-500/20 transition-colors"
+                      title="Close preview"
+                      aria-label="Close preview"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
                 <div className="max-h-64 overflow-auto no-scrollbar">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-muted/60">
+                    <thead className="sticky top-0 bg-purple-500/[0.14] backdrop-blur-sm">
                       <tr>
                         <th className="text-left font-semibold px-2 py-1.5 text-muted-foreground w-10">#</th>
                         {uploadPreview.headers.map((h, i) => (
@@ -1598,7 +1623,7 @@ const CampaignDetail = () => {
                     </thead>
                     <tbody>
                       {uploadPreview.rows.map((r, ri) => (
-                        <tr key={ri} className="border-t hover:bg-muted/20">
+                        <tr key={ri} className="border-t hover:bg-purple-500/[0.07]">
                           <td className="px-2 py-1 text-muted-foreground tabular-nums">{ri + 2}</td>
                           {uploadPreview.headers.map((_, ci) => (
                             <td key={ci} className="px-2 py-1 whitespace-nowrap max-w-[220px] truncate" title={r[ci]}>{r[ci]}</td>

@@ -191,6 +191,10 @@ const ALL_AGENTS = [
   {
     key: 'reply_draft_agent', label: 'Reply Draft Agent', icon: Reply,
     section: 'reply-draft', path: '/reply-draft/dashboard', basePath: '/reply-draft',
+    children: [
+      { label: 'Dashboard', icon: LayoutDashboard, path: '/reply-draft/dashboard' },
+      { label: 'Emails',    icon: Mail,            path: '/reply-draft/emails' },
+    ],
   },
   {
     key: 'ai_sdr_agent', label: 'AI SDR Agent', icon: Target,
