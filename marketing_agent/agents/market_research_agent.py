@@ -54,6 +54,64 @@ Given the user's message, reply with exactly one word:
 - research: user wants an actual REPORT on a market/competitor/customer/opportunity/risk topic (e.g. "cloud trends", "web and ai companies", "competitor analysis for Amazon"). They gave a topic to analyze.
 Ignore typos and casual language. Reply with only one word: greeting, platform_question, meta_question, definition, off_topic, or research."""
 
+    RESEARCH_TYPE_LABELS = {
+        'market_trend': 'Market Trend',
+        'competitor': 'Competitor Analysis',
+        'customer_behavior': 'Customer Behavior',
+        'opportunity': 'Opportunity Analysis',
+        'threat': 'Threat Analysis',
+    }
+
+    TYPE_DETECT_SYSTEM = (
+        "You classify a market-research question into exactly ONE category.\n"
+        "Reply with ONLY the category id, nothing else.\n\n"
+        "market_trend      - direction/size/growth of a market or technology over "
+        "time. Questions about demand rising or falling, adoption rates, market "
+        "size, forecasts, what is growing or declining.\n"
+        "competitor        - about specific rival companies: who they are, what "
+        "they offer, their pricing, strengths, weaknesses, market share.\n"
+        "customer_behavior - how buyers act: what they want, why they buy, their "
+        "preferences, pain points, buying journey, demographics.\n"
+        "opportunity       - unmet needs, gaps in a market, where to expand, "
+        "untapped segments, whether an idea is worth pursuing.\n"
+        "threat            - risks and dangers: regulation, new entrants, "
+        "substitution, economic or competitive risk to a business.\n\n"
+        "Examples:\n"
+        "'Is the demand for SaaS products increasing or decreasing?' -> market_trend\n"
+        "'How does Slack compare to Microsoft Teams?' -> competitor\n"
+        "'Why do users abandon their carts?' -> customer_behavior\n"
+        "'Which markets are underserved in fintech?' -> opportunity\n"
+        "'What could disrupt the taxi industry?' -> threat\n"
+    )
+
+    def _detect_research_type(self, topic: str) -> Optional[str]:
+        """Ask the LLM which research category the QUESTION is really about.
+
+        Returns a research_type id, or None when it cannot tell. Used only to
+        warn the user when the selected category does not match what they
+        actually asked — it never silently overrides their choice.
+        """
+        if not topic or not isinstance(topic, str) or not topic.strip():
+            return None
+        try:
+            out = self._call_llm_for_reasoning(
+                'Question: "%s"' % topic.strip()[:500],
+                self.TYPE_DETECT_SYSTEM,
+                temperature=0.0,
+                max_tokens=10,
+            )
+        except Exception as e:
+            self.log_action("Research type detection failed", {"error": str(e)})
+            return None
+        if not out:
+            return None
+        # The model may answer "market_trend" or "Category: market_trend."
+        cleaned = re.sub(r'[^a-z_]', ' ', out.strip().lower())
+        for token in cleaned.split():
+            if token in self.RESEARCH_TYPE_LABELS:
+                return token
+        return None
+
     def _classify_intent(self, topic: str) -> str:
         """
         Use the LLM to classify user intent so any phrasing/typos are handled.
@@ -228,14 +286,47 @@ Reply only with the definition, no preamble."""
                 'source_urls': []
             }
 
-        # Run research (no relevance check—accept the user's topic and selected type)
-        research_findings = self._conduct_research(research_type, topic, additional_context)
+        # The selected category and the question can disagree — e.g. "Opportunity
+        # Analysis" selected but the question is "is demand for SaaS increasing?",
+        # which is a market-trend question. Answering it purely as an opportunity
+        # study gives the user the wrong kind of report with no warning.
+        #
+        # We do NOT silently override the user's choice: we run the research for
+        # the category the QUESTION is about (so the answer is actually useful)
+        # and tell them what we did, so they stay in control.
+        detected_type = self._detect_research_type(topic)
+        type_mismatch = bool(detected_type) and detected_type != research_type
+        effective_type = detected_type if type_mismatch else research_type
+
+        mismatch_note = ''
+        if type_mismatch:
+            self.log_action("Research type mismatch", {
+                "selected": research_type, "detected": detected_type,
+            })
+            # No blockquote/'>' — the UI's markdown renderer escapes it and it
+            # would show up as a literal "&gt;".
+            mismatch_note = (
+                "**Note:** you selected **%s**, but this question is really a "
+                "**%s** question, so it was researched as **%s**. "
+                "Switch the category above if you wanted a %s report instead.\n\n"
+            ) % (
+                self.RESEARCH_TYPE_LABELS.get(research_type, research_type),
+                self.RESEARCH_TYPE_LABELS.get(detected_type, detected_type),
+                self.RESEARCH_TYPE_LABELS.get(detected_type, detected_type),
+                self.RESEARCH_TYPE_LABELS.get(research_type, research_type),
+            )
+
+        research_findings = self._conduct_research(effective_type, topic, additional_context)
+        if mismatch_note:
+            research_findings['insights'] = mismatch_note + (
+                research_findings.get('insights') or ''
+            )
         
         # Store research in database
         try:
             user = User.objects.get(id=user_id)
             market_research = MarketResearch.objects.create(
-                research_type=research_type,
+                research_type=effective_type,
                 topic=topic,
                 findings=research_findings.get('findings', {}),
                 insights=research_findings.get('insights', ''),
@@ -251,7 +342,10 @@ Reply only with the definition, no preamble."""
         return {
             'success': True,
             'research_id': research_id,
-            'research_type': research_type,
+            'research_type': effective_type,
+            'selected_research_type': research_type,
+            'detected_research_type': detected_type,
+            'type_mismatch': type_mismatch,
             'topic': topic,
             'findings': research_findings.get('findings', {}),
             'insights': research_findings.get('insights', ''),

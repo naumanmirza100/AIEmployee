@@ -2,22 +2,27 @@
 Marketing Knowledge Q&A + Analytics Agent
 Foundation Agent - Provides data understanding and answers marketing questions
 
-ROUTING ARCHITECTURE (Smart Enum Router):
-  Every question goes through _classify_question() which returns ONE of these:
-  
-  DB-only (0 LLM tokens):
-    - GREETING          → short friendly reply
-    - PLATFORM_INFO     → static platform description
-    - META_HELP         → "what can I ask?" reply
-    - DB_COUNT_STATUS   → campaign count / active / list
-    - DB_TOTAL_LEADS    → total leads number
-    - DB_ANALYTICS      → open rate, click rate, top campaigns
-    - DB_CAMPAIGN_DETAIL→ specific named campaign metrics
-    - DB_BEST_CHANNEL   → channel recommendation (static logic)
+ROUTING ARCHITECTURE:
+  EVERY question about the data is answered by the LLM, which receives the
+  complete campaign list (metrics + targeting fields) plus the conversation
+  history and reasons over it itself.
 
-  LLM-needed:
-    - GENERAL_DEFINITION→ "what is X", full form, meaning (small LLM call, no data)
-    - LLM_REASONING     → why, strategy, improve, optimize (full LLM + data)
+  Only four categories are answered without the LLM, and none of them read
+  campaign data:
+    - ACTION_REQUEST  → refuse: this agent is READ-ONLY and must never imply
+                        it changed something (the LLM would claim it did)
+    - GREETING        → short friendly reply
+    - PLATFORM_INFO   → static platform description
+    - META_HELP       → static "what can I ask?" reply
+
+  WHY: the previous design keyword-matched data questions to hand-written
+  handlers (DB_COUNT_STATUS, DB_TOTAL_LEADS, DB_ANALYTICS, DB_CAMPAIGN_DETAIL,
+  DB_BEST_CHANNEL). Each answered ONE fixed question and silently ignored any
+  qualifier the user added, so "show campaigns targeting young adults" matched
+  on 'show campaigns' and returned every campaign, and "what is THEIR number of
+  leads" matched on 'number of leads' and returned the account-wide total.
+  Those handlers remain in the file but are no longer routed to; deleting them
+  is safe once nothing else references them.
 """
 
 from .marketing_base_agent import MarketingBaseAgent
@@ -27,6 +32,7 @@ from marketing_agent.models import Campaign, CampaignPerformance, MarketResearch
 import json
 import re
 from enum import Enum
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from django.db.models import Sum, Avg, Count, Q
 
@@ -44,6 +50,7 @@ class QuestionCategory(Enum):
     DB_CAMPAIGN_DETAIL  = "db_campaign_detail"
     DB_BEST_CHANNEL     = "db_best_channel"
     GENERAL_DEFINITION  = "general_definition"
+    ACTION_REQUEST      = "action_request"   # user asked us to DO something
     LLM_REASONING       = "llm_reasoning"   # fallback — needs LLM
 
 
@@ -61,7 +68,7 @@ ROUTER_CONFIG = {
             'sure', 'yeah', 'yep', 'nope', 'no',
         },
         "startswith": (
-            'how are', "how's it", 'hows it', 'how do you do',
+            'how are you', 'how are u', "how's it", 'hows it', 'how do you do',
             'how r u', 'how r you', 'good morning', 'good afternoon',
             'good evening', 'hi there', 'hello there', 'hey there',
         ),
@@ -207,6 +214,76 @@ class MarketingQAAgent(MarketingBaseAgent):
     #  SMART ENUM ROUTER  ← THE BRAIN OF ROUTING
     # ══════════════════════════════════════════════════════════
 
+    # This agent is READ-ONLY. It has no write path to the DB at all, so any
+    # request to change something must be refused explicitly — otherwise the
+    # question falls through to the LLM, which happily replies "Done, deleted!"
+    # and the user believes a campaign was removed when it never was.
+    ACTION_VERBS = (
+        'delete', 'deletes', 'deleting', 'remove', 'removes', 'removing',
+        'erase', 'destroy', 'pause', 'pauses', 'pausing', 'halt', 'suspend',
+        'resume', 'restart', 'launch', 'launches', 'launching',
+        'schedule', 'publish', 'create', 'creates', 'creating',
+        'rename', 'renames', 'modify', 'archive', 'duplicate', 'clone',
+        'upload', 'unsubscribe',
+        # Ambiguous on their own — they read as commands only with an object,
+        # handled by ACTION_PHRASES below: send, start, stop, update, edit,
+        # change, add, make, set, export, import.
+    )
+    # Verb + object patterns. These are commands even though the verb alone is
+    # too common to blocklist ("update" appears in "any update on X?").
+    ACTION_PHRASES = (
+        r'\bsend\s+(the|an|a|this|that|these|those|it|out|emails?|campaign)',
+        r'\b(start|stop)\s+(the|this|that|it|all|campaign|sending)',
+        r'\b(update|edit|change|modify)\s+(the|this|that|it|my|campaign|name|age|status)',
+        r'\b(add|make|create)\s+(a|an|the|new)\b',
+        r'\bset\s+(up|the|this|it)\b',
+        r'\b(export|import)\s+(the|this|my|all|leads?|campaigns?|data|csv)',
+        r'\bturn\s+(on|off)\b',
+        r'\bmark\s+(as|it|this|the)\b',
+    )
+    # Phrases that look like verbs but are really questions about data.
+    ACTION_EXCLUDE = (
+        'how do i', 'how to', 'how can i', 'can you tell', 'what happens',
+        'should i', 'when should', 'why do', 'what does', 'is it possible',
+        'how would i', 'where do i', 'what is', "what's", 'what are',
+        'which campaign', 'which campaigns', 'list ', 'show ', 'tell me',
+        'how many', 'compare',
+    )
+
+    def _is_action_request(self, q: str) -> bool:
+        """True when the user is asking us to CHANGE something, not answer.
+
+        Word-boundary matching matters here: a plain substring test made
+        'import' match inside 'important', so an ordinary listing question was
+        refused as if it were a command.
+        """
+        if any(x in q for x in self.ACTION_EXCLUDE):
+            return False
+
+        # Shape-based checks, so a typo in the phrase doesn't turn a question
+        # into a command ("what ahppen if i pause a campaign").
+        # 1. Starts with a question word -> asking, not instructing.
+        # Typo-tolerant: users routinely write "waht", "shud", "wud", and the
+        # whole point of this check is that it must not be defeated by one.
+        if re.match(r"^\s*(wh?at|waht|wat|why|whi|when|wen|where|which|wich|"
+                    r"who|how|hwo|should|shoud|shud|shld|could|coud|cud|"
+                    r"would|woud|wud|can|cn|do|does|did|is|are|was|were|"
+                    r"will|shall|any|tell|explain|describe)\b", q):
+            return False
+        # 2. Contains a hypothetical/comparative frame.
+        if re.search(r"\b(if i|if we|whether|instead of|difference between|"
+                     r"better to|worth it|pros and cons)\b", q):
+            return False
+        # 3. Ends in a question mark.
+        if q.rstrip().endswith('?'):
+            return False
+
+        words = set(re.findall(r"[a-z']+", q))
+        if words & set(self.ACTION_VERBS):
+            return True
+        return any(re.search(pat, q) for pat in self.ACTION_PHRASES)
+
+
     def _classify_question(self, question: str, campaigns: Optional[List[Dict]] = None) -> QuestionCategory:
         """
         Single entry point for ALL routing decisions.
@@ -219,6 +296,15 @@ class MarketingQAAgent(MarketingBaseAgent):
             return QuestionCategory.GREETING
 
         q = question.strip().lower().rstrip('?!.')
+
+        # ── 0a. Action requests ───────────────────────────────
+        #    Checked before everything else: this agent cannot write to the DB,
+        #    so an action request must never reach the LLM (which would claim
+        #    it did the work).
+        if self._is_action_request(q):
+            return QuestionCategory.ACTION_REQUEST
+
+        # ── 0a2. Back-referencing questions ───────────────────
 
         # ── 1. Greeting / small talk ──────────────────────────
         cfg = ROUTER_CONFIG[QuestionCategory.GREETING]
@@ -238,70 +324,16 @@ class MarketingQAAgent(MarketingBaseAgent):
         if len(q) <= cfg["max_len"] and any(p in q for p in cfg["contains"]):
             return QuestionCategory.META_HELP
 
-        # ── 4. DB: total leads ────────────────────────────────
-        cfg = ROUTER_CONFIG[QuestionCategory.DB_TOTAL_LEADS]
-        if len(q) <= cfg["max_len"] and any(p in q for p in cfg["contains"]):
-            return QuestionCategory.DB_TOTAL_LEADS
-
-        # ── 5. DB: campaign count / status ────────────────────
-        cfg = ROUTER_CONFIG[QuestionCategory.DB_COUNT_STATUS]
-        if len(q) <= cfg["max_len"] and any(p in q for p in cfg["contains"]):
-            return QuestionCategory.DB_COUNT_STATUS
-
-        # ── 6. DB: specific campaign detail ───────────────────
-        #    Check this BEFORE generic analytics so named campaigns win
-        if campaigns:
-            perf_terms = (
-                'performance', 'open rate', 'click rate', 'reply rate', 'bounce',
-                'conversion', 'leads', 'goal', 'target', 'positive', 'negative',
-                'details', 'detail', 'about', 'achieved', 'achievement',
-                'status', 'how is', 'how are', 'tell me about',
-            )
-            if any(t in q for t in perf_terms):
-                matched = self._find_campaign_in_question(question, campaigns)
-                if matched is not None:
-                    return QuestionCategory.DB_CAMPAIGN_DETAIL
-
-        # ── 7. General definition (strong signals) ─────────────
-        #    Check BEFORE analytics so "what is meant by conversion rate"
-        #    is treated as a definition, not a stats query
-        cfg = ROUTER_CONFIG[QuestionCategory.GENERAL_DEFINITION]
-        if len(q) <= cfg["max_len"]:
-            if any(p in q for p in cfg.get("contains_strong", ())):
-                return QuestionCategory.GENERAL_DEFINITION
-
-        # ── 8. DB: analytics / performance summary ────────────
-        cfg = ROUTER_CONFIG[QuestionCategory.DB_ANALYTICS]
-        if len(q) <= cfg["max_len"]:
-            has_exclude = any(x in q for x in cfg["exclude_if_contains"])
-            if not has_exclude:
-                # exact match (short vague follow-ups like "performance", "stats")
-                if q in cfg.get("exact_also", set()):
-                    return QuestionCategory.DB_ANALYTICS
-                # phrase match
-                if any(p in q for p in cfg["contains"]):
-                    return QuestionCategory.DB_ANALYTICS
-
-        # ── 9. DB: best channel ───────────────────────────────
-        cfg = ROUTER_CONFIG[QuestionCategory.DB_BEST_CHANNEL]
-        if len(q) <= cfg["max_len"]:
-            has_trigger = any(x in q for x in cfg["requires_any"])
-            has_channel = any(t in q for t in cfg["requires_channel"])
-            has_phrase  = any(p in q for p in cfg["contains"])
-            if (has_trigger and has_channel) or has_phrase:
-                return QuestionCategory.DB_BEST_CHANNEL
-
-        # ── 10. General definition (weak signals) ─────────────
-        cfg = ROUTER_CONFIG[QuestionCategory.GENERAL_DEFINITION]
-        if len(q) <= cfg["max_len"]:
-            has_exclude = any(x in q for x in cfg["exclude_if_contains"])
-            if not has_exclude:
-                if any(p in q for p in cfg["contains"]):
-                    return QuestionCategory.GENERAL_DEFINITION
-                # "what is X" / "what does X" only when short and no data context
-                if len(q) <= 50 and any(q.startswith(p) for p in cfg["startswith_short"]):
-                    return QuestionCategory.GENERAL_DEFINITION
-
+        # ── 4. Everything else is a question about the DATA ───
+        #    It goes to the LLM, which receives the complete campaign list
+        #    (metrics + targeting) and the conversation history and answers
+        #    for itself. The old keyword routes (DB_TOTAL_LEADS,
+        #    DB_COUNT_STATUS, DB_CAMPAIGN_DETAIL, DB_ANALYTICS,
+        #    DB_BEST_CHANNEL, GENERAL_DEFINITION) each answered ONE fixed
+        #    question and ignored any qualifier the user added, so
+        #    'show campaigns targeting young adults' returned every campaign
+        #    and 'what is THEIR number of leads' returned the account total.
+        #    Their handlers are kept below for reference but not routed to.
         # ── 10. Default: needs LLM reasoning ──────────────────
         return QuestionCategory.LLM_REASONING
 
@@ -311,58 +343,136 @@ class MarketingQAAgent(MarketingBaseAgent):
 
     def process(self, question: str, context: Optional[Dict] = None, user_id: Optional[int] = None) -> Dict:
         """
-        Main entry point — classifies question and routes to correct handler.
+        Main entry point.
+
+        Every question ABOUT THE DATA goes to the LLM, which receives the full
+        campaign list (metrics + targeting) and the conversation history and
+        answers for itself.
+
+        Only four things are still answered without the LLM, and none of them
+        read campaign data:
+          - ACTION_REQUEST : must be refused deterministically — the LLM would
+                             cheerfully claim it deleted something.
+          - GREETING       : "hi" needs no data and no tokens.
+          - PLATFORM_INFO  : static description of this platform.
+          - META_HELP      : static "what can I ask?" text.
+
+        The old keyword router sent data questions to hand-written handlers
+        (DB_COUNT_STATUS, DB_TOTAL_LEADS, DB_ANALYTICS, DB_CAMPAIGN_DETAIL).
+        Those handlers answered ONE fixed question and silently ignored any
+        qualifier the user added, so "show campaigns targeting young adults"
+        returned every campaign and "what is THEIR number of leads" returned the
+        account-wide total. They are no longer routed to.
         """
         self.log_action("Processing marketing question", {"question": (question or '')[:100]})
 
-        # Fix common typos first
         question = self._normalize_question_typos(question)
+        category = self._classify_question(question, campaigns=None)
 
-        # ── Fast-path: categories that need NO DB data ────────
-        pre_db_category = self._classify_question(question, campaigns=None)
+        # Refuse writes before anything else — this agent is read-only.
+        # The keyword filter flags candidates; the LLM confirms, because only it
+        # reads typos ("what ahppen if i pause a comapgin" is a question, not a
+        # command). Refuse only when both agree.
+        if category == QuestionCategory.ACTION_REQUEST:
+            if self._confirm_action_with_llm(question):
+                return self._handle_action_request(question)
+            category = QuestionCategory.LLM_REASONING
 
-        if pre_db_category == QuestionCategory.GREETING:
+        # No-data replies: cheap, deterministic, and impossible to get wrong.
+        if category == QuestionCategory.GREETING:
             return self._handle_greeting(question)
 
-        if pre_db_category == QuestionCategory.PLATFORM_INFO:
+        if category == QuestionCategory.PLATFORM_INFO:
             return self._handle_platform_info(question)
 
-        if pre_db_category == QuestionCategory.META_HELP:
+        if category == QuestionCategory.META_HELP:
             return self._handle_meta_help(question)
 
-        if pre_db_category == QuestionCategory.DB_BEST_CHANNEL:
-            return self._handle_best_channel(question)
-
-        if pre_db_category == QuestionCategory.GENERAL_DEFINITION:
-            return self._handle_general_definition(question)
-
-        # ── DB required from here ─────────────────────────────
+        # Everything else is a question about the data → let the LLM answer it
+        # with the full dataset in context.
         marketing_data = self._get_marketing_data(user_id)
-        campaigns = marketing_data.get('campaigns', []) or []
-
-        # Re-classify with campaign list (needed for DB_CAMPAIGN_DETAIL)
-        category = self._classify_question(question, campaigns=campaigns)
-
-        if category == QuestionCategory.DB_TOTAL_LEADS:
-            return self._handle_total_leads(marketing_data, question)
-
-        if category == QuestionCategory.DB_COUNT_STATUS:
-            return self._handle_count_status(marketing_data, question)
-
-        if category == QuestionCategory.DB_CAMPAIGN_DETAIL:
-            matched = self._find_campaign_in_question(question, campaigns)
-            if matched:
-                return self._handle_campaign_detail(matched, marketing_data, question)
-
-        if category == QuestionCategory.DB_ANALYTICS:
-            return self._handle_db_analytics(question, marketing_data)
-
-        # ── LLM reasoning (last resort) ───────────────────────
         return self._handle_llm_reasoning(question, marketing_data, context)
 
     # ══════════════════════════════════════════════════════════
     #  HANDLERS — one per category
     # ══════════════════════════════════════════════════════════
+
+    INTENT_SYSTEM = (
+        "You decide whether a message to a READ-ONLY marketing assistant is a "
+        "COMMAND or a QUESTION. Reply with exactly one word.\n\n"
+        "command  - the user is telling the assistant to CHANGE something now: "
+        "delete/pause/launch/create/rename/send/export a campaign or its data.\n"
+        "question - anything else, including asking HOW to do those things, "
+        "WHETHER they should, WHAT WOULD HAPPEN if they did, or any request for "
+        "information.\n\n"
+        "The user often misspells words - read through typos.\n\n"
+        "Examples:\n"
+        "'delete campaign cmp1' -> command\n"
+        "'pause er5t6y7u89' -> command\n"
+        "'how do i delet a campaign' -> question\n"
+        "'what ahppen if i pause a comapgin' -> question\n"
+        "'shud i delete a draf comapgin' -> question\n"
+        "'which campaigns should i delete?' -> question\n"
+        "'list all the caomapgin with important info' -> question\n"
+    )
+
+    def _confirm_action_with_llm(self, question: str) -> bool:
+        """Second opinion before refusing.
+
+        The keyword pre-filter cannot read typos, so it has repeatedly refused
+        ordinary questions ('what ahppen if i pause a comapgin'). Ask the model,
+        which handles misspellings natively. On any failure we keep the
+        keyword verdict, so a refusal is never skipped by accident.
+        """
+        try:
+            out = self._call_llm_for_reasoning(
+                'Message: "%s"' % (question or '').strip()[:300],
+                self.INTENT_SYSTEM, temperature=0.0, max_tokens=5,
+            )
+        except Exception as e:
+            self.log_action("Intent confirmation failed", {"error": str(e)})
+            return True
+        if not out:
+            return True
+        return 'command' in out.strip().lower()
+
+    def _handle_action_request(self, question: str) -> Dict:
+        """Refuse, clearly. This agent has no write path — it must never imply
+        that it changed anything. Points the user at the UI that can."""
+        q = (question or '').lower()
+
+        if any(v in q for v in ('delete', 'remove', 'erase', 'destroy', 'archive')):
+            where = "Campaigns tab -> open the campaign -> Delete"
+            what = "delete campaigns"
+        elif any(v in q for v in ('pause', 'stop', 'halt', 'suspend', 'resume', 'restart')):
+            where = "Campaigns tab -> open the campaign -> Pause/Resume"
+            what = "pause or resume campaigns"
+        elif any(v in q for v in ('launch', 'send', 'schedule', 'publish', 'start ')):
+            where = "Campaigns tab -> open the campaign -> Launch"
+            what = "launch campaigns or send emails"
+        elif any(v in q for v in ('create', 'make a', 'add a', 'set up', 'setup')):
+            where = "Outreach tab -> Create Campaign"
+            what = "create campaigns"
+        elif any(v in q for v in ('update', 'edit', 'change', 'rename', 'modify')):
+            where = "Campaigns tab -> open the campaign -> Edit"
+            what = "edit campaigns"
+        else:
+            where = "the Campaigns or Outreach tab"
+            what = "make changes"
+
+        answer = (
+            "I can't %s — I'm a read-only assistant, so I can only answer "
+            "questions about your marketing data. **Nothing has been changed.**\n\n"
+            "To do this yourself: %s." % (what, where)
+        )
+        return {
+            'success': True,
+            'answer': answer,
+            'insights': [],
+            'data_summary': self._create_data_summary(None),
+            'question': question,
+            'action_refused': True,
+        }
 
     def _handle_greeting(self, question: str) -> Dict:
         q = (question or '').strip().lower()
@@ -568,9 +678,28 @@ class MarketingQAAgent(MarketingBaseAgent):
         return self._ok(answer, question, marketing_data)
 
     def _handle_llm_reasoning(self, question: str, marketing_data: Dict, context: Optional[Dict]) -> Dict:
-        """Full LLM call — only reached when DB handlers cannot answer."""
+        """Full LLM call. This is now the path for every data question."""
         full_context = self._build_context(marketing_data, context)
         answer = self._generate_answer(question, full_context, context)
+
+        # An empty reply reached the UI as "No answer provided." — retry once,
+        # asking plainly, rather than showing the user a blank.
+        if not (answer or '').strip():
+            self.log_action("Empty LLM answer, retrying", {"question": question[:100]})
+            answer = self._generate_answer(
+                "%s\n\n(Answer directly using the campaign data above. Do not "
+                "return an empty response.)" % question,
+                full_context, context
+            )
+        if not (answer or '').strip():
+            answer = ("I couldn't produce an answer for that. Try rephrasing it, "
+                      "or ask about a specific campaign by name.")
+
+        # A per-campaign listing can still hit the token ceiling and stop
+        # mid-row. Silently returning half the campaigns looks like the
+        # assistant ignored the rest, so detect it and say what happened.
+        answer = self._note_if_truncated(answer, marketing_data)
+
         insights = self._extract_insights(marketing_data, question)
         return {
             'success': True,
@@ -648,31 +777,62 @@ class MarketingQAAgent(MarketingBaseAgent):
         return None
 
     def _normalize_question_typos(self, question: str) -> str:
+        """Normalise misspellings of "campaign" only.
+
+        The keyword pre-filter matches that one word, so it has to survive a
+        typo. Everything else is left alone: the model reads misspellings
+        natively, and maintaining a spelling dictionary was a losing game —
+        every new typo became a new bug ('elads', 'nubmer', 'higest',
+        'ahppen', 'shud'...).
+
+        Uses similarity rather than a fixed list, so unseen variants work too.
+        """
         if not question or not isinstance(question, str):
             return question
-        q = question.strip()
-        typos = [
-            (r'\bcaomaphin\b', 'campaign'),  (r'\bcaompagin\b', 'campaign'),
-            (r'\bcampagin\b',  'campaign'),  (r'\bcompagin\b',  'campaign'),
-            (r'\bcamapgin\b',  'campaign'),  (r'\bcamapagin\b', 'campaign'),
-            (r'\bcomapgin\b',  'campaign'),  (r'\bcampagins\b', 'campaigns'),
-            (r'\bcaampaign\b', 'campaign'),  (r'\bcampain\b',   'campaign'),
-            (r'\bcampagn\b',   'campaign'),
-            (r'\bavergae\b',      'average'),       (r'\baverge\b',      'average'),
-            (r'\bavreage\b',      'average'),       (r'\bavgerage\b',    'average'),
-            (r'\bperformane\b',   'performance'),  (r'\bperformace\b',  'performance'),
-            (r'\bperfomance\b',   'performance'),   (r'\bpreformance\b', 'performance'),
-            (r'\banaltics\b',     'analytics'),     (r'\banalyitcs\b',   'analytics'),
-            (r'\bleades\b',       'leads'),          (r'\bledes\b',       'leads'),
-            (r'\bchanel\b',       'channel'),        (r'\bchanell\b',     'channel'),
-            (r'\bplatfrom\b',     'platform'),       (r'\bplatfom\b',     'platform'),
-            (r'\bqeustion\b',     'question'),       (r'\bqestion\b',     'question'),
-            (r'\bemials\b',       'emails'),         (r'\bemails\b',      'emails'),
-            (r'\bstaregy\b',      'strategy'),       (r'\bstratgey\b',    'strategy'),
-        ]
-        for pattern, replacement in typos:
-            q = re.sub(pattern, replacement, q, flags=re.IGNORECASE)
-        return q
+
+        def _looks_like_campaign(word: str) -> Optional[str]:
+            w = word.lower()
+            if len(w) < 5 or len(w) > 12:
+                return None
+            if w in ('campaign', 'campaigns'):
+                return None          # already correct
+            if not w.startswith('c'):
+                return None
+            # Guard real words that are close to "campaign" in shape.
+            if w in ('company', 'companies', 'complain', 'complains',
+                     'campus', 'camping', 'champion', 'champions',
+                     'comparison', 'competitor', 'competitors'):
+                return None
+            plural = w.endswith('s')
+            stem = w[:-1] if plural else w
+            target = 'campaign'
+            # Same letters, just jumbled/dropped -> a typo of "campaign".
+            if sorted(stem) == sorted(target):
+                return 'campaigns' if plural else 'campaign'
+            ratio = SequenceMatcher(None, stem, target).ratio()
+            if ratio >= 0.6:
+                return 'campaigns' if plural else 'campaign'
+            # Heavily jumbled spellings ('comapgin', 'caomaphin') score low on
+            # ordered similarity but use almost the same letters, so compare
+            # letter sets too — the guard list above keeps real words out.
+            common = len(set(stem) & set(target))
+            if common >= 6 and abs(len(stem) - len(target)) <= 2:
+                return 'campaigns' if plural else 'campaign'
+            return None
+
+        def _fix(m):
+            word = m.group(0)
+            fixed = _looks_like_campaign(word)
+            if not fixed:
+                return word
+            # Preserve the original capitalisation style.
+            if word.isupper():
+                return fixed.upper()
+            if word[0].isupper():
+                return fixed.capitalize()
+            return fixed
+
+        return re.sub(r"[A-Za-z]+", _fix, question.strip())
 
     def _is_best_campaign_intent(self, q: str) -> bool:
         """Detect requests asking for top/best campaign performance, including typo variants."""
@@ -725,6 +885,55 @@ class MarketingQAAgent(MarketingBaseAgent):
             ) and campaign_word)
         )
         return has_low_signal
+
+    # Pronouns/short-hands that refer back to whatever was discussed last turn.
+    # SINGULAR back-references only. Plurals (them/they/their) refer to a whole
+    # list, not one campaign, so resolving them to a single campaign is wrong.
+    FOLLOWUP_REFS = (
+        'it', 'its', "it's", 'that one', 'this one', 'the same',
+        'same campaign', 'that campaign', 'this campaign', 'the campaign',
+    )
+    # If the question carries its own filter it is a fresh query, not a
+    # follow-up about one campaign.
+    FOLLOWUP_BLOCKERS = (
+        'targeting', 'all campaigns', 'campaigns', 'which campaigns',
+        'list', 'show me all', 'how many',
+    )
+
+    def _resolve_followup_campaign(self, question: str, campaigns: List[Dict],
+                                   context: Optional[Dict]) -> Optional[Dict]:
+        """When the question refers back ("what's ITS open rate?") instead of
+        naming a campaign, find the campaign named in the recent conversation.
+        Returns None when the question names no campaign and refers to none."""
+        if not campaigns or not context:
+            return None
+
+        q = (question or '').strip().lower().rstrip('?!.')
+
+        # A question that names its own scope ("campaigns targeting adults") is a
+        # new query, not a follow-up about a single campaign.
+        if any(b in q for b in self.FOLLOWUP_BLOCKERS):
+            return None
+
+        words = set(re.findall(r"[a-z']+", q))
+        if not any((r in words) if ' ' not in r else (r in q) for r in self.FOLLOWUP_REFS):
+            return None
+
+        history = context.get('conversation_history') or []
+        if not history:
+            return None
+
+        # Only the previous QUESTIONS. A previous answer may list many campaigns;
+        # picking the first one from it would be arbitrary.
+        for pair in reversed(history[-6:]):
+            for key in ('question', 'q'):
+                text = pair.get(key) or ''
+                if not text:
+                    continue
+                found = self._find_campaign_in_question(text, campaigns)
+                if found is not None:
+                    return found
+        return None
 
     def _find_campaign_in_question(self, question: str, campaigns: List[Dict]) -> Optional[Dict]:
         """Match a campaign name inside the question text (with fuzzy/partial support)."""
@@ -882,6 +1091,17 @@ class MarketingQAAgent(MarketingBaseAgent):
                     for m in metrics_prefetched
                 ],
                 'goals': campaign.goals, 'channels': campaign.channels,
+                # Targeting/demographics — needed for questions that filter on
+                # audience ("campaigns targeting young adults", "which target
+                # healthcare"). These live on the model but were never read.
+                'age_range': getattr(campaign, 'age_range', '') or '',
+                'location': getattr(campaign, 'location', '') or '',
+                'industry': getattr(campaign, 'industry', '') or '',
+                'company_size': getattr(campaign, 'company_size', '') or '',
+                'interests': getattr(campaign, 'interests', '') or '',
+                'language': getattr(campaign, 'language', '') or '',
+                'target_audience': getattr(campaign, 'target_audience', None) or {},
+                'description': (getattr(campaign, 'description', '') or '')[:300],
                 'target_leads': target_leads, 'target_conversions': target_conversions,
                 'leads_count': leads_count, 'positive_replies': positive_replies,
                 'negative_replies': negative_replies, 'conversions': positive_replies,
@@ -953,14 +1173,70 @@ class MarketingQAAgent(MarketingBaseAgent):
 
         campaigns = marketing_data.get('campaigns', [])
         if campaigns:
-            context += f"CAMPAIGNS (up to 5):\n"
-            for c in campaigns[:5]:
+            # Send EVERY campaign, with its targeting fields. Truncating to 5 and
+            # omitting audience data made whole classes of question unanswerable
+            # ("which campaigns target young adults?").
+            context += (
+                "FIELD MEANINGS:\n"
+                "- sent = emails actually delivered. sent=0 means the campaign "
+                "has NOT run yet, so it has produced no results of any kind.\n"
+                "- leads = contacts uploaded. Uploading leads is not progress; "
+                "nothing happens until emails are sent.\n"
+                "- positive_replies = leads who replied WITH INTEREST. This is "
+                "the only real signal of a deal in progress. A campaign is "
+                "'close to converting' only if positive_replies > 0.\n"
+                "- status: draft = never launched, paused = stopped, "
+                "active = running.\n"
+                "- A draft campaign with sent=0 is the FURTHEST from closing a "
+                "deal, never the closest.\n"
+                "- Some campaigns have more replies than emails sent (rates over "
+                "100%), because replies were recorded from earlier sends that are "
+                "no longer in the send history. Report such rates as-is if asked, "
+                "but rank by the raw counts (positive_replies), not by the "
+                "percentage, and don't claim a >100% rate is an error.\n\n"
+            )
+            context += "CAMPAIGNS (all %d — this is the COMPLETE list):\n" % len(campaigns)
+            for c in campaigns[:60]:
+                targeting = []
+                if c.get('age_range'):
+                    targeting.append("age=%s" % c['age_range'])
+                if c.get('location'):
+                    targeting.append("location=%s" % c['location'])
+                if c.get('industry'):
+                    targeting.append("industry=%s" % c['industry'])
+                if c.get('company_size'):
+                    targeting.append("company_size=%s" % c['company_size'])
+                if c.get('interests'):
+                    targeting.append("interests=%s" % c['interests'])
+                if c.get('language'):
+                    targeting.append("language=%s" % c['language'])
+                targeting_str = "; ".join(targeting) if targeting else "no targeting set"
+
+                # positive_replies is what actually signals a deal in progress —
+                # a lead who answered with interest. Without it the model has to
+                # guess from lead counts, and picks campaigns that never sent an
+                # email as "about to close".
                 context += (
-                    f"- {c.get('name','Unnamed')} ({c.get('status','N/A')}): "
-                    f"sent={c.get('emails_sent',0)}, open={c.get('open_rate','N/A')}%, "
-                    f"click={c.get('click_rate','N/A')}%, reply={c.get('reply_rate','N/A')}%, "
-                    f"leads={c.get('leads_count','N/A')}, conv_progress={c.get('conversion_progress','N/A')}%\n"
+                    "- %s (%s): sent=%s, opened=%s, replied=%s, "
+                    "positive_replies=%s, negative_replies=%s, "
+                    "open=%s%%, click=%s%%, reply=%s%%, "
+                    "leads=%s, conversions=%s/%s, conv_progress=%s%% "
+                    "| TARGETING: %s\n" % (
+                        c.get('name', 'Unnamed'), c.get('status', 'N/A'),
+                        c.get('emails_sent', 0), c.get('emails_opened', 0),
+                        c.get('emails_replied', 0),
+                        c.get('positive_replies', 0), c.get('negative_replies', 0),
+                        c.get('open_rate', 'N/A'), c.get('click_rate', 'N/A'),
+                        c.get('reply_rate', 'N/A'),
+                        c.get('leads_count', 'N/A'),
+                        c.get('positive_replies', 0),
+                        c.get('target_conversions') if c.get('target_conversions') is not None else 'N/A',
+                        c.get('conversion_progress', 'N/A'),
+                        targeting_str,
+                    )
                 )
+            if len(campaigns) > 60:
+                context += "  (...%d more not shown)\n" % (len(campaigns) - 60)
 
         research = marketing_data.get('research', [])
         if research:
@@ -980,13 +1256,85 @@ class MarketingQAAgent(MarketingBaseAgent):
             f'Answer this question using the provided context: "{question}"\n\n'
             f"{context}\n\n"
             "RULES:\n"
-            "- Be direct and short (1–4 sentences unless details were asked).\n"
-            "- No filler like 'based on...'.\n"
-            "- If listing campaigns, include status after each name.\n"
+            "- Be direct — no filler like 'based on...'. Keep prose short, but "
+            "NEVER drop data the question asked for. Length follows the question: "
+            "a yes/no gets one line, 'list all campaigns with X, Y and Z' gets a "
+            "full row per campaign.\n"
+            "- ANSWER EVERY PART OF THE QUESTION. If the user names fields "
+            "(leads, industry, country, open rate, ages...), show EACH named "
+            "field for EACH campaign, as 'name (status) - field: value, "
+            "field: value'. Listing just names and statuses when specific "
+            "fields were requested is a wrong answer.\n"
+            "- If a requested field is empty for a campaign, print it as "
+            "'not set' rather than leaving it out.\n"
+            "- The CAMPAIGNS list above is COMPLETE. Never invent a campaign that "
+            "is not in it, and never invent metrics or targeting values.\n"
+            "- If the question asks for campaigns matching a condition and NONE "
+            "match, say so plainly: 'No campaigns match that.' Then say what the "
+            "campaigns DO target. Do NOT fall back to listing every campaign as "
+            "if it answered the question.\n"
+            "- A campaign matches an audience filter ONLY if its TARGETING line "
+            "actually says so. 'no targeting set' or a missing age means UNKNOWN "
+            "— such a campaign must be EXCLUDED from the matching list, never "
+            "counted as a match. Do not guess from the campaign's name.\n"
+            "- When filtering by age, compare against the campaign's age= value. "
+            "'adults' means 18+; a range like 10-30 means the campaign's range "
+            "must overlap it. State each matching campaign's actual age range.\n"
+            "- Start a filtered answer with the count, e.g. '3 of 17 campaigns "
+            "target ...', then list only those, each with its age range. If the "
+            "rest have no targeting set, say so in one short line.\n"
+            "- You can only READ data. You cannot create, edit, delete, pause, "
+            "launch or send anything. If asked to perform an action, say you "
+            "can't do it and point to the relevant tab in the UI. NEVER claim an "
+            "action was done.\n"
+            "- For follow-ups like 'it', 'that campaign', 'their', 'them', use the "
+            "campaign(s) named in RECENT CONVERSATION above instead of asking "
+            "which one. 'What is THEIR number of leads?' means the campaigns from "
+            "your previous answer — give each one's leads, not the account total.\n"
+            "- For counts and totals, COUNT the rows in the CAMPAIGNS list above. "
+            "Do not estimate. When asked for a total, add up the per-campaign "
+            "values and show the arithmetic briefly if more than two numbers.\n"
+            "- For 'highest/lowest/best/worst', compare the relevant number across "
+            "ALL campaigns listed and name the winner(s) with the value. If two "
+            "tie, say both.\n"
+            "- Always answer with something concrete. Never reply with an empty "
+            "message. If the question is unclear, say what you think was meant and "
+            "answer that, or ask one short clarifying question.\n"
+            "- Read FIELD MEANINGS above before ranking anything. For questions "
+            "about progress, conversions, or 'closing deals', rank by "
+            "positive_replies. If EVERY campaign has positive_replies=0, the "
+            "honest answer is 'None — no campaign has any positive replies yet', "
+            "not the least-bad campaign. Never present a draft campaign that has "
+            "sent 0 emails as the closest to converting.\n"
+            "- When you name a winner, quote the number that makes it the winner. "
+            "If that number is 0, say the result is 'no data yet' instead.\n"
         )
+        # 700 tokens could not hold a full per-campaign listing: the answer was
+        # cut off mid-row ("below age11 (draft) - sent:0, opened:0, ...open"),
+        # which reads as the assistant ignoring half the question. Size the
+        # budget to what the question actually asks for.
+        n_campaigns = 0
+        m = re.search(r'CAMPAIGNS \(all (\d+)', context or '')
+        if m:
+            n_campaigns = int(m.group(1))
+
+        q = (question or '').lower()
+        wants_all = any(w in q for w in (
+            'all', 'each', 'every', 'list', 'their information', 'full detail',
+            'details of', 'mention their', 'along with',
+        ))
+        if wants_all and n_campaigns:
+            # A detailed row measures ~85 tokens, but the budget also has to
+            # cover whatever the model spends thinking before it writes. Sizing
+            # purely off the visible text left the answer cut off at 10 of 18
+            # rows, so allow 3x the raw row cost with a generous floor.
+            max_tokens = min(8000, max(2500, 400 + n_campaigns * 250))
+        else:
+            max_tokens = 1500
+
         try:
             return self._call_llm_for_reasoning(
-                prompt, self.system_prompt, temperature=0.3, max_tokens=700
+                prompt, self.system_prompt, temperature=0.3, max_tokens=max_tokens
             )
         except Exception as e:
             from core.api_key_service import KeyServiceError
@@ -996,6 +1344,49 @@ class MarketingQAAgent(MarketingBaseAgent):
             if "429" in err_str or "rate_limit" in err_str.lower():
                 return "The service is busy. Please try again in a few seconds."
             return "Analysis could not be completed at this time. Please try again."
+
+    def _note_if_truncated(self, answer: str, marketing_data: Dict) -> str:
+        """Append a note when a per-campaign listing was cut short.
+
+        The model can run out of output tokens mid-listing. Without this the
+        user just sees fewer campaigns than they asked for, with no clue that
+        anything was dropped.
+        """
+        campaigns = (marketing_data or {}).get('campaigns') or []
+        total = len(campaigns)
+        if total < 4 or not answer:
+            return answer
+
+        # Count how many campaign names actually made it into the answer.
+        low = answer.lower()
+        named = [c for c in campaigns
+                 if (c.get('name') or '').strip()
+                 and (c.get('name') or '').strip().lower() in low]
+        shown = len(named)
+
+        # Only a listing-style answer is worth checking: several names present
+        # but not all of them.
+        if shown < 3 or shown >= total:
+            return answer
+
+        # A filtered answer legitimately shows a subset ("2 of 18 campaigns
+        # target tech"). Don't call that truncated — the model said up front
+        # how many it was listing.
+        if re.search(r'\b\d+\s+of\s+\d+\b', low) or 'no campaigns match' in low:
+            return answer
+
+        # A truncated listing ends mid-row; a finished one ends in punctuation.
+        # If the last line looks like a complete sentence, trust it.
+        last_line = answer.rstrip().split('\n')[-1].strip()
+        if last_line.endswith(('.', '!', '?', ':')) and len(last_line) < 120:
+            return answer
+
+        missing = [c.get('name', 'Unnamed') for c in campaigns if c not in named]
+        return answer.rstrip() + (
+            "\n\n_Showing %d of %d campaigns — the reply hit its length limit. "
+            "Still missing: %s. Ask about those by name for their details._"
+            % (shown, total, ", ".join(missing[:12]) + ("..." if len(missing) > 12 else ""))
+        )
 
     def _extract_insights(self, marketing_data: Dict, question: str) -> List[Dict]:
         insights = []

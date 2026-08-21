@@ -13,7 +13,10 @@ export const REPLY_DRAFT_TOUR_KEY = 'reply_draft_tour_seen_v1';
 // whose target doesn't exist would leave the tour stuck on a centered
 // fallback card, so we build the step list from the current account state
 // and drop those two steps when there's no account yet.
-export function buildReplyDraftTourSteps(hasAccount) {
+// `view` is 'dashboard' or 'emails'. The tabs/search steps only exist on the
+// Emails page, and the folder-tiles step only exists on the Dashboard, so the
+// tail of the tour is built from whichever view is currently mounted.
+export function buildReplyDraftTourSteps(hasAccount, view = 'dashboard') {
   const steps = [
     {
       title: 'Welcome to the Reply Draft Agent 👋',
@@ -61,18 +64,41 @@ export function buildReplyDraftTourSteps(hasAccount) {
       body: 'The workspace auto-refreshes every 30 seconds, but you can pull the latest manually here.',
       placement: 'bottom',
     },
-    {
-      selector: '[data-tour="rd-tabs"]',
-      title: 'Inbox · Drafts · Sent',
-      body: 'Inbox holds incoming replies. Drafts holds AI replies you haven\'t sent yet. Sent shows everything already sent.',
-      placement: 'right',
-    },
-    {
-      selector: '[data-tour="rd-search"]',
-      title: 'Search & filter',
-      body: 'Search within the current tab, and filter Inbox/Sent to a rolling time window. Long lists are paged so the page stays fast.',
-      placement: 'right',
-    },
+    ...(view === 'emails'
+      ? [
+        {
+          selector: '[data-tour="rd-tabs"]',
+          title: 'Inbox · Drafts · Sent',
+          body: 'Inbox holds incoming replies. Drafts holds AI replies you haven\'t sent yet. Sent shows everything already sent.',
+          placement: 'right',
+        },
+        {
+          selector: '[data-tour="rd-search"]',
+          title: 'Search & filter',
+          body: 'Search within the current tab, and filter Inbox/Sent to a rolling time window. Long lists are paged so the page stays fast.',
+          placement: 'right',
+        },
+      ]
+      : [
+        {
+          selector: '[data-tour="rd-folders"]',
+          title: 'Your mail folders',
+          body: 'Open any folder to jump into the Emails page with that tab already selected. The counts stay live while you work.',
+          placement: 'bottom',
+        },
+        {
+          selector: '[data-tour="rd-activity"]',
+          title: 'Email activity',
+          body: 'Received vs sent volume over the last 30, 60 or 90 days — the same chart the Settings dialog shows.',
+          placement: 'top',
+        },
+        {
+          selector: '[data-tour="rd-recent"]',
+          title: 'Recent activity',
+          body: 'The newest inbox mail and drafts waiting on review. Click any row to open it straight in the Emails page.',
+          placement: 'top',
+        },
+      ]),
     {
       title: "You're all set 🎉",
       body: hasAccount

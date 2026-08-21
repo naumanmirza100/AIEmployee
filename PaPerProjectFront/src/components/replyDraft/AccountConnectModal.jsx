@@ -14,6 +14,13 @@ import {
   defaultNewForm,
 } from './replyDraftConstants';
 
+// Styling for fields that are display-only while editing. Changing the
+// address or server settings of a live account would orphan every synced
+// message already filed under it, so on edit we allow exactly the two
+// things that legitimately change over time: the passwords (rotated app
+// passwords) and the sync scope.
+const LOCKED_CLS = 'opacity-70 cursor-not-allowed bg-muted/40';
+
 export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', existingAccount = null }) => {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -140,7 +147,7 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
           </DialogTitle>
           <DialogDescription>
             {isEdit
-              ? 'Update the connection settings. Leave password fields blank to keep what\'s stored.'
+              ? 'You can update the passwords and the sync scope. The address and server settings are fixed for a connected account - disconnect and re-add to change those.'
               : 'Add the email account the Reply Draft Agent will read replies from. Syncing starts automatically once you save.'}
           </DialogDescription>
         </DialogHeader>
@@ -154,7 +161,9 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
                 value={form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                 placeholder="e.g. Reply inbox"
-                className="mt-1 h-9"
+                readOnly={isEdit}
+                disabled={isEdit}
+                className={`mt-1 h-9 ${isEdit ? LOCKED_CLS : ''}`}
               />
             </div>
             <div>
@@ -162,7 +171,8 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
               <select
                 value={form.account_type}
                 onChange={(e) => applyTypeDefaults(e.target.value)}
-                className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                disabled={isEdit}
+                className={`mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm ${isEdit ? LOCKED_CLS : ''}`}
               >
                 {ACCOUNT_TYPE_OPTIONS.map((t) => (
                   <option key={t.value} value={t.value}>{t.label}</option>
@@ -176,7 +186,9 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
                 value={form.email}
                 onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
                 placeholder="you@example.com"
-                className="mt-1 h-9"
+                readOnly={isEdit}
+                disabled={isEdit}
+                className={`mt-1 h-9 ${isEdit ? LOCKED_CLS : ''}`}
               />
             </div>
           </div>
@@ -192,7 +204,9 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
                   <Input
                     value={form.smtp_host}
                     onChange={(e) => setForm((p) => ({ ...p, smtp_host: e.target.value }))}
-                    className="mt-1 h-9"
+                    readOnly={isEdit}
+                    disabled={isEdit}
+                    className={`mt-1 h-9 ${isEdit ? LOCKED_CLS : ''}`}
                   />
                 </div>
                 <div>
@@ -201,17 +215,22 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
                     type="number"
                     value={form.smtp_port}
                     onChange={(e) => setForm((p) => ({ ...p, smtp_port: e.target.value }))}
-                    className="mt-1 h-9"
+                    readOnly={isEdit}
+                    disabled={isEdit}
+                    className={`mt-1 h-9 ${isEdit ? LOCKED_CLS : ''}`}
                   />
                 </div>
               </div>
               <div>
-                <Label className="text-xs">Password</Label>
+                <Label className="text-xs">
+                  Password
+                  {isEdit && <span className="ml-1 text-muted-foreground font-normal">— leave blank to keep current</span>}
+                </Label>
                 <Input
                   type="password"
                   value={form.smtp_password}
                   onChange={(e) => setForm((p) => ({ ...p, smtp_password: e.target.value }))}
-                  placeholder="••••••••"
+                  placeholder={isEdit ? 'Enter a new password to change it' : '••••••••'}
                   className="mt-1 h-9"
                 />
               </div>
@@ -226,7 +245,9 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
                   <Input
                     value={form.imap_host}
                     onChange={(e) => setForm((p) => ({ ...p, imap_host: e.target.value }))}
-                    className="mt-1 h-9"
+                    readOnly={isEdit}
+                    disabled={isEdit}
+                    className={`mt-1 h-9 ${isEdit ? LOCKED_CLS : ''}`}
                   />
                 </div>
                 <div>
@@ -235,17 +256,22 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
                     type="number"
                     value={form.imap_port}
                     onChange={(e) => setForm((p) => ({ ...p, imap_port: e.target.value }))}
-                    className="mt-1 h-9"
+                    readOnly={isEdit}
+                    disabled={isEdit}
+                    className={`mt-1 h-9 ${isEdit ? LOCKED_CLS : ''}`}
                   />
                 </div>
               </div>
               <div>
-                <Label className="text-xs">Password</Label>
+                <Label className="text-xs">
+                  Password
+                  {isEdit && <span className="ml-1 text-muted-foreground font-normal">— leave blank to keep current</span>}
+                </Label>
                 <Input
                   type="password"
                   value={form.imap_password}
                   onChange={(e) => setForm((p) => ({ ...p, imap_password: e.target.value }))}
-                  placeholder="••••••••"
+                  placeholder={isEdit ? 'Enter a new password to change it' : '••••••••'}
                   className="mt-1 h-9"
                 />
               </div>
@@ -254,6 +280,7 @@ export const AccountConnectModal = ({ open, onClose, onSaved, mode = 'add', exis
                   id="imap-ssl"
                   checked={form.imap_use_ssl}
                   onCheckedChange={(checked) => setForm((p) => ({ ...p, imap_use_ssl: checked }))}
+                  disabled={isEdit}
                 />
                 <Label htmlFor="imap-ssl" className="text-xs cursor-pointer">Use SSL</Label>
               </div>
