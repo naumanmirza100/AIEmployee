@@ -244,6 +244,11 @@ export default function HRMeetingScheduler() {
 
   const deleteChat = async (e, chatId) => {
     e.stopPropagation();
+    // UX-13: confirm before wiping a scheduler chat thread — the trash
+    // icon used to fire instantly with no undo.
+    const chat = chats.find((c) => c.id === chatId);
+    const label = chat?.title ? `"${chat.title}"` : 'this scheduling chat';
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
     setChats((prev) => prev.filter((c) => c.id !== chatId));
     if (selectedChatId === chatId) setSelectedChatId(null);
     try { await hrAgentService.deleteHRMeetingSchedulerChat(chatId); } catch { /* already gone — fine */ }
@@ -590,6 +595,8 @@ export default function HRMeetingScheduler() {
 
                 <div className="border-t border-white/[0.06] px-3 py-3 flex items-end gap-2">
                   <InfoHint {...HR_HINTS.hrMeetChatInput} className="mb-2" />
+                  {/* EXEC-BUG-03: freeze the input while the scheduler is
+                      thinking so users can't inject a new intent mid-flight. */}
                   <Textarea
                     data-tour-hrmeet="chat-input"
                     rows={2}
@@ -597,6 +604,7 @@ export default function HRMeetingScheduler() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder='e.g. "Schedule a 1:1 with Bilal tomorrow at 3pm"'
+                    disabled={loading}
                     className="flex-1 resize-none bg-white/[0.03] border-white/[0.08]"
                   />
                   <Button data-tour-hrmeet="chat-send" onClick={handleSend} disabled={loading || !input.trim()}>
