@@ -284,20 +284,30 @@ export const ComposeModal = ({ open, onClose, onSent }) => {
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-2 pr-1">
           {/* To row — inline label so it's a single ~36px row instead of
               two stacked elements. */}
-          <div className={`flex items-center gap-2 border-b transition ${toEmail && !validEmail ? 'border-rose-500/40' : 'border-white/10'
+          <div className={`flex items-center gap-2 border-b-2 rounded-t transition ${toEmail && !validEmail
+            ? 'border-rose-500 bg-rose-500/10'
+            : 'border-b border-white/10'
             }`}>
-            <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-500 w-20 shrink-0">To</span>
+            <span className={`text-[11px] uppercase tracking-wider font-semibold w-20 shrink-0 pl-1 ${toEmail && !validEmail ? 'text-rose-300' : 'text-gray-500'
+              }`}>To</span>
             <input
               type="email"
               autoComplete="off"
               value={toEmail}
               onChange={(e) => setToEmail(e.target.value)}
               placeholder="recipient@example.com"
-              className="flex-1 bg-transparent py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none"
+              aria-invalid={Boolean(toEmail && !validEmail)}
+              className={`flex-1 bg-transparent py-1.5 text-sm placeholder-gray-600 focus:outline-none ${toEmail && !validEmail ? 'text-rose-200' : 'text-white'
+                }`}
               disabled={busy}
             />
+            {/* Invalid badge — a bare 10px word was easy to miss, so it now
+                reads as a filled pill with an icon and sits on a tinted row. */}
             {toEmail && !validEmail && (
-              <span className="text-[10px] text-rose-300 shrink-0">invalid</span>
+              <span className="flex items-center gap-1 shrink-0 mr-1 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/50 text-rose-200 text-[11px] font-semibold">
+                <AlertCircle className="h-3 w-3 shrink-0" />
+                Invalid email
+              </span>
             )}
           </div>
 

@@ -41,6 +41,10 @@ function validateAgeRange(raw) {
   const s = String(raw || '').trim();
   if (!s) return ''; // empty = no age restriction
   const inRange = (n) => Number.isInteger(n) && n >= 0 && n <= 120;
+  // Explicit negative check so the message says why, not just "enter a number".
+  if (/^-\s*\d+/.test(s) || /[-–]\s*-\s*\d+/.test(s)) {
+    return "Age can't be negative — use a value between 0 and 120 (e.g. 25-45).";
+  }
   const m = s.match(/^(\d+)\s*[-–]\s*(\d+)$/); // "25-45"
   if (m) {
     const lo = parseInt(m[1], 10);
@@ -53,6 +57,53 @@ function validateAgeRange(raw) {
     return inRange(parseInt(s, 10)) ? '' : 'Age must be between 0 and 120.';
   }
   return 'Enter a single age (e.g. 30) or a range (e.g. 25-45). No negatives.';
+}
+
+// Scan a free-text campaign brief/prompt for a negative age. Handles both the
+// symbol form ("age -10") and the spelled-out form ("minus 10 age", "negative
+// ten years old"), since users type either. Returns an error message, or ''.
+// Mirrors validate_age_in_prompt() in the backend agent so the user is told
+// before we spend an AI call on nonsense input.
+const AGE_WORD_NUMS = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60,
+  seventy: 70, eighty: 80, ninety: 90, hundred: 100,
+};
+
+function validateAgeInPrompt(...texts) {
+  // "age"-ish token: age/ages/aged plus common typos (agez, agesz), and
+  // year(s)/yr(s)/year-old.
+  const AGE = '(?:aged|agez|agesz|ages?|years?|yrs?|year[-\\s]?olds?)';
+  // A negative number that is NOT part of a digit-digit range like "25-45".
+  const NEG = '(?<![0-9])-\\s*\\d+';
+  const patterns = [
+    new RegExp(`${NEG}\\s*(?:to\\s*\\d+\\s*|[-–]\\s*\\d+\\s*)?${AGE}`, 'i'),
+    new RegExp(`${AGE}\\s*(?:of|is|:|=|from|are)?\\s*${NEG}`, 'i'),
+    new RegExp(`${AGE}[^.]{0,20}?\\bbetween\\s*${NEG}`, 'i'),
+    // Bare, numberless forms: "negative age", "minus age", "- age",
+    // "age in minus", "age should be negative".
+    new RegExp(`\\b(?:negative|minus)\\s+${AGE}`, 'i'),
+    new RegExp(`${AGE}\\s*(?:in|is|should\\s+be|as|=|:)?\\s*(?:negative|minus)\\b`, 'i'),
+    new RegExp(`-\\s*${AGE}\\b`, 'i'),
+  ];
+
+  for (const t of texts) {
+    let norm = String(t || '').toLowerCase();
+    if (!norm) continue;
+    // Normalise spelled-out negatives to the symbol form so one set of
+    // patterns covers both: "minus ten" / "negative 10" -> "-10".
+    for (const [word, val] of Object.entries(AGE_WORD_NUMS)) {
+      norm = norm.replace(new RegExp(`\\b(?:minus|negative)\\s+${word}\\b`, 'g'), `-${val}`);
+    }
+    norm = norm.replace(/\b(?:minus|negative)\s+(\d+)/g, '-$1');
+
+    if (patterns.some((re) => re.test(norm))) {
+      return "Age can't be negative — please use a value between 0 and 120 (e.g. target ages 25-45).";
+    }
+  }
+  return '';
 }
 
 const COMPANY_SIZES = [
@@ -338,6 +389,21 @@ function formatResult(result, action, options = {}) {
   return <div className="space-y-1 text-sm">{parts.length ? parts : <p>Success.</p>}</div>;
 }
 
+// Draft persistence. The whole create form lives in useState, so a page
+// refresh used to wipe an in-progress (or AI-generated) campaign draft with no
+// warning. We mirror it into sessionStorage on every change and restore it on
+// mount, then clear it once the campaign is actually created.
+const DRAFT_KEY = 'outreach_campaign_draft_v1';
+
+function loadDraft() {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null; // private mode / corrupt JSON — just start fresh
+  }
+}
+
 const OutreachCampaign = ({ onCampaignCreated }) => {
   const { toast } = useToast();
   const [action, setAction] = useState('create_multi_channel');
@@ -351,24 +417,24 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   const [leadsFile, setLeadsFile] = useState(null);
   const [showFullDesign, setShowFullDesign] = useState(false);
 
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [targetLeads, setTargetLeads] = useState('');
-  const [targetConversions, setTargetConversions] = useState('');
-  const [ageRange, setAgeRange] = useState('');
-  const [location, setLocation] = useState('');
-  const [industry, setIndustry] = useState('');
-  const [companySize, setCompanySize] = useState('__any__');
-  const [interests, setInterests] = useState('');
-  const [language, setLanguage] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [name, setName] = useState(() => loadDraft()?.name || '');
+  const [description, setDescription] = useState(() => loadDraft()?.description || '');
+  const [targetLeads, setTargetLeads] = useState(() => loadDraft()?.targetLeads || '');
+  const [targetConversions, setTargetConversions] = useState(() => loadDraft()?.targetConversions || '');
+  const [ageRange, setAgeRange] = useState(() => loadDraft()?.ageRange || '');
+  const [location, setLocation] = useState(() => loadDraft()?.location || '');
+  const [industry, setIndustry] = useState(() => loadDraft()?.industry || '');
+  const [companySize, setCompanySize] = useState(() => loadDraft()?.companySize || '__any__');
+  const [interests, setInterests] = useState(() => loadDraft()?.interests || '');
+  const [language, setLanguage] = useState(() => loadDraft()?.language || '');
+  const [startDate, setStartDate] = useState(() => loadDraft()?.startDate || '');
+  const [endDate, setEndDate] = useState(() => loadDraft()?.endDate || '');
 
   // Quick-create flow: name + description + duration -> AI fills the rest -> editable review
-  const [durationAmount, setDurationAmount] = useState('1');
-  const [durationUnit, setDurationUnit] = useState('week');
+  const [durationAmount, setDurationAmount] = useState(() => loadDraft()?.durationAmount || '1');
+  const [durationUnit, setDurationUnit] = useState(() => loadDraft()?.durationUnit || 'week');
   const [autoFilling, setAutoFilling] = useState(false);
-  const [fieldsRevealed, setFieldsRevealed] = useState(false);
+  const [fieldsRevealed, setFieldsRevealed] = useState(() => Boolean(loadDraft()?.fieldsRevealed));
   // When the user hits "Generate with AI" without filling name/description,
   // we pop this quick modal to collect them (+ duration) instead of erroring.
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
@@ -516,15 +582,16 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     const amount = parseInt(durationAmount, 10);
     const today = new Date();
     const end = new Date(today);
-    if (Number.isFinite(amount) && amount > 0) {
-      if (durationUnit === 'month') {
-        end.setMonth(end.getMonth() + amount);
-      } else if (durationUnit === 'day') {
-        end.setDate(end.getDate() + amount);
-      } else {
-        // week
-        end.setDate(end.getDate() + amount * 7);
-      }
+    // A blank / 0 / non-numeric duration used to fall through here leaving
+    // end === today, i.e. a zero-length campaign. Treat it as 1 unit instead.
+    const units = Number.isFinite(amount) && amount > 0 ? amount : 1;
+    if (durationUnit === 'month') {
+      end.setMonth(end.getMonth() + units);
+    } else if (durationUnit === 'day') {
+      end.setDate(end.getDate() + units);
+    } else {
+      // week
+      end.setDate(end.getDate() + units * 7);
     }
     return { start: formatDateLocal(today), end: formatDateLocal(end) };
   };
@@ -570,6 +637,10 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       return;
     }
 
+    // A negative age in the brief no longer blocks the draft. The campaign is
+    // still generated; the backend leaves age_range empty and returns a warning
+    // (surfaced as a toast below) explaining that no age filter was applied.
+
     const { start, end } = computeDatesFromDuration();
     if (showDates) {
       setStartDate(start);
@@ -593,6 +664,9 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
       if (agentResult?.success === false) {
         toast({ title: 'Error', description: agentResult.error, variant: 'destructive' });
         return;
+      }
+      if (agentResult?.warning) {
+        toast({ title: 'No age filter applied', description: agentResult.warning });
       }
       const fields = agentResult?.suggested_fields || {};
       // The user's typed text was a hint; the AI turns it into a proper
@@ -624,10 +698,13 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     }
   };
 
-  // From the AI preview card: close it and run the normal create flow. We
-  // pass a no-op event so handleSubmit's e.preventDefault() is safe.
+  // From the AI preview card: run the normal create flow while KEEPING the card
+  // open. Closing it up front meant any validation/API error dismissed the card
+  // and the user lost their draft while the error toast appeared behind it.
+  // handleSubmit closes the card itself (via resetCampaignForm) only on a
+  // successful create; on failure the card stays up so the draft is editable.
+  // We pass a no-op event so handleSubmit's e.preventDefault() is safe.
   const handleCreateFromPreview = () => {
-    setAiPreviewOpen(false);
     handleSubmit({ preventDefault: () => {} });
   };
 
@@ -667,6 +744,9 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
     setFieldsRevealed(false);
     setAiPreviewOpen(false);
     setAiInstructions('');
+    // The campaign exists now — drop the saved draft so a later refresh doesn't
+    // resurrect it as a phantom "unsaved" campaign.
+    try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* best-effort */ }
   };
 
   // From the quick-create pop-up: validate name, close, then run auto-fill.
@@ -710,6 +790,17 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
         });
         return;
       }
+    }
+
+    // Start and end must differ — a campaign whose start == end has no
+    // duration to send anything in.
+    if (startDate && endDate && startDate === endDate) {
+      toast({
+        title: 'Invalid dates',
+        description: "Start and end date can't be the same — a campaign needs at least one day of duration. Pick a later end date.",
+        variant: 'destructive',
+      });
+      return;
     }
 
     // Start date must not be after end date.
@@ -792,6 +883,45 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   const campaignSelectRequired = action === 'optimize';
   const showLeadsUpload = action === 'create_multi_channel' || action === 'launch';
   const showDates = action === 'create_multi_channel' || action === 'schedule';
+
+  // Mirror the draft into sessionStorage so a refresh doesn't lose it.
+  useEffect(() => {
+    const draft = {
+      name, description, targetLeads, targetConversions, ageRange, location,
+      industry, companySize, interests, language, startDate, endDate,
+      durationAmount, durationUnit, fieldsRevealed,
+    };
+    const isEmpty = !Object.entries(draft).some(([k, v]) => {
+      if (k === 'companySize') return v && v !== '__any__';
+      if (k === 'durationAmount') return v && v !== '1';
+      if (k === 'durationUnit') return v && v !== 'week';
+      if (k === 'fieldsRevealed') return Boolean(v);
+      return v && String(v).trim();
+    });
+    try {
+      if (isEmpty) sessionStorage.removeItem(DRAFT_KEY);
+      else sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      // storage unavailable (private mode / quota) — persistence is best-effort
+    }
+  }, [name, description, targetLeads, targetConversions, ageRange, location,
+      industry, companySize, interests, language, startDate, endDate,
+      durationAmount, durationUnit, fieldsRevealed]);
+
+  // True when the draft actually holds something worth previewing. Guards the
+  // "View in card form" button so a rejected/blank draft can't open a card of
+  // em-dashes.
+  const hasDraftData = Boolean(
+    (description && description.trim()) ||
+    (targetLeads && String(targetLeads).trim()) ||
+    (targetConversions && String(targetConversions).trim()) ||
+    (ageRange && ageRange.trim()) ||
+    (location && location.trim()) ||
+    (industry && industry.trim()) ||
+    (interests && interests.trim()) ||
+    (language && language.trim()) ||
+    (companySize && companySize !== '__any__')
+  );
 
   const created = result && result.success !== false && action === 'create_multi_channel';
   const goToLaunch = () => {
@@ -1032,7 +1162,21 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                     <Button
                       type="button"
                       size="sm"
-                      onClick={() => { setAiPreviewMode('preview'); setAiPreviewOpen(true); }}
+                      onClick={() => {
+                        // Don't open an empty card. If the AI draft was rejected
+                        // (e.g. a negative age in the brief) every field is still
+                        // blank and the card renders a wall of "—".
+                        if (!hasDraftData) {
+                          toast({
+                            title: 'Nothing to preview yet',
+                            description: 'Generate a campaign draft first, or fill in the details below.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+                        setAiPreviewMode('preview');
+                        setAiPreviewOpen(true);
+                      }}
                       className="gap-1.5 bg-violet-600 hover:bg-violet-700 text-white border-0 shadow-md shadow-violet-600/20"
                     >
                       <Eye className="h-4 w-4" /> View in card form

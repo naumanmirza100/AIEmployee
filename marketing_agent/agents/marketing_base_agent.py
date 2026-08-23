@@ -77,12 +77,16 @@ class MarketingBaseAgent:
         from core.api_key_service import resolve_for_call
         company = Company.objects.get(pk=company_id)
         ctx = resolve_for_call(company, agent_key_name)
+        # max_retries=0: the SDKs retry 429s themselves with long backoffs
+        # (observed "Retrying request in 27.000000 seconds"), and _call_groq_qa
+        # already retries with its own capped wait. Two stacked retry layers made
+        # a single question take over a minute. Keep one layer — ours.
         if ctx.provider == 'groq':
             from groq import Groq
-            return Groq(api_key=ctx.api_key, timeout=30.0), ctx
+            return Groq(api_key=ctx.api_key, timeout=30.0, max_retries=0), ctx
         if ctx.provider == 'openai':
             from openai import OpenAI
-            return OpenAI(api_key=ctx.api_key, timeout=30.0), ctx
+            return OpenAI(api_key=ctx.api_key, timeout=30.0, max_retries=0), ctx
         raise ValueError(f"Unsupported provider '{ctx.provider}' configured for company key")
     
     def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):

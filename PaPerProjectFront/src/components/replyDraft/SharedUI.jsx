@@ -58,14 +58,54 @@ export const Paginator = ({ page, totalItems, pageSize, onPage }) => {
   );
 };
 
-export const StatCard = ({ icon: Icon, label, value, tint, iconTint }) => (
-  <div className={`rounded-xl bg-gradient-to-br ${tint} border border-white/10 p-4 flex items-center gap-3 backdrop-blur-sm`}>
-    <div className="h-10 w-10 rounded-lg bg-black/30 border border-white/10 flex items-center justify-center">
-      <Icon className={`h-5 w-5 ${iconTint}`} />
-    </div>
-    <div className="min-w-0">
-      <div className="text-xs text-gray-400 font-medium truncate">{label}</div>
-      <div className="text-xl font-bold text-white leading-tight">{value}</div>
-    </div>
-  </div>
-);
+// `onClick` is optional — when supplied the card becomes a button so the
+// dashboard's counters can deep-link into the matching Emails folder.
+export const StatCard = ({ icon: Icon, label, value, tint, iconTint, onClick }) => {
+  const Tag = onClick ? 'button' : 'div';
+  return (
+    <Tag
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`w-full text-left rounded-xl bg-gradient-to-br ${tint} border border-white/10 p-4 flex items-center gap-3 backdrop-blur-sm ${
+        onClick ? 'hover:border-white/25 hover:brightness-110 transition cursor-pointer' : ''
+      }`}
+    >
+      <div className="h-10 w-10 rounded-lg bg-black/30 border border-white/10 flex items-center justify-center shrink-0">
+        <Icon className={`h-5 w-5 ${iconTint}`} />
+      </div>
+      <div className="min-w-0">
+        <div className="text-xs text-gray-400 font-medium truncate">{label}</div>
+        <div className="text-xl font-bold text-white leading-tight">{value}</div>
+      </div>
+    </Tag>
+  );
+};
+
+// Large mail-folder tile for the dashboard — Inbox / Drafts / Sent.
+const FOLDER_ACCENTS = {
+  cyan:     { ring: 'hover:border-cyan-500/40',    icon: 'text-cyan-300',    glow: 'from-cyan-500/15 to-blue-500/5' },
+  fuchsia:  { ring: 'hover:border-fuchsia-500/40', icon: 'text-fuchsia-300', glow: 'from-fuchsia-500/15 to-purple-500/5' },
+  emerald:  { ring: 'hover:border-emerald-500/40', icon: 'text-emerald-300', glow: 'from-emerald-500/15 to-teal-500/5' },
+};
+
+export const FolderTile = ({ icon: Icon, label, count, subtitle, accent = 'cyan', onClick }) => {
+  const a = FOLDER_ACCENTS[accent] || FOLDER_ACCENTS.cyan;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full text-left rounded-2xl bg-gradient-to-br ${a.glow} bg-black/40 border border-white/10 backdrop-blur-sm p-5 flex items-start gap-4 transition ${a.ring} hover:bg-white/[0.04]`}
+    >
+      <div className="h-12 w-12 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center shrink-0">
+        <Icon className={`h-6 w-6 ${a.icon}`} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-base font-semibold text-white">{label}</span>
+          <span className={`text-sm font-bold ${a.icon} tabular-nums`}>{count}</span>
+        </div>
+        {subtitle && <div className="text-xs text-gray-400 mt-1">{subtitle}</div>}
+      </div>
+    </button>
+  );
+};

@@ -115,7 +115,13 @@ export const HtmlBody = ({ html }) => {
       if (doc) {
         imgs = Array.from(doc.images || []);
         imgs.forEach((img) => {
-          if (!img.complete) img.addEventListener('load', resize, { once: true });
+          if (!img.complete) {
+            img.addEventListener('load', resize, { once: true });
+            // A cid: image is hidden by CSS, but 'error' still fires and the
+            // layout settles at that point — remeasure so the iframe doesn't
+            // keep height for something that isn't drawn.
+            img.addEventListener('error', resize, { once: true });
+          }
         });
       }
     } catch {
@@ -130,7 +136,10 @@ export const HtmlBody = ({ html }) => {
       clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
       if (ro) ro.disconnect();
       if (mo) mo.disconnect();
-      imgs.forEach((img) => img.removeEventListener('load', resize));
+      imgs.forEach((img) => {
+        img.removeEventListener('load', resize);
+        img.removeEventListener('error', resize);
+      });
     };
   }, [html]);
 
@@ -153,9 +162,19 @@ export const HtmlBody = ({ html }) => {
     #er [bgcolor]{background-color:transparent !important;}
     #er a,#er a *{color:#7dd3fc !important;text-decoration:underline;}
     #er img{max-width:100%;height:auto;background-color:transparent !important;}
+    /* An inline image still pointing at cid: is one whose bytes we haven't
+       pulled from IMAP yet — the browser can't resolve that scheme, so it
+       paints its broken-image glyph plus the alt text ("Error Icon" sitting
+       in the middle of a bounce notice). Hide those outright; once the
+       attachment lands, the body is re-rendered with a real data: URI and
+       this selector simply stops matching, so the image appears on its own.
+       Pure CSS on purpose: the iframe sandbox has no allow-scripts (we never
+       execute anything an email ships), so a JS onerror hook would not run. */
+    #er img[src^="cid:"]{display:none !important;}
     #er hr{border-color:rgba(255,255,255,0.15) !important;}
     #er blockquote{border-left:2px solid rgba(255,255,255,0.2) !important;padding-left:10px;color:#a1a1aa !important;}
-  </style></head><body><div id="er">${html || ''}</div></body></html>`;
+  </style></head><body><div id="er">${html || ''}</div>
+  </body></html>`;
 
   // No wrapper chrome — render the iframe directly so the email reads
   // as part of the dashboard, not a "document" sitting on a tray.

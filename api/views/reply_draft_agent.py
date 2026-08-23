@@ -1017,6 +1017,25 @@ def fetch_inbox_attachments(request, email_id):
             })
         return out
 
+    def _rendered_body_html():
+        """Re-render body_html now that the attachment bytes are on disk.
+
+        Inline images travel as ``src="cid:..."``, which a browser cannot
+        resolve — _serialize_inbox_email swaps them for data: URIs by reading
+        the attachment files. On the first open those files don't exist yet
+        (sync stores rows with attachments_fetched=False and pulls the bytes
+        lazily), so the body the client already rendered still carries the raw
+        cid: refs and shows a broken-image icon. Handing back the freshly
+        rewritten HTML lets the client patch the body in place instead of
+        making the user reopen the email to see the image.
+        """
+        try:
+            inbox.refresh_from_db()
+            return _serialize_inbox_email(inbox, include_body=True).get('body_html') or ''
+        except Exception:
+            logger.warning('fetch_inbox_attachments: body_html re-render failed for %s', inbox.id)
+            return None
+
     # Fast-path: already fetched. Return what we have without touching IMAP.
     if inbox.attachments_fetched:
         existing = InboxAttachment.objects.filter(inbox_email_id=inbox.id).only(
@@ -1026,6 +1045,7 @@ def fetch_inbox_attachments(request, email_id):
             'status': 'success',
             'data': _serialize_atts(existing),
             'fetched': True,
+            'body_html': _rendered_body_html(),
         })
 
     # Need to fetch from IMAP. Verify the account still has IMAP credentials —
@@ -1137,6 +1157,7 @@ def fetch_inbox_attachments(request, email_id):
             'status': 'success',
             'data': _serialize_atts(created),
             'fetched': True,
+            'body_html': _rendered_body_html(),
         })
     except imaplib.IMAP4.error as e:
         logger.exception('fetch_inbox_attachments: IMAP error for email %s', email_id)
@@ -1786,6 +1807,21 @@ def create_reply_account(request):
         imap_port = int(data.get('imap_port') or 993)
         imap_username = (data.get('imap_username') or '').strip() or email
         imap_password = data.get('imap_password') or ''
+        # Same "blank means keep what's stored" rule the SMTP block above
+        # uses. This matters most on edit, where the password fields are
+        # deliberately left empty unless the user is rotating them — without
+        # this fallback, saving an edit would wipe the IMAP password and
+        # break every subsequent sync.
+        if not imap_password:
+            imap_password = (existing.imap_password if existing else '') or ''
+        # Host/port/username come back blank on edit too — those inputs are
+        # rendered read-only and disabled, and a disabled input submits
+        # nothing. Fall back to the stored values so validation below sees a
+        # complete config instead of rejecting a perfectly valid edit.
+        if not imap_host:
+            imap_host = (existing.imap_host if existing else '') or ''
+        if not data.get('imap_port') and existing and existing.imap_port:
+            imap_port = existing.imap_port
 
         # Sync window + per-sweep email cap, chosen by the user in the connect
         # modal. Clamp to the allowed presets so a hand-crafted request can't
@@ -1856,20 +1892,42 @@ def create_reply_account(request):
         # That mirrors marketing_agent.create_email_account, which owns
         # the marketing flag in the other direction.
         if existing:
-            existing.name = name
-            existing.account_type = data.get('account_type', existing.account_type or 'smtp')
-            existing.smtp_host = smtp_host
-            existing.smtp_port = smtp_port
-            existing.smtp_username = smtp_username
+            # This branch serves two different situations, and they have
+            # different rules:
+            #
+            #  a) The row is ALREADY a reply-agent account -> a true edit.
+            #     Identity and server settings are fixed: every synced
+            #     InboxEmail/Reply row is filed under this account, so
+            #     letting the address or host change would silently orphan
+            #     that history against a mailbox it never came from. Only
+            #     the passwords (app passwords do get rotated) and the sync
+            #     scope may change. The UI renders the rest read-only; we
+            #     enforce it here so a hand-rolled request can't bypass it.
+            #
+            #  b) The row exists but was created marketing-side and is being
+            #     attached to the reply agent for the FIRST time. Marketing
+            #     only ever fills in SMTP, so the IMAP fields are blank and
+            #     genuinely need writing here — there's also no reply-agent
+            #     history to orphan yet.
+            first_attach = not existing.is_reply_agent_account
+
+            if first_attach:
+                existing.name = name
+                existing.account_type = data.get('account_type', existing.account_type or 'smtp')
+                existing.smtp_host = smtp_host
+                existing.smtp_port = smtp_port
+                existing.smtp_username = smtp_username
+                existing.use_tls = bool(data.get('use_tls', existing.use_tls))
+                existing.use_ssl = bool(data.get('use_ssl', existing.use_ssl))
+                existing.is_gmail_app_password = bool(data.get('is_gmail_app_password', existing.is_gmail_app_password))
+                existing.imap_host = imap_host
+                existing.imap_port = imap_port
+                existing.imap_username = imap_username
+                existing.imap_use_ssl = bool(data.get('imap_use_ssl', True))
+
+            # Always writable, in both situations.
             existing.smtp_password = smtp_password
-            existing.use_tls = bool(data.get('use_tls', existing.use_tls))
-            existing.use_ssl = bool(data.get('use_ssl', existing.use_ssl))
-            existing.is_gmail_app_password = bool(data.get('is_gmail_app_password', existing.is_gmail_app_password))
-            existing.imap_host = imap_host
-            existing.imap_port = imap_port
-            existing.imap_username = imap_username
             existing.imap_password = imap_password
-            existing.imap_use_ssl = bool(data.get('imap_use_ssl', True))
             existing.imap_sync_days = imap_sync_days
             existing.imap_sync_email_limit = imap_sync_email_limit
             existing.enable_imap_sync = True
@@ -1915,6 +1973,18 @@ def create_reply_account(request):
         # this in around 30s, so the prior 30-day-fast / 120-day-delayed
         # split is no longer worth its complexity. The 5-min periodic beat
         # is the fallback if this enqueue fails.
+        # Flip the "syncing" flag HERE rather than waiting for the worker to
+        # pick the task up. Between enqueue and the first IMAP byte there can
+        # be a minute or more (broker latency + connect + login), and
+        # sync_inbox only sets this flag once it's already running — so the
+        # UI had nothing to show and looked frozen right after connecting.
+        # Setting it up-front means the "Syncing…" banner renders on the very
+        # next 5s poll. sync_inbox's finally-block clears it, and its
+        # stale-flag watchdog clears it too if the task never runs at all.
+        EmailAccount.objects.filter(pk=account.pk).update(
+            sync_in_progress=True, last_sync_stage=0,
+        )
+
         sync_queued = False
         try:
             from marketing_agent.tasks import sync_inbox_task
@@ -1922,6 +1992,8 @@ def create_reply_account(request):
             sync_queued = True
         except Exception:
             logger.exception('create_reply_account: failed to enqueue immediate inbox sync')
+            # Nothing will run, so don't leave a phantom banner spinning.
+            EmailAccount.objects.filter(pk=account.pk).update(sync_in_progress=False)
 
         return Response({
             'status': 'success',

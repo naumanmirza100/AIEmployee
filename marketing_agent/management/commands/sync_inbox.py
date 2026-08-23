@@ -445,6 +445,20 @@ class Command(BaseCommand):
                 EmailAccount.objects.filter(pk=account.pk).update(last_sync_stage=stage)
                 prev_stage = stage
 
+            # Bring stored rows back in line with the account's current
+            # caps. _process_folder only limits what we FETCH, so lowering
+            # a setting (200 -> 50 per 30 days, or 90 -> 30 days) used to
+            # leave the earlier, larger set sitting in the DB — the user
+            # saved a smaller number and the list didn't budge. Raising a
+            # cap always appeared to work because the extra mail simply got
+            # fetched. Pruning here makes both directions behave the same.
+            # Skipped when the caller narrowed the window itself
+            # (cli_since_days): that's a deliberate one-shot fetch over a
+            # smaller range, and pruning to it would delete mail the
+            # account's own settings still say to keep.
+            if is_reply_agent and not dry_run and not cli_since_days:
+                self._prune_to_caps(account)
+
             self.stdout.write(f'\n  [OK] Finished processing account: {account.email}')
             self.stdout.write(
                 f'     Campaign replies: {total_replies_found} '
@@ -480,6 +494,63 @@ class Command(BaseCommand):
             EmailAccount.objects.filter(pk=account.pk).update(**update_fields)
 
         return total_replies_found, total_replies_processed, total_inbox_stored
+
+    def _prune_to_caps(self, account):
+        """Delete stored InboxEmail rows that the account's caps exclude.
+
+        Two caps apply, composed the same way the sync fetches:
+
+          * ``imap_sync_days``  - nothing older than this window is kept.
+          * ``imap_sync_email_limit`` - per 30-day stage, per direction
+            ('in' vs 'out'), keep only the newest N.
+
+        Only this account's reply-agent rows are touched. Campaign replies
+        live in marketing_agent.Reply and are never pruned from here.
+        """
+        from datetime import timedelta
+
+        cap = getattr(account, 'imap_sync_email_limit', None)
+        window = getattr(account, 'imap_sync_days', None)
+        if not cap and not window:
+            return
+
+        now = timezone.now()
+        base = InboxEmail.objects.filter(email_account_id=account.id)
+        removed = 0
+
+        # 1. Anything outside the retention window goes, whatever the count.
+        if window:
+            stale = base.filter(received_at__lt=now - timedelta(days=window))
+            n = stale.count()
+            if n:
+                stale.delete()
+                removed += n
+
+        # 2. Within each 30-day stage keep only the newest `cap` per
+        #    direction - mirroring the per-folder slice in _process_folder.
+        if cap:
+            for direction in ('in', 'out'):
+                for start in range(0, window or self.DEFAULT_SINCE_DAYS, 30):
+                    slice_qs = base.filter(
+                        direction=direction,
+                        received_at__lt=now - timedelta(days=start),
+                        received_at__gte=now - timedelta(days=start + 30),
+                    )
+                    keep_ids = list(
+                        slice_qs.order_by('-received_at')
+                        .values_list('id', flat=True)[:cap]
+                    )
+                    extra = slice_qs.exclude(id__in=keep_ids)
+                    n = extra.count()
+                    if n:
+                        extra.delete()
+                        removed += n
+
+        if removed:
+            self.stdout.write(
+                f'   [PRUNE] Removed {removed} stored email(s) now outside '
+                f'the account caps ({window}d / {cap} per 30 days).'
+            )
 
     def _find_sent_folder(self, mail):
         """Locate the IMAP Sent-mail folder by probing common names.
@@ -1265,6 +1336,48 @@ class Command(BaseCommand):
 
         return results
 
+    def _extract_delivery_status(self, msg):
+        """Return a readable summary of a bounce's delivery-status part.
+
+        Bounce notices (DSNs, RFC 3464) put the actual reason in a
+        ``message/delivery-status`` part made of header-style blocks, e.g.::
+
+            Final-Recipient: rfc822; someone@example.com
+            Action: failed
+            Status: 5.2.2
+            Diagnostic-Code: smtp; 552 mailbox is over quota
+
+        The human-readable body above it often says only "could not be
+        delivered", so without this the user never learns *why*. Returns ''
+        for normal mail (no such part) — every provider that emits DSNs uses
+        this same standard structure, so no provider-specific handling.
+        """
+        lines = []
+        for part in msg.walk():
+            if (part.get_content_type() or '').lower() != 'message/delivery-status':
+                continue
+            # Each block is itself a header-only Message.
+            payload = part.get_payload()
+            blocks = payload if isinstance(payload, list) else []
+            for block in blocks:
+                if not hasattr(block, 'items'):
+                    continue
+                for key in ('Final-Recipient', 'Original-Recipient', 'Action',
+                            'Status', 'Diagnostic-Code', 'Remote-MTA'):
+                    val = block.get(key)
+                    if not val:
+                        continue
+                    val = ' '.join(str(val).split())
+                    # These headers are `type; value` — the type prefix
+                    # ("rfc822;", "smtp;") is noise for a human reader.
+                    if ';' in val and key != 'Status':
+                        val = val.split(';', 1)[1].strip()
+                    lines.append(f'{key.replace("-", " ")}: {val}')
+
+        if not lines:
+            return ''
+        return 'Delivery failure details\n' + '\n'.join(f'  {l}' for l in lines)
+
     def get_email_body(self, msg):
         """Extract email body — both plain text and HTML when present.
 
@@ -1278,18 +1391,50 @@ class Command(BaseCommand):
           UI renders this for visual fidelity (formatted layouts, links,
           images, signatures). When the source is plain-text-only, this
           is empty and the UI falls back to ``plain``.
+
+        Embedded ``message/rfc822`` parts are never descended into. Bounce
+        notices (DSNs) attach the message that failed, and a plain
+        ``msg.walk()`` recurses straight through the attachment container
+        into the original's own text/plain part. That child carries no
+        Content-Disposition of its own, so the "skip attachments" check
+        never sees it and the original body wins over the failure notice —
+        an "Undelivered Mail Returned to Sender" row would render as the
+        body of the mail that bounced. This is provider-independent: any
+        IMAP source (Gmail, cPanel/hosting, Outlook) ships DSNs this way.
         """
         plain = ''
         html = ''
 
-        if msg.is_multipart():
-            for part in msg.walk():
-                content_type = part.get_content_type()
-                content_disposition = str(part.get("Content-Disposition"))
+        def _walk_body(part):
+            """Yield body parts, without descending into attached messages.
 
-                # Skip attachments
-                if "attachment" in content_disposition:
-                    continue
+            Same traversal as ``email.message.Message.walk()`` except it
+            stops at ``message/*`` and at any part explicitly marked as an
+            attachment, so only the parts that make up *this* message's
+            own body are considered.
+            """
+            content_type = (part.get_content_type() or '').lower()
+            disposition = str(part.get('Content-Disposition') or '').lower()
+
+            # An attached/embedded message is content, not body — its own
+            # sub-parts belong to a different email.
+            if content_type.startswith('message/'):
+                return
+            if 'attachment' in disposition:
+                return
+
+            yield part
+
+            if part.is_multipart():
+                for child in part.get_payload():
+                    # get_payload() on a malformed multipart can hand back
+                    # a str instead of Message objects; guard for it.
+                    if hasattr(child, 'get_content_type'):
+                        yield from _walk_body(child)
+
+        if msg.is_multipart():
+            for part in _walk_body(msg):
+                content_type = part.get_content_type()
 
                 if content_type == "text/plain" and not plain:
                     try:
@@ -1312,6 +1457,18 @@ class Command(BaseCommand):
                 # messages with many alternative parts.
                 if plain and html:
                     break
+
+            # Delivery-status reports carry the machine-readable reason in a
+            # `message/delivery-status` part rather than the body. Append it
+            # so the user (and the AI analysis) can see *why* it bounced,
+            # not just that it did.
+            dsn = self._extract_delivery_status(msg)
+            if dsn:
+                plain = (plain + '\n\n' + dsn).strip() if plain else dsn
+                if html:
+                    html += '<pre style="white-space:pre-wrap">{}</pre>'.format(
+                        dsn.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    )
         else:
             # Single-part message. Branch on content type so we don't lose
             # the HTML when the source is HTML-only (transactional / OTP
