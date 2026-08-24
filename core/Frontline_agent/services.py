@@ -163,7 +163,13 @@ class KnowledgeService:
     def search_knowledge(
         self,
         query: str,
-        max_results: int = 5,
+        # Bumped from 5 → 12 to increase recall for broad "list all X"
+        # questions on OpenAI's higher-capacity embedding model. Old
+        # default was sized for the local bge-small model with 512-token
+        # chunks; with 3500-char chunks and better embeddings, 12
+        # chunks (~42k chars, ~10k tokens) still fits comfortably in a
+        # gpt-4o context window and covers multi-facet questions.
+        max_results: int = 12,
         company_id: Optional[int] = None,
         scope_document_type: Optional[List[str]] = None,
         scope_document_ids: Optional[List[int]] = None,
@@ -428,11 +434,24 @@ class KnowledgeService:
             if not results:
                 docs = all_documents.filter(document_content__icontains=query)[:max_results]
                 for doc in docs:
+                    _raw = doc.document_content or ''
+                    if len(_raw) > 2000:
+                        # REC-BUG-01 pattern: mark truncation explicitly so the
+                        # LLM knows the tail is missing and can hedge / invite
+                        # a follow-up instead of confidently inventing the rest.
+                        _content = (
+                            _raw[:2000]
+                            + f"\n\n[…truncated for length — {len(_raw) - 2000} more "
+                              "characters not shown. Ask a more specific follow-up "
+                              "if the answer needs the rest.]"
+                        )
+                    else:
+                        _content = _raw
                     results.append({
                         'id': doc.id,
                         'chunk_id': None,
                         'title': doc.title,
-                        'content': (doc.document_content[:2000] + '...') if doc.document_content and len(doc.document_content) > 2000 else doc.document_content,
+                        'content': _content,
                         'file_format': doc.file_format,
                         'document_type': doc.document_type,
                         'similarity_score': 0.5,

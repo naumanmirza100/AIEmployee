@@ -88,7 +88,11 @@ class HRAgent(BaseAgent):
     # ---- Knowledge Q&A ----------------------------------------------------
 
     def answer_question(self, question: str, *, asker_role: str = 'employee',
-                        asker_employee=None, max_results: int = 3) -> dict:
+                        # Bumped from 3 → 12 for OpenAI embeddings + larger
+                        # chunks. See KnowledgeService.get_answer for full
+                        # rationale; the old 3 was a bottleneck that starved
+                        # the LLM of context on broad "list all" questions.
+                        asker_employee=None, max_results: int = 12) -> dict:
         """Q&A entry point. ``asker_role`` controls what the retriever is
         allowed to see; ``asker_employee`` (Employee instance, optional)
         unlocks personalised answers (their leave balance, manager etc.)."""
@@ -190,7 +194,8 @@ class HRAgent(BaseAgent):
     # ---- Streaming Q&A ---------------------------------------------------
 
     def answer_question_stream(self, question: str, *, asker_role: str = 'employee',
-                                asker_employee=None, max_results: int = 3):
+                                # See note on answer_question(): bumped 3 → 12.
+                                asker_employee=None, max_results: int = 12):
         """Generator variant of :meth:`answer_question`. Yields dicts:
 
           * ``{'type': 'meta', ...}`` — first event with retrieval results

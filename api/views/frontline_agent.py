@@ -75,7 +75,10 @@ def _parse_rag_params(data):
 
     min_similarity = _as_float(data.get('min_similarity')) if data.get('min_similarity') is not None else None
     max_age_days = _as_int(data.get('max_age_days'), 1, 3650) if data.get('max_age_days') is not None else None
-    max_results = _as_int(data.get('max_results'), 1, 10) or 5
+    # Cap raised 10 → 20 and default 5 → 10 to match the OpenAI-embedding
+    # + larger-chunk tuning downstream. The core defaults are already 10;
+    # this keeps the API view from clamping requests back down.
+    max_results = _as_int(data.get('max_results'), 1, 20) or 10
     enable_rewrite = bool(data.get('enable_rewrite', False))
     return min_similarity, max_age_days, max_results, enable_rewrite
 
