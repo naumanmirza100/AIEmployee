@@ -1,0 +1,635 @@
+<title>SDR Lead-Gen Cost Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ground:#FAFAF7;
+    --surface:#FFFFFF;
+    --surface-2:#F1F0E9;
+    --ink:#1C2321;
+    --ink-soft:#4A524D;
+    --muted:#6B7570;
+    --line:#E2E0D8;
+    --accent:#3D6B5C;
+    --accent-ink:#FFFFFF;
+    --accent-soft:#E7EFEA;
+    --warn:#9C6B2E;
+    --warn-soft:#FBF1E1;
+    --bad:#A3423A;
+    --bad-soft:#FBEAE8;
+    --good:#3D6B5C;
+    --good-soft:#E7EFEA;
+    --shadow: 0 1px 2px rgba(28,35,33,0.06), 0 6px 20px rgba(28,35,33,0.05);
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#14171A;
+      --surface:#1B1F22;
+      --surface-2:#20252A;
+      --ink:#EDEEE8;
+      --ink-soft:#C7CBC5;
+      --muted:#8A9490;
+      --line:#2C3236;
+      --accent:#6FA895;
+      --accent-ink:#0E1512;
+      --accent-soft:#1E2C28;
+      --warn:#D8A65E;
+      --warn-soft:#2A2419;
+      --bad:#E2867E;
+      --bad-soft:#2B1D1C;
+      --good:#6FA895;
+      --good-soft:#1E2C28;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#14171A;
+    --surface:#1B1F22;
+    --surface-2:#20252A;
+    --ink:#EDEEE8;
+    --ink-soft:#C7CBC5;
+    --muted:#8A9490;
+    --line:#2C3236;
+    --accent:#6FA895;
+    --accent-ink:#0E1512;
+    --accent-soft:#1E2C28;
+    --warn:#D8A65E;
+    --warn-soft:#2A2419;
+    --bad:#E2867E;
+    --bad-soft:#2B1D1C;
+    --good:#6FA895;
+    --good-soft:#1E2C28;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size:16px;
+    line-height:1.6;
+    margin:0;
+    padding:0 20px 96px;
+  }
+
+  .wrap{max-width:880px;margin:0 auto;}
+
+  /* ---------- header ---------- */
+  .report-header{
+    padding:56px 0 32px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:40px;
+  }
+  .eyebrow{
+    font-family:"IBM Plex Mono", ui-monospace, monospace;
+    font-size:12px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    color:var(--accent);
+    font-weight:600;
+    margin:0 0 14px;
+  }
+  h1{
+    font-family:"Fraunces", ui-serif, Georgia, serif;
+    font-weight:600;
+    font-size:clamp(2rem, 4.4vw, 2.75rem);
+    line-height:1.12;
+    letter-spacing:-0.01em;
+    margin:0 0 14px;
+    text-wrap:balance;
+    color:var(--ink);
+  }
+  .dek{
+    font-size:1.0625rem;
+    color:var(--ink-soft);
+    max-width:640px;
+    margin:0 0 24px;
+    text-wrap:pretty;
+  }
+  .meta-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:24px;
+    font-family:"IBM Plex Mono", monospace;
+    font-size:12.5px;
+    color:var(--muted);
+  }
+  .meta-row div span{display:block;color:var(--ink-soft);font-size:13.5px;margin-top:2px;font-family:"IBM Plex Sans",sans-serif;}
+
+  /* ---------- section scaffolding ---------- */
+  section{margin-bottom:56px;}
+  .sec-label{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    margin-bottom:18px;
+  }
+  .sec-num{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:12px;
+    color:var(--muted);
+    letter-spacing:0.04em;
+  }
+  h2{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:1.5rem;
+    margin:0;
+    letter-spacing:-0.01em;
+    color:var(--ink);
+    text-wrap:balance;
+  }
+  h3{
+    font-family:"IBM Plex Sans",sans-serif;
+    font-weight:600;
+    font-size:1.0625rem;
+    margin:28px 0 10px;
+    color:var(--ink);
+  }
+  p{margin:0 0 14px;max-width:68ch;color:var(--ink-soft);}
+  .lede{font-size:1.0625rem;color:var(--ink-soft);}
+  strong{color:var(--ink);font-weight:600;}
+  a{color:var(--accent);}
+
+  /* ---------- stat tiles ---------- */
+  .stat-row{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(190px,1fr));
+    gap:12px;
+    margin:20px 0 8px;
+  }
+  .stat{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px 18px 16px;
+    box-shadow:var(--shadow);
+  }
+  .stat .label{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    color:var(--muted);
+    margin-bottom:8px;
+  }
+  .stat .value{
+    font-family:"IBM Plex Mono",monospace;
+    font-variant-numeric:tabular-nums;
+    font-size:1.7rem;
+    font-weight:600;
+    color:var(--ink);
+    line-height:1.1;
+  }
+  .stat .sub{
+    font-size:12.5px;
+    color:var(--muted);
+    margin-top:6px;
+  }
+  .stat.accent{background:var(--accent-soft);border-color:transparent;}
+  .stat.accent .value{color:var(--accent);}
+  .stat.warn{background:var(--warn-soft);border-color:transparent;}
+  .stat.warn .value{color:var(--warn);}
+
+  /* ---------- tables ---------- */
+  .table-card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:10px;
+    overflow-x:auto;
+    box-shadow:var(--shadow);
+    margin:18px 0;
+  }
+  table{border-collapse:collapse;width:100%;min-width:560px;}
+  caption{
+    text-align:left;
+    font-family:"IBM Plex Mono",monospace;
+    font-size:11.5px;
+    color:var(--muted);
+    padding:12px 18px 0;
+  }
+  th,td{
+    text-align:left;
+    padding:11px 16px;
+    font-size:14px;
+    border-bottom:1px solid var(--line);
+    white-space:nowrap;
+  }
+  th{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--muted);
+    font-weight:600;
+    background:var(--surface-2);
+  }
+  tbody tr:last-child td{border-bottom:none;}
+  td.num, th.num{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;text-align:right;}
+  tbody tr:hover{background:var(--surface-2);}
+  td small{color:var(--muted);display:block;font-size:11.5px;margin-top:2px;white-space:normal;}
+
+  /* ---------- pills ---------- */
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:2px 9px;
+    border-radius:100px;
+    font-size:11.5px;
+    font-weight:600;
+    font-family:"IBM Plex Mono",monospace;
+  }
+  .pill.good{background:var(--good-soft);color:var(--good);}
+  .pill.warn{background:var(--warn-soft);color:var(--warn);}
+  .pill.bad{background:var(--bad-soft);color:var(--bad);}
+
+  /* ---------- callouts ---------- */
+  .callout{
+    border:1px solid var(--line);
+    border-left:3px solid var(--accent);
+    background:var(--surface);
+    border-radius:8px;
+    padding:16px 18px;
+    margin:18px 0;
+    box-shadow:var(--shadow);
+  }
+  .callout.warn{border-left-color:var(--warn);}
+  .callout .callout-title{
+    font-weight:600;
+    font-size:13.5px;
+    color:var(--ink);
+    margin-bottom:4px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .callout p{margin:0;font-size:14px;max-width:none;}
+
+  /* ---------- pipeline (genuinely sequential) ---------- */
+  .pipeline{
+    display:flex;
+    flex-direction:column;
+    gap:0;
+    border:1px solid var(--line);
+    border-radius:10px;
+    overflow:hidden;
+    background:var(--surface);
+    box-shadow:var(--shadow);
+  }
+  .pipe-step{
+    display:grid;
+    grid-template-columns:44px 1fr;
+    gap:14px;
+    padding:14px 18px;
+    border-bottom:1px solid var(--line);
+    align-items:start;
+  }
+  .pipe-step:last-child{border-bottom:none;}
+  .pipe-num{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:12px;
+    color:var(--accent);
+    background:var(--accent-soft);
+    width:26px;height:26px;
+    display:flex;align-items:center;justify-content:center;
+    border-radius:50%;
+    font-weight:600;
+  }
+  .pipe-step .t{font-weight:600;font-size:14.5px;color:var(--ink);margin-bottom:2px;}
+  .pipe-step .d{font-size:13.5px;color:var(--muted);}
+  .pipe-step .d code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12px;}
+
+  /* ---------- scenario cards ---------- */
+  .scenario-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+    gap:14px;
+    margin:18px 0;
+  }
+  .scenario{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px;
+    box-shadow:var(--shadow);
+  }
+  .scenario h4{
+    margin:0 0 4px;
+    font-family:"Fraunces",serif;
+    font-weight:600;
+    font-size:1.05rem;
+    color:var(--ink);
+  }
+  .scenario .price{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:12px;
+    color:var(--muted);
+    margin-bottom:14px;
+  }
+  .scenario dl{margin:0;display:flex;flex-direction:column;gap:8px;}
+  .scenario dl div{display:flex;justify-content:space-between;font-size:13px;border-top:1px dashed var(--line);padding-top:8px;}
+  .scenario dl div:first-child{border-top:none;padding-top:0;}
+  .scenario dt{color:var(--muted);}
+  .scenario dd{margin:0;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink);font-weight:500;}
+
+  hr.div{border:none;border-top:1px solid var(--line);margin:44px 0;}
+
+  footer{
+    margin-top:64px;
+    padding-top:24px;
+    border-top:1px solid var(--line);
+    font-size:12px;
+    color:var(--muted);
+    font-family:"IBM Plex Mono",monospace;
+  }
+
+  @media (max-width:600px){
+    .meta-row{gap:14px 24px;}
+    th,td{padding:10px 12px;font-size:13px;}
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="report-header">
+    <p class="eyebrow">AI SDR Agent &middot; Internal Cost &amp; Capacity Analysis</p>
+    <h1>What an Apify Starter plan actually buys the lead-gen agent</h1>
+    <p class="dek">A breakdown of current SDR pipeline costs — lead sourcing, email verification, and AI token usage — plus a sizing model for how many companies and leads a $29/month Apify Starter plan can realistically support.</p>
+    <div class="meta-row">
+      <div>Prepared for<span>Management review</span></div>
+      <div>Date<span>August 20, 2026</span></div>
+      <div>System<span>AI SDR Agent (ai_sdr_agent)</span></div>
+      <div>Status<span>Apify is already integrated — this sizes usage, not a new build</span></div>
+    </div>
+  </div>
+
+  <section>
+    <div class="sec-label"><span class="sec-num">00</span><h2>Executive summary</h2></div>
+    <p class="lede">The SDR agent already has a working Apify integration — this is not a new build. On the <strong>Starter plan ($29/mo)</strong>, using the lead-sourcing actor already wired into the system that returns verified emails, the account can pull roughly <strong>19,000 leads with emails per month</strong> before the credit runs out — about <strong>640/day</strong>. That's the ceiling on the data-sourcing side. The real bottleneck is elsewhere: the sending pipeline caps every lead at <strong>one email per day system-wide</strong>, and AI qualification currently processes leads in batches of 5 every 2 minutes — about <strong>150/hour</strong> — so a burst of 19,000 fresh leads would take roughly <strong>5.3 days</strong> just to get qualified, long before it becomes an outreach bottleneck.</p>
+    <div class="stat-row">
+      <div class="stat accent">
+        <div class="label">Leads with email / month</div>
+        <div class="value">~19,300</div>
+        <div class="sub">on $29 Starter credit, $1.50/1k actor</div>
+      </div>
+      <div class="stat">
+        <div class="label">Companies coverable / month</div>
+        <div class="value">~3,800–6,400</div>
+        <div class="sub">at 3–5 leads sourced per company</div>
+      </div>
+      <div class="stat">
+        <div class="label">Cost per lead (sourcing)</div>
+        <div class="value">$0.0015</div>
+        <div class="sub">Apify actor cost only</div>
+      </div>
+      <div class="stat warn">
+        <div class="label">Qualification throughput</div>
+        <div class="value">150/hr</div>
+        <div class="sub">shared across all companies on the platform</div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section>
+    <div class="sec-label"><span class="sec-num">01</span><h2>Current pipeline — where cost actually enters</h2></div>
+    <p>Confirmed from the codebase (<code>ai_sdr_agent/agents/lead_research_agent.py</code>, <code>tasks.py</code>, <code>outreach_agent.py</code>). There is no separate "companies" table — company fields live directly on each lead row.</p>
+    <div class="pipeline">
+      <div class="pipe-step">
+        <div class="pipe-num">1</div>
+        <div><div class="t">Source leads</div><div class="d">Priority order: Apollo.io API &rarr; <strong>Apify actor</strong> &rarr; Groq AI-generated fallback. Apify path uses <code>code_crafter/leads-finder</code> ($1.50/1k, returns verified email) or the default <code>apify/google-search-scraper</code> (LinkedIn search results only, <strong>no email field</strong>).</div></div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-num">2</div>
+        <div><div class="t">Format-validate</div><div class="d">Regex/heuristic check only (<code>lead_validator.py</code>) — flags fake or free-domain addresses, scores 0–100. Not a real deliverability check. $0 cost, runs locally.</div></div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-num">3</div>
+        <div><div class="t">AI qualification</div><div class="d">Groq LLM scores each lead (hot/warm/cold). Batches of <strong>5 leads every 120 seconds</strong>, shared queue across the whole platform &mdash; not per company. Token usage metered.</div></div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-num">4</div>
+        <div><div class="t">Enroll in campaign</div><div class="d">Manual selection &rarr; <code>SDRCampaignEnrollment</code>. No cap found on leads per campaign or per enroll call.</div></div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-num">5</div>
+        <div><div class="t">Send &amp; track</div><div class="d">Per-campaign SMTP. Hard guard: <strong>max 1 email per lead per day</strong>, system-wide across all campaigns. Bounces detected after send via IMAP reply parsing &mdash; not pre-send verification.</div></div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠ No email verification service is integrated today</div>
+      <p>The system checks email <em>format</em> (regex) and detects <em>bounces</em> after a send fails — but there is no Hunter.io, NeverBounce, or ZeroBounce-style pre-send verification anywhere in the codebase. The <code>leads-finder</code> Apify actor's own "verified" email field is the closest thing to it currently, and it's actor-side, not ours. Adding real pre-send verification (see §4) would be a new integration.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section>
+    <div class="sec-label"><span class="sec-num">02</span><h2>Apify Starter plan — capacity model</h2></div>
+    <p>Verified current pricing directly from apify.com (the in-app setup guide still shows an outdated "$49/month" — actual current price is below).</p>
+
+    <div class="table-card">
+      <table>
+        <caption>Apify plan tiers — apify.com/pricing, verified August 2026</caption>
+        <thead><tr><th>Plan</th><th class="num">Monthly price</th><th class="num">Usage credit</th><th>Concurrent runs</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Free</td><td class="num">$0</td><td class="num">$5</td><td>low</td><td>Can only import from existing finished runs, not launch paid actors</td></tr>
+          <tr><td><strong>Starter</strong></td><td class="num"><strong>$29</strong></td><td class="num"><strong>$29</strong></td><td>32</td><td>Credit does not roll over &mdash; resets monthly</td></tr>
+          <tr><td>Scale</td><td class="num">$199</td><td class="num">$199</td><td>higher</td><td>For reference only &mdash; not requested</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Actor cost — the number that actually decides lead volume</h3>
+    <p>The plan's dollar amount only matters relative to the actor's per-result price. Two actors are already referenced in this codebase; only one produces usable emails:</p>
+
+    <div class="scenario-grid">
+      <div class="scenario">
+        <h4>code_crafter/leads-finder</h4>
+        <div class="price">$1.50 per 1,000 leads &middot; pay-per-event</div>
+        <dl>
+          <div><dt>Returns verified email</dt><dd>Yes</dd></div>
+          <div><dt>Leads on $29 credit</dt><dd>~19,333</dd></div>
+          <div><dt>Per day (30-day month)</dt><dd>~644</dd></div>
+          <div><dt>Per minute (continuous)</dt><dd>~0.45</dd></div>
+          <div><dt>Cost per lead</dt><dd>$0.0015</dd></div>
+        </dl>
+      </div>
+      <div class="scenario">
+        <h4>apify/google-search-scraper</h4>
+        <div class="price">~$0.15–0.50 per 1,000 results &middot; default actor</div>
+        <dl>
+          <div><dt>Returns verified email</dt><dd>No</dd></div>
+          <div><dt>Results on $29 credit</dt><dd>~58,000–193,000</dd></div>
+          <div><dt>Per day (30-day month)</dt><dd>~1,930–6,400</dd></div>
+          <div><dt>Usable as-is for outreach</dt><dd>No &mdash; name/title/company only</dd></div>
+        </dl>
+      </div>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">Reading "how many leads per minute"</div>
+      <p>0.45 leads/minute is the <em>credit-exhaustion</em> rate if Apify ran continuously all month — not how the system actually behaves. In practice Apify runs happen in batches (current default: 10 leads per scheduled run, one run every 24 hours via the background auto-research job). A single manual run against <code>leads-finder</code> can return hundreds of leads in under two minutes — the $29 credit, not per-minute throughput, is what limits monthly volume.</p>
+    </div>
+
+    <h3>Companies coverable per month</h3>
+    <p>"Companies" isn't a tracked entity in this system — each lead carries its own company fields. Coverage depends on how many contacts you pull per target company:</p>
+    <div class="table-card">
+      <table>
+        <caption>Same $29 credit, same 19,333 leads &mdash; sliced by contacts-per-company</caption>
+        <thead><tr><th>Leads pulled per company</th><th class="num">Companies covered / month</th><th class="num">Companies covered / day</th></tr></thead>
+        <tbody>
+          <tr><td>1 (single decision-maker)</td><td class="num">19,333</td><td class="num">644</td></tr>
+          <tr><td>3 (typical: 2–3 contacts)</td><td class="num">6,444</td><td class="num">215</td></tr>
+          <tr><td>5 (broader account mapping)</td><td class="num">3,867</td><td class="num">129</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section>
+    <div class="sec-label"><span class="sec-num">03</span><h2>Downstream bottlenecks that cap the Apify number</h2></div>
+    <p>Sourcing 19,000 leads a month doesn't mean 19,000 leads get emailed — two hard limits already in the code throttle everything after sourcing.</p>
+    <div class="table-card">
+      <table>
+        <caption>Rate limits found in ai_sdr_agent/tasks.py and scheduler.py</caption>
+        <thead><tr><th>Stage</th><th>Limit</th><th class="num">Effective throughput</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td>AI qualification (Groq)</td><td>5 leads / 120s, one shared queue</td><td class="num">~150/hr &middot; ~3,600/day</td><td><code>tasks.py</code> QUALIFY_BATCH_SIZE</td></tr>
+          <tr><td>Email sending</td><td>1 email per lead per day, all campaigns combined</td><td class="num">1/lead/day max</td><td><code>tasks.py</code>, <code>outreach_agent.py</code></td></tr>
+          <tr><td>Send scheduler tick</td><td>runs every 5 minutes</td><td class="num">288 ticks/day</td><td><code>scheduler.py</code></td></tr>
+          <tr><td>Auto lead research</td><td>10 leads / run, 1 run / 24h</td><td class="num">10/day (auto path only)</td><td><code>middleware.py</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn">
+      <div class="callout-title">⚠ Auto-research scheduling gap</div>
+      <p>Two separate auto-research triggers exist in code &mdash; a background thread (<code>middleware.py</code>, every 24h) and a Celery task (<code>tasks.py</code>) &mdash; but the active APScheduler job list does not register the Celery version. Only the thread-based path appears to run today. Worth a dev ticket regardless of the Apify decision.</p>
+    </div>
+    <p>Net effect: qualification throughput (~3,600/day max) comfortably exceeds Apify's own daily ceiling (~644/day at leads-finder pricing), so <strong>Apify credit — not internal processing — is the binding constraint</strong> on lead volume today.</p>
+  </section>
+
+  <hr class="div">
+
+  <section>
+    <div class="sec-label"><span class="sec-num">04</span><h2>Email verification cost — if added</h2></div>
+    <p>No verification provider is integrated today (§1). If the manager wants real pre-send deliverability checks (catch-all detection, SMTP ping, bounce prediction) rather than relying on the Apify actor's own "verified" flag, Hunter.io is the common reference point:</p>
+    <div class="table-card">
+      <table>
+        <caption>Hunter.io &mdash; verification-only credits (0.5 credit per email checked)</caption>
+        <thead><tr><th>Plan</th><th class="num">Monthly price</th><th class="num">Credits</th><th class="num">Emails verifiable</th><th class="num">Cost / verified email</th></tr></thead>
+        <tbody>
+          <tr><td>Starter</td><td class="num">~$34/mo (annual)</td><td class="num">2,000</td><td class="num">4,000</td><td class="num">~$0.0085</td></tr>
+          <tr><td>Growth</td><td class="num">~$104/mo (annual)</td><td class="num">10,000</td><td class="num">20,000</td><td class="num">~$0.0052</td></tr>
+          <tr><td>Scale</td><td class="num">~$209/mo (annual)</td><td class="num">25,000</td><td class="num">50,000</td><td class="num">~$0.0042</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Adding verification on top of the leads-finder actor's ~19,000 monthly leads would need a plan covering ~19,000 checks &mdash; the <strong>Growth tier (~$104/mo)</strong> comfortably covers that with headroom, bringing blended sourcing + verification cost to roughly <strong>$0.007/lead</strong> total.</p>
+  </section>
+
+  <hr class="div">
+
+  <section>
+    <div class="sec-label"><span class="sec-num">05</span><h2>AI usage cost — what's tracked today</h2></div>
+    <p>The platform already meters LLM token usage per company per agent (<code>core/api_key_service.py</code>), but it is <strong>not broken out by campaign or by lead</strong> anywhere in the system. Every SDR sub-agent that calls the model &mdash; qualification, outreach personalization, reply/meeting handling &mdash; records into the same company-level pool.</p>
+    <div class="stat-row">
+      <div class="stat">
+        <div class="label">Free tokens / company / agent</div>
+        <div class="value">10,000</div>
+        <div class="sub">DEFAULT_FREE_TOKENS, granted on purchase</div>
+      </div>
+      <div class="stat">
+        <div class="label">Managed-key reset cycle</div>
+        <div class="value">30 days</div>
+        <div class="sub">as configured for this key (reset_interval_days)</div>
+      </div>
+      <div class="stat warn">
+        <div class="label">Per-campaign cost tracking</div>
+        <div class="value">None</div>
+        <div class="sub">not present in current models</div>
+      </div>
+      <div class="stat warn">
+        <div class="label">Per-lead cost tracking</div>
+        <div class="value">None</div>
+        <div class="sub">not present in current models</div>
+      </div>
+      <div class="stat warn">
+        <div class="label">Apify spend visibility</div>
+        <div class="value">None</div>
+        <div class="sub">billed entirely on Apify's own dashboard</div>
+      </div>
+    </div>
+    <div class="callout">
+      <div class="callout-title">Gap for the manager to weigh</div>
+      <p>Right now, nobody inside the app can see "campaign X cost $Y in AI + $Z in Apify credit." Token spend is visible per company, but Apify spend is invisible until you check Apify's own billing dashboard, and neither is attributed to a specific campaign or lead. If per-campaign ROI reporting matters, that's a small but real gap to close alongside the Apify plan decision.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <section>
+    <div class="sec-label"><span class="sec-num">06</span><h2>Bottom line</h2></div>
+    <div class="table-card">
+      <table>
+        <caption>All-in monthly cost, Starter plan + leads-finder actor + optional verification</caption>
+        <thead><tr><th>Component</th><th class="num">Monthly cost</th><th>Covers</th></tr></thead>
+        <tbody>
+          <tr><td>Apify Starter plan</td><td class="num">$29</td><td>~19,300 leads with actor-verified email</td></tr>
+          <tr><td>Hunter.io Growth (optional, if adding real verification)</td><td class="num">~$104</td><td>20,000 verification checks</td></tr>
+          <tr><td>AI token usage (SDR agents)</td><td class="num">$0 up to free tier</td><td>10,000 free tokens/company; overage per AdminPricingConfig</td></tr>
+          <tr><td><strong>Total (sourcing only)</strong></td><td class="num"><strong>$29/mo</strong></td><td>~644 leads/day, ~215 companies/day at 3 contacts each</td></tr>
+          <tr><td><strong>Total (sourcing + verification)</strong></td><td class="num"><strong>~$133/mo</strong></td><td>same volume, with independently-verified deliverability</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Recommendation: start with the <strong>$29 Starter plan alone</strong> — the leads-finder actor's built-in "verified" email flag already covers the basic case, and current qualification/send throughput has plenty of headroom above Apify's ~644 leads/day ceiling. Add Hunter.io verification only if bounce rates from actor-side verification prove too high in practice.</p>
+  </section>
+
+  <hr class="div">
+
+  <section>
+    <div class="sec-label"><span class="sec-num">07</span><h2>Billing scenario — Apify credit + real AI enrichment cost</h2></div>
+    <p>AI cost only applies to the <strong>enrichment step</strong> — the qualification agent that scores each lead (<code>lead_qualification_agent.py</code>) — not to sourcing or verification. That call runs on Groq's <code>llama-3.1-8b-instant</code> (confirmed in code, no override configured), priced at $0.05/1M input and $0.08/1M output tokens. One qualification call is ~750 input + ~300 output tokens, so real cost is about <strong>$0.00006 per lead enriched</strong> — not a flat $1. Volume is fixed by the $29 Apify credit either way.</p>
+    <div class="table-card">
+      <table>
+        <caption>Leads/month fixed by the $29 Apify credit ($1.50/1k, leads-finder actor) &middot; AI enrichment at actual Groq cost, ~$0.00006/lead</caption>
+        <thead><tr><th>Plan combination</th><th class="num">Leads / month</th><th class="num">AI enrichment cost</th><th class="num">Total monthly cost</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Apify Starter only<small>$29/mo, no verification add-on</small></td>
+            <td class="num">19,333</td>
+            <td class="num">~$1.16</td>
+            <td class="num">~$30.16</td>
+          </tr>
+          <tr>
+            <td>Apify Starter + Hunter.io Growth<small>$29 + ~$104/mo verification</small></td>
+            <td class="num">19,333</td>
+            <td class="num">~$1.16</td>
+            <td class="num">~$134.16</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <div class="callout-title">AI enrichment cost is negligible next to Apify/Hunter.io</div>
+      <p>At Groq's real per-token rate, enriching all 19,333 leads costs roughly <strong>$1.16 for the whole month</strong> — under 4% of the $29 Apify plan itself, and it's covered almost entirely by the platform's free token tier (10,000 free tokens/company) before any paid usage kicks in. The Apify credit — not AI processing — is what actually caps monthly volume and cost. Outreach personalization (a separate Groq call per campaign step actually sent, only when <code>ai_personalize</code> is on) and reply-classification calls add a small amount on top, but at the same sub-cent-per-call rate.</p>
+    </div>
+  </section>
+
+  <hr class="div">
+
+  <footer>
+    Sources: apify.com/pricing (fetched Aug 2026) &middot; apify.com/code_crafter/leads-finder &middot; Hunter.io published pricing (2026) &middot; internal codebase review of ai_sdr_agent/ (models.py, tasks.py, lead_research_agent.py, outreach_agent.py, scheduler.py, api_key_service.py)
+  </footer>
+
+</div>
