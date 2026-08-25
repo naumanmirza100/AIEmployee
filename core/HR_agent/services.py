@@ -178,7 +178,14 @@ class HRKnowledgeService:
 
     def get_answer(self, question: str, *, asker_role: str = 'employee',
                    asker_employee_id: Optional[int] = None,
-                   max_results: int = 5) -> dict:
+                   # Bumped from 5 → 12 to match the Frontline retrieval
+                   # tuning for the OpenAI embedding model. Old default
+                   # was sized for local bge-small + 1200-char chunks;
+                   # with larger chunks and better embeddings, 12
+                   # candidates still fit comfortably in the LLM prompt
+                   # and materially improve recall on broad "list all X"
+                   # questions.
+                   max_results: int = 12) -> dict:
         """Retrieve top chunks and return the same shape Frontline uses
         (`answer`, `has_verified_info`, `confidence`, `citations`,
         `best_score`, `threshold`)."""
@@ -229,7 +236,9 @@ class HRKnowledgeService:
 
     def search_knowledge(self, query: str, *, asker_role: str = 'employee',
                          asker_employee_id: Optional[int] = None,
-                         max_results: int = 5) -> List[dict]:
+                         # See note in get_answer(): bumped 5 → 12 for
+                         # OpenAI-embedding + larger-chunk recall.
+                         max_results: int = 12) -> List[dict]:
         """Hybrid retrieval (semantic + keyword) over the company's HR docs.
 
         Returns a flat list of result dicts with `chunk_id`, `document_id`,

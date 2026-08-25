@@ -116,10 +116,13 @@ class FrontlineAgent(BaseAgent):
         scope_document_ids: Optional[List[int]] = None,
         min_similarity: Optional[float] = None,
         max_age_days: Optional[int] = None,
-        # Dropped default from 5 → 3. Fewer chunks in the prompt = smaller
-        # payload = lower TTFT on the final LLM call. Callers who need more
-        # can override.
-        max_results: int = 3,
+        # Bumped from 3 → 10 for OpenAI-embedding + larger-chunk recall.
+        # The old 3 was tuned for the local bge-small model with 1200-char
+        # chunks to keep TTFT low, but starved the LLM of context on
+        # broad "list all X" questions. With gpt-4o and 3500-char chunks,
+        # 10 chunks (~35k chars ≈ 8k tokens) is still well under budget
+        # and materially improves answer coverage.
+        max_results: int = 10,
         enable_rewrite: bool = False,
         company_user_id: Optional[int] = None,
         history: Optional[List[Dict]] = None,
@@ -343,7 +346,8 @@ class FrontlineAgent(BaseAgent):
         scope_document_ids: Optional[List[int]] = None,
         min_similarity: Optional[float] = None,
         max_age_days: Optional[int] = None,
-        max_results: int = 3,
+        # See note on answer_question(): bumped 3 → 10.
+        max_results: int = 10,
         company_user_id: Optional[int] = None,
         history: Optional[List[Dict]] = None,
     ):
@@ -712,7 +716,8 @@ class FrontlineAgent(BaseAgent):
         self,
         query: str,
         company_id: Optional[int] = None,
-        max_results: int = 5,
+        # See note on answer_question(): bumped 5 → 10 for OpenAI + larger chunks.
+        max_results: int = 10,
         scope_document_type: Optional[List[str]] = None,
         scope_document_ids: Optional[List[int]] = None,
     ) -> Dict:
