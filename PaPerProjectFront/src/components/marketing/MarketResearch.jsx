@@ -9,8 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { 
-  Loader2, 
-  Sparkles, 
+  Loader2,
+  Square,
+  Sparkles,
   Search, 
   Plus, 
   FileSearch, 
@@ -375,6 +376,10 @@ const MarketResearch = () => {
   const [chats, setChats] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Lets the user abandon a slow research run instead of waiting it out. The
+  // request keeps going server-side; we stop waiting and discard the result,
+  // so the input is usable again immediately.
+  const cancelledRef = useRef(false);
   const [researchType, setResearchType] = useState('general');
   const [topic, setTopic] = useState('');
   const [competitors, setCompetitors] = useState('');
@@ -454,6 +459,19 @@ const MarketResearch = () => {
     if (competitors.trim()) context.competitors = competitors.split(',').map((c) => c.trim()).filter(Boolean);
     if (industry.trim()) context.industry = industry.trim();
     if (geographicRegion.trim()) context.geographic_region = geographicRegion.trim();
+
+    // Send the recent turns so follow-ups work. Without this, "make that table
+    // clearer" or "what else has high demand instead of it?" arrived with no
+    // idea what "that" or "it" referred to, and the agent researched the
+    // follow-up text itself as a brand-new topic.
+    const recentTurns = (currentMessages || [])
+      .slice(-6)
+      .map((m) => ({
+        question: m.role === 'user' ? (m.topic || m.content || '') : '',
+        answer: m.role === 'assistant' ? (m.response?.insights || m.content || '') : '',
+      }))
+      .filter((t) => t.question || t.answer);
+    if (recentTurns.length) context.conversation_history = recentTurns;
     
     const userMsg = { 
       role: 'user', 
@@ -503,8 +521,13 @@ const MarketResearch = () => {
 
     // Perform actual research
     try {
+      cancelledRef.current = false;
       setLoading(true);
       const result = await marketingAgentService.marketResearch(researchType, trimmedTopic, context);
+
+      // Stopped while in flight — drop the result rather than dumping a stale
+      // report into the chat.
+      if (cancelledRef.current) return;
 
       if (result?.status === 'success' && result?.data) {
         const data = result.data;
@@ -518,6 +541,8 @@ const MarketResearch = () => {
         throw new Error(result?.message || result?.error || 'Failed to conduct research');
       }
     } catch (error) {
+      // A stopped run isn't a failure — don't show an error for it.
+      if (cancelledRef.current) return;
       const isHardBlock = error?.status === 402 || error?.status === 403 || error?.data?.hard_block;
       toast({
         title: isHardBlock ? 'Research blocked' : 'Error',
@@ -529,6 +554,12 @@ const MarketResearch = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleStopResearch = () => {
+    cancelledRef.current = true;
+    setLoading(false);
+    toast({ title: 'Stopped', description: 'Research was cancelled.' });
   };
 
   // Convert research-specific message format to DB-compatible format
@@ -1101,6 +1132,13 @@ const MarketResearch = () => {
                           <Loader2 className="h-4 w-4 text-primary" />
                         </motion.div>
                         <span className="text-sm">Running market research...</span>
+                        <button
+                          type="button"
+                          onClick={handleStopResearch}
+                          className="ml-1 flex items-center gap-1 rounded-lg border border-red-500/40 px-2 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/15 hover:text-red-200"
+                        >
+                          <Square className="h-3 w-3 fill-current" /> Stop
+                        </button>
                       </div>
                     </motion.div>
                   )}
@@ -1199,19 +1237,28 @@ const MarketResearch = () => {
                       </div>
                     </div>
 
-                    <HoverTip tip="Run the research">
+                    {/* Becomes a Stop button while research is running, so a
+                        slow run can be abandoned instead of locking the input
+                        until it finishes. */}
+                    <HoverTip tip={loading ? 'Stop the research' : 'Run the research'}>
                       <Button
-                        type="submit"
-                        disabled={loading || !topic.trim()}
+                        type={loading ? 'button' : 'submit'}
+                        onClick={loading ? handleStopResearch : undefined}
+                        disabled={!loading && !topic.trim()}
+                        aria-label={loading ? 'Stop the research' : 'Run the research'}
                         className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
                         style={{
-                          background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
-                          boxShadow: '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                          background: loading
+                            ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 50%, #991b1b 100%)'
+                            : 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
+                          boxShadow: loading
+                            ? '0 0 16px rgba(220, 38, 38, 0.35), 0 2px 8px rgba(0,0,0,0.3)'
+                            : '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
                           color: '#ffffff',
                         }}
                       >
                         {loading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Square className="h-3.5 w-3.5 fill-current" />
                         ) : (
                           <Send className="h-4 w-4" />
                         )}

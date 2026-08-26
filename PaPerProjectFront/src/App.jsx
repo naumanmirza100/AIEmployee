@@ -246,6 +246,7 @@ import { useTranslation } from 'react-i18next';
               {/* Reply Draft — now inside the shell so the sidebar stays mounted */}
               <Route path="/reply-draft" element={<Navigate to="/reply-draft/dashboard" replace />} />
               <Route path="/reply-draft/dashboard" element={<ReplyDraftAgentPage />} />
+              <Route path="/reply-draft/emails" element={<ReplyDraftAgentPage />} />
             </Route>
 
             {/* Embeddable chat widget & web form (public, no auth) */}

@@ -101,9 +101,9 @@ export const downloadLeadsTemplateCsv = () => {
  * download button, for use inside any "Upload leads" modal. Both column
  * sections toggle independently.
  */
-const LeadsUploadFields = () => {
-  const [requiredColumnsOpen, setRequiredColumnsOpen] = useState(true);
-  const [optionalColumnsOpen, setOptionalColumnsOpen] = useState(true);
+const LeadsUploadFields = ({ defaultOpen = true }) => {
+  const [requiredColumnsOpen, setRequiredColumnsOpen] = useState(defaultOpen);
+  const [optionalColumnsOpen, setOptionalColumnsOpen] = useState(defaultOpen);
 
   return (
     <>

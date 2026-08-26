@@ -49,10 +49,71 @@ Given the user's message, reply with exactly one word:
 - greeting: hi, hello, how are you, thanks, bye, lets start, ready, small talk, etc. (NOT asking about the platform or what it does.)
 - platform_question: user is asking about THIS PLATFORM/APP/WEBSITE/SYSTEM—what it does, how helpful it is, how to use it, how to run a campaign (e.g. "what does this platform do", "how helpful is this platform", "what is this website", "what is this system", "how to use this", "how to run campaign here"). They want an answer about the product itself.
 - meta_question: user is asking what THIS RESEARCH AGENT can do or which topics it can research (e.g. what can you research, which topics, what questions can you answer, give me examples of research topics). They want to know research capabilities of this tab.
-- definition: user is asking for the MEANING, FULL FORM, or DEFINITION of a term/abbreviation (e.g. "meaning of AWS", "what is API"). NOT a research report.
-- off_topic: not a research request (e.g. dismissive, random, or unrelated).
-- research: user wants an actual REPORT on a market/competitor/customer/opportunity/risk topic (e.g. "cloud trends", "web and ai companies", "competitor analysis for Amazon"). They gave a topic to analyze.
+- definition: user wants ONLY the meaning or full form of a term, with no market angle (e.g. "meaning of AWS", "what does API stand for"). If the question asks about a market, trend, size, demand, risk or decision, it is research, not a definition.
+- off_topic: genuinely nothing to do with business or markets (e.g. "what's the weather", "tell me a joke", "u dont know"). Use this SPARINGLY.
+- research: the user wants market/business insight. This covers BOTH a plain topic ("cloud trends", "competitor analysis for Amazon") AND a business question or decision about their own product, pricing, model or market — e.g. "should I convert my product to SaaS?", "is pay-per-use better than subscription?", "should I enter the UK market?", "is this idea worth pursuing?", "what are the risks of X?". Anything a market analyst could answer counts as research.
+
+IMPORTANT: when in doubt between off_topic and research, choose research. Rejecting a real business question is much worse than researching a borderline one. A question phrased as a decision ("should I...", "is it better to...", "would it work if...") about a product, market, pricing or strategy is ALWAYS research, never off_topic.
+
 Ignore typos and casual language. Reply with only one word: greeting, platform_question, meta_question, definition, off_topic, or research."""
+
+    RESEARCH_TYPE_LABELS = {
+        'market_trend': 'Market Trend',
+        'competitor': 'Competitor Analysis',
+        'customer_behavior': 'Customer Behavior',
+        'opportunity': 'Opportunity Analysis',
+        'threat': 'Threat Analysis',
+    }
+
+    TYPE_DETECT_SYSTEM = (
+        "You classify a market-research question into exactly ONE category.\n"
+        "Reply with ONLY the category id, nothing else.\n\n"
+        "market_trend      - direction/size/growth of a market or technology over "
+        "time. Questions about demand rising or falling, adoption rates, market "
+        "size, forecasts, what is growing or declining.\n"
+        "competitor        - about specific rival companies: who they are, what "
+        "they offer, their pricing, strengths, weaknesses, market share.\n"
+        "customer_behavior - how buyers act: what they want, why they buy, their "
+        "preferences, pain points, buying journey, demographics.\n"
+        "opportunity       - unmet needs, gaps in a market, where to expand, "
+        "untapped segments, whether an idea is worth pursuing.\n"
+        "threat            - risks and dangers: regulation, new entrants, "
+        "substitution, economic or competitive risk to a business.\n\n"
+        "Examples:\n"
+        "'Is the demand for SaaS products increasing or decreasing?' -> market_trend\n"
+        "'How does Slack compare to Microsoft Teams?' -> competitor\n"
+        "'Why do users abandon their carts?' -> customer_behavior\n"
+        "'Which markets are underserved in fintech?' -> opportunity\n"
+        "'What could disrupt the taxi industry?' -> threat\n"
+    )
+
+    def _detect_research_type(self, topic: str) -> Optional[str]:
+        """Ask the LLM which research category the QUESTION is really about.
+
+        Returns a research_type id, or None when it cannot tell. Used only to
+        warn the user when the selected category does not match what they
+        actually asked — it never silently overrides their choice.
+        """
+        if not topic or not isinstance(topic, str) or not topic.strip():
+            return None
+        try:
+            out = self._call_llm_for_reasoning(
+                'Question: "%s"' % topic.strip()[:500],
+                self.TYPE_DETECT_SYSTEM,
+                temperature=0.0,
+                max_tokens=10,
+            )
+        except Exception as e:
+            self.log_action("Research type detection failed", {"error": str(e)})
+            return None
+        if not out:
+            return None
+        # The model may answer "market_trend" or "Category: market_trend."
+        cleaned = re.sub(r'[^a-z_]', ' ', out.strip().lower())
+        for token in cleaned.split():
+            if token in self.RESEARCH_TYPE_LABELS:
+                return token
+        return None
 
     def _classify_intent(self, topic: str) -> str:
         """
@@ -86,6 +147,22 @@ Ignore typos and casual language. Reply with only one word: greeting, platform_q
                 if first == 'def':
                     return 'definition'
                 if first in ('offtopic', 'off_topic'):
+                    # Safety net: rejecting a real question is the worst
+                    # outcome here ("i have a project that works as pay before
+                    # u use so should i convert it in saas?" was refused as
+                    # off-topic). A substantial message that mentions business
+                    # vocabulary is researched regardless of the verdict.
+                    low = t.lower()
+                    business_words = (
+                        'market', 'product', 'saas', 'pricing', 'price', 'customer',
+                        'business', 'competitor', 'revenue', 'subscription',
+                        'startup', 'company', 'industry', 'demand', 'growth',
+                        'risk', 'strategy', 'launch', 'sell', 'brand', 'model',
+                        'project', 'service', 'users', 'clients',
+                    )
+                    if len(t.split()) >= 6 and any(w in low for w in business_words):
+                        self.log_action("Overriding off_topic verdict", {"topic": t[:120]})
+                        return 'research'
                     return 'off_topic'
                 return first
             if 'greeting' in out.lower():
@@ -228,14 +305,32 @@ Reply only with the definition, no preamble."""
                 'source_urls': []
             }
 
-        # Run research (no relevance check—accept the user's topic and selected type)
-        research_findings = self._conduct_research(research_type, topic, additional_context)
+        # The selected category and the question can disagree — e.g. "Opportunity
+        # Analysis" selected but the question is "is demand for SaaS increasing?",
+        # which is a market-trend question. Answering it purely as an opportunity
+        # study gives the user the wrong kind of report with no warning.
+        #
+        # Research the category the QUESTION is about, so the answer is useful
+        # even when the selected category doesn't fit. This happens silently —
+        # the note explaining the switch was noise in every report, so it is
+        # logged for debugging instead of shown. The mismatch still comes back
+        # in the response payload if the UI ever wants to surface it.
+        detected_type = self._detect_research_type(topic)
+        type_mismatch = bool(detected_type) and detected_type != research_type
+        effective_type = detected_type if type_mismatch else research_type
+
+        if type_mismatch:
+            self.log_action("Research type mismatch", {
+                "selected": research_type, "detected": detected_type,
+            })
+
+        research_findings = self._conduct_research(effective_type, topic, additional_context)
         
         # Store research in database
         try:
             user = User.objects.get(id=user_id)
             market_research = MarketResearch.objects.create(
-                research_type=research_type,
+                research_type=effective_type,
                 topic=topic,
                 findings=research_findings.get('findings', {}),
                 insights=research_findings.get('insights', ''),
@@ -251,7 +346,10 @@ Reply only with the definition, no preamble."""
         return {
             'success': True,
             'research_id': research_id,
-            'research_type': research_type,
+            'research_type': effective_type,
+            'selected_research_type': research_type,
+            'detected_research_type': detected_type,
+            'type_mismatch': type_mismatch,
             'topic': topic,
             'findings': research_findings.get('findings', {}),
             'insights': research_findings.get('insights', ''),
@@ -274,8 +372,16 @@ Reply only with the definition, no preamble."""
         Returns:
             Dict: Structured research findings
         """
-        # Build research prompt based on type
-        prompt = self._build_research_prompt(research_type, topic, additional_context)
+        # A direct question ("should i go for saas?") gets a direct answer.
+        # The per-type templates always emitted a full multi-section report,
+        # which buried the answer the user actually asked for.
+        brief = self._wants_brief_answer(topic)
+        if brief:
+            prompt = self.BRIEF_TEMPLATE.format(
+                base_prompt=self._build_base_prompt(topic, additional_context)
+            )
+        else:
+            prompt = self._build_research_prompt(research_type, topic, additional_context)
         
         # Get AI-generated research
         try:
@@ -283,7 +389,7 @@ Reply only with the definition, no preamble."""
                 prompt,
                 self.system_prompt,
                 temperature=0.5,
-                max_tokens=700
+                max_tokens=350 if brief else 1500
             )
         except Exception as e:
             self.log_action("Error generating research", {"error": str(e)})
@@ -294,16 +400,109 @@ Reply only with the definition, no preamble."""
             research_response = "Research analysis could not be completed at this time. Please try again."
         
         # Parse and structure findings
+        # An empty model reply rendered as a blank assistant bubble — the user
+        # sees the question vanish with no explanation. Retry once, then say so.
+        if not (research_response or '').strip():
+            self.log_action("Empty research response, retrying", {"topic": topic[:100]})
+            try:
+                research_response = self._call_llm_for_reasoning(
+                    prompt + "\n\nAnswer directly. Do not return an empty response.",
+                    self.system_prompt, temperature=0.5,
+                    max_tokens=350 if brief else 1500,
+                )
+            except Exception as e:
+                self.log_action("Research retry failed", {"error": str(e)})
+        if not (research_response or '').strip():
+            research_response = (
+                "I couldn't generate an answer for that. Try rephrasing it, or "
+                "give a specific market or company to research."
+            )
+
         findings = self._parse_research_response(research_type, research_response, additional_context)
-        
+
         return findings
     
+    DEPTH_SYSTEM = (
+        "You judge how much depth a market-research question needs. "
+        "Reply with exactly one word.\n\n"
+        "brief - a direct question with a short answer: yes/no, is X rising or "
+        "falling, should I do X, what is X. The user wants the answer and a "
+        "couple of supporting facts, NOT a full report.\n"
+        "full  - an open request to analyse, research, or map out a market, "
+        "competitor set, or strategy. The user wants a structured report.\n\n"
+        "Read through typos.\n\n"
+        "Examples:\n"
+        "'Is the demand for SaaS products increasing or decreasing?' -> brief\n"
+        "'should i go for saas?' -> brief\n"
+        "'what other thing has high demand instead of it?' -> brief\n"
+        "'analyse the SaaS market for 2026' -> full\n"
+        "'competitor analysis for Amazon' -> full\n"
+        "'research opportunities in fintech' -> full\n"
+    )
+
+    def _wants_brief_answer(self, topic: str) -> bool:
+        """True when the question deserves a direct answer, not a full report."""
+        if not topic or not isinstance(topic, str):
+            return False
+        try:
+            out = self._call_llm_for_reasoning(
+                'Question: "%s"' % topic.strip()[:300],
+                self.DEPTH_SYSTEM, temperature=0.0, max_tokens=5,
+            )
+        except Exception as e:
+            self.log_action("Depth detection failed", {"error": str(e)})
+            return False          # fall back to the existing full report
+        return bool(out) and 'brief' in out.strip().lower()
+
+    BRIEF_TEMPLATE = """{base_prompt}
+Answer the question DIRECTLY. This is a short answer, not a report.
+
+Rules:
+- Open with the actual answer in ONE sentence. If the question is yes/no or
+  either/or, say which, plainly.
+- Then 3-5 bullet points of supporting evidence, one line each, with numbers
+  where you have them.
+- If the user asked "should I...", give a clear recommendation and the single
+  biggest risk.
+- NO section headings, NO tables, NO "Opportunities"/"Recommendations"/
+  "Conclusion" sections. Under 150 words total.
+- Do not restate the question. End when the answer is complete."""
+
     def _build_research_prompt(self, research_type: str, topic: str, 
                                additional_context: Optional[Dict] = None) -> str:
         """Build research prompt based on type"""
         
+        return self._build_base_prompt(topic, additional_context) + \
+            self._type_specific_prompt(research_type, topic, additional_context)
+
+    def _build_base_prompt(self, topic: str,
+                           additional_context: Optional[Dict] = None) -> str:
+        """Topic + any user-supplied context. Shared by the full-report
+        templates and the brief-answer template."""
         base_prompt = f"Research Topic: {topic}\n\n"
-        
+
+        # Prior turns first, so a follow-up ("make that table clearer", "what
+        # else instead of it?") resolves against what was actually discussed
+        # rather than being researched as a new topic in its own right.
+        history = (additional_context or {}).get('conversation_history') or []
+        if history:
+            hist = "PREVIOUS CONVERSATION (for resolving references only):\n"
+            for turn in history[-4:]:
+                q = (turn.get('question') or '').strip()
+                a = (turn.get('answer') or '').strip()
+                if q:
+                    hist += f"  User: {q}\n"
+                if a:
+                    hist += f"  You: {a[:400]}{'...' if len(a) > 400 else ''}\n"
+            hist += (
+                "\nThe topic above may refer back to this ('it', 'that', 'this "
+                "table'). Resolve the reference and answer about the REAL "
+                "subject. Never treat the follow-up wording as a new research "
+                "topic in itself, and never research the assistant's own "
+                "output as if it were a market.\n\n"
+            )
+            base_prompt += hist
+
         if additional_context:
             context_str = "\nContext:\n"
 
@@ -319,14 +518,24 @@ Reply only with the definition, no preamble."""
             if 'geographic_region' in additional_context:
                 context_str += f"Region: {additional_context['geographic_region']}\n"
 
-            known_fields = {'competitors', 'competitor', 'industry', 'geographic_region'}
+            # conversation_history is rendered above; excluding it here stops it
+            # being dumped again as raw JSON.
+            known_fields = {'competitors', 'competitor', 'industry',
+                            'geographic_region', 'conversation_history'}
             for key, value in additional_context.items():
                 if key not in known_fields and value:
                     context_str += f"{key.replace('_', ' ').title()}: {value}\n"
 
             context_str += "\nAnalyze ONLY the provided competitors. Be specific, not generic.\n\n"
             base_prompt += context_str
-        
+
+        return base_prompt
+
+    def _type_specific_prompt(self, research_type: str, topic: str,
+                              additional_context: Optional[Dict] = None) -> str:
+        """The per-type report template appended after the base prompt."""
+        base_prompt = ''
+
         if research_type == 'market_trend':
             has_specific_competitors = additional_context and ('competitors' in additional_context or 'competitor' in additional_context)
 

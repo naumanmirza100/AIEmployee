@@ -826,6 +826,77 @@ def reject_request(request, request_id):
     return Response({'status': 'success', 'request': _serialize_request_admin(req)})
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def edit_key_request(request, request_id):
+    """Edit a key request's pricing / duration / admin note BEFORE the company
+    pays. Allowed only while status is 'pending' or 'payment_pending' — once
+    payment is received or the key is assigned the request is locked.
+
+    Body (all optional): { key_cost, service_charge, discount_pct,
+                           preferred_duration, admin_note }
+    When the request is already payment_pending and the price changes, the
+    company is re-notified of the new amount due.
+    """
+    try:
+        req = KeyRequest.objects.select_related('company', 'requested_by').get(pk=request_id)
+    except KeyRequest.DoesNotExist:
+        return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if req.status not in ('pending', 'payment_pending'):
+        return Response(
+            {'status': 'error', 'message': f'This request can no longer be edited (status: {req.status}).'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    data = request.data or {}
+    changed_price = False
+    try:
+        if 'key_cost' in data:
+            req.key_cost_snapshot = max(0, float(data.get('key_cost') or 0)); changed_price = True
+        if 'service_charge' in data:
+            req.service_charge_snapshot = max(0, float(data.get('service_charge') or 0)); changed_price = True
+        if 'discount_pct' in data:
+            req.discount_pct_snapshot = min(100, max(0, float(data.get('discount_pct') or 0))); changed_price = True
+    except (TypeError, ValueError):
+        return Response({'status': 'error', 'message': 'Invalid price values'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if 'preferred_duration' in data:
+        pd = (data.get('preferred_duration') or 'monthly').strip()
+        req.preferred_duration = pd if pd in ('monthly', 'yearly') else 'monthly'
+    if 'admin_note' in data:
+        req.admin_note = (data.get('admin_note') or '').strip()
+
+    req.resolved_by = request.user
+    req.save()
+
+    # If a price was changed on an already-approved (payment_pending) request,
+    # tell the company the amount due changed so they pay the right amount.
+    if changed_price and req.status == 'payment_pending':
+        total_due = round((req.key_cost_snapshot or 0) + (req.service_charge_snapshot or 0), 2)
+        agent_label = req.get_agent_name_display()
+        try:
+            from core.models import CompanyUser
+            from project_manager_agent.models import PMNotification
+            for cu in CompanyUser.objects.filter(company=req.company, is_active=True):
+                PMNotification.objects.create(
+                    company_user=cu,
+                    notification_type='custom',
+                    severity='info',
+                    title=f"Updated amount due — {agent_label}",
+                    message=(
+                        f"The admin updated your managed-key request for {agent_label}. "
+                        f"New amount due: ${total_due:.2f} "
+                        f"(key cost: ${float(req.key_cost_snapshot or 0):.2f} + "
+                        f"service charge: ${float(req.service_charge_snapshot or 0):.2f})."
+                    ),
+                )
+        except Exception as exc:
+            logger.warning("PMNotification failed on edit_key_request: %s", exc)
+
+    return Response({'status': 'success', 'request': _serialize_request_admin(req)})
+
+
 # ----------------------------------------------------------------------------
 # Overview — single call that feeds the whole dashboard
 # ----------------------------------------------------------------------------

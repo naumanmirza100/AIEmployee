@@ -169,6 +169,7 @@
 
 # # DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+
 # # # Auth settings
 # # LOGIN_REDIRECT_URL = '/dashboard/'  # After login, go to dashboard
 # # LOGOUT_REDIRECT_URL = '/'  # After logout, go to home
@@ -474,8 +475,13 @@ LOGIN_URL = '/login/'
 # AI / API Settings
 # --------------------
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
-GROQ_FALLBACK_MODEL = os.getenv('GROQ_FALLBACK_MODEL', 'llama-3.3-70b-versatile')
+# NOTE: The company's managed Groq key has NO access to any llama-* chat model
+# (verified via the /models endpoint — only gpt-oss / compound / qwen / audio
+# models are granted), so llama-3.1-8b-instant and llama-3.3-70b-versatile both
+# 404 with model_not_found. Default is now openai/gpt-oss-20b, which the key can
+# actually use. Override via env if a different key exposes other models.
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'openai/gpt-oss-20b')
+GROQ_FALLBACK_MODEL = os.getenv('GROQ_FALLBACK_MODEL', 'openai/gpt-oss-120b')
 
 # Per-agent LLM configuration overrides
 # Keys: agent class name (lowercase), Values: { model, temperature, max_tokens }
@@ -619,15 +625,59 @@ LOGGING = {
     # doesn't silently drop SQL debug output in prod.
     'loggers': {
         'django.db.backends': {'level': 'WARNING'},
-        # Full debug output for SDR email sending — helps diagnose duplicate emails.
-        # Set to WARNING to reduce noise once the issue is resolved.
+
+        # ── Third-party chatter ───────────────────────────────
+        # httpx logs a line for EVERY outbound API call ("HTTP Request: POST
+        # https://api.groq.com/... 200 OK"), which buries our own output.
+        # Warnings and errors still come through.
+        'httpx': {'level': 'WARNING'},
+        'httpcore': {'level': 'WARNING'},
+        'openai': {'level': 'WARNING'},
+        'groq': {'level': 'WARNING'},
+        'anthropic': {'level': 'WARNING'},
+        'urllib3': {'level': 'WARNING'},
+        'apscheduler': {'level': 'WARNING'},
+        'asyncio': {'level': 'WARNING'},
+
+        # ── Background schedulers ─────────────────────────────
+        # These run on a timer and log the same "nothing to do" lines forever
+        # (follow-up checks every few seconds, interview scans, token resets).
+        # At WARNING they stay silent unless something actually goes wrong.
+        'recruitment_agent.middleware': {'level': 'WARNING'},
+        'recruitment_agent.tasks': {'level': 'WARNING'},
+        'ai_sdr_agent.scheduler': {'level': 'WARNING'},
+        'marketing_agent.tasks': {'level': 'WARNING'},
+
+        # SDR: the send loop runs on a timer and logs START/END every minute
+        # even when there is nothing to send. WARNING keeps real problems
+        # (blocked keys, send failures) and drops the heartbeat.
         'ai_sdr_agent': {
             'handlers': ['console'],
-            'level': 'DEBUG',
+            'level': 'WARNING',
             'propagate': False,
         },
+        'ai_sdr_agent.tasks': {'level': 'WARNING'},
+        'ai_sdr_agent.middleware': {'level': 'WARNING'},
+
+        # Startup import warnings ("PyPDF2 not available") repeat on every boot
+        # and are not actionable during normal work.
+        'api.views.pm_agent': {'level': 'ERROR'},
     },
 }
+
+# Opt back in when you need the noise for debugging:
+#   VERBOSE_LOGS=1 python manage.py runserver
+if os.getenv('VERBOSE_LOGS', '').strip().lower() in ('1', 'true', 'yes'):
+    for _name in (
+        'httpx', 'httpcore', 'openai', 'groq', 'anthropic', 'urllib3',
+        'apscheduler', 'asyncio',
+        'recruitment_agent.middleware', 'recruitment_agent.tasks',
+        'ai_sdr_agent.scheduler', 'ai_sdr_agent.tasks',
+        'ai_sdr_agent.middleware', 'marketing_agent.tasks',
+        'api.views.pm_agent',
+    ):
+        LOGGING['loggers'][_name]['level'] = 'INFO'
+    LOGGING['loggers']['ai_sdr_agent']['level'] = 'DEBUG'
 
 
 # --------------------

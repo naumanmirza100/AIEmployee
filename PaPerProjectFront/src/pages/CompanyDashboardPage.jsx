@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { DatePicker } from '@/components/ui/date-picker';
 import SearchableSelect from '@/components/ui/searchable-select';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
@@ -34,7 +34,6 @@ import {
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
   Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2, Lock
 } from 'lucide-react';
-import { createCheckoutSession } from '@/services/modulePurchaseService';
 
 const toLocaleDateStr = (date) => {
   const d = date instanceof Date ? date : new Date(date);
@@ -198,20 +197,13 @@ const CompanyDashboardPage = () => {
   const [loadingTicketTasks, setLoadingTicketTasks] = useState(false);
   const [resolvingTaskId, setResolvingTaskId] = useState(null);
 
-  const handlePurchaseAgain = async (moduleName) => {
-    setPurchasingModule(moduleName);
-    try {
-      const response = await createCheckoutSession(moduleName);
-      if (response.status === 'success' && response.url) {
-        window.location.href = response.url;
-      } else {
-        toast({ title: 'Error', description: response.message || 'Failed to start purchase', variant: 'destructive' });
-      }
-    } catch (error) {
-      toast({ title: 'Error', description: error.message || 'Failed to start purchase', variant: 'destructive' });
-    } finally {
-      setPurchasingModule(null);
-    }
+  const handlePurchaseAgain = (moduleName) => {
+    // Buying an agent now requires choosing one of the admin-defined plans
+    // (duration + price). Rather than starting a plan-less checkout (which the
+    // backend rejects), send the user to the AI Agents marketplace where each
+    // agent card shows its plans. Pass the module in the hash so the target can
+    // scroll to / preselect it.
+    navigate(`/#ai-modules${moduleName ? `?agent=${encodeURIComponent(moduleName)}` : ''}`);
   };
 
   const formatDate = (dateString) => {
@@ -1190,36 +1182,9 @@ const CompanyDashboardPage = () => {
         <div className="container mx-auto px-4 py-8 max-w-7xl w-full overflow-x-hidden">
           {activeSection === 'dashboard' && (
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <div className="flex justify-between items-center mb-6">
-              <TabsList
-                className="bg-[#1a1333] border border-[#3a295a] rounded-xl p-1 flex gap-1 h-auto flex-wrap"
-                style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
-              >
-                {[
-                  { value: 'jobs', icon: Briefcase, label: 'My Jobs' },
-                  { value: 'projects', icon: FolderKanban, label: 'Projects' },
-                  { value: 'applications', icon: Users, label: 'Applications' },
-                  { value: 'users', icon: UserCheck, label: 'Users' },
-                  { value: 'all-tasks', icon: ListTodo, label: 'All Users Tasks' },
-                  ...(purchasedModules.includes('frontline_agent') ? [{ value: 'ticket-tasks', icon: Ticket, label: 'Ticket Tasks' }] : []),
-                  { value: 'ai-agents', icon: BrainCircuit, label: 'AI Agents' },
-                  { value: 'api-keys', icon: KeyRound, label: 'API Keys' },
-                ].map(({ value, icon: TabIcon, label }) => (
-                  <TabsTrigger
-                    key={value}
-                    value={value}
-                    onClick={value === 'api-keys' ? (e) => { e.preventDefault(); navigate('/company/settings/api-keys'); } : undefined}
-                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all border"
-                    style={activeTab === value
-                      ? { background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', color: '#fff', border: '1.5px solid #a259ff', boxShadow: '0 0 8px 0 #a259ff55' }
-                      : { background: 'rgba(60,30,90,0.22)', color: '#cfc6e6', border: '1.5px solid #2d2342' }
-                    }
-                  >
-                    <TabIcon className="h-4 w-4" />
-                    {label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+              {/* Tab navigation now lives in the left sidebar (under "Dashboard").
+                  This row keeps only the per-tab action buttons, aligned right. */}
+              <div className="flex justify-end items-center mb-6">
               {activeTab === 'jobs' && (
                 <Button onClick={() => setShowCreateJobModal(true)}>
                   <Plus className="h-4 w-4 mr-2" />
@@ -2518,15 +2483,10 @@ const CompanyDashboardPage = () => {
                                 {canRepurchase && (
                                   <Button
                                     onClick={() => handlePurchaseAgain(agent.module_name)}
-                                    disabled={purchasingModule === agent.module_name}
                                     className="bg-violet-600 hover:bg-violet-700 text-white w-full"
                                     size="sm"
                                   >
-                                    {purchasingModule === agent.module_name ? (
-                                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                    ) : (
-                                      <RotateCcw className="h-4 w-4 mr-2" />
-                                    )}
+                                    <RotateCcw className="h-4 w-4 mr-2" />
                                     Purchase Again
                                   </Button>
                                 )}

@@ -688,7 +688,7 @@ Chunks:
             provider = None
             api_key = None
             rerank_model_openai = 'gpt-4o-mini'
-            rerank_model_groq = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+            rerank_model_groq = getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
 
             try:
                 from core.models import Company

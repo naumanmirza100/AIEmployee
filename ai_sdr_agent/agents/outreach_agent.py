@@ -51,7 +51,7 @@ class OutreachAgent:
                 "Pass company= so the platform key service can resolve the correct key."
             )
 
-        self.model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+        self.model = getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
 
     # ------------------------------------------------------------------
     # Step generation

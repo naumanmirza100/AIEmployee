@@ -21,6 +21,29 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { parseDateLocal, formatDateLocal } from '@/lib/utils';
 import { Sparkles, CheckCircle, Loader2, Pencil, Eye, RefreshCw } from 'lucide-react';
 
+// Same age rules as the inline form: '' (any), a single number, or "min-max";
+// 0-120, min <= max, no negatives. Returns a message, or '' if valid.
+function validateAgeRange(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const inRange = (n) => Number.isInteger(n) && n >= 0 && n <= 120;
+  if (/^-\s*\d+/.test(s) || /[-–]\s*-\s*\d+/.test(s)) {
+    return "Age can't be negative — use a value between 0 and 120 (e.g. 25-45).";
+  }
+  const m = s.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+  if (m) {
+    const lo = parseInt(m[1], 10);
+    const hi = parseInt(m[2], 10);
+    if (!inRange(lo) || !inRange(hi)) return 'Ages must be between 0 and 120.';
+    if (lo > hi) return "The minimum age can't be greater than the maximum age.";
+    return '';
+  }
+  if (/^\d+$/.test(s)) {
+    return inRange(parseInt(s, 10)) ? '' : 'Age must be between 0 and 120.';
+  }
+  return 'Enter a single age (e.g. 30) or a range (e.g. 25-45). No negatives.';
+}
+
 export const CampaignAIPreviewModal = ({
   open,
   onOpenChange,
@@ -58,11 +81,25 @@ export const CampaignAIPreviewModal = ({
     language && `Language: ${language}`,
   ].filter(Boolean);
 
+  // Don't let the card be dismissed mid-flight. While a create or a regenerate
+  // is running, ignore backdrop clicks / Esc / the close ✕ — otherwise the user
+  // can close the card and lose the draft while the request is still in the air.
+  const busy = creating || regenerating;
+  const handleOpenChange = (next) => {
+    if (!next && busy) return;
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       {/* [&>button] targets the built-in close ✕ — drop its border and make it
           white so it sits cleanly in the top-right corner over the gradient. */}
-      <DialogContent className="sm:max-w-3xl p-0 overflow-hidden [&>button]:border-0 [&>button]:text-white/80  [&>button]:right-1 [&>button]:top-1">
+      <DialogContent
+        className="sm:max-w-3xl p-0 overflow-hidden [&>button]:border-0 [&>button]:text-white/80  [&>button]:right-1 [&>button]:top-1"
+        onPointerDownOutside={(e) => { if (busy) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (busy) e.preventDefault(); }}
+        onInteractOutside={(e) => { if (busy) e.preventDefault(); }}
+      >
         {/* Gradient header — pr-12 keeps the Preview/Edit toggle clear of the
             dialog's own close ✕ in the top-right corner. */}
         <div className="px-6 py-5 pr-12 bg-gradient-to-r from-violet-600/90 to-fuchsia-600/90 text-white">
@@ -146,6 +183,9 @@ export const CampaignAIPreviewModal = ({
                 <div className="space-y-1">
                   <Label className="text-xs">Age range</Label>
                   <Input value={ageRange} onChange={(e) => setAgeRange(e.target.value)} placeholder="e.g. 25-45" />
+                  {validateAgeRange(ageRange) && (
+                    <p className="text-[11px] text-red-400">{validateAgeRange(ageRange)}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Location</Label>

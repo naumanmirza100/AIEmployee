@@ -24,12 +24,16 @@ const HomePage = () => {
   const { hash } = useLocation();
 
   useEffect(() => {
-    if (hash) {
-      const el = document.querySelector(hash);
-      if (el) {
-        // Delay so the section is mounted before scroll
-        setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-      }
+    if (!hash) return;
+    // The hash can carry a query string (e.g. "#ai-modules?agent=exec_meeting_agent").
+    // Strip anything after the id and look up by id, so an invalid CSS selector
+    // like "#ai-modules?agent=..." doesn't throw and blank the whole page.
+    const id = hash.replace(/^#/, '').split(/[?&]/)[0];
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (el) {
+      // Delay so the section is mounted before scroll
+      setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
     }
   }, [hash]);
 

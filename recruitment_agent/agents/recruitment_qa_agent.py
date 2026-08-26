@@ -606,7 +606,13 @@ FORMATTING:
                 # context, which it would otherwise dump as a substitute answer.
                 return self._wrap_response(self._no_candidate_answer(data), insights)
 
-            context = self._build_context(data)
+            # A specific job may have been identified (e.g. by _get_direct_answer's
+            # matching) even though no keyword branch fired and `direct` came back
+            # empty. Without this, that job's description/requirements would get
+            # the same multi-job _shorten(...900) trim as an "all jobs" overview.
+            matched_job = _find_matching_job(data.get("jobs", []), question)
+            focus_job_id = matched_job["id"] if matched_job else None
+            context = self._build_context(data, focus_job_id=focus_job_id)
             answer = self._generate_answer(question, context, direct)
             return self._wrap_response(answer, insights)
         except GroqClientError as e:
@@ -956,11 +962,16 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             "qualification_settings": qual_settings,
         }
 
-    def _build_context(self, data: Dict[str, Any]) -> str:
+    def _build_context(self, data: Dict[str, Any], focus_job_id: Optional[int] = None) -> str:
         """Build compact context for LLM with DIRECT FACTS + per-job data.
 
         Optimized to keep token usage low while still giving the model
         enough structure to answer overview / analysis questions.
+
+        focus_job_id: when the question was already resolved to one specific
+        job, pass its id so that job's description/requirements are included
+        in full — only the OTHER jobs still get the multi-job _shorten trim.
+        Aggregate DIRECT FACTS counts always reflect every job, unchanged.
         """
         jobs = data.get("jobs", [])
         total_jobs = len(jobs)
@@ -1011,8 +1022,10 @@ Be practical and specific. Give actionable lists of questions recruiters can use
             jqc = j.get("qualification_counts", {})
             # With a single job there is room to pass its full text, which is what
             # "complete description" questions need. Across many jobs the shared
-            # context budget forces a trim.
-            if len(jobs) == 1:
+            # context budget forces a trim — unless this is the one job the
+            # question was already resolved to (focus_job_id), which always gets
+            # full text so its answer is never silently cut.
+            if len(jobs) == 1 or aid == focus_job_id:
                 desc = j.get("description") or ""
                 req = j.get("requirements") or ""
             else:

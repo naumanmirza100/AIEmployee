@@ -240,7 +240,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
                   <button
                     type="button"
                     onClick={handleGenerateDescription}
-                    disabled={generatingDesc}
+                    disabled={generatingDesc || loading}
                     className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
                   >
                     {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
@@ -657,7 +657,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
 // "View all members" toggle whose panel is rendered by the parent dialog to
 // the side (so it isn't cramped inside this narrow field). Without them the
 // picker is just the search box + chips.
-export const AssigneePicker = ({ assignees, onChange, onViewAll, viewingAll = false }) => {
+export const AssigneePicker = ({ assignees, onChange, onViewAll, viewingAll = false, disabled = false }) => {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -713,9 +713,10 @@ export const AssigneePicker = ({ assignees, onChange, onViewAll, viewingAll = fa
           <Input
             value={q}
             onChange={e => search(e.target.value)}
+            disabled={disabled}
             placeholder="Type name or email to add…"
             autoComplete="off"
-            className="bg-white/5 border-white/10 text-white text-sm"
+            className="bg-white/5 border-white/10 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
           />
           {searching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
           {results.length > 0 && (
@@ -743,7 +744,8 @@ export const AssigneePicker = ({ assignees, onChange, onViewAll, viewingAll = fa
           <button
             type="button"
             onClick={onViewAll}
-            className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 whitespace-nowrap flex-shrink-0"
+            disabled={disabled}
+            className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 whitespace-nowrap flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Users className="h-3 w-3" />
             View all
@@ -924,7 +926,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
                 <button
                   type="button"
                   onClick={handleGenerateDescription}
-                  disabled={generatingDesc}
+                  disabled={generatingDesc || loading}
                   className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 disabled:opacity-50"
                 >
                   {generatingDesc ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
@@ -975,6 +977,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
     onChange={setAssignees}
     onViewAll={() => setShowAllMembers(v => !v)}
     viewingAll={showAllMembers}
+    disabled={loading}
   />
 </div>
         </div>
@@ -1163,6 +1166,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
               onChange={setAssignees}
               onViewAll={() => setShowAllMembers(v => !v)}
               viewingAll={showAllMembers}
+              disabled={saving}
             />
           </div>
         </div>

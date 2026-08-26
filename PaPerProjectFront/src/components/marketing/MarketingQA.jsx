@@ -12,6 +12,7 @@ import HoverTip from '@/components/common/HoverTip';
 import {
   Loader2,
   Send,
+  Square,
   MessageSquare,
   Plus,
   MessageCircle,
@@ -814,6 +815,16 @@ const MarketingQA = () => {
   const [question, setQuestion] = useState('');
   const [suggestedValue, setSuggestedValue] = useState('__none__');
   const [loading, setLoading] = useState(false);
+  // Lets the user abandon a slow answer instead of waiting it out. The request
+  // itself keeps running server-side; we simply stop waiting for it and drop
+  // the result, so the input is usable again immediately.
+  const cancelledRef = useRef(false);
+
+  const handleStopGenerating = () => {
+    cancelledRef.current = true;
+    setLoading(false);
+    toast({ title: 'Stopped', description: 'Answer generation was cancelled.' });
+  };
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [showSidebarSearch, setShowSidebarSearch] = useState(false);
@@ -1001,6 +1012,7 @@ const MarketingQA = () => {
 
     // Actual API call
     try {
+      cancelledRef.current = false;
       setLoading(true);
 
       // Send last 6 Q&A pairs for context
@@ -1024,6 +1036,10 @@ const MarketingQA = () => {
         // Call QA API
         result = await marketingAgentService.marketingQA(q, reducedConversationHistory);
       }
+
+      // The user pressed stop while this was in flight — discard the result
+      // rather than dropping a stale answer into the chat.
+      if (cancelledRef.current) return;
 
       if (result.status === 'success' && result.data) {
         const response = result.data;
@@ -1068,6 +1084,8 @@ const MarketingQA = () => {
       // Run comparison in background (no await - non-blocking)
       compareResponses(q, inputMode).catch(err => console.error('Comparison failed:', err));
     } catch (error) {
+      // A stopped request isn't a failure — don't scold the user for it.
+      if (cancelledRef.current) return;
       const isHardBlock = error?.status === 402 || error?.status === 403 || error?.data?.hard_block;
       toast({
         title: isHardBlock ? 'Request blocked' : 'Warning',
@@ -1779,6 +1797,13 @@ const MarketingQA = () => {
                           <Loader2 className="h-4 w-4 text-primary" />
                         </motion.div>
                         <span className="text-sm">Analyzing your data...</span>
+                        <button
+                          type="button"
+                          onClick={handleStopGenerating}
+                          className="ml-1 flex items-center gap-1 rounded-lg border border-red-500/40 px-2 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/15 hover:text-red-200"
+                        >
+                          <Square className="h-3 w-3 fill-current" /> Stop
+                        </button>
                       </div>
                     </motion.div>
                   )}
@@ -1885,24 +1910,33 @@ const MarketingQA = () => {
                         className="flex-1 w-full min-h-[44px] h-11 max-h-32 resize-none border-0 bg-transparent text-sm py-3 px-4 text-white placeholder:text-white/30 focus-visible:ring-0 focus-visible:ring-offset-0"
                       />
                     </div>
-                    <HoverTip tip="Submit your prompt">
+                    {/* While an answer is generating this becomes a Stop
+                        button, so a slow request can be abandoned instead of
+                        leaving the input locked until it finishes. */}
+                    <HoverTip tip={loading ? 'Stop generating' : 'Submit your prompt'}>
                       <motion.div
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                       >
                         <Button
-                          type="submit"
-                          disabled={loading || !question.trim()}
+                          type={loading ? 'button' : 'submit'}
+                          onClick={loading ? handleStopGenerating : undefined}
+                          disabled={!loading && !question.trim()}
                           size="icon"
+                          aria-label={loading ? 'Stop generating' : 'Send'}
                           className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
                           style={{
-                            background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
-                            boxShadow: '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                            background: loading
+                              ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 50%, #991b1b 100%)'
+                              : 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
+                            boxShadow: loading
+                              ? '0 0 16px rgba(220, 38, 38, 0.35), 0 2px 8px rgba(0,0,0,0.3)'
+                              : '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
                             color: '#ffffff',
                           }}
                         >
                           {loading ? (
-                            <Loader2 className="h-5 w-5 animate-spin" />
+                            <Square className="h-4 w-4 fill-current" />
                           ) : (
                             <Send className="h-5 w-5" />
                           )}

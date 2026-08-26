@@ -13,6 +13,7 @@ import logging
 import os
 import re
 from datetime import timedelta
+from typing import Optional
 
 from django.conf import settings
 from django.core.paginator import Paginator
@@ -48,6 +49,45 @@ def _ensure_https(url: str) -> str:
     if url and not url.startswith(('http://', 'https://')):
         return f'https://{url}'
     return url
+
+
+_EMAIL_RE = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+
+
+def _validate_lead_input(full_name, email, linkedin_url, company_size) -> Optional[str]:
+    """Server-side validation for a manually-created lead. Mirrors the frontend
+    checks so invalid data can't be saved by bypassing the UI. Returns an error
+    message string, or None when the input is valid.
+    """
+    name = (full_name or '').strip()
+    email = (email or '').strip()
+    linkedin = (linkedin_url or '').strip()
+
+    if not name and not email:
+        return 'Enter at least a name or a business email.'
+    if email and not _EMAIL_RE.match(email):
+        return 'Enter a valid business email like jane@company.com.'
+    if linkedin:
+        url = linkedin if re.match(r'^https?://', linkedin, re.I) else f'https://{linkedin}'
+        host = re.sub(r'^https?://', '', url, flags=re.I).split('/')[0].lower()
+        if not (host == 'linkedin.com' or host.endswith('.linkedin.com')):
+            return 'Enter a valid LinkedIn URL like https://linkedin.com/in/jane.'
+    if company_size not in (None, '') and not str(company_size).strip().isdigit():
+        return 'Employees must be a whole number.'
+    return None
+
+
+def _validate_url_optional(value, error_message) -> Optional[str]:
+    """Validate an optional URL field. Empty is allowed. Returns error_message
+    when the value is present but not a plausible http(s) URL, else None."""
+    v = (value or '').strip()
+    if not v:
+        return None
+    url = v if re.match(r'^https?://', v, re.I) else f'https://{v}'
+    host = re.sub(r'^https?://', '', url, flags=re.I).split('/')[0]
+    if not host or '.' not in host or ' ' in host:
+        return error_message
+    return None
 
 
 def _get_research_agent(company, company_user=None) -> LeadResearchAgent:
@@ -212,8 +252,10 @@ def icp_profile(request):
                 'company_size_max': data.get('company_size_max') or None,
                 'locations': data.get('locations', []),
                 'keywords': data.get('keywords', []),
-                'hot_threshold': int(data.get('hot_threshold', 70)),
-                'warm_threshold': int(data.get('warm_threshold', 40)),
+                # Defaults must match SDRICPProfile model defaults (75 / 60) so
+                # hot/warm bucketing is consistent regardless of code path.
+                'hot_threshold': int(data.get('hot_threshold', 75)),
+                'warm_threshold': int(data.get('warm_threshold', 60)),
             },
         )
         return Response({'status': 'success', 'message': 'ICP saved.', 'data': _serialize_icp(icp)})
@@ -312,8 +354,17 @@ def leads_list(request):
         d = request.data
         full_name = d.get('full_name') or f"{d.get('first_name', '')} {d.get('last_name', '')}".strip()
 
-        # ── Duplicate guard ──────────────────────────────────────────────────
+        # ── Validation (mirrors the frontend; never trust the client) ─────────
         email_input = (d.get('email') or '').strip().lower()
+        linkedin_input = (d.get('linkedin_url') or '').strip()
+        size_input = d.get('company_size')
+
+        err = _validate_lead_input(full_name, email_input, linkedin_input, size_input)
+        if err:
+            return Response({'status': 'error', 'message': err}, status=400)
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── Duplicate guard ──────────────────────────────────────────────────
         if email_input:
             existing = SDRLead.objects.filter(
                 company_user=company_user, email__iexact=email_input
@@ -343,6 +394,10 @@ def leads_list(request):
             company_website=d.get('company_website', ''),
             source='manual',
             status='new',
+            # Queue for background qualification so manually-added leads get
+            # scored automatically like research/CSV leads.
+            qualification_status='pending',
+            qualification_queued_at=timezone.now(),
         )
         return Response({'status': 'success', 'data': _serialize_lead(lead)}, status=201)
     except KeyServiceError:
@@ -519,6 +574,7 @@ def research_leads(request):
             raw_leads = researcher.search_leads(icp, count=count, source=source)
 
             created = 0
+            created_ids = []
             skipped_dupes = 0
 
             # Pre-load existing keys to catch dupes. LinkedIn URL is the most
@@ -596,7 +652,7 @@ def research_leads(request):
 
                 validation = validate_lead({**ld, 'full_name': full_name})
 
-                SDRLead.objects.create(
+                new_lead = SDRLead.objects.create(
                     company_user=company_user,
                     icp_profile=icp,
                     first_name=ld.get('first_name', ''),
@@ -627,13 +683,15 @@ def research_leads(request):
                     data_quality_flags=validation['data_quality_flags'],
                 )
                 created += 1
+                created_ids.append(new_lead.pk)
 
-            # Queue newly created leads for background qualification instead of
-            # scoring them synchronously — the scheduler drains the queue in small
-            # batches so AI tokens aren't exhausted in one burst, and retries
-            # failures automatically. Returns instantly with no token error.
+            # Queue ONLY the leads created by this run for background
+            # qualification — the scheduler drains the queue in small batches so
+            # AI tokens aren't exhausted in one burst, and retries failures
+            # automatically. Scoping to created_ids avoids sweeping up unrelated
+            # pre-existing unscored leads (e.g. CSV/manual imports).
             queued = SDRLead.objects.filter(
-                company_user=company_user, score__isnull=True, qualification_status='none',
+                pk__in=created_ids, score__isnull=True, qualification_status='none',
             ).update(qualification_status='pending', qualification_queued_at=timezone.now())
 
             job.status = 'completed'
@@ -777,46 +835,26 @@ def fetch_apify_leads(request):
                 status='new',
                 confidence_score=validation['confidence_score'],
                 data_quality_flags=validation['data_quality_flags'],
+                # Queue for background qualification instead of scoring inline —
+                # a synchronous loop here blocked the request for minutes and hit
+                # AI token limits. The scheduler drains the queue in small batches.
+                qualification_status='pending',
+                qualification_queued_at=timezone.now(),
             )
             created += 1
 
-        # ── Best-effort auto-qualify (never fail the import if AI tokens are out) ──
-        qualified = 0
-        if created and icp:
-            new_leads = SDRLead.objects.filter(
-                company_user=company_user, score__isnull=True
-            ).order_by('-created_at')[:created]
-            try:
-                qualifier = _get_qualification_agent(company_user.company)
-                for lead in new_leads:
-                    try:
-                        result = qualifier.qualify_lead(lead, icp)
-                        lead.score = result['score']
-                        lead.temperature = result['temperature']
-                        lead.score_breakdown = result.get('score_breakdown', {})
-                        lead.qualification_reasoning = result.get('qualification_reasoning', '')
-                        lead.key_strengths = result.get('key_strengths', [])
-                        lead.concerns = result.get('concerns', [])
-                        lead.outreach_strategy = result.get('outreach_strategy', '')
-                        lead.qualified_at = timezone.now()
-                        lead.status = 'qualified'
-                        lead.save()
-                        qualified += 1
-                    except Exception:
-                        break  # e.g. tokens exhausted — stop qualifying, keep leads
-            except Exception as exc:
-                logger.info("Fetch-from-Apify: auto-qualify unavailable: %s", exc)
+        queued = created  # every imported lead is queued for qualification
 
         msg = f'Imported {created} leads from Apify'
-        if qualified:
-            msg += f', qualified {qualified}'
+        if queued:
+            msg += '. Qualifying them in the background — scores will appear shortly'
         if skipped:
             msg += f'. Skipped {skipped} duplicates'
         return Response({
             'status': 'success',
             'message': msg + '.',
             'leads_created': created,
-            'leads_qualified': qualified,
+            'leads_queued': queued,
             'skipped_duplicates': skipped,
             'stats': _lead_stats(company_user),
         })
@@ -929,6 +967,10 @@ def import_leads_csv(request):
                     company_website=pick('company_website'),
                     source='csv_import',
                     status='new',
+                    # Queue for background qualification so imported leads get
+                    # scored automatically instead of sitting permanently unscored.
+                    qualification_status='pending',
+                    qualification_queued_at=timezone.now(),
                 )
                 created += 1
             except KeyServiceError:
@@ -940,6 +982,8 @@ def import_leads_csv(request):
         if skipped_empty:
             msg += f', {skipped_empty} empty rows'
         msg += '.'
+        if created:
+            msg += ' Qualifying them in the background — scores will appear shortly.'
         if created == 0 and not errors:
             msg = ('No leads imported — check the CSV has a header row with columns like '
                    'full_name / email / company_name (any capitalisation).')
@@ -1274,6 +1318,18 @@ def sdr_campaigns_list(request):
     try:
         d = request.data
         start_date = d.get('start_date') or None  # ISO date string or None
+
+        # ── Validation (mirrors the frontend; never trust the client) ─────────
+        if not (d.get('name') or '').strip():
+            return Response({'status': 'error', 'message': 'Campaign name is required.'}, status=400)
+        cal_err = _validate_url_optional(
+            d.get('calendar_link'),
+            'Enter a valid calendar link like https://calendly.com/you/30min.',
+        )
+        if cal_err:
+            return Response({'status': 'error', 'message': cal_err}, status=400)
+        # ─────────────────────────────────────────────────────────────────────
+
         # If start_date provided → status='scheduled' (Celery will auto-activate)
         initial_status = 'scheduled' if start_date else 'draft'
 

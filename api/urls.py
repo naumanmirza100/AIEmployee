@@ -692,6 +692,7 @@ urlpatterns = [
     re_path(r'^admin/key-requests/?$', admin_api_keys.list_requests, name='admin_list_requests'),  # GET
     re_path(r'^admin/key-requests/(?P<request_id>\d+)/approve/?$', admin_api_keys.approve_key_request, name='admin_approve_request'),  # POST
     re_path(r'^admin/key-requests/(?P<request_id>\d+)/reject/?$', admin_api_keys.reject_request, name='admin_reject_request'),  # POST
+    re_path(r'^admin/key-requests/(?P<request_id>\d+)/edit/?$', admin_api_keys.edit_key_request, name='admin_edit_request'),  # POST
 
     # Platform keys (shared default keys, one per provider)
     re_path(r'^admin/platform-keys/?$', admin_api_keys.list_platform_keys, name='admin_list_platform_keys'),  # GET

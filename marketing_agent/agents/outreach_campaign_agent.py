@@ -14,6 +14,107 @@ import json
 import re
 
 
+def validate_campaign_dates_and_age(start_date, end_date, age_range):
+    """Validate campaign date order and age range. Returns an error string, or
+    None if valid. start_date/end_date may be date objects or 'YYYY-MM-DD'
+    strings (or None); age_range is a string ('' = any age)."""
+    def _as_date(d):
+        if not d:
+            return None
+        if isinstance(d, str):
+            try:
+                return datetime.strptime(d[:10], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                return None
+        return d
+    sd, ed = _as_date(start_date), _as_date(end_date)
+    if sd and ed:
+        if sd > ed:
+            return "Start date can't be after the end date."
+        if sd == ed:
+            return ("Start and end date can't be the same — a campaign needs at "
+                    "least one day of duration. Pick a later end date.")
+    s = str(age_range or '').strip()
+    if s:
+        def _ok(n):
+            return 0 <= n <= 120
+        # Catch negatives explicitly so the message says *why* it's rejected,
+        # instead of falling through to the generic "must be a number" text.
+        if re.match(r'^-\s*\d+', s) or re.search(r'[-–]\s*-\s*\d+', s):
+            return "Age can't be negative — use a value between 0 and 120 (e.g. 25-45)."
+        m = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', s)  # "25-45"
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if not _ok(lo) or not _ok(hi):
+                return "Ages must be between 0 and 120."
+            if lo > hi:
+                return "The minimum age can't be greater than the maximum age."
+        elif re.match(r'^\d+$', s):
+            if not _ok(int(s)):
+                return "Age must be between 0 and 120."
+        else:
+            return "Age must be a single number (e.g. 30) or a range (e.g. 25-45); no negatives."
+    return None
+
+
+def validate_age_in_prompt(*texts):
+    """Scan free-text campaign prompts/briefs for a negative age. Returns an
+    error string, or None if nothing objectionable is found. This runs before
+    the LLM call so a nonsense brief is rejected up front instead of being
+    silently 'fixed' into a plausible-looking age range.
+
+    Handles both the symbol form ("age -10") and the spelled-out form
+    ("minus 10 age", "negative ten years old"), since users type either.
+    """
+    # Small number words, so "minus ten age" is caught alongside "minus 10 age".
+    word_nums = {
+        'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+        'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14,
+        'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18,
+        'nineteen': 19, 'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50,
+        'sixty': 60, 'seventy': 70, 'eighty': 80, 'ninety': 90, 'hundred': 100,
+    }
+    # "age"-ish token: age/ages/aged plus common typos (agez, agesz), and
+    # year(s)/yr(s)/year-old.
+    age_word = r'(?:aged|agez|agesz|ages?|years?|yrs?|year[-\s]?olds?)'
+    # A negative number that is NOT part of a digit-digit range like "25-45":
+    # requires a non-digit (or start of string) immediately before the minus.
+    neg = r'(?<![\d])-\s*\d+'
+
+    patterns = (
+        # "-10 age", "-10 agez", "-5 year olds", "-10 to 40 years"
+        neg + r'\s*(?:to\s*\d+\s*|[-–]\s*\d+\s*)?' + age_word,
+        # "age -10", "aged -20", "age of -30", "ages: -18"
+        age_word + r'\s*(?:of|is|:|=|from|are)?\s*' + neg,
+        # "age between -5 and 40"
+        age_word + r'[^.]{0,20}?\bbetween\s*' + neg,
+        # Bare, numberless forms: "negative age", "minus age", "- age",
+        # "age in minus", "age should be negative".
+        r'\b(?:negative|minus)\s+' + age_word,
+        age_word + r'\s*(?:in|is|should\s+be|as|=|:)?\s*(?:negative|minus)\b',
+        r'-\s*' + age_word + r'\b',
+    )
+
+    for text in texts:
+        t = str(text or '')
+        if not t:
+            continue
+        norm = t.lower()
+        # Normalise spelled-out negatives to the symbol form so one set of
+        # patterns covers both: "minus ten" / "negative 10" -> "-10".
+        for word, val in word_nums.items():
+            norm = re.sub(r'\b(?:minus|negative)\s+' + word + r'\b',
+                          '-{0}'.format(val), norm)
+        norm = re.sub(r'\b(?:minus|negative)\s+(\d+)', r'-\1', norm)
+
+        for pat in patterns:
+            if re.search(pat, norm, re.IGNORECASE):
+                return ("Age can't be negative — please use a value between 0 and 120 "
+                        "(e.g. \"target ages 25-45\").")
+    return None
+
+
 class OutreachCampaignAgent(MarketingBaseAgent):
     """
     Outreach & Campaign Agent
@@ -160,26 +261,48 @@ class OutreachCampaignAgent(MarketingBaseAgent):
         # the Pakistan finance sector, aim for higher leads", etc.).
         instructions = (campaign_data.get('instructions') or '').strip()
 
+        # The brief may mention a negative age ("minus age", "negative 10 age").
+        # That's not a reason to refuse the whole campaign — we still generate it,
+        # but we tell the model explicitly not to emit a negative age, and we
+        # sanitise whatever it returns below.
+        mentions_negative_age = bool(
+            validate_age_in_prompt(description, instructions, name)
+        )
+
         self.log_action("Auto-filling campaign fields", {"user_id": user_id})
 
         instructions_line = f"\nExtra instructions from the user (follow these): {instructions}\n" if instructions else ''
+
+        # Age can't be negative. If the brief asked for one, say so in the prompt
+        # so the model leaves age_range empty rather than inventing "-10-40".
+        age_guard_line = (
+            "\nIMPORTANT: The brief mentions a negative/minus age. An age can never be "
+            "negative. Do NOT output a negative age. Set \"age_range\" to an empty "
+            "string \"\" unless a sensible non-negative age can be inferred from the "
+            "rest of the brief. This applies to age ONLY — still fill in location, "
+            "industry, company_size and interests with your best guesses.\n"
+        ) if mentions_negative_age else ''
 
         prompt = f"""Based on this email marketing campaign, infer reasonable targeting values.
 
 Campaign name: {name}
 User's brief / hint (may be rough — treat it as guidance, NOT the final description): {description or 'Not provided'}
 Duration: {start_date or 'Not specified'} to {end_date or 'Not specified'}
-{instructions_line}
+{instructions_line}{age_guard_line}
+Infer sensible values even when the brief is vague — an educated guess is far more
+useful than a blank. Only "age_range" may be an empty string; every other field must
+be filled in.
+
 Respond with ONLY a single JSON object (no markdown, no commentary) with exactly these keys:
 {{
-  "description": "<a clear, professional 1-2 sentence campaign description written FROM the name and the user's hint. Do NOT just copy the hint — turn it into a proper description. If the hint is empty, infer a sensible one from the campaign name>",
+  "description": "<REQUIRED, never empty. A clear, professional 1-2 sentence campaign description written FROM the name and the user's hint. You MUST rewrite it in your own words — do NOT echo the hint back, do not reuse its wording or its typos, and never mention a negative/minus age. If the hint is empty or nonsense, infer a sensible description from the campaign name alone>",
   "target_leads": <integer, realistic number of qualified leads for this duration>,
   "target_conversions": <integer, realistic number of conversions, smaller than target_leads>,
-  "age_range": "<e.g. 25-45, or empty string if not applicable>",
-  "location": "<likely target location, or empty string>",
-  "industry": "<likely target industry, or empty string>",
-  "company_size": "<one of: 1-10, 11-50, 51-200, 201-1000, 1001-5000, 5000+, or empty string>",
-  "interests": "<comma-separated interests relevant to the audience, or empty string>",
+  "age_range": "<e.g. 25-45. Must be non-negative, between 0 and 120. Never output a negative age. Use an empty string if not applicable>",
+  "location": "<REQUIRED. Your best guess at the target country or region, e.g. United States. Never leave blank — pick the most probable one>",
+  "industry": "<REQUIRED. Your best guess at the target industry, e.g. Technology. Never leave blank — pick the most probable one>",
+  "company_size": "<REQUIRED. Exactly one of: 1-10, 11-50, 51-200, 201-1000, 1001-5000, 5000+. Never leave blank — pick the most probable one>",
+  "interests": "<REQUIRED. 3-5 comma-separated interests relevant to the audience. Never leave blank>",
   "language": "<primary language, e.g. English, or empty string>"
 }}"""
 
@@ -188,9 +311,20 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
                 prompt,
                 self.system_prompt,
                 temperature=0.4,
-                max_tokens=400
+                # Reasoning models (gpt-oss-20b) spend tokens on a <think> block
+                # before emitting the JSON. 400 truncated the object mid-write,
+                # which parsed to nothing and showed as an empty card.
+                max_tokens=1500
             )
             fields = self._parse_auto_fill_json(raw)
+            # If nothing at all came back, the model didn't answer in the shape we
+            # asked for. Log the raw reply — otherwise this shows up in the UI as a
+            # silent card full of em-dashes with no way to tell why.
+            if not any(v not in (None, '') for v in fields.values()):
+                self.log_action(
+                    "Auto-fill returned no usable fields",
+                    {"user_id": user_id, "raw_preview": str(raw)[:500]}
+                )
         except Exception as e:
             from core.api_key_service import KeyServiceError
             if isinstance(e, KeyServiceError):
@@ -198,14 +332,55 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
             self.log_action("Error auto-filling campaign fields", {"error": str(e)})
             return {'success': False, 'error': str(e)}
 
+        # The model sometimes echoes the user's hint back verbatim (or returns an
+        # empty string), which looks like "the description never changed". Detect
+        # that and synthesise a clean one instead.
+        def _norm(v):
+            return re.sub(r'[^a-z0-9]+', ' ', str(v or '').lower()).strip()
+
+        generated_desc = fields.get('description') or ''
+        echoed = _norm(generated_desc) == _norm(description) and bool(_norm(description))
+        if not generated_desc.strip() or echoed:
+            audience_bits = [b for b in (
+                fields.get('industry'),
+                ('companies of %s employees' % fields['company_size'])
+                if fields.get('company_size') else '',
+                ('in %s' % fields['location']) if fields.get('location') else '',
+            ) if b]
+            audience = ' '.join(audience_bits) if audience_bits else 'the target audience'
+            fields['description'] = (
+                "Email outreach campaign \"%s\" aimed at %s, focused on generating "
+                "qualified leads and conversions over the campaign period."
+                % (name, audience)
+            )
+
+        # The model can still hand back a nonsense age ("-5-40"). Drop it rather
+        # than presenting it as a confident suggestion — the campaign is still
+        # generated, it just targets all ages.
+        _age_err = validate_campaign_dates_and_age(None, None, fields.get('age_range'))
+        warning = None
+        if _age_err:
+            fields['age_range'] = ''
+            warning = ("Age can't be negative, so no age filter was applied — "
+                       "this campaign targets all ages. Set an age range manually "
+                       "if you need one.")
+        elif mentions_negative_age and not fields.get('age_range'):
+            warning = ("Age can't be negative, so no age filter was applied — "
+                       "this campaign targets all ages. Set an age range manually "
+                       "if you need one.")
+
         return {
             'success': True,
             'action': 'auto_fill',
-            'suggested_fields': fields
+            'suggested_fields': fields,
+            'warning': warning,
         }
 
     def _parse_auto_fill_json(self, raw_text: str) -> Dict:
-        """Parse the LLM's JSON response for auto_fill_campaign, tolerating stray text/markdown fences."""
+        """Parse the LLM's JSON response for auto_fill_campaign, tolerating stray
+        text/markdown fences, reasoning preambles, trailing commas and single
+        quotes. Returns the default (empty) shape only if nothing usable is found.
+        """
         defaults = {
             'description': '',
             'target_leads': None,
@@ -219,29 +394,124 @@ Respond with ONLY a single JSON object (no markdown, no commentary) with exactly
         }
         if not raw_text:
             return defaults
-        text = raw_text.strip()
-        if text.startswith('```'):
-            text = text.strip('`')
-            if text.lower().startswith('json'):
-                text = text[4:]
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if not match:
+
+        text = str(raw_text).strip()
+        # Reasoning models wrap their scratch work in <think>...</think> (and
+        # gpt-oss uses <|channel|>analysis ... <|message|>). Drop those first —
+        # they contain braces that would otherwise be mistaken for the payload.
+        text = re.sub(r'<think>.*?</think>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+        # An unclosed <think> means the model never emitted the closing tag. Only
+        # drop the tag itself, not the rest of the reply — the JSON often follows
+        # it. If no JSON follows, the scrape/truncation fallbacks below handle it.
+        text = re.sub(r'</?think>', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'<\|[^>]*?\|>', ' ', text)
+        # Strip markdown fences wherever they appear, not just at position 0.
+        text = re.sub(r'```[a-zA-Z]*', '', text).replace('```', '')
+
+        def _candidates(t):
+            """Yield balanced {...} blocks, longest/most promising first. A greedy
+            '\\{.*\\}' grabs stray braces from reasoning text ("the set {a, b}"),
+            so walk the string and pair braces properly instead."""
+            out, stack = [], []
+            for i, ch in enumerate(t):
+                if ch == '{':
+                    stack.append(i)
+                elif ch == '}' and stack:
+                    start = stack.pop()
+                    if not stack:
+                        out.append(t[start:i + 1])
+            # Prefer blocks that actually look like our payload.
+            out.sort(key=lambda b: ('description' in b or 'target_leads' in b, len(b)),
+                     reverse=True)
+            return out
+
+        def _loads(block):
+            try:
+                return json.loads(block)
+            except (ValueError, TypeError):
+                pass
+            # Tolerate trailing commas and single-quoted keys/values.
+            relaxed = re.sub(r',\s*([}\]])', r'\1', block)
+            relaxed = re.sub(r"'([^'\"]*?)'\s*:", r'"\1":', relaxed)
+            relaxed = re.sub(r":\s*'([^'\"]*?)'", r': "\1"', relaxed)
+            try:
+                return json.loads(relaxed)
+            except (ValueError, TypeError):
+                return None
+
+        parsed = None
+        for block in _candidates(text):
+            got = _loads(block)
+            if isinstance(got, dict):
+                parsed = got
+                break
+
+        if parsed is None:
+            # Last resort: the reply was cut off mid-object (token limit), so no
+            # block is balanced. Close it and retry, then fall back to scraping
+            # whatever "key": value pairs did arrive.
+            open_at = text.find('{')
+            if open_at != -1:
+                tail = text[open_at:]
+                tail = re.sub(r',\s*$', '', tail.rstrip())
+                for closer in ('}', '"}', ']}' , '"]}'):
+                    got = _loads(tail + closer)
+                    if isinstance(got, dict):
+                        parsed = got
+                        break
+            if parsed is None:
+                scraped = {}
+                for k in defaults:
+                    m = re.search(r'"%s"\s*:\s*"([^"]*)"' % k, text)
+                    if m:
+                        scraped[k] = m.group(1)
+                        continue
+                    m = re.search(r'"%s"\s*:\s*(-?\d+)' % k, text)
+                    if m:
+                        scraped[k] = m.group(1)
+                if scraped:
+                    parsed = scraped
+
+        if parsed is None:
             return defaults
-        try:
-            parsed = json.loads(match.group(0))
-        except (ValueError, TypeError):
-            return defaults
+
+        # Some models nest the demographics under "target_audience" instead of
+        # returning them flat — flatten that in before reading the keys.
+        nested = parsed.get('target_audience')
+        if isinstance(nested, dict):
+            for k, v in nested.items():
+                parsed.setdefault(k, v)
+        goals = parsed.get('goals')
+        if isinstance(goals, dict):
+            if 'target_leads' not in parsed and 'leads' in goals:
+                parsed['target_leads'] = goals['leads']
+            if 'target_conversions' not in parsed and 'conversions' in goals:
+                parsed['target_conversions'] = goals['conversions']
+
         result = dict(defaults)
         for key in defaults:
             if key in parsed and parsed[key] is not None:
                 result[key] = parsed[key]
+
+        # Integers may arrive as "2,000" or "about 2000" — pull the digits out.
         for int_key in ('target_leads', 'target_conversions'):
-            try:
-                result[int_key] = int(result[int_key]) if result[int_key] not in (None, '') else None
-            except (ValueError, TypeError):
+            val = result[int_key]
+            if val in (None, ''):
                 result[int_key] = None
-        for str_key in ('description', 'age_range', 'location', 'industry', 'company_size', 'interests', 'language'):
-            result[str_key] = str(result[str_key]).strip() if result[str_key] else ''
+                continue
+            try:
+                result[int_key] = int(val)
+            except (ValueError, TypeError):
+                digits = re.sub(r'[^0-9]', '', str(val))
+                result[int_key] = int(digits) if digits else None
+
+        # Lists ("interests": ["a","b"]) should become the comma string the UI wants.
+        for str_key in ('description', 'age_range', 'location', 'industry',
+                        'company_size', 'interests', 'language'):
+            val = result[str_key]
+            if isinstance(val, (list, tuple)):
+                val = ', '.join(str(v).strip() for v in val if str(v).strip())
+            result[str_key] = str(val).strip() if val else ''
         return result
 
     def generate_template_content(self, name: str, description: str, company_name: str = '') -> Dict:
@@ -478,7 +748,12 @@ Respond with comma-separated category keys only (from: any, positive, negative, 
                     end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
                 except (ValueError, TypeError):
                     end_date = None
-            
+
+            # Reject bad date order / age range.
+            _err = validate_campaign_dates_and_age(start_date, end_date, age_range)
+            if _err:
+                return {'success': False, 'error': _err}
+
             campaign_name = (campaign_data.get('name') or 'New Campaign').strip() or 'New Campaign'
             if Campaign.objects.filter(owner_id=user_id, name__iexact=campaign_name).exists():
                 return {

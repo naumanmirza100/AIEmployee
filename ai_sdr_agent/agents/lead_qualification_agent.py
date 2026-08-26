@@ -71,7 +71,7 @@ class LeadQualificationAgent:
         else:
             logger.warning("LeadQualificationAgent initialised without a company — no LLM key resolved.")
 
-        self.model = getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant')
+        self.model = getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
 
     def qualify_lead(self, lead, icp_profile) -> dict:
         if self.groq_client:
@@ -183,7 +183,6 @@ Score this lead now:"""
 
         raw_score = result.get('score', 0)
         score = max(0, min(100, int(float(str(raw_score)))))
-        temperature = self._score_to_temp(score, icp)
 
         # Validate breakdown sums (cap each dimension)
         bd = result.get('breakdown', {})
@@ -198,6 +197,10 @@ Score this lead now:"""
         bd_sum = sum(breakdown.values())
         if bd_sum > 0 and abs(bd_sum - score) > 10:
             score = bd_sum
+
+        # Derive temperature from the FINAL score (after breakdown reconciliation)
+        # so the label can never contradict the score (e.g. score=85 / cold).
+        temperature = self._score_to_temp(score, icp)
 
         return {
             'score': score,
