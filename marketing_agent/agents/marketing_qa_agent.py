@@ -388,9 +388,24 @@ class MarketingQAAgent(MarketingBaseAgent):
         if category == QuestionCategory.META_HELP:
             return self._handle_meta_help(question)
 
+        marketing_data = self._get_marketing_data(user_id)
+
+        # Decline anything outside this account's marketing data. Answering
+        # general knowledge is how the assistant ended up asserting an invented
+        # OpenAI price as fact. Campaign names are passed in so a question that
+        # names one is never mistaken for off-topic.
+        campaign_names = [c.get('name') for c in (marketing_data.get('campaigns') or [])]
+        has_history = bool((context or {}).get('conversation_history'))
+        if self._is_out_of_scope(question, campaign_names, has_history):
+            return self._ok(
+                "That's outside what I can help with — I answer questions about "
+                "your campaigns and marketing data.\n\nTry asking about campaign "
+                "performance, leads, targeting, or what to do next.",
+                question,
+            )
+
         # Everything else is a question about the data → let the LLM answer it
         # with the full dataset in context.
-        marketing_data = self._get_marketing_data(user_id)
         return self._handle_llm_reasoning(question, marketing_data, context)
 
     # ══════════════════════════════════════════════════════════
@@ -679,7 +694,139 @@ class MarketingQAAgent(MarketingBaseAgent):
 
     def _handle_llm_reasoning(self, question: str, marketing_data: Dict, context: Optional[Dict]) -> Dict:
         """Full LLM call. This is now the path for every data question."""
-        full_context = self._build_context(marketing_data, context)
+        full_context = self._build_context(marketing_data, context, question)
+
+        # Resolve any filtering in the question here rather than trusting the
+        # model to do it over 18 rows — it repeatedly dropped conditions,
+        # miscounted, and answered "none" while matches existed.
+        hint = self._run_query_plan(question, marketing_data)
+
+        # A question about LEADS wants the people, not the campaign's metrics.
+        # The plan for "leads of meow" filters to that campaign, and its row of
+        # sent/opened/reply-rate figures then crowded out the lead list the
+        # user actually asked for.
+        q_lower = (question or '').lower()
+
+        # "which leads got emails but never replied?" is about PEOPLE, but the
+        # planner can only filter campaigns, so it produced a campaign-level
+        # "no campaign matches" and the answer denied something that was never
+        # asked. Drop that hint and let the model work from the lead rows.
+        asks_about_leads = bool(re.search(
+            r'\b(which|what|who|how many)\b[^.?]{0,40}\b(leads?|contacts?|'
+            r'people|persons?)\b', q_lower))
+
+        # "to which campaign do they belong?" right after a lead answer is
+        # still about those leads. Treated as a fresh campaign question it came
+        # back with campaign metrics instead of naming the leads' campaigns.
+        prev_q = (self._previous_question(context) or '').lower()
+        prev_was_leads = bool(re.search(r'\b(leads?|contacts?|people)\b', prev_q))
+        if (prev_was_leads
+                and re.search(r'\b(they|them|their|these|those|it)\b', q_lower)
+                and re.search(r'\b(belong|campaign|from|part of|which)\b', q_lower)):
+            asks_about_leads = True
+            full_context += (
+                "\nThe previous answer was about specific LEADS. This follow-up "
+                "is about THOSE SAME PEOPLE — only the ones named in your "
+                "previous answer, nobody else. For each of them, look their "
+                "email up in the LEAD -> CAMPAIGNS index below and write one "
+                "line: 'email — campaign, campaign'. Copy the campaign names "
+                "from that index; never leave the list empty. Do not answer "
+                "with campaign metrics, and do not introduce other leads.\n")
+        if hint and asks_about_leads and 'NO campaign matches' in hint:
+            self.log_action("Dropped campaign-level 'no match' for a lead question",
+                            {"question": question[:120]})
+            hint = (
+                "NOTE: this question is about individual LEADS, not campaigns. "
+                "Answer it from the lead and reply rows in the DETAIL section "
+                "below. Do not say 'no campaigns match' — the user did not ask "
+                "about campaigns.\n"
+            )
+
+        # "types of replies from all leads of X" is about the reply TYPES, not
+        # the lead roster — answering it with a plain lead list left the actual
+        # question unanswered.
+        asks_reply_types = (
+            self._mentions(q_lower, 'type', 'types', 'kind', 'kinds',
+                           'interest level')
+            and self._mentions(q_lower, 'reply', 'replies', 'replied',
+                               'respond', 'response', 'responded'))
+        if asks_reply_types:
+            # Build the finished table here. Asked to copy it from the context
+            # the model kept dropping rows — 2 of 5, then 4 of 5. Handing it
+            # the completed text removes the chance to trim.
+            ready = self._reply_types_table(question, marketing_data)
+            if ready:
+                hint = (hint or '') + ready
+        elif hint and re.search(r'\b(lead|leads|contact|contacts|who|whom)\b', q_lower):
+            hint += (
+                "The row above identifies WHICH campaign. The question is about "
+                "its LEADS — answer from the DETAIL section, listing the people "
+                "and their fields. Do not present campaign metrics as the "
+                "answer.\n")
+        # Same for email content: the plan's metrics row was being returned in
+        # place of the subject lines the user asked for.
+        if hint and (
+                re.search(r'\b(subject|subjects|email content)\b', q_lower)
+                or re.search(r'\b(what|which|show|list|tell)\b[^.?]{0,30}'
+                             r'\b(emails?|messages?)\b', q_lower)
+                or re.search(r'\bemails?\b[^.?]{0,20}\b(sent|went out)\b', q_lower)):
+            hint += (
+                "The row above identifies WHICH campaign. The question is about "
+                "the EMAILS IT SENT — answer from the 'Emails sent, grouped by "
+                "subject' rows in the DETAIL section, listing each subject with "
+                "its own count. Do not answer with the campaign's totals.\n")
+
+        # A follow-up like "just show their names" or a bare "why?" carries no
+        # filter of its own, so nothing is computed and the model answered over
+        # ALL campaigns — or, for "why?", claimed it had no information. Plan
+        # against the previous question so the same set stays in play.
+        # A question that names a campaign is about THAT campaign, not the
+        # previous result set — "just tell me about er5t6y7u89" was treated as
+        # a re-format because of the word "just" and re-ran the last query.
+        low_q = (question or '').lower()
+        names_a_campaign = any(
+            re.search(r'(?<![a-z0-9])%s(?![a-z0-9])' % re.escape(
+                (c.get('name') or '').strip().lower()), low_q)
+            for c in (marketing_data.get('campaigns') or [])
+            if (c.get('name') or '').strip())
+
+        # "and which campaign is left?" after "17 of 18 target adults" asks for
+        # the ONE that did not match — the complement of the previous filter.
+        # Without this it was treated as a fresh question and listed 16 rows.
+        is_complement = bool(re.search(
+            r'\b(left|remaining|rest|other one|others|excluded|not included|'
+            r'didn.?t match|does ?n.?t match|missing one|the last one)\b', low_q))
+        if not hint and is_complement:
+            prev = self._previous_question(context)
+            if prev:
+                comp = self._complement_answer(prev, marketing_data)
+                if comp:
+                    hint = comp
+
+        is_why = bool(re.match(r'^\s*(and\s+)?why\b', low_q))
+        if (not hint and not names_a_campaign
+                and (is_why or self._is_reformat_followup(question))):
+            prev = self._previous_question(context)
+            if prev:
+                hint = self._run_query_plan(prev, marketing_data)
+                if hint and is_why:
+                    full_context += (
+                        "\nThe user asked WHY about the previous answer. Explain "
+                        "it using the numbers computed below — never reply that "
+                        "you don't have the information.\n")
+                if hint:
+                    full_context += (
+                        "\nThe new question CONTINUES the previous one. It "
+                        "applies to exactly the campaigns computed below — the "
+                        "same set, nothing added, nothing dropped.\n"
+                        "If it asks for a different field (what they achieved, "
+                        "their leads, their dates), give that field FOR EACH of "
+                        "those campaigns, one row each. Do NOT answer with an "
+                        "account-wide total.\n")
+
+        if hint:
+            full_context += "\n" + hint
+
         answer = self._generate_answer(question, full_context, context)
 
         # An empty reply reached the UI as "No answer provided." — retry once,
@@ -694,6 +841,10 @@ class MarketingQAAgent(MarketingBaseAgent):
         if not (answer or '').strip():
             answer = ("I couldn't produce an answer for that. Try rephrasing it, "
                       "or ask about a specific campaign by name.")
+
+        # Strip any working notes the model copied out of the context.
+        answer = self._strip_internal_lines(answer)
+        answer = self._dedupe_person_rows(answer)
 
         # A per-campaign listing can still hit the token ceiling and stop
         # mid-row. Silently returning half the campaigns looks like the
@@ -1055,6 +1206,92 @@ class MarketingQAAgent(MarketingBaseAgent):
             ).order_by('campaign_id'):
                 lead_counts[row['campaign_id']] = row['count']
 
+        # Per-lead and per-reply detail. Only counts were fetched before, so
+        # "who are meow's leads?" and "what did they say?" were unanswerable
+        # even though the data exists. Capped per campaign to keep the context
+        # manageable; the caps are reported so a truncated list is never
+        # presented as complete.
+        LEADS_PER_CAMPAIGN = 25
+        REPLIES_PER_CAMPAIGN = 15
+        leads_by_campaign = {}
+        replies_by_campaign = {}
+        reply_tally = {}
+        if campaign_ids:
+            for cl in (CampaignLead.objects
+                       .filter(campaign_id__in=campaign_ids)
+                       .select_related('lead')
+                       .order_by('campaign_id', 'lead__email')):
+                bucket = leads_by_campaign.setdefault(cl.campaign_id, [])
+                if len(bucket) >= LEADS_PER_CAMPAIGN:
+                    continue
+                lead = cl.lead
+                bucket.append({
+                    'email': lead.email,
+                    'name': ('%s %s' % (lead.first_name or '',
+                                        lead.last_name or '')).strip(),
+                    'company': lead.company or '',
+                    'job_title': lead.job_title or '',
+                    'status': lead.status or '',
+                })
+
+            # Per-lead reply tallies, counted over EVERY reply. The displayed
+            # rows are capped, and building the tally from those capped rows
+            # produced counts that did not match the data.
+            # order_by() clears the model's default ordering — SQL Server
+            # rejects an ORDER BY column that is not in the GROUP BY.
+            for row in (Reply.objects
+                        .filter(campaign_id__in=campaign_ids)
+                        .values('campaign_id', 'lead__email', 'interest_level')
+                        .annotate(n=Count('id'))
+                        .order_by()):
+                em = row['lead__email']
+                if not em:
+                    continue
+                per = reply_tally.setdefault(row['campaign_id'], {})
+                per.setdefault(em, {})[row['interest_level'] or 'not_analyzed'] = row['n']
+
+            for rep in (Reply.objects
+                        .filter(campaign_id__in=campaign_ids)
+                        .select_related('lead')
+                        .order_by('campaign_id', '-replied_at')):
+                bucket = replies_by_campaign.setdefault(rep.campaign_id, [])
+                if len(bucket) >= REPLIES_PER_CAMPAIGN:
+                    continue
+                bucket.append({
+                    'lead_email': rep.lead.email if rep.lead_id else '',
+                    'lead_name': (('%s %s' % (rep.lead.first_name or '',
+                                              rep.lead.last_name or '')).strip()
+                                  if rep.lead_id else ''),
+                    'interest_level': rep.interest_level or '',
+                    'subject': (rep.reply_subject or '')[:120],
+                    'content': (rep.reply_content or '')[:400],
+                    'replied_at': (rep.replied_at.isoformat()
+                                   if rep.replied_at else None),
+                })
+
+        # Which emails actually went out. Only totals were fetched before, so
+        # "what emails did this campaign send?" had nothing to draw on and the
+        # model invented subject lines — and put the campaign's total against
+        # every one of them.
+        sends_by_campaign = {}
+        if campaign_ids:
+            for row in (EmailSendHistory.objects
+                        .filter(campaign_id__in=campaign_ids)
+                        .values('campaign_id', 'subject')
+                        .annotate(n=Count('id'),
+                                  opened=Count('id', filter=Q(status__in=['opened', 'clicked'])),
+                                  clicked=Count('id', filter=Q(status='clicked')))
+                        .order_by('campaign_id', '-n')):
+                bucket = sends_by_campaign.setdefault(row['campaign_id'], [])
+                if len(bucket) >= 20:
+                    continue
+                bucket.append({
+                    'subject': row['subject'] or '(no subject)',
+                    'sent': row['n'],
+                    'opened': row['opened'],
+                    'clicked': row['clicked'],
+                })
+
         campaigns_data = []
         for campaign in campaigns:
             cid = campaign.id
@@ -1101,8 +1338,16 @@ class MarketingQAAgent(MarketingBaseAgent):
                 'interests': getattr(campaign, 'interests', '') or '',
                 'language': getattr(campaign, 'language', '') or '',
                 'target_audience': getattr(campaign, 'target_audience', None) or {},
+                # Creation date — needed for "when was the last campaign
+                # created?" / "how many did I create last Tuesday?", which
+                # previously answered "not provided in the context".
+                'created_at': campaign.created_at.isoformat() if getattr(campaign, 'created_at', None) else None,
                 'description': (getattr(campaign, 'description', '') or '')[:300],
                 'target_leads': target_leads, 'target_conversions': target_conversions,
+                'leads': leads_by_campaign.get(cid, []),
+                'replies': replies_by_campaign.get(cid, []),
+                'reply_tally': (reply_tally or {}).get(cid, {}),
+                'sent_emails': sends_by_campaign.get(cid, []),
                 'leads_count': leads_count, 'positive_replies': positive_replies,
                 'negative_replies': negative_replies, 'conversions': positive_replies,
                 'conversion_progress': conversion_progress, 'leads_progress': leads_progress,
@@ -1145,7 +1390,8 @@ class MarketingQAAgent(MarketingBaseAgent):
     #  LLM CONTEXT BUILDER (for _handle_llm_reasoning only)
     # ══════════════════════════════════════════════════════════
 
-    def _build_context(self, marketing_data: Dict, additional_context: Optional[Dict] = None) -> str:
+    def _build_context(self, marketing_data: Dict, additional_context: Optional[Dict] = None,
+                       question: str = '') -> str:
         parts = []
 
         parts.append(
@@ -1156,7 +1402,11 @@ class MarketingQAAgent(MarketingBaseAgent):
 
         conv_history = (additional_context or {}).get('conversation_history') or []
         if conv_history:
-            parts.append("RECENT CONVERSATION (last campaign mentioned = current context):")
+            parts.append(
+                "RECENT CONVERSATION — background only. Use it to resolve "
+                "pronouns ('it', 'that one'). If the new question stands on its "
+                "own, answer it over ALL campaigns and ignore what came before; "
+                "do not narrow it to the campaigns discussed earlier.")
             for i, pair in enumerate(conv_history[-4:], 1):
                 q = pair.get('question') or pair.get('q') or ''
                 a = pair.get('answer') or pair.get('a') or ''
@@ -1164,6 +1414,27 @@ class MarketingQAAgent(MarketingBaseAgent):
                     parts.append(f"  Q{i}: {q}")
                     parts.append(f"  A{i}: {a[:500]}{'...' if len(a) > 500 else ''}")
             parts.append("")
+
+            # Name the subject explicitly. Left to infer it from the transcript,
+            # the model drifted: asked "how many leads does IT have?" about one
+            # campaign it answered for three, and "is that realistic?" about a
+            # conversion target it answered about every campaign's status.
+            subject = self._subject_of_conversation(conv_history, marketing_data, question)
+            if subject:
+                # Resolve pronouns to this campaign, but do NOT lock the answer
+                # to it. An earlier version said "Answer ONLY about X", which
+                # made "what about the OTHERS?" and "how do I improve my other
+                # campaigns?" keep answering about X — the exact opposite of
+                # what was asked.
+                parts.append(
+                    "LAST CAMPAIGN DISCUSSED: %s\n"
+                    "Use this to resolve 'it', 'its', 'that', 'this' in the new "
+                    "question. It is NOT a restriction: if the question says "
+                    "'the others', 'other campaigns', 'the rest', or names "
+                    "different campaigns, answer about THOSE and exclude %s. "
+                    "If the question is general, answer generally.\n"
+                    % (subject, subject)
+                )
 
         context = "\n".join(parts)
         context += "MARKETING DATA:\n\n"
@@ -1195,6 +1466,146 @@ class MarketingQAAgent(MarketingBaseAgent):
                 "but rank by the raw counts (positive_replies), not by the "
                 "percentage, and don't claim a >100% rate is an error.\n\n"
             )
+            # Pre-computed counts. The model was answering "no campaign has sent
+            # emails yet" while two rows clearly showed sent=7 and sent=24 — it
+            # generalised from the majority of rows instead of checking each one.
+            # Stating the totals up front removes the need for it to count.
+            sent_c = [c for c in campaigns if (c.get('emails_sent') or 0) > 0]
+            pos_c = [c for c in campaigns if (c.get('positive_replies') or 0) > 0]
+            lead_c = [c for c in campaigns if (c.get('leads_count') or 0) > 0]
+            none_c = [c for c in campaigns if (c.get('emails_sent') or 0) == 0]
+            lead_nosend_c = [c for c in lead_c if (c.get('emails_sent') or 0) == 0]
+
+            def _nm(rows):
+                return ", ".join(c.get('name', 'Unnamed') for c in rows) or "(none)"
+
+            # Age brackets, resolved here rather than by the model. Asked which
+            # campaigns "target children under 10" it answered "below age11"
+            # — a campaign whose age range is 25-45 — because the NAME sounded
+            # right. Ranges are arithmetic, so compute them.
+            def _age_bounds(c):
+                raw = str(c.get('age_range') or '').strip()
+                if not raw:
+                    return None
+                m = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', raw)
+                if m:
+                    return int(m.group(1)), int(m.group(2))
+                if re.match(r'^\d+$', raw):
+                    n = int(raw)
+                    return n, n
+                return None
+
+            def _overlaps(c, lo, hi):
+                b = _age_bounds(c)
+                return b is not None and b[0] <= hi and b[1] >= lo
+
+            kids_c = [c for c in campaigns if _overlaps(c, 0, 12)]
+            teens_c = [c for c in campaigns if _overlaps(c, 13, 17)]
+            adults_c = [c for c in campaigns if _overlaps(c, 18, 120)]
+            noage_c = [c for c in campaigns if _age_bounds(c) is None]
+
+            def _nm_age(rows):
+                if not rows:
+                    return "(none)"
+                return ", ".join("%s [%s]" % (c.get('name', 'Unnamed'),
+                                              c.get('age_range') or '?')
+                                 for c in rows)
+
+            # Explicit low/high per campaign. The fixed brackets above only
+            # answer child/teen/adult; an arbitrary range ("between 10 and 20")
+            # still had to be worked out, and the model kept answering "no
+            # campaigns match" while listing matches in the same breath.
+            _age_rows = []
+            for c in campaigns:
+                b = _age_bounds(c)
+                _age_rows.append(
+                    "  %s: low=%s high=%s" % (c.get('name', 'Unnamed'), b[0], b[1])
+                    if b else
+                    "  %s: no age range set" % c.get('name', 'Unnamed')
+                )
+            age_table = "\n".join(_age_rows)
+            # Without today's date the model cannot resolve "last Tuesday",
+            # "this month", "recently" against the created= values.
+            _today = datetime.now()
+            context += "TODAY: %s (%s)\n\n" % (
+                _today.strftime('%Y-%m-%d'), _today.strftime('%A'))
+            # MEMBERSHIP, not just counts. With counts alone the model still
+            # claimed "none have sent emails" while two rows showed sent=7 and
+            # sent=24, and listed leads=0 rows as "campaigns with leads".
+            # Naming the members leaves nothing for it to derive or mis-read.
+            context += (
+                "PRE-COMPUTED FACTS (authoritative — quote these, never "
+                "re-derive them from the rows below):\n"
+                "- HAVE SENT EMAILS (%d): %s\n"
+                "- HAVE SENT NOTHING (%d): %s\n"
+                "- HAVE POSITIVE REPLIES (%d): %s\n"
+                "- HAVE LEADS UPLOADED (%d): %s\n"
+                "- HAVE LEADS BUT NEVER SENT (%d): %s\n"
+                "- TARGET CHILDREN, age 0-12 (%d): %s\n"
+                "- TARGET TEENS, age 13-17 (%d): %s\n"
+                "- TARGET ADULTS, age 18+ (%d): %s\n"
+                "- NO AGE RANGE SET (%d): %s\n"
+                "\nAGE RANGES, low-high per campaign (for ANY age question, "
+                "including ranges not listed above):\n%s\n"
+                "OVERLAP RULE: a campaign matches an asked range A-B when its "
+                "low <= B AND its high >= A. Example: asking 10-20, a campaign "
+                "with 18-35 MATCHES (18 <= 20 and 35 >= 10). Apply this test to "
+                "every row above before answering — most ranges overlap far more "
+                "campaigns than you would guess.\n"
+                "A campaign NOT in a list does NOT have that property. Never "
+                "name a campaign as having leads, sends or replies unless it "
+                "appears in the matching list above. 'No campaign has sent "
+                "emails' is true ONLY if the first list is (none).\n"
+                "The age lists are computed from the age= numbers, not from "
+                "campaign names. A name like 'below age11' means nothing — only "
+                "its age range counts. Answer age questions from these lists.\n\n"
+                % (len(sent_c), _nm(sent_c),
+                   len(none_c), _nm(none_c),
+                   len(pos_c), _nm(pos_c),
+                   len(lead_c), _nm(lead_c),
+                   len(lead_nosend_c), _nm(lead_nosend_c),
+                   len(kids_c), _nm_age(kids_c),
+                   len(teens_c), _nm_age(teens_c),
+                   len(adults_c), _nm_age(adults_c),
+                   len(noage_c), _nm(noage_c),
+                   age_table)
+            )
+            # Totals and averages, computed here. Asked "what's the average?"
+            # the model produced 11.5 and 1.11 in the same reply and asserted
+            # both — arithmetic over 18 rows is not something to delegate.
+            def _sum(key):
+                return sum((c.get(key) or 0) for c in campaigns)
+
+            def _avg_over(key, rows):
+                return (sum((c.get(key) or 0) for c in rows) / len(rows)) if rows else 0
+
+            n_all = len(campaigns) or 1
+            rates = [(c, c.get('open_rate')) for c in sent_c
+                     if c.get('open_rate') is not None]
+            avg_open = (sum(r for _, r in rates) / len(rates)) if rates else None
+            context += (
+                "TOTALS AND AVERAGES (already computed — quote these, never "
+                "recalculate):\n"
+                "- total leads: %d | total emails sent: %d | total positive "
+                "replies: %d | total conversions: %d\n"
+                "- avg leads per campaign: %.2f over all %d, or %.2f over the "
+                "%d that have leads\n"
+                "- avg positive replies: %.2f over all %d, or %.2f over the %d "
+                "that have sent emails\n"
+                "- avg open rate: %s (over the %d campaigns that sent emails; "
+                "the other %d have no rate at all)\n"
+                "When asked for 'the average' without saying of what, give the "
+                "figure over campaigns that actually have the data, state which "
+                "denominator you used, and give ONE number — never two.\n\n"
+                % (_sum('leads_count'), _sum('emails_sent'), _sum('positive_replies'),
+                   _sum('positive_replies'),
+                   _sum('leads_count') / n_all, len(campaigns),
+                   _avg_over('leads_count', lead_c), len(lead_c),
+                   _sum('positive_replies') / n_all, len(campaigns),
+                   _avg_over('positive_replies', sent_c), len(sent_c),
+                   ("%.2f%%" % avg_open) if avg_open is not None else "n/a",
+                   len(rates), len(campaigns) - len(rates))
+            )
             context += "CAMPAIGNS (all %d — this is the COMPLETE list):\n" % len(campaigns)
             for c in campaigns[:60]:
                 targeting = []
@@ -1216,13 +1627,16 @@ class MarketingQAAgent(MarketingBaseAgent):
                 # a lead who answered with interest. Without it the model has to
                 # guess from lead counts, and picks campaigns that never sent an
                 # email as "about to close".
+                created = (c.get('created_at') or '')[:10] or 'unknown'
                 context += (
-                    "- %s (%s): sent=%s, opened=%s, replied=%s, "
+                    "- %s (%s): created=%s, sent=%s, opened=%s, replied=%s, "
                     "positive_replies=%s, negative_replies=%s, "
                     "open=%s%%, click=%s%%, reply=%s%%, "
-                    "leads=%s, conversions=%s/%s, conv_progress=%s%% "
+                    "leads=%s, conversions=%s/%s, conv_progress=%s%%, "
+                    "runs=%s to %s "
                     "| TARGETING: %s\n" % (
                         c.get('name', 'Unnamed'), c.get('status', 'N/A'),
+                        created,
                         c.get('emails_sent', 0), c.get('emails_opened', 0),
                         c.get('emails_replied', 0),
                         c.get('positive_replies', 0), c.get('negative_replies', 0),
@@ -1232,11 +1646,189 @@ class MarketingQAAgent(MarketingBaseAgent):
                         c.get('positive_replies', 0),
                         c.get('target_conversions') if c.get('target_conversions') is not None else 'N/A',
                         c.get('conversion_progress', 'N/A'),
+                        c.get('start_date') or 'not set',
+                        c.get('end_date') or 'not set',
                         targeting_str,
                     )
                 )
             if len(campaigns) > 60:
                 context += "  (...%d more not shown)\n" % (len(campaigns) - 60)
+
+            # Lead and reply detail, only when the question is about them.
+            # Included always it would dominate every answer and cost tokens on
+            # questions that never touch it.
+            q_low = (question or '').lower()
+            wants_leads = self._mentions(
+                q_low, 'lead', 'leads', 'contact', 'contacts', 'who', 'whom',
+                'email address', 'addresses', 'people')
+            # A follow-up about people carries no such word ("to which campaign
+            # do they belong?"), so fall back to the previous question.
+            if not wants_leads:
+                prev_low = (self._previous_question(additional_context) or '').lower()
+                if (re.search(r'\b(lead|leads|contact|contacts|people)\b', prev_low)
+                        and re.search(r'\b(they|them|their|these|those|it)\b', q_low)):
+                    wants_leads = True
+            wants_replies = self._mentions(
+                q_low, 'reply', 'replies', 'replied', 'respond', 'response',
+                'responded', 'said', 'wrote', 'feedback', 'interested',
+                'interest level', 'unsubscribe', 'unsubscribed', 'positive',
+                'negative', 'objection')
+            # "which CAMPAIGNS have sent emails" asks which campaigns, not what
+            # was in them — it must not pull in every subject line.
+            # Written loosely on purpose: "what were the emails sent by X"
+            # failed a tighter pattern because of the words between "what" and
+            # "emails".
+            wants_sends = bool(
+                re.search(r'\b(subject|subjects|email content)\b', q_low)
+                or re.search(r'\b(what|which|show|list|tell)\b[^.?]{0,30}'
+                             r'\b(emails?|messages?)\b', q_low)
+                or re.search(r'\bemails?\b[^.?]{0,20}\b(sent|went out)\b', q_low)
+            ) and not re.search(r'\bwhich campaigns?\b', q_low)
+
+            if wants_leads or wants_replies or wants_sends:
+                context += "\n"
+                for c in campaigns[:60]:
+                    leads = c.get('leads') or []
+                    replies = c.get('replies') or []
+                    sends = c.get('sent_emails') or []
+                    if not leads and not replies and not sends:
+                        continue
+                    context += "DETAIL for %s:\n" % c.get('name', 'Unnamed')
+                    if wants_sends and sends:
+                        context += (
+                            "  Emails sent, grouped by subject (these counts "
+                            "add up to the campaign total — do NOT put the "
+                            "campaign total against each subject):\n")
+                        for S in sends:
+                            context += (
+                                "    - subject: %s | sent: %d | opened: %d | "
+                                "clicked: %d\n" % (
+                                    S.get('subject'), S.get('sent', 0),
+                                    S.get('opened', 0), S.get('clicked', 0)))
+                    if wants_leads and leads:
+                        context += "  Leads (%d of %d):\n" % (
+                            len(leads), c.get('leads_count') or len(leads))
+                        for L in leads:
+                            # Every field is labelled and always present, even
+                            # when empty. Appending company only when set made
+                            # the model treat it as optional and drop it from
+                            # answers that asked for it.
+                            context += (
+                                "    - name: %s | email: %s | company: %s | "
+                                "job title: %s | status: %s\n" % (
+                                    L.get('name') or 'not set',
+                                    L.get('email') or 'not set',
+                                    L.get('company') or 'not set',
+                                    L.get('job_title') or 'not set',
+                                    L.get('status') or 'unknown'))
+                    if wants_replies and replies:
+                        # Spell out how many PEOPLE these replies came from.
+                        # Given only the rows, the model listed one lead twice
+                        # because that lead had replied twice.
+                        senders = {R.get('lead_email') for R in replies
+                                   if R.get('lead_email')}
+                        # Who replied and who stayed silent, worked out here.
+                        # Given the two lists separately the model had to
+                        # intersect them itself and returned every lead as a
+                        # non-replier.
+                        lead_emails = {L.get('email') for L in (c.get('leads') or [])
+                                       if L.get('email')}
+                        if lead_emails:
+                            replied = sorted(senders & lead_emails)
+                            silent = sorted(lead_emails - senders)
+                            context += (
+                                "  Replied at least once (%d): %s\n"
+                                "  Never replied (%d): %s\n" % (
+                                    len(replied), ", ".join(replied) or "(none)",
+                                    len(silent), ", ".join(silent) or "(none)"))
+
+                        # Reply types PER LEAD. Asked "what types of replies
+                        # from all leads of X", the model returned the lead
+                        # list with no types attached — it had the rows but not
+                        # the per-person tally.
+                        # Counted over every reply, not just the rows shown.
+                        per_lead = c.get('reply_tally') or {}
+                        if per_lead:
+                            # Name the campaign on the heading. Without it the
+                            # table read as account-wide and the answer never
+                            # said whose replies these were.
+                            context += (
+                                "  (the table below is for %s only, and has %d "
+                                "rows — reproduce every one)\n" % (
+                                    c.get('name', 'Unnamed'),
+                                    len(lead_emails or per_lead)))
+                            context += "  Reply types per lead:\n"
+                            for em in sorted(lead_emails or per_lead):
+                                counts = per_lead.get(em)
+                                context += "    %s -> %s\n" % (
+                                    em,
+                                    ", ".join("%s x%d" % (k, v) for k, v in
+                                              sorted(counts.items(),
+                                                     key=lambda t: -t[1]))
+                                    if counts else "no replies")
+                        # Pre-counted so "what reply types did we get?" is a
+                        # lookup rather than a tally across rows.
+                        kinds = {}
+                        for R in replies:
+                            k = R.get('interest_level') or 'not_analyzed'
+                            kinds[k] = kinds.get(k, 0) + 1
+                        context += (
+                            "  Replies (%d reply rows from %d distinct "
+                            "lead(s) — the same person can appear more than "
+                            "once):\n"
+                            "  Reply types here: %s\n" % (
+                                len(replies), len(senders),
+                                ", ".join("%s=%d" % (k, v) for k, v
+                                          in sorted(kinds.items(),
+                                                    key=lambda t: -t[1]))))
+                        for R in replies:
+                            context += (
+                                "    - %s <%s> [%s] on %s\n"
+                                "      subject: %s\n"
+                                "      says: %s\n" % (
+                                    R.get('lead_name') or '(no name)',
+                                    R.get('lead_email'),
+                                    R.get('interest_level') or 'not analysed',
+                                    (R.get('replied_at') or '')[:10],
+                                    R.get('subject') or '(none)',
+                                    (R.get('content') or '(empty)').replace('\n', ' ')))
+                # Which campaigns each lead belongs to. The detail above is
+                # grouped BY campaign, so "which campaign do they belong to?"
+                # had to be inferred by scanning every block — the model
+                # answered with campaign metrics instead.
+                if wants_leads:
+                    lead_to_campaigns = {}
+                    for c in campaigns[:60]:
+                        for L in (c.get('leads') or []):
+                            em = L.get('email')
+                            if em:
+                                lead_to_campaigns.setdefault(em, []).append(
+                                    c.get('name', 'Unnamed'))
+                    if lead_to_campaigns:
+                        context += "\nLEAD -> CAMPAIGNS (which campaigns each lead is on):\n"
+                        for em, names in sorted(lead_to_campaigns.items()):
+                            context += "  %s -> %s\n" % (em, ", ".join(names))
+
+                context += (
+                    "\nThese lists are capped (25 leads, 15 replies per "
+                    "campaign). If a campaign's lead count is higher than the "
+                    "number shown, say the list is partial rather than "
+                    "presenting it as everyone.\n"
+                    "When asked about leads, answer with the LEAD ROWS above — "
+                    "give every field each row carries (name, email, company, "
+                    "job title, status), not just the ones you consider "
+                    "interesting. 'Details of leads' means the people, not the "
+                    "campaign's metrics: do not answer it with sent/opened/"
+                    "reply-rate figures.\n"
+                    "Subject lines exist ONLY in the 'Emails sent' rows above. "
+                    "Never write a subject line that is not listed there, and "
+                    "never repeat the campaign's total against each subject — "
+                    "each row already carries its own count.\n"
+                    "When listing PEOPLE, each lead appears ONCE however many "
+                    "times they replied. If one lead sent three replies, that "
+                    "is still one lead — say '1 lead (3 replies)', never the "
+                    "same person three times. Count the distinct email "
+                    "addresses, not the reply rows.\n")
 
         research = marketing_data.get('research', [])
         if research:
@@ -1269,10 +1861,35 @@ class MarketingQAAgent(MarketingBaseAgent):
             "'not set' rather than leaving it out.\n"
             "- The CAMPAIGNS list above is COMPLETE. Never invent a campaign that "
             "is not in it, and never invent metrics or targeting values.\n"
-            "- If the question asks for campaigns matching a condition and NONE "
-            "match, say so plainly: 'No campaigns match that.' Then say what the "
-            "campaigns DO target. Do NOT fall back to listing every campaign as "
-            "if it answered the question.\n"
+            "- YOU ONLY KNOW WHAT IS IN THIS CONTEXT. If the answer is not in "
+            "the data above, say 'I don't have that information' and stop. This "
+            "applies especially to outside facts — API pricing, model costs, "
+            "industry benchmarks, competitor numbers, news, dates, definitions. "
+            "You have no access to them, and a number that looks plausible is "
+            "still a fabrication. Never state a figure you cannot point to a "
+            "line of the context for.\n"
+            "- STAY IN SCOPE. You answer questions about THIS account's "
+            "marketing data. General knowledge is out of scope even when you "
+            "happen to know it: geography, history, science, celebrities, "
+            "current events, other companies' pricing, coding help, recipes. "
+            "For those reply exactly: \"That's outside what I can help with — "
+            "I answer questions about your campaigns and marketing data.\" Do "
+            "not answer and then add a disclaimer; just decline.\n"
+            "- Do not produce creative writing (poems, songs, stories, jokes) "
+            "even about the campaign data. Say you can summarise the data "
+            "instead, and offer the summary.\n"
+            "- OPEN WITH THE ANSWER. Name the campaign(s) in the first sentence "
+            "(e.g. 'new1234 performs best: 13 positive replies from 24 sent'). "
+            "Never open with 'No campaigns match that' when campaigns follow in "
+            "the same reply — that contradicts itself.\n"
+            "- Write 'No campaigns match that.' ONLY when your entire reply names "
+            "zero campaigns, i.e. the filter genuinely matched nothing. Then say "
+            "what the campaigns DO have, so the user can adjust. Never list every "
+            "campaign as if it answered the question.\n"
+            "- A vague question ('which one is good?', 'which is best?', 'sab se "
+            "achi konsi hai?') always HAS an answer: rank the campaigns by the "
+            "most sensible metric, name the winner, and say which metric you "
+            "used. It is never an unmatched filter.\n"
             "- A campaign matches an audience filter ONLY if its TARGETING line "
             "actually says so. 'no targeting set' or a missing age means UNKNOWN "
             "— such a campaign must be EXCLUDED from the matching list, never "
@@ -1300,14 +1917,93 @@ class MarketingQAAgent(MarketingBaseAgent):
             "- Always answer with something concrete. Never reply with an empty "
             "message. If the question is unclear, say what you think was meant and "
             "answer that, or ask one short clarifying question.\n"
+            "- The context above is working material, not the answer. Never "
+            "reproduce its headings, instructions, per-condition counts, raw "
+            "field names or operators (emails_sent, duration_days, '> 7', "
+            "'!='). Write for someone who has never seen the data model: "
+            "'campaigns that ran longer than a week', not 'duration_days > 7'.\n"
             "- Read FIELD MEANINGS above before ranking anything. For questions "
             "about progress, conversions, or 'closing deals', rank by "
-            "positive_replies. If EVERY campaign has positive_replies=0, the "
-            "honest answer is 'None — no campaign has any positive replies yet', "
-            "not the least-bad campaign. Never present a draft campaign that has "
-            "sent 0 emails as the closest to converting.\n"
-            "- When you name a winner, quote the number that makes it the winner. "
-            "If that number is 0, say the result is 'no data yet' instead.\n"
+            "positive_replies. Never present a draft campaign that has sent 0 "
+            "emails as the closest to converting.\n"
+            "- BEFORE answering 'none', CHECK EVERY ROW of the CAMPAIGNS list. "
+            "Answer 'none' ONLY when literally zero rows qualify. Most campaigns "
+            "having sent=0 does NOT mean all of them do — if even one row has "
+            "sent>0 or positive_replies>0, that row IS the answer. Saying 'no "
+            "campaign has sent emails' while rows show sent=7 and sent=24 is "
+            "flatly wrong.\n"
+            "- Never contradict yourself: if you say nothing matches and then "
+            "list matching rows, the correct answer was the list. Decide from "
+            "the data first, then write one consistent answer. Never show two "
+            "different values for the same figure and let the reader choose — "
+            "work it out, then state one number.\n"
+            "- THE COUNT MUST MATCH THE LIST. If you open with 'N campaigns...', "
+            "N must equal how many you then list. Write the list first, count "
+            "its rows, and use that number. Saying '6 campaigns' above a list "
+            "of 16 is a wrong answer.\n"
+            "- A counting or filtering question covers ALL 18 campaigns unless "
+            "the user restricts it. 'How many were created before August?' means "
+            "every campaign, not just the ones discussed a moment ago. Check the "
+            "created= value of each row before answering.\n"
+            "- BUT a request to re-present the last answer ('just show their "
+            "names', 'with their dates', 'shorter') keeps the SAME set of "
+            "campaigns you just listed. Change only the formatting — never widen "
+            "it back to every campaign.\n"
+            "- 'and how much did they achieve?' after a filtered list means: for "
+            "EACH campaign in that list, give the figure. One row per campaign, "
+            "never a single account-wide total. The same goes for 'their leads', "
+            "'their dates', 'their rates'.\n"
+            "- 'mention its detail' / 'more detail' / 'break it down' asks for "
+            "the full row(s) of whatever was just discussed — every field you "
+            "have for them. Never answer that with 'I don't have that "
+            "information': you have the rows in the CAMPAIGNS list.\n"
+            "- A bare 'why?' asks you to justify the answer you JUST gave, using "
+            "the numbers behind it. You always have those — they are in the "
+            "context. 'I don't have that information' is never a valid reply to "
+            "'why?'.\n"
+            "- A follow-up asks for something NEW about the same subject — never "
+            "repeat your previous answer verbatim. 'and why?' wants the reasoning "
+            "and the numbers behind what you just said, not the same sentence "
+            "again.\n"
+            "- 'the others' / 'other campaigns' / 'the rest' / 'my other X' means "
+            "EXCLUDE the campaign(s) you just discussed and answer about the "
+            "remaining ones. Naming the same campaign again is a wrong answer. "
+            "If the remaining campaigns are many and similar, group them (e.g. "
+            "'the 15 drafts have sent nothing — launch or delete them') instead "
+            "of listing every row.\n"
+            "- 'How do I improve X' asks for ADVICE, not a metric dump. Give "
+            "concrete steps tied to what the data shows is weak (never launched, "
+            "no leads uploaded, low open rate, no targeting set). Restating the "
+            "numbers is not advice.\n"
+            "- Answer the question that was ACTUALLY asked. If it does not "
+            "follow from the previous turn, treat it as a fresh question rather "
+            "than bending it to fit the last topic. If a question is about the "
+            "platform, your own limits, or anything outside the campaign data "
+            "(e.g. 'is the limit reset?'), say you don't have that information "
+            "instead of answering it with campaign metrics.\n"
+            "- 'Best' is ambiguous: say which metric you ranked by, and if a "
+            "different metric would give a different winner, mention that in one "
+            "clause (e.g. 'by positive replies X leads; by open rate Y does').\n"
+            "- 'Performing best/worst' means RESULTS, so only campaigns with "
+            "sent>0 can be ranked. A campaign that never sent an email has no "
+            "performance at all — never call it the best performer just because "
+            "it has leads. Rank among sent>0 rows only.\n"
+            "- A judgement question ('is that realistic?', 'is it good?') is "
+            "about the NUMBER just discussed. Answer it with arithmetic on that "
+            "campaign: compare the target against what it has achieved so far "
+            "and its send volume, then say realistic or not and why. Do not "
+            "answer with the status of every campaign in the account.\n"
+            "- Never say 'all campaigns are X' unless every single row is X. "
+            "Check the status values in the list before making a claim about "
+            "all of them.\n"
+            "- created=YYYY-MM-DD is when the campaign was created; runs=... is "
+            "its scheduled window. Use created= for 'when was it made / created "
+            "last week'. There is no budget or spend data — if asked, say that "
+            "field isn't tracked rather than guessing.\n"
+            "- 'age' about a CAMPAIGN means the audience age range it targets "
+            "(the age= value), never how old the campaign is. 'All campaigns "
+            "with their age' means name + age range, not creation dates.\n"
+            "- When you name a winner, quote the number that makes it the winner.\n"
         )
         # 700 tokens could not hold a full per-campaign listing: the answer was
         # cut off mid-row ("below age11 (draft) - sent:0, opened:0, ...open"),
@@ -1345,6 +2041,868 @@ class MarketingQAAgent(MarketingBaseAgent):
                 return "The service is busy. Please try again in a few seconds."
             return "Analysis could not be completed at this time. Please try again."
 
+    OUT_OF_SCOPE_SYSTEM = (
+        "You gate questions for an assistant that ONLY answers questions about "
+        "one company's own marketing campaigns (their metrics, targeting, "
+        "leads, emails, dates) and marketing advice about them.\n"
+        "Reply with exactly one word.\n\n"
+        "allow  - about this account's campaigns/marketing, or advice on them. "
+        "Each campaign stores TARGETING fields: age range, location, industry, "
+        "company size, interests, language. Questions about those are ALWAYS "
+        "allowed — 'what is their company size?' asks which company size a "
+        "campaign targets, and 'show their industries' asks which industries "
+        "they target. Neither is a question about outside companies.\n"
+        "reject - general knowledge (geography, history, science, celebrities, "
+        "news), OTHER companies' pricing or products, coding help, recipes, "
+        "creative writing (poems, songs, stories, jokes), or anything else "
+        "unrelated to this account's marketing data.\n\n"
+        "A question does NOT have to mention the word 'campaign'. Short "
+        "follow-ups, comparisons, and campaign names on their own are part of "
+        "an ongoing conversation about the data — allow them. When unsure, "
+        "ALLOW: wrongly blocking a real question is far worse than answering a "
+        "borderline one.\n\n"
+        "Examples:\n"
+        "'which campaigns have sent emails?' -> allow\n"
+        "'how do I improve my open rate?' -> allow\n"
+        "'should I delete the drafts?' -> allow\n"
+        "'compare er5t6y7u89 and new1234' -> allow\n"
+        "'what should I do about the others?' -> allow\n"
+        "'and why?' -> allow\n"
+        "'from total?' -> allow\n"
+        "'which one is good?' -> allow\n"
+        "'what is the capital of France?' -> reject\n"
+        "'how much does OpenAI charge per token?' -> reject\n"
+        "'write me a poem about my campaigns' -> reject\n"
+        "'tell me a joke' -> reject\n"
+    )
+
+    def _is_out_of_scope(self, question: str,
+                         campaign_names: Optional[List[str]] = None,
+                         has_history: bool = False) -> bool:
+        """True when the question isn't about this account's marketing.
+
+        The prompt rules alone did not hold — the model answered 'what is the
+        capital of France?' and wrote a poem on request. On any failure this
+        returns False, so a real question is never blocked by a broken check.
+        """
+        if not question or not question.strip():
+            return False
+
+        # A question naming one of the user's own campaigns is always in scope,
+        # whatever the classifier thinks. It wrongly rejected "compare
+        # er5t6y7u89 and new1234" — blocking a real question is the worse error.
+        low = question.lower()
+        for name in (campaign_names or []):
+            n = (name or '').strip().lower()
+            if n and re.search(r'(?<![a-z0-9])%s(?![a-z0-9])' % re.escape(n), low):
+                return False
+
+        # Creative writing is out of scope even when it is about the campaigns,
+        # so this is checked before the domain-term allowance below (a poem
+        # request mentions "campaigns" too).
+        if re.search(r'\b(write|compose|make up|create)\b[^.]{0,30}'
+                     r'\b(poem|poetry|song|story|joke|rap|haiku|limerick)\b', low):
+            return True
+
+        # Any question mentioning a field we actually store is in scope. The
+        # classifier read "what is their company size?" as being about outside
+        # companies and blocked it, though company_size is a targeting field on
+        # every campaign.
+        domain_terms = (
+            'campaign', 'campaigns', 'lead', 'leads', 'email', 'emails',
+            'sent', 'open rate', 'click', 'reply', 'replies', 'bounce',
+            'conversion', 'conversions', 'target', 'targeting', 'audience',
+            'age range', 'company size', 'industry', 'industries', 'interests',
+            'location', 'language', 'draft', 'drafts', 'paused', 'active',
+            'performance', 'metrics', 'created', 'status',
+        )
+        if any(t in low for t in domain_terms):
+            return False
+
+        # Mid-conversation, a short question with a back-reference is a
+        # follow-up about the data just discussed — "mention its deal" was
+        # blocked because it names no field of its own. The subject comes from
+        # the previous turn, so it cannot be judged in isolation.
+        if has_history:
+            words = set(re.findall(r"[a-z']+", low))
+            refs = {'it', 'its', "it's", 'that', 'this', 'those', 'these',
+                    'them', 'they', 'their', 'same', 'above', 'previous',
+                    'others', 'other', 'rest'}
+            if len(low.split()) <= 12 and (words & refs):
+                return False
+        try:
+            out = self._call_llm_for_reasoning(
+                'Question: "%s"' % question.strip()[:300],
+                self.OUT_OF_SCOPE_SYSTEM, temperature=0.0, max_tokens=5,
+            )
+        except Exception as e:
+            self.log_action("Scope check failed", {"error": str(e)})
+            return False
+        return bool(out) and 'reject' in out.strip().lower()
+
+    # Question wording -> the campaign field it refers to.
+    # ══════════════════════════════════════════════════════════
+    #  QUERY PLANNER
+    #  The model turns a question into a filter spec; Python executes it.
+    #
+    #  This replaced six hand-written filter helpers (age ranges, dates,
+    #  numeric thresholds, booleans, ranking, industry/location text). Each
+    #  handled the cases it was written for and silently dropped the rest, so
+    #  every new field or combination was a new bug: "campaigns with positive
+    #  replies AND clicks" ignored the clicks entirely because no helper knew
+    #  that field. A spec covers every field and operator at once.
+    # ══════════════════════════════════════════════════════════
+
+    # Fields the planner may filter or sort on, and how to read each one.
+    #   kind: 'num'   -> numeric compare
+    #         'text'  -> case-insensitive substring
+    #         'range' -> "25-45" style, compared by overlap
+    #         'date'  -> ISO date string, compared lexically
+    PLANNABLE_FIELDS = {
+        'name':               ('text',  'name'),
+        'status':             ('text',  'status'),
+        'industry':           ('text',  'industry'),
+        'location':           ('text',  'location'),
+        'language':           ('text',  'language'),
+        'company_size':       ('text',  'company_size'),
+        'interests':          ('text',  'interests'),
+        'age_range':          ('range', 'age_range'),
+        'created_at':         ('date',  'created_at'),
+        'start_date':         ('date',  'start_date'),
+        'end_date':           ('date',  'end_date'),
+        'emails_sent':        ('num',   'emails_sent'),
+        'emails_opened':      ('num',   'emails_opened'),
+        'emails_clicked':     ('num',   'emails_clicked'),
+        'emails_replied':     ('num',   'emails_replied'),
+        'emails_bounced':     ('num',   'emails_bounced'),
+        'positive_replies':   ('num',   'positive_replies'),
+        'negative_replies':   ('num',   'negative_replies'),
+        'leads_count':        ('num',   'leads_count'),
+        'target_leads':       ('num',   'target_leads'),
+        'target_conversions': ('num',   'target_conversions'),
+        'open_rate':          ('num',   'open_rate'),
+        'click_rate':         ('num',   'click_rate'),
+        'reply_rate':         ('num',   'reply_rate'),
+        'bounce_rate':        ('num',   'bounce_rate'),
+        'conversion_progress': ('num',  'conversion_progress'),
+        # Derived: end_date - start_date. Without it "campaigns running more
+        # than a week" had no way to be expressed, so the model guessed and
+        # returned a 7-day campaign as "more than a week".
+        'duration_days':      ('num',   '_duration_days'),
+    }
+
+    PLANNER_SYSTEM = (
+        "You translate a question about marketing campaigns into a JSON filter "
+        "spec. Reply with ONLY the JSON object, no prose, no code fences.\n\n"
+        "Shape:\n"
+        '{"filters": [{"field": "...", "op": "...", "value": ...}], '
+        '"sort": {"field": "...", "desc": true}, "limit": null}\n\n'
+        "Fields you may use:\n"
+        "  text  : name, status (draft|paused|active), industry, location, "
+        "language, company_size, interests\n"
+        "  range : age_range        (use op 'overlaps' with [low, high])\n"
+        "  date  : created_at, start_date, end_date  (values 'YYYY-MM-DD')\n"
+        "  number: emails_sent, emails_opened, emails_clicked, emails_replied, "
+        "emails_bounced, positive_replies, negative_replies, leads_count, "
+        "target_leads, target_conversions, open_rate, click_rate, reply_rate, "
+        "bounce_rate, conversion_progress, duration_days\n\n"
+        "duration_days is end_date minus start_date, already computed. Use it "
+        "for 'runs for more than a week' (> 7), 'longer than a month' (> 30), "
+        "'short campaigns', and similar. A week is 7 days, a month is 30.\n"
+        "IMPORTANT: start_date/end_date are the PLANNED schedule. A draft "
+        "campaign has never launched, so it is not actually running. When the "
+        "question is about campaigns that RUN or ARE RUNNING (present tense), "
+        "add {\"field\":\"emails_sent\",\"op\":\">\",\"value\":0} so only "
+        "campaigns that actually went out are returned. If the question is "
+        "about how long they are SCHEDULED for, do not add it.\n\n"
+        "Operators: =, !=, >, >=, <, <=, contains, overlaps\n\n"
+        "Rules:\n"
+        "- EVERY condition in the question must appear as a filter. 'paused "
+        "campaigns with positive replies and clicks' is THREE filters.\n"
+        "- 'has X' / 'with X' means X > 0. 'no X' / 'zero X' means X = 0.\n"
+        "- 'never sent' is emails_sent = 0; 'have sent' is emails_sent > 0.\n"
+        "- 'clicks' is emails_clicked; 'opens' is emails_opened.\n"
+        "- Industry/location: use 'contains' with the shortest distinctive "
+        "word ('tech', 'commerce', 'united states') so spelling variants match.\n"
+        "- Read through typos: 'ecomerce'->commerce, 'postive'->positive.\n"
+        "- best/worst PERFORMING ranks by positive_replies AND requires "
+        "emails_sent > 0 (a campaign that never ran has no performance). Use "
+        "sort + limit 1.\n"
+        "- If the question asks for no filtering at all, return "
+        '{"filters": [], "sort": null, "limit": null}.\n'
+        "- If the question names a SPECIFIC campaign, filter on its name: "
+        '{"field":"name","op":"contains","value":"<the name>"}.\n'
+        "- If the question asks about something NOT in the field list above — "
+        "ROI, budget, spend, cost, revenue, profit, CTR benchmarks — return "
+        '{"filters": [], "sort": null, "limit": null, "unavailable": "<field>"}. '
+        "Never substitute a different field for one you do not have: 'highest "
+        "ROI' is NOT 'most positive replies'.\n"
+        "- 'unavailable' is ONLY for the four money concepts above (ROI, "
+        "budget/spend/cost, revenue/profit, external benchmarks). If the word "
+        "appears anywhere in the field list — language, location, industry, "
+        "interests, company_size, age_range, any rate or count — it EXISTS and "
+        "'unavailable' is wrong. Asking 'what are the languages of these "
+        "campaigns' is a question about a field you have.\n"
+        "- Individual LEADS and their REPLIES are also available (name, email, "
+        "company, job title, status; reply text, reply subject, reply date, and "
+        "interest level: positive, negative, neutral, requested_info, "
+        "objection, unsubscribe, not_analyzed). Sent emails carry their subject "
+        "lines too. A question like 'who are meow's leads', 'what did they "
+        "reply', 'what reply types did we get' or 'what subjects were sent' is "
+        "answerable — that detail is supplied automatically. Never call leads, "
+        "replies, reply types or subjects unavailable.\n"
+        "- Only use 'unavailable' when the DATA is missing, not when the "
+        "phrasing is unusual. 'campaigns targeting multiple countries' is a "
+        "question about the location field, which you DO have — use "
+        '{"field":"location","op":"contains","value":","} because a location '
+        "listing several countries is comma-separated. The same trick works "
+        "for multiple industries or languages.\n\n"
+        "Examples:\n"
+        "Q: which paused campaigns have positive replies but no clicks?\n"
+        'A: {"filters": [{"field":"status","op":"=","value":"paused"},'
+        '{"field":"positive_replies","op":">","value":0},'
+        '{"field":"emails_clicked","op":"=","value":0}], "sort":null, "limit":null}\n'
+        "Q: ecomerce campaigns with more than 100 conversion target\n"
+        'A: {"filters": [{"field":"industry","op":"contains","value":"commerce"},'
+        '{"field":"target_conversions","op":">","value":100}], "sort":null, "limit":null}\n'
+        "Q: which campaigns target ages 10 to 20?\n"
+        'A: {"filters": [{"field":"age_range","op":"overlaps","value":[10,20]}], '
+        '"sort":null, "limit":null}\n'
+        "Q: campaigns created before August 2026\n"
+        'A: {"filters": [{"field":"created_at","op":"<","value":"2026-08-01"}], '
+        '"sort":null, "limit":null}\n'
+        "Q: which campaign performs worst?\n"
+        'A: {"filters": [{"field":"emails_sent","op":">","value":0}], '
+        '"sort":{"field":"positive_replies","desc":false}, "limit":1}\n'
+        "Q: tell me about er5t6y7u89\n"
+        'A: {"filters": [{"field":"name","op":"contains","value":"er5t6y7u89"}], '
+        '"sort":null, "limit":null}\n'
+        "Q: which campaign has the highest ROI?\n"
+        'A: {"filters": [], "sort":null, "limit":null, "unavailable":"ROI"}\n'
+        "Q: what is the budget of cmp1?\n"
+        'A: {"filters": [], "sort":null, "limit":null, "unavailable":"budget"}\n'
+    )
+
+    def _plan_query(self, question: str) -> Optional[Dict]:
+        """Ask the model for a filter spec. None when it can't produce one."""
+        if not question or not question.strip():
+            return None
+        # The model has no idea what year it is and defaulted to its training
+        # data: "before September" planned a cutoff of 2023-09-01 against 2026
+        # campaigns, so nothing matched. State today's date every time.
+        today = datetime.now()
+        dated_system = self.PLANNER_SYSTEM + (
+            "\nTODAY IS %s (%s). Any month named without a year means that "
+            "month in %d — 'before September' is '%d-09-01'. 'last month' is "
+            "%s, 'this month' is %s. Never use a year from memory.\n"
+            % (today.strftime('%Y-%m-%d'), today.strftime('%A'),
+               today.year, today.year,
+               (today.replace(day=1) - timedelta(days=1)).strftime('%Y-%m'),
+               today.strftime('%Y-%m'))
+        )
+        try:
+            raw = self._call_llm_for_reasoning(
+                'Q: %s\nA:' % question.strip()[:400],
+                dated_system, temperature=0.0, max_tokens=300,
+            )
+        except Exception as e:
+            self.log_action("Query planning failed", {"error": str(e)})
+            return None
+        if not raw:
+            return None
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not m:
+            return None
+        try:
+            plan = json.loads(m.group(0))
+        except (ValueError, TypeError):
+            return None
+        return plan if isinstance(plan, dict) else None
+
+    @staticmethod
+    def _duration_days(campaign: Dict) -> Optional[int]:
+        """end_date - start_date in days, or None when either is missing."""
+        a = str(campaign.get('start_date') or '')[:10]
+        b = str(campaign.get('end_date') or '')[:10]
+        if len(a) != 10 or len(b) != 10:
+            return None
+        try:
+            d1 = datetime.strptime(a, '%Y-%m-%d')
+            d2 = datetime.strptime(b, '%Y-%m-%d')
+        except ValueError:
+            return None
+        return (d2 - d1).days
+
+    @staticmethod
+    def _parse_range(raw) -> Optional[tuple]:
+        s = str(raw or '').strip()
+        m = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', s)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        if re.match(r'^\d+$', s):
+            return int(s), int(s)
+        return None
+
+    def _apply_filter(self, campaign: Dict, flt: Dict) -> Optional[bool]:
+        """Evaluate one condition. None when it cannot be evaluated."""
+        field = str(flt.get('field') or '')
+        spec = self.PLANNABLE_FIELDS.get(field)
+        if not spec:
+            return None
+        kind, key = spec
+        op = str(flt.get('op') or '=').strip()
+        want = flt.get('value')
+        if key == '_duration_days':
+            have = self._duration_days(campaign)
+        else:
+            have = campaign.get(key)
+
+        if kind == 'range':
+            bounds = self._parse_range(have)
+            if bounds is None:
+                return False          # no age set is not a match
+            if op == 'overlaps' and isinstance(want, (list, tuple)) and len(want) == 2:
+                try:
+                    lo, hi = float(want[0]), float(want[1])
+                except (TypeError, ValueError):
+                    return None
+                return bounds[0] <= hi and bounds[1] >= lo
+            return None
+
+        if kind == 'num':
+            if have is None:
+                return False          # no data is not a match either way
+            try:
+                a, b = float(have), float(want)
+            except (TypeError, ValueError):
+                return None
+            return {'>': a > b, '>=': a >= b, '<': a < b, '<=': a <= b,
+                    '=': a == b, '==': a == b, '!=': a != b}.get(op)
+
+        # text and date are both string compares; dates are ISO so this is safe.
+        a = str(have or '').strip().lower()
+        # company_size is stored as text ("11-50"), so the planner sometimes
+        # sends it as a range. Treat that as the literal bucket it names.
+        if isinstance(want, (list, tuple)) and len(want) == 2:
+            b = '%s-%s' % (want[0], want[1])
+            if op == 'overlaps':
+                op = 'contains'
+        else:
+            b = str(want or '').strip().lower()
+        b = b.strip().lower()
+        if kind == 'date':
+            a = a[:10]
+            b = b[:10]
+            if not a:
+                return False
+        if op in ('contains', 'includes', 'has'):
+            return b in a
+        if op == '!=':
+            return b not in a if kind == 'text' else a != b
+        if op in ('=', '=='):
+            return (b in a) if kind == 'text' else a == b
+        if kind == 'date':
+            return {'>': a > b, '>=': a >= b, '<': a < b, '<=': a <= b}.get(op)
+        return None
+
+    def _complement_answer(self, previous_question: str,
+                           marketing_data: Dict) -> Optional[str]:
+        """The campaigns the PREVIOUS filter did not match.
+
+        "17 of 18 target adults" followed by "which one is left?" is asking for
+        the 18th. Re-running the previous plan and inverting it is exact; asked
+        to work it out itself the model listed sixteen unrelated campaigns.
+        """
+        campaigns = (marketing_data or {}).get('campaigns') or []
+        if not campaigns:
+            return None
+        plan = self._plan_query(previous_question)
+        if not plan:
+            return None
+        filters = plan.get('filters')
+        if not isinstance(filters, list) or not filters:
+            return None
+
+        missed = []
+        for c in campaigns:
+            verdicts = [self._apply_filter(c, f) for f in filters
+                        if isinstance(f, dict)]
+            if any(v is None for v in verdicts) or not verdicts:
+                return None          # can't trust a partial evaluation
+            if not all(verdicts):
+                missed.append(c)
+
+        described = " AND ".join(
+            "%s %s %s" % (f.get('field'), f.get('op'), f.get('value'))
+            for f in filters if isinstance(f, dict))
+        if not missed:
+            return (
+                "ANSWER FOR THIS QUESTION (already computed):\n"
+                "Every campaign matched the previous filter, so none is left "
+                "over. Say that plainly.\n"
+            )
+
+        shown = []
+        for f in filters:
+            fld = f.get('field')
+            if fld in self.PLANNABLE_FIELDS and fld not in shown:
+                shown.append(fld)
+        rows = []
+        for c in missed:
+            bits = ", ".join(
+                "%s: %s" % (f.replace('_', ' '),
+                            c.get(self.PLANNABLE_FIELDS[f][1])
+                            if c.get(self.PLANNABLE_FIELDS[f][1]) is not None
+                            else 'not set')
+                for f in shown)
+            rows.append("  - %s (%s)%s" % (c.get('name', 'Unnamed'),
+                                           c.get('status', 'N/A'),
+                                           (" - " + bits) if bits else ""))
+        return (
+            "ANSWER FOR THIS QUESTION (already computed):\n"
+            "The previous question filtered on: %s\n"
+            "%d of %d campaigns did NOT match — these are the ones left over:\n"
+            "%s\n"
+            "List exactly these. Explain briefly why each fell outside (usually "
+            "the field is not set). Do not list the campaigns that DID match.\n"
+            % (described, len(missed), len(campaigns), "\n".join(rows))
+        )
+
+    def _run_query_plan(self, question: str, marketing_data: Dict) -> Optional[str]:
+        """Execute a planned filter and return the finished answer as context.
+
+        The model plans; Python filters. That split is the point: the model is
+        good at reading intent out of a typo-ridden sentence and bad at
+        comparing numbers across 18 rows, and this asks each to do only what it
+        is good at.
+        """
+        campaigns = (marketing_data or {}).get('campaigns') or []
+        if not campaigns:
+            return None
+
+        plan = self._plan_query(question)
+        if not plan:
+            return None
+
+        # The question asks for a field we do not store (ROI, budget, spend).
+        # Say so — the model otherwise substitutes a field it does have and
+        # presents the wrong metric as the answer.
+        unavailable = plan.get('unavailable')
+        # Only four things are genuinely missing. Checking against the field
+        # list alone was not enough — 'language' and then 'reply types' were
+        # both declared unavailable while the data existed, telling the user
+        # their own records weren't there. Allow the refusal only for money
+        # concepts we truly do not store.
+        if unavailable:
+            u = str(unavailable).strip().lower()
+            truly_missing = (
+                'roi', 'return on investment', 'budget', 'spend', 'spent',
+                'cost', 'costs', 'revenue', 'profit', 'margin', 'cpc', 'cpl',
+                'cpa', 'benchmark', 'benchmarks', 'industry average',
+            )
+            if not any(m in u for m in truly_missing):
+                self.log_action("Ignored bogus 'unavailable'", {"field": u})
+                unavailable = None
+        if unavailable:
+            return (
+                "ANSWER FOR THIS QUESTION (already computed — use it verbatim):\n"
+                "This account does not track %s. There is no such field on a "
+                "campaign, so the question cannot be answered from the data.\n"
+                "Say that plainly. Do NOT answer with a different metric "
+                "instead, and do not estimate it.\n" % unavailable
+            )
+
+        filters = plan.get('filters')
+        if not isinstance(filters, list) or not filters:
+            return None            # nothing to pre-compute
+
+        matched, described = [], []
+        for c in campaigns:
+            verdicts = [self._apply_filter(c, f) for f in filters
+                        if isinstance(f, dict)]
+            if any(v is None for v in verdicts) or not verdicts:
+                # An unusable filter means we cannot trust the result; leave the
+                # question to the model rather than answering it wrongly.
+                return None
+            if all(verdicts):
+                matched.append(c)
+
+        for f in filters:
+            described.append("%s %s %s" % (f.get('field'), f.get('op'),
+                                           f.get('value')))
+        label = " AND ".join(described)
+
+        sort = plan.get('sort') or None
+        if isinstance(sort, dict) and sort.get('field') in self.PLANNABLE_FIELDS:
+            skey = self.PLANNABLE_FIELDS[sort['field']][1]
+            matched.sort(key=lambda c: (c.get(skey) is None, c.get(skey) or 0),
+                         reverse=bool(sort.get('desc')))
+        limit = plan.get('limit')
+        if isinstance(limit, int) and 0 < limit < len(matched):
+            matched = matched[:limit]
+
+        self.log_action("Query plan executed",
+                        {"filters": label, "matched": len(matched)})
+
+        if not matched:
+            # Show how each condition fares on its own, so the explanation for
+            # "none" is grounded instead of guessed ("they have sent nothing"
+            # was offered for campaigns that had in fact sent emails).
+            breakdown = []
+            for f in filters:
+                if not isinstance(f, dict):
+                    continue
+                n = sum(1 for c in campaigns
+                        if self._apply_filter(c, f) is True)
+                breakdown.append("  %s %s %s -> %d campaign(s)" % (
+                    f.get('field'), f.get('op'), f.get('value'), n))
+            return (
+                "ANSWER FOR THIS QUESTION (already computed):\n"
+                "NO campaign matches: %s\n"
+                "\n--- INTERNAL, DO NOT REPRODUCE ---\n"
+                "Per-condition counts, for working out the reason only:\n%s\n"
+                "--- END INTERNAL ---\n"
+                % (label, "\n".join(breakdown))
+                +
+                "Reply to the user in one or two plain sentences: say nothing "
+                "matched, and give the reason in words (e.g. 'the campaigns "
+                "that sent emails are all English'). Never print the counts "
+                "above, the field names, or the operators — they are working "
+                "notes, not part of the answer. Do not list other campaigns.\n"
+            )
+
+        # Show the fields that were filtered or sorted on, so each listed row
+        # visibly satisfies the conditions.
+        shown = []
+        for f in filters:
+            fld = f.get('field')
+            if fld in self.PLANNABLE_FIELDS and fld not in shown:
+                shown.append(fld)
+        if isinstance(sort, dict) and sort.get('field') in self.PLANNABLE_FIELDS:
+            if sort['field'] not in shown:
+                shown.append(sort['field'])
+
+        def _display(campaign, field):
+            key = self.PLANNABLE_FIELDS[field][1]
+            if key == '_duration_days':
+                d = self._duration_days(campaign)
+                return ('%d days (%s to %s)' % (d, campaign.get('start_date'),
+                                                campaign.get('end_date'))
+                        if d is not None else 'no dates set')
+            v = campaign.get(key)
+            return v if v is not None else 'not set'
+
+        rows = []
+        for c in matched:
+            bits = ", ".join(
+                "%s: %s" % (f.replace('_', ' '), _display(c, f)) for f in shown)
+            rows.append("  - %s (%s) - %s" % (c.get('name', 'Unnamed'),
+                                              c.get('status', 'N/A'), bits))
+
+        # A duration answer that includes drafts reads as though those campaigns
+        # are running. They are not — the dates are only a plan.
+        caveat = ""
+        if any(f.get('field') == 'duration_days' for f in filters):
+            drafts = [c.get('name') for c in matched
+                      if (c.get('emails_sent') or 0) == 0]
+            if drafts:
+                caveat = (
+                    "NOTE: %s never sent an email, so %s scheduled for that "
+                    "long, not actually running. Say so — do not describe a "
+                    "draft as running.\n"
+                    % (", ".join(drafts),
+                       "it is" if len(drafts) == 1 else "they are")
+                )
+
+        return (
+            "ANSWER FOR THIS QUESTION (already computed — do not recount and do "
+            "not re-filter):\n"
+            "%d of %d campaigns match. The matching campaigns are:\n%s\n%s"
+            "List exactly these, all of them — do not add or drop any.\n"
+            "Describe the condition in plain words, never as a raw filter: say "
+            "'run longer than a week', not 'duration_days > 7'. Field names and "
+            "operators are internal.\n"
+            "Write each row as 'name (status) - label: value, label: value'. "
+            "Never prefix a label with the word 'field' — 'location: Pakistan', "
+            "not 'field: location: Pakistan'.\n"
+            % (len(matched), len(campaigns), "\n".join(rows), caveat)
+        )
+
+    def _is_reformat_followup(self, question: str) -> bool:
+        """True when the question continues the PREVIOUS result set.
+
+        Covers both re-presentations ("just show their names") and requests for
+        a different field about the same campaigns ("and how much did they
+        achieve?"). Either way the previous filter still applies — answering
+        the latter across all 18 campaigns was wrong.
+        """
+        q = (question or '').strip().lower().rstrip('?!.')
+        # A follow-up is short. A long question states its own criteria.
+        if not q or len(q.split()) > 10:
+            return False
+        # A question naming its own scope is a new query, not a follow-up.
+        # ("their"/"those" excluded — "how many of them" is still a follow-up.)
+        if re.search(r'\b(all|every|each)\s+campaigns?\b', q):
+            return False
+        if re.search(r'\bwhich\s+campaigns?\b', q):
+            return False
+
+        words = set(re.findall(r"[a-z']+", q))
+        refs = {'their', 'them', 'they', 'those', 'these', 'that', 'it', 'its',
+                'same', 'this'}
+        trims = {'just', 'only', 'shorter', 'briefly', 'simply'}
+
+        # A back-reference means "the set we were just discussing".
+        if words & refs:
+            return True
+        # A bare trim with no subject ("just names") means the same.
+        return bool(words & trims)
+
+    def _previous_question(self, additional_context: Optional[Dict]) -> Optional[str]:
+        """The most recent user question from the conversation history."""
+        history = (additional_context or {}).get('conversation_history') or []
+        for pair in reversed(history):
+            q = (pair.get('question') or pair.get('q') or '').strip()
+            if q:
+                return q
+        return None
+
+    def _subject_of_conversation(self, conv_history: List[Dict],
+                                 marketing_data: Dict,
+                                 current_question: str = '') -> Optional[str]:
+        """The campaign the conversation is currently about, or None.
+
+        Only returns a name when the recent turns are focused on ONE campaign;
+        a conversation ranging over several has no single subject to pin.
+        """
+        campaigns = (marketing_data or {}).get('campaigns') or []
+        names = [(c.get('name') or '').strip() for c in campaigns]
+        names = [n for n in names if n]
+        if not names or not conv_history:
+            return None
+
+        # Only pin a subject when the NEW question actually refers back. After
+        # "compare er5t6y7u89 and new1234", asking "how many campaigns were
+        # created before August 2026?" is a fresh, self-contained question —
+        # naming a subject made the model answer it about those two only.
+        q_new = (current_question or '').strip().lower()
+        if q_new:
+            refs = ('it', 'its', "it's", 'that', 'this', 'those', 'these',
+                    'them', 'they', 'their', 'same', 'above', 'previous')
+            words = set(re.findall(r"[a-z']+", q_new))
+            names_in_q = any(
+                re.search(r'(?<![a-z0-9])%s(?![a-z0-9])' % re.escape(n.lower()), q_new)
+                for n in names)
+            if not (words & set(refs)) and not names_in_q:
+                return None
+            if names_in_q:
+                # The question names campaigns itself — that wins over history.
+                # One name is the subject; several is a comparison, so no pin.
+                named = [n for n in names
+                         if re.search(r'(?<![a-z0-9])%s(?![a-z0-9])' % re.escape(n.lower()), q_new)]
+                return named[0] if len(named) == 1 else None
+
+        def _found(text: str) -> List[str]:
+            low = (text or '').lower()
+            hits = []
+            for n in names:
+                if re.search(r'(?<![a-z0-9])%s(?![a-z0-9])' % re.escape(n.lower()), low):
+                    hits.append(n)
+            return hits
+
+        # Walk backwards; the most recent turn that pins exactly one campaign
+        # wins. A turn naming several is a comparison, not a single subject.
+        for pair in reversed(conv_history[-4:]):
+            hits = set(_found(pair.get('question') or pair.get('q') or ''))
+            if len(hits) == 1:
+                return hits.pop()
+            if hits:
+                return None      # comparison — no single subject
+            hits = set(_found(pair.get('answer') or pair.get('a') or ''))
+            if len(hits) == 1:
+                return hits.pop()
+        return None
+
+    def _dedupe_person_rows(self, answer: str) -> str:
+        """Drop repeated lead rows for the same email address.
+
+        A lead who replied several times has several reply rows, and the model
+        listed the person once per row — the same name and address twice under
+        "which leads replied negatively". One person is one row.
+        """
+        if not answer or answer.count('@') < 2:
+            return answer
+
+        out, seen = [], set()
+        for line in answer.split('\n'):
+            emails = re.findall(r'[\w.+-]+@[\w-]+\.[\w.]+', line)
+            # Only collapse rows that are ABOUT one person, not prose that
+            # happens to mention an address.
+            if len(emails) == 1 and len(line.strip()) < 220:
+                key = emails[0].lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+            out.append(line)
+        return '\n'.join(out)
+
+    def _reply_types_table(self, question: str,
+                           marketing_data: Dict) -> Optional[str]:
+        """The finished per-lead reply-type answer, ready to be repeated.
+
+        Told to copy the table from the context, the model kept omitting leads.
+        Composing the final text here leaves nothing to trim.
+        """
+        campaigns = (marketing_data or {}).get('campaigns') or []
+        if not campaigns:
+            return None
+
+        low = (question or '').lower()
+        targets = [c for c in campaigns
+                   if (c.get('name') or '').strip()
+                   and re.search(r'(?<![a-z0-9])%s(?![a-z0-9])'
+                                 % re.escape(c['name'].strip().lower()), low)]
+
+        # The question may name a campaign that does not exist ("new123456").
+        # Falling back to every campaign answered about the wrong data and gave
+        # no clue whose replies these were — say the name is unknown instead.
+        if not targets:
+            named = re.findall(r'\b(?:of|for|from|in)\s+([A-Za-z0-9_-]{3,})\s*$',
+                               (question or '').strip(), re.IGNORECASE)
+            if named:
+                typo = named[-1]
+                # Offer the nearest existing names so the user can correct it.
+                close = sorted(
+                    ((SequenceMatcher(None, typo.lower(),
+                                      (c.get('name') or '').lower()).ratio(),
+                      c.get('name')) for c in campaigns if c.get('name')),
+                    reverse=True)[:3]
+                suggestions = [n for score, n in close if score >= 0.4]
+                return (
+                    "\nANSWER FOR THIS QUESTION (already computed — use it "
+                    "verbatim, add nothing):\n"
+                    "No match found for '%s'.%s\n"
+                    "Reply with just that. Do NOT show reply data, lead rows or "
+                    "metrics for any campaign.\n"
+                    % (typo,
+                       (" Closest names: " + ", ".join(suggestions) + ".")
+                       if suggestions else "")
+                )
+            # No campaign named at all — cover every campaign that has replies,
+            # each clearly labelled.
+            targets = [c for c in campaigns if c.get('reply_tally')]
+        if not targets:
+            return None
+
+        out = []
+        for c in targets:
+            tally = c.get('reply_tally') or {}
+            emails = sorted({L.get('email') for L in (c.get('leads') or [])
+                             if L.get('email')} | set(tally))
+            if not emails:
+                continue
+            lines = []
+            totals = {}
+            for em in emails:
+                kinds = tally.get(em) or {}
+                for k, v in kinds.items():
+                    totals[k] = totals.get(k, 0) + v
+                lines.append("  - %s: %s" % (
+                    em,
+                    ", ".join("%s x%d" % (k, v) for k, v in
+                              sorted(kinds.items(), key=lambda t: -t[1]))
+                    if kinds else "no replies"))
+            out.append(
+                "%s (%s) — all %d lead(s):\n%s\nTotals: %s" % (
+                    c.get('name'), c.get('status', 'N/A'), len(emails),
+                    "\n".join(lines),
+                    ", ".join("%s %d" % (k, v) for k, v in
+                              sorted(totals.items(), key=lambda t: -t[1]))
+                    or "no replies at all"))
+
+        if not out:
+            return None
+        return (
+            "\nANSWER FOR THIS QUESTION (already computed — reproduce it "
+            "exactly, every line, adding nothing and dropping nothing):\n"
+            + "\n\n".join(out) + "\n"
+        )
+
+    def _mentions(self, question: str, *keywords) -> bool:
+        """Typo-tolerant keyword test.
+
+        Exact patterns kept failing on ordinary misspellings — "replis" matched
+        nothing, so the reply detail never reached the context and the answer
+        came back without it.
+        """
+        q = (question or '').lower()
+        tokens = re.findall(r"[a-z]+", q)
+        for kw in keywords:
+            if kw in q:
+                return True
+            if ' ' in kw:
+                continue
+            for t in tokens:
+                if len(kw) >= 5 and abs(len(t) - len(kw)) <= 3 and \
+                        SequenceMatcher(None, t, kw).ratio() >= 0.78:
+                    return True
+        return False
+
+    def _strip_internal_lines(self, answer: str) -> str:
+        """Remove working notes the model echoed from the context.
+
+        The pre-computed hints carry per-condition counts and raw filter
+        expressions for the model to reason with. Those are internal; when they
+        reached the reply the user saw "language != English -> 3 campaign(s)"
+        under their answer. Prompt rules alone did not reliably stop it.
+        """
+        if not answer:
+            return answer
+
+        drop_exact = (
+            'each condition on its own', 'per-condition counts',
+            'answer for this question', '--- internal', '--- end internal',
+            'do not reproduce', 'already computed',
+        )
+        out = []
+        for line in answer.split('\n'):
+            low = line.strip().lower()
+            if not low:
+                out.append(line)
+                continue
+            if any(m in low for m in drop_exact):
+                continue
+            # "field op value -> N campaign(s)" — a raw breakdown row.
+            if re.match(r'^[a-z_]+\s*(!=|>=|<=|>|<|=|contains|overlaps)\s*\S.*'
+                        r'->\s*\d+\s*campaign', low):
+                continue
+            # A bare filter expression on its own line.
+            if re.match(r'^[a-z_]{3,}\s*(!=|>=|<=|>|<|=)\s*[\w\'"%.-]+$', low):
+                continue
+            out.append(line)
+
+        cleaned = '\n'.join(out)
+
+        # "field: location: Pakistan" -> "location: Pakistan". The model picked
+        # the word up from the plan and repeated it before every label.
+        cleaned = re.sub(r'\bfield\s*:\s*(?=[a-z_ ]+\s*:)', '', cleaned,
+                         flags=re.IGNORECASE)
+
+        # Trailing filter expressions inside an otherwise fine sentence:
+        # "2 of 18 campaigns match: duration_days > 7" -> drop from the colon.
+        # Anchored on "match:" so a normal data row ("sent: 7, leads: 5")
+        # is never touched.
+        cleaned = re.sub(
+            r'\bmatch(?:es|ing)?\s*:\s*[a-z_]{3,}\s*'
+            r'(?:!=|>=|<=|>|<|=|contains|overlaps)[^\n]*',
+            'match', cleaned)
+        # Underscored field names are left alone here. Rewriting them turned
+        # legitimate data rows ("sent: 7, positive_replies: 10") into different
+        # text, and the prompt already asks for plain wording.
+
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+        return cleaned or answer
+
     def _note_if_truncated(self, answer: str, marketing_data: Dict) -> str:
         """Append a note when a per-campaign listing was cut short.
 
@@ -1357,36 +2915,72 @@ class MarketingQAAgent(MarketingBaseAgent):
         if total < 4 or not answer:
             return answer
 
-        # Count how many campaign names actually made it into the answer.
-        low = answer.lower()
-        named = [c for c in campaigns
-                 if (c.get('name') or '').strip()
-                 and (c.get('name') or '').strip().lower() in low]
-        shown = len(named)
+        # Repair a count that disagrees with the list under it. The model wrote
+        # "6 campaigns have not sent emails" above 16 rows; the list was right
+        # and the number was not, so correct the number rather than leaving the
+        # reader to spot it.
+        answer = self._fix_count_mismatch(answer, campaigns)
 
-        # Only a listing-style answer is worth checking: several names present
-        # but not all of them.
-        if shown < 3 or shown >= total:
+        # Truncation is only flagged when the text ends on a DANGLING LABEL —
+        # a metric name with its separator and no value ("…opened: 4, open:").
+        # Every looser test produced false positives on complete answers, and a
+        # wrong "cut off" note is worse than missing a rare real truncation.
+        stripped = answer.rstrip()
+        last_line = stripped.split('\n')[-1].strip()
+        if not last_line or len(last_line) < 15:
+            return answer
+        cut = re.search(
+            r'\b(sent|leads|opened|open|click|clicked|reply|replied|'
+            r'positive_replies|negative_replies|conversions|conversion|'
+            r'age|created|status|target)\s*[:=]\s*$',
+            last_line.lower())
+        if not cut:
             return answer
 
-        # A filtered answer legitimately shows a subset ("2 of 18 campaigns
-        # target tech"). Don't call that truncated — the model said up front
-        # how many it was listing.
-        if re.search(r'\b\d+\s+of\s+\d+\b', low) or 'no campaigns match' in low:
-            return answer
-
-        # A truncated listing ends mid-row; a finished one ends in punctuation.
-        # If the last line looks like a complete sentence, trust it.
-        last_line = answer.rstrip().split('\n')[-1].strip()
-        if last_line.endswith(('.', '!', '?', ':')) and len(last_line) < 120:
-            return answer
-
-        missing = [c.get('name', 'Unnamed') for c in campaigns if c not in named]
-        return answer.rstrip() + (
-            "\n\n_Showing %d of %d campaigns — the reply hit its length limit. "
-            "Still missing: %s. Ask about those by name for their details._"
-            % (shown, total, ", ".join(missing[:12]) + ("..." if len(missing) > 12 else ""))
+        return stripped + (
+            "\n\n_The reply was cut off before the end. Ask again for the "
+            "remaining campaigns, or narrow the question._"
         )
+
+    def _fix_count_mismatch(self, answer: str, campaigns: List[Dict]) -> str:
+        """Correct an opening count that disagrees with the list beneath it.
+
+        The model wrote "6 campaigns have not sent emails" and then listed 16.
+        The list comes from the data and is reliable; the count is where it slips.
+        """
+        if not answer or not campaigns:
+            return answer
+
+        names = [(c.get('name') or '').strip() for c in campaigns]
+        names = [n for n in names if n]
+
+        lines = answer.split('\n')
+        # Rows that name exactly one campaign — the listing itself.
+        listed = 0
+        for ln in lines:
+            low = ln.lower()
+            hits = [n for n in names
+                    if re.search(r'(?<![a-z0-9])%s(?![a-z0-9])' % re.escape(n.lower()), low)]
+            if len(hits) == 1 and re.search(
+                    r'\b(sent|leads|open|click|reply|positive_replies|age|created)\s*[:=]', low):
+                listed += 1
+        if listed < 3:
+            return answer
+
+        # The opening line's leading number, if it has one.
+        for i, ln in enumerate(lines[:3]):
+            m = re.match(r'^\s*(\d+)\b', ln)
+            if not m:
+                continue
+            stated = int(m.group(1))
+            if stated == listed or stated > len(campaigns):
+                return answer
+            # "N of M" keeps its M; only the first number is wrong.
+            lines[i] = re.sub(r'^(\s*)\d+\b', r'\g<1>%d' % listed, ln, count=1)
+            self.log_action("Corrected count in answer",
+                            {"stated": stated, "listed": listed})
+            return '\n'.join(lines)
+        return answer
 
     def _extract_insights(self, marketing_data: Dict, question: str) -> List[Dict]:
         insights = []

@@ -131,11 +131,14 @@ class MarketingBaseAgent:
             if key_ctx.provider == 'groq':
                 model_to_use = model or self.model or getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-20b')
             else:
-                model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
+                # Ignore any caller-supplied model here: callers pass GPT names
+                # like 'gpt-4.1' that the company's own OpenAI key may not have
+                # access to, which surfaced as "Analysis could not be completed".
+                model_to_use = getattr(settings, 'OPENAI_MODEL', 'gpt-4o-mini')
         else:
             # company_id/agent_key_name not set — fail; never fall back to env key
             call_client = None
-            model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1')
+            model_to_use = model or getattr(settings, 'OPENAI_MODEL', 'gpt-4o-mini')
         if not call_client:
             raise ValueError(
                 "No API key available for OpenAI call. Set self.company_id and self.agent_key_name "
@@ -297,7 +300,9 @@ class MarketingBaseAgent:
         if resolved_client is not None:
             call_client = resolved_client
             if key_ctx.provider == 'openai':
-                effective_model = getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+                # self.model holds the GROQ model (set in __init__), so it must
+                # not be used when the company attached an OpenAI key.
+                effective_model = getattr(settings, 'OPENAI_MODEL', 'gpt-4o-mini')
             else:
                 effective_model = self.model
         else:
@@ -411,8 +416,7 @@ class MarketingBaseAgent:
         Returns:
             str: LLM response text
         """
-        # Use GPT-4 Turbo for writing (or gpt-4.1 if available)
-        writing_model = getattr(settings, 'OPENAI_WRITING_MODEL', 'gpt-4.1')
+        writing_model = getattr(settings, 'OPENAI_WRITING_MODEL', 'gpt-4o-mini')
         return self._call_llm(prompt, system_prompt, temperature, max_tokens, model=writing_model)
     
     def log_action(self, action, details=None):
