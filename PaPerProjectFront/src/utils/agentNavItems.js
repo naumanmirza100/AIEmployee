@@ -40,6 +40,9 @@ import {
   LineChart,
   FolderKanban,
   CalendarPlus,
+  // Company dashboard sub-tabs
+  ListTodo,
+  KeyRound,
 } from 'lucide-react';
 
 /**
@@ -270,11 +273,30 @@ const ALL_AGENTS = [
  * @returns {Array}  navItems ready for the sidebar (each may carry `children`)
  */
 export const getAgentNavItems = (purchasedModules, currentSection, navigate) => {
+  // The company dashboard's own tabs, shown nested under "Dashboard" in the
+  // sidebar (they used to live only as a horizontal tab bar on the page).
+  // Each routes to /company/dashboard/<tab>; "Ticket Tasks" only appears when
+  // the Frontline agent is purchased (mirrors the on-page tab bar), and
+  // "API Keys" jumps to the settings route like its tab does.
+  const dashboardChildren = [
+    { label: 'My Jobs',         icon: Briefcase,    path: '/company/dashboard/jobs' },
+    { label: 'Projects',        icon: FolderKanban, path: '/company/dashboard/projects' },
+    { label: 'Applications',    icon: Users,        path: '/company/dashboard/applications' },
+    { label: 'Users',           icon: UserCheck,    path: '/company/dashboard/users' },
+    { label: 'All Users Tasks', icon: ListTodo,     path: '/company/dashboard/all-tasks' },
+    ...(purchasedModules.includes('frontline_agent')
+      ? [{ label: 'Ticket Tasks', icon: Ticket, path: '/company/dashboard/ticket-tasks' }]
+      : []),
+    { label: 'AI Agents',       icon: BrainCircuit, path: '/company/dashboard/ai-agents' },
+    { label: 'API Keys',        icon: KeyRound,     path: '/company/settings/api-keys' },
+  ];
+
   const items = [
     {
       label: 'Dashboard',
       icon: Building2,
       section: 'dashboard',
+      children: dashboardChildren,
       onClick: () => navigate('/company/dashboard'),
     },
   ];
