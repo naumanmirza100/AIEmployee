@@ -298,11 +298,24 @@ export const HR_OPERATIONS_TOUR = {
 // etc.) are still exported so URL deep-links can still launch them.
 
 export const HR_TAB_TOURS = {
+  // Visible top-level tabs — reached from the sidebar directly.
   overview:   HR_OVERVIEW_TOUR,
   people:     HR_PEOPLE_TOUR,
   knowledge:  HR_KNOWLEDGE_TOUR,
   operations: HR_OPERATIONS_TOUR,
   meetings:   HR_MEETINGS_TOUR,
+  // Hidden legacy tabs — reached via click-through from the visible tabs'
+  // placeholder cards. Each still renders a "Tour this tab" button in its
+  // TabsContent header; without these mappings the buttons were a silent
+  // no-op (HR_TAB_TOURS[tabKey] → undefined → handler returns early).
+  qa:            HR_QA_TOUR,
+  employees:     HR_EMPLOYEES_TOUR,
+  my_team:       HR_MY_TEAM_TOUR,
+  org_chart:     HR_ORG_CHART_TOUR,
+  documents:     HR_DOCUMENTS_TOUR,
+  workflows:     HR_WORKFLOWS_TOUR,
+  leave:         HR_LEAVE_TOUR,
+  notifications: HR_NOTIFICATIONS_TOUR,
 };
 
 // Main-tour storage key (used by the "Take the Tour" auto-launch).

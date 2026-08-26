@@ -775,6 +775,7 @@ const ProjectManagerDashboardPage = () => {
                     the hidden legacy tab that currently owns the feature, so
                     nothing is inaccessible. Real content lands in Chunks B/C/D. */}
                 <TabsContent value="projects" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="projects" /></div>
                   <ErrorBoundary>
                     <ProjectsListView
                       projects={projects || []}
@@ -786,6 +787,7 @@ const ProjectManagerDashboardPage = () => {
                 </TabsContent>
 
                 <TabsContent value="tasks" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="tasks" /></div>
                   <ErrorBoundary>
                     <TasksListView
                       projects={projects || []}
@@ -797,6 +799,7 @@ const ProjectManagerDashboardPage = () => {
                 </TabsContent>
 
                 <TabsContent value="insights" className="mt-6">
+                  <div className="flex justify-end mb-3"><TabTourButton tabKey="insights" /></div>
                   <ErrorBoundary>
                     <InsightsView
                       onOpenPilot={openPilot}

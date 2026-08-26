@@ -3983,6 +3983,7 @@ const FrontlineDashboard = () => {
               as proper nested sub-tabs. Until then, sub-tab feel = one click
               away, not zero — but nothing is broken or unreachable. */}
         <TabsContent value="queue" className="mt-6">
+          <div className="flex justify-end mb-3"><TabTourButton tabKey="queue" /></div>
           <QueueView
             activeSubTab={activeSubTab}
             onSubTabChange={(sub) => setSubTab('queue', sub)}
@@ -3991,6 +3992,7 @@ const FrontlineDashboard = () => {
         </TabsContent>
 
         <TabsContent value="knowledge" className="mt-6">
+          <div className="flex justify-end mb-3"><TabTourButton tabKey="knowledge" /></div>
           <KnowledgeView
             documents={documents}
             docSummaries={docSummaries}
@@ -4008,6 +4010,7 @@ const FrontlineDashboard = () => {
         </TabsContent>
 
         <TabsContent value="insights" className="mt-6">
+          <div className="flex justify-end mb-3"><TabTourButton tabKey="insights" /></div>
           <InsightsView
             activeSubTab={activeSubTab}
             onSubTabChange={(sub) => setSubTab('insights', sub)}
@@ -4015,6 +4018,7 @@ const FrontlineDashboard = () => {
         </TabsContent>
 
         <TabsContent value="automation" className="mt-6">
+          <div className="flex justify-end mb-3"><TabTourButton tabKey="automation" /></div>
           <AutomationView
             activeSubTab={activeSubTab}
             onSubTabChange={(sub) => setSubTab('automation', sub)}
@@ -4022,6 +4026,7 @@ const FrontlineDashboard = () => {
         </TabsContent>
 
         <TabsContent value="settings" className="mt-6">
+          <div className="flex justify-end mb-3"><TabTourButton tabKey="settings" /></div>
           <SettingsView
             activeSubTab={activeSubTab}
             onSubTabChange={(sub) => setSubTab('settings', sub)}
