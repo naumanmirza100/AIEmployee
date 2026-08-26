@@ -347,8 +347,11 @@ Return JSON array with optimized dates:
 ]"""
             
             try:
-                response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=1200)
-                
+                # Bumped 1200 → 6000. This call schedules one JSON entry per
+                # task with 4-6 sentence reasoning; projects with 10+ tasks
+                # blew the 1200 cap and truncated mid-array.
+                response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=6000)
+
                 # Extract JSON from response
                 if "```json" in response:
                     json_start = response.find("```json") + 7
@@ -1228,8 +1231,11 @@ Return JSON array:
         
         suggestions = []
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=1200)
-            
+            # Bumped 1200 → 6000. Suggestion list is variable-length with an
+            # `impact` field per item; large timelines produced enough
+            # suggestions to overflow 1200 and truncate the JSON.
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=6000)
+
             # Extract JSON
             if "```json" in response:
                 json_start = response.find("```json") + 7
@@ -1515,8 +1521,12 @@ CALCULATE AND RETURN JSON:
 }}"""
         
         try:
-            # Use temperature=0 for consistency (same input = same output)
-            response = self._call_llm(prompt, self.system_prompt, temperature=0, max_tokens=1200)
+            # Use temperature=0 for consistency (same input = same output).
+            # Bumped max_tokens 1200 → 3000. The output includes an 5-8
+            # sentence `ai_reasoning` field plus 3-5 improvement suggestions
+            # and nested dependency analysis; 1200 was tight and truncated
+            # under realistic load.
+            response = self._call_llm(prompt, self.system_prompt, temperature=0, max_tokens=3000)
             
             # Extract JSON
             if "```json" in response:
