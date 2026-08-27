@@ -668,10 +668,24 @@ export const SETTINGS_TOUR = {
 // The hidden-tab tour constants above (DOCUMENTS_TOUR, QA_TOUR, etc.) are
 // still exported so URL deep-links can still launch them if needed.
 export const TAB_TOURS = {
+  // Visible top-level tabs — reached from the sidebar directly.
   queue:      QUEUE_TOUR,
   knowledge:  KNOWLEDGE_TOUR_NEW,
   insights:   INSIGHTS_TOUR,
   automation: AUTOMATION_TOUR,
   settings:   SETTINGS_TOUR,
   overview:   OVERVIEW_TOUR,
+  // Hidden legacy tabs — reached via click-through from the visible tabs'
+  // placeholder cards, but each still renders a "Tour this tab" button in
+  // its TabsContent header. Without these mappings the buttons were a
+  // silent no-op (TAB_TOURS[tabKey] → undefined → handler returns early).
+  documents:     DOCUMENTS_TOUR,
+  qa:            QA_TOUR,
+  widget:        WIDGET_TOUR,
+  tickets:       TICKETS_TOUR,
+  handoffs:      HANDOFFS_TOUR,
+  notifications: NOTIFICATIONS_TOUR,
+  workflows:     WORKFLOWS_TOUR,
+  analytics:     ANALYTICS_TOUR,
+  'ai-graphs':   AI_GRAPHS_TOUR,
 };

@@ -131,7 +131,10 @@ Rules:
 - Include detailed task_reasoning explaining the breakdown strategy and efficiency considerations"""
 
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=2048)
+            # Bumped 2048 → 6000. The prompt asks for 4-8 subtasks with 6-8
+            # sentence descriptions AND 5-7 sentence reasoning per subtask;
+            # complex tasks routinely blew past 2048 and truncated the JSON.
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=6000)
             
             # Try to extract JSON from response (handle markdown code blocks)
             if "```json" in response:

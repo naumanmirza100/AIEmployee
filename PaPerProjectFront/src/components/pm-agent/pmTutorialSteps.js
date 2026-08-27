@@ -327,11 +327,23 @@ export const PM_INSIGHTS_TOUR = {
 // still exported so URL deep-links can still launch them if needed.
 
 export const PM_TAB_TOURS = {
+  // Visible top-level tabs — reached from the sidebar directly.
   'project-pilot': PM_PROJECT_PILOT_TOUR,
   projects:        PM_PROJECTS_TOUR,
   tasks:           PM_TASKS_TOUR,
   insights:        PM_INSIGHTS_TOUR,
   overview:        PM_OVERVIEW_TOUR,
+  // Hidden legacy tabs — reached via click-through from the visible tabs'
+  // placeholder cards. Each still renders a "Tour this tab" button in its
+  // TabsContent header; without these mappings the buttons were a silent
+  // no-op (PM_TAB_TOURS[tabKey] → undefined → handler returns early).
+  'create-project':     PM_CREATE_PROJECT_TOUR,
+  'create-task':        PM_CREATE_TASK_TOUR,
+  'task-prioritization': PM_TASK_PRIO_TOUR,
+  'knowledge-qa':       PM_KNOWLEDGE_QA_TOUR,
+  'timeline-gantt':     PM_TIMELINE_TOUR,
+  'meeting-scheduler':  PM_MEETING_TOUR,
+  'ai-tools':           PM_AI_TOOLS_TOUR,
 };
 
 // Main-tour storage key

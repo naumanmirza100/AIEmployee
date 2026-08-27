@@ -1082,6 +1082,7 @@ const HRDashboard = () => {
                   Chunks B–D extract that content into these views as real
                   nested sub-tabs, the sub-tab feel becomes zero-click. */}
             <TabsContent value="people" className="mt-6">
+              <div className="flex justify-end mb-3"><TabTourButton tabKey="people" /></div>
               <ErrorBoundary>
                 <HRPeopleView
                   activeSubTab={activeSubTab}
@@ -1096,6 +1097,7 @@ const HRDashboard = () => {
             </TabsContent>
 
             <TabsContent value="knowledge" className="mt-6">
+              <div className="flex justify-end mb-3"><TabTourButton tabKey="knowledge" /></div>
               <ErrorBoundary>
                 <HRKnowledgeView
                   activeSubTab={activeSubTab}
@@ -1107,6 +1109,7 @@ const HRDashboard = () => {
             </TabsContent>
 
             <TabsContent value="operations" className="mt-6">
+              <div className="flex justify-end mb-3"><TabTourButton tabKey="operations" /></div>
               <ErrorBoundary>
                 <HROperationsView
                   activeSubTab={activeSubTab}

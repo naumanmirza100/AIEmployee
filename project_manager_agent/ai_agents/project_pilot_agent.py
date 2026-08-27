@@ -382,7 +382,11 @@ RULES:
 - Return ONLY tasks that should be in this sprint (don't include all tasks)"""
 
             try:
-                response = self._call_llm(prompt, self.system_prompt, temperature=0.7, max_tokens=3000)
+                # Bumped 3000 → 12000. A sprint plan returns one create_task per
+                # selected item WITH reasoning, plus a summary block. Sprints
+                # with 10+ tasks blew past 3000 and the JSON truncated mid-array,
+                # matching the same failure mode as the create-project flow.
+                response = self._call_llm(prompt, self.system_prompt, temperature=0.7, max_tokens=12000)
 
                 # Try to extract both JSON actions and summary
                 summary = ""
@@ -932,6 +936,23 @@ Return ONLY text - NO JSON, NO actions."""
                     # Prefer "add to existing project" when they named a project (or used "in X" / "to X")
                     if existing_project_mentioned:
                         wants_new_project = False
+
+                # Explicit "create a project named X" ALWAYS wins over fuzzy matching.
+                # Without this, a user asking for a brand-new project whose name happens
+                # to overlap with an existing one (e.g. "create a project named mess
+                # management system" when a "Mess Management System Project" already
+                # exists) gets silently routed into the add-tasks-to-existing-project
+                # path — no create_project action, tasks attached to the wrong project.
+                _explicit_create_phrases = (
+                    'create a project', 'create project', 'make a project',
+                    'make project', 'new project', 'add a new project',
+                    'add project', 'start a project', 'start project',
+                    'build a new project', 'build a project',
+                )
+                if any(p in question_lower for p in _explicit_create_phrases):
+                    wants_new_project = True
+                    existing_project_mentioned = False
+                    project_id_to_use = None
                 
                 if wants_new_project:
                     # Determine assignment intent from the user's words (no hardcoded keyword lists for "all").
@@ -1361,9 +1382,14 @@ Return a helpful text response (NOT JSON) explaining this."""
                 (not is_action_request and not is_deletion_request)
             )
             
-            # Use more tokens for action requests (they need to generate JSON with multiple actions)
-            # Deletion requests may need many tokens if deleting multiple projects
-            max_tokens = 3000 if ((is_action_request or is_deletion_request) and not is_text_response) else (200 if is_text_response else 800)
+            # Use more tokens for action requests (they need to generate JSON with multiple actions).
+            # Deletion requests may need many tokens if deleting multiple projects.
+            # Bumped 3000 → 12000: the prompt asks for 10-20 tasks with 4-6 sentence
+            # descriptions AND 5-7 sentence reasoning per task. That easily blows
+            # past 3000 tokens and the response gets cut mid-JSON, which fails to
+            # parse and the client sees "no project created" even though the
+            # intent was correct. 12000 is comfortably under gpt-4o's 16k output cap.
+            max_tokens = 12000 if ((is_action_request or is_deletion_request) and not is_text_response) else (200 if is_text_response else 800)
             response = self._call_llm(prompt, self.system_prompt, temperature=0.7, max_tokens=max_tokens)
             
             # If this is a text-only response, return it directly without parsing JSON
