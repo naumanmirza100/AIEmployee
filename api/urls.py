@@ -655,12 +655,20 @@ urlpatterns = [
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
     re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
-    re_path(r'^modules/purchase/?$', module_purchase.purchase_module, name='purchase_module'),  # POST (legacy)
     re_path(r'^modules/checkout/?$', module_purchase.create_checkout_session, name='create_checkout_session'),  # POST
     re_path(r'^modules/stripe-webhook/?$', module_purchase.stripe_webhook, name='stripe_webhook'),  # POST (raw, no auth)
     re_path(r'^modules/verify-session/?$', module_purchase.verify_session, name='verify_session'),  # POST (public)
     re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
     re_path(r'^modules/(?P<module_name>[a-z_]+)/plans/?$', module_purchase.get_module_plans, name='get_module_plans'),  # GET (public)
+    # Subscription management
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/cancel/?$', module_purchase.cancel_subscription, name='cancel_subscription'),  # POST
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/reactivate/?$', module_purchase.reactivate_subscription, name='reactivate_subscription'),  # POST
+    re_path(r'^modules/billing-overview/?$', module_purchase.billing_overview, name='billing_overview'),  # GET
+    re_path(r'^modules/billing-portal/?$', module_purchase.create_billing_portal, name='create_billing_portal'),  # POST
+    # In-app card management (Stripe Elements). Hyphenated, so neither collides with
+    # the ^modules/(?P<module_name>[a-z_]+)/... patterns above.
+    re_path(r'^modules/setup-intent/?$', module_purchase.create_setup_intent, name='create_setup_intent'),  # POST
+    re_path(r'^modules/payment-method/?$', module_purchase.set_default_payment_method, name='set_default_payment_method'),  # POST
 
     # Company API Key management (user-side: BYOK + key requests)
     re_path(r'^company/agent-keys/?$', company_api_keys.list_agent_keys, name='list_agent_keys'),  # GET

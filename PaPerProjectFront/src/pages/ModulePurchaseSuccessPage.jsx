@@ -81,12 +81,12 @@ const ModulePurchaseSuccessPage = () => {
         </div>
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
-            Payment successful
+            Subscription activated
           </h1>
           <p className="text-muted-foreground">
             {error
-              ? 'Your payment was received. We could not activate your module automatically—please go to your dashboard or contact support.'
-              : 'Your module has been activated. You can access it from your dashboard.'}
+              ? 'Your payment was received. We could not activate your subscription automatically—please go to your dashboard or contact support.'
+              : 'Your subscription is now active. You can access your agent from the dashboard. Recurring payments will be handled automatically.'}
           </p>
           {error && (
             <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">{error}</p>

@@ -24,20 +24,16 @@ from api.views.recruitment_agent import _make_agents
 def _company_has_recruitment_agent(company):
     """True only if the company has an active Recruitment Agent purchase.
 
-    Mirrors reply_draft_agent.permissions.company_has_module: DB is the source
-    of truth, and an active-but-expired purchase is lazily flipped to expired.
+    Uses CompanyModulePurchase.is_active() which handles both Stripe
+    subscription and legacy one-time purchase expiry checks.
     """
     if company is None:
         return False
-    from django.utils import timezone
     purchase = CompanyModulePurchase.objects.filter(
         company=company, module_name='recruitment_agent'
     ).first()
     if not purchase:
         return False
-    if purchase.status == 'active' and purchase.expires_at and timezone.now() > purchase.expires_at:
-        purchase.status = 'expired'
-        purchase.save(update_fields=['status'])
     return purchase.is_active()
 
 logger = logging.getLogger(__name__)

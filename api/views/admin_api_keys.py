@@ -1229,6 +1229,8 @@ def _serialize_plan(p):
         'price_usd': float(p.price_usd),
         'is_active': p.is_active,
         'sort_order': p.sort_order,
+        'billing_interval': p.billing_interval,
+        'stripe_price_id': p.stripe_price_id,
     }
 
 
@@ -1246,11 +1248,23 @@ def list_agent_plans(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def save_agent_plans(request):
-    """Replace the full set of plans for ONE agent.
+    """Save the plans for ONE agent — at most one monthly and one yearly.
 
-    Body: { agent_name, plans: [{ duration_days, price_usd, label?, is_active? }] }
-    Simplest reliable sync: delete the agent's existing plans and recreate from
-    the payload (small lists, admin-edited).
+    Body: { agent_name, plans: [{ billing_interval, price_usd, label?, is_active? }] }
+
+    An agent gets two plans at most, keyed by billing_interval. Stripe bills on the
+    interval and the subscription runs until cancelled, so a duration is not a thing
+    the customer buys any more; several monthly plans would be the same subscription
+    at different prices. `duration_days` is therefore derived, not accepted.
+
+    Rows are matched to existing ones BY INTERVAL and updated in place. They are
+    never deleted and recreated: a plan owns a Stripe Price, so recreating the row
+    drops `stripe_price_id` and the next sync mints a fresh Price, orphaning the old
+    one while live subscriptions still reference it.
+
+    Stripe Prices are immutable, so a changed amount means minting a new Price and
+    archiving the old — handled by `sync_agent_plans_to_stripe` below. Existing
+    subscribers stay on the Price they signed up at.
     """
     agent_name = (request.data.get('agent_name') or '').strip()
     if agent_name not in {name for name, _ in AGENT_CHOICES}:
@@ -1259,23 +1273,87 @@ def save_agent_plans(request):
     if not isinstance(plans, list):
         return Response({'status': 'error', 'message': 'plans must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Derived, not accepted: kept only so legacy one-time rows stay non-null.
+    DAYS_FOR = {'month': 30, 'year': 365}
+
+    # Reject duplicates loudly rather than silently keeping the last one — an admin
+    # who sent two monthly plans meant something, and guessing which wins is worse
+    # than telling them.
+    seen_intervals = set()
+    for p in plans:
+        iv = p.get('billing_interval') or 'month'
+        if iv not in ('month', 'year'):
+            return Response({
+                'status': 'error',
+                'message': f"billing_interval must be 'month' or 'year', got '{iv}'.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if iv in seen_intervals:
+            return Response({
+                'status': 'error',
+                'message': f'Only one {iv}ly plan is allowed per agent. '
+                           'To change the price, edit the existing plan.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        seen_intervals.add(iv)
+
     with transaction.atomic():
-        AgentPlan.objects.filter(agent_name=agent_name).delete()
-        created = []
+        existing = list(AgentPlan.objects.filter(agent_name=agent_name))
+        # Interval is the identity of a plan now, so it is the only match key.
+        by_interval = {p.billing_interval: p for p in existing}
+
+        kept_ids = set()
+        saved = []
         for i, p in enumerate(plans):
             try:
-                days = int(p.get('duration_days') or 0)
                 price = float(p.get('price_usd') or 0)
             except (TypeError, ValueError):
                 continue
-            if days <= 0 or price < 0:
+            if price < 0:
                 continue
-            created.append(AgentPlan.objects.create(
-                agent_name=agent_name,
-                duration_days=days,
-                price_usd=price,
-                label=(p.get('label') or '').strip()[:80],
-                is_active=bool(p.get('is_active', True)),
-                sort_order=int(p.get('sort_order', i)) if str(p.get('sort_order', i)).isdigit() else i,
-            ))
-    return Response({'status': 'success', 'plans': [_serialize_plan(p) for p in created]})
+            billing_interval = p.get('billing_interval') or 'month'
+            days = DAYS_FOR[billing_interval]
+
+            row = by_interval.get(billing_interval)
+
+            sort_order = int(p.get('sort_order', i)) if str(p.get('sort_order', i)).isdigit() else i
+            label = (p.get('label') or '').strip()[:80]
+            is_active = bool(p.get('is_active', True))
+
+            if row is None:
+                row = AgentPlan.objects.create(
+                    agent_name=agent_name,
+                    duration_days=days,
+                    price_usd=price,
+                    label=label,
+                    is_active=is_active,
+                    sort_order=sort_order,
+                    billing_interval=billing_interval,
+                )
+            else:
+                row.duration_days = days
+                row.price_usd = price
+                row.label = label
+                row.is_active = is_active
+                row.sort_order = sort_order
+                row.billing_interval = billing_interval
+                row.save(update_fields=[
+                    'duration_days', 'price_usd', 'label', 'is_active',
+                    'sort_order', 'billing_interval', 'updated_at',
+                ])
+            kept_ids.add(row.id)
+            saved.append(row)
+
+        removed = [p for p in existing if p.id not in kept_ids]
+        if removed:
+            AgentPlan.objects.filter(id__in=[p.id for p in removed]).delete()
+
+    # Reconcile Stripe outside the transaction — a Stripe timeout must not roll
+    # back plans the admin has already been told were saved. Failures here are
+    # logged and left for the next sync; the plan simply isn't buyable until then.
+    try:
+        from core.stripe_sync import sync_agent_plans_to_stripe
+        sync_agent_plans_to_stripe(agent_name, archive_prices_for=removed)
+    except Exception as exc:
+        logger.error('Stripe sync after saving %s plans failed: %s', agent_name, exc, exc_info=True)
+
+    saved = list(AgentPlan.objects.filter(id__in=[p.id for p in saved]))
+    return Response({'status': 'success', 'plans': [_serialize_plan(p) for p in saved]})

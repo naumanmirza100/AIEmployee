@@ -26,6 +26,13 @@ class CoreConfig(AppConfig):
         """Import signals when app is ready"""
         import core.signals  # noqa
 
+        # NOTE: Stripe Product/Price sync deliberately does NOT run here.
+        # ready() fires in every gunicorn worker, every celery worker and every
+        # `manage.py` invocation — so syncing here meant concurrent workers racing
+        # to create duplicate Stripe Products, and live Stripe calls firing during
+        # `migrate` before the columns being read existed.
+        # It now runs explicitly: on admin plan save, and via `manage.py sync_stripe_plans`.
+
         # Auto-start Celery when running the dev server
         self._auto_start_celery()
 

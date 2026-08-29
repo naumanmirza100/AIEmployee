@@ -2,17 +2,21 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.conf import settings as djsettings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import models
 from django.db.models import Count
 from datetime import timedelta
+import logging
 import secrets
 import string
 
 from core.models import Company, CompanyRegistrationToken, CompanyModulePurchase
 from api.serializers.company import CompanySerializer, CompanyRegistrationTokenSerializer
 from api.permissions import IsAdmin
+
+logger = logging.getLogger(__name__)
 
 
 def generate_registration_token():
@@ -196,10 +200,13 @@ def generate_company_token(request, companyId):
 def list_company_agents(request):
     """Get all AI agent module purchases across all companies (Admin only)"""
     try:
-        # Auto-expire: update DB status for any purchase past its expires_at
+        # Auto-expire: update DB status for legacy purchases past their expires_at
+        # (Stripe subscriptions are managed via webhooks, not local expiry)
         now = timezone.now()
         CompanyModulePurchase.objects.filter(
-            status='active', expires_at__isnull=False, expires_at__lt=now
+            models.Q(stripe_subscription_id__isnull=True) | models.Q(is_complimentary=True),
+            status='active',
+            expires_at__isnull=False, expires_at__lt=now,
         ).update(status='expired')
 
         purchases = CompanyModulePurchase.objects.select_related(
@@ -234,26 +241,33 @@ def list_company_agents(request):
 
         data = []
         for purchase in paginated:
-            # Determine effective status
+            # Determine effective status using the model's is_active() which
+            # handles Stripe, complimentary, and legacy expiry correctly.
+            is_active = purchase.is_active()
+            is_expired = purchase.status != 'cancelled' and not is_active
             effective_status = purchase.status
-            is_expired = purchase.status == 'expired'
+            if is_expired and effective_status != 'expired':
+                effective_status = 'expired'
 
-            # Compute time remaining or time since expired
+            # Compute time remaining or time since expired — prefer Stripe
+            # current_period_end over legacy expires_at.
+            effective_expiry = None
+            if purchase.stripe_subscription_id and purchase.current_period_end:
+                effective_expiry = purchase.current_period_end
+            elif purchase.expires_at:
+                effective_expiry = purchase.expires_at
+
             time_remaining = None
             time_ended_ago = None
-            if purchase.expires_at:
-                if effective_status == 'active':
-                    diff = purchase.expires_at - now
+            if effective_expiry:
+                if is_active:
+                    diff = effective_expiry - now
                     if diff.total_seconds() > 0:
                         days = diff.days
                         hours = diff.seconds // 3600
                         time_remaining = f"{days}d {hours}h remaining" if days > 0 else f"{hours}h remaining"
-                    else:
-                        # Edge case: still active in DB but actually expired
-                        is_expired = True
-                        effective_status = 'expired'
-                if effective_status in ('expired',):
-                    ended = now - purchase.expires_at
+                elif is_expired:
+                    ended = now - effective_expiry
                     if ended.total_seconds() > 0:
                         days = ended.days
                         hours = ended.seconds // 3600
@@ -297,6 +311,7 @@ def list_company_agents(request):
                 'module_display_name': purchase.get_module_name_display(),
                 'status': effective_status,
                 'is_expired': is_expired,
+                'is_complimentary': purchase.is_complimentary,
                 'deactivated_by_admin': purchase.cancelled_reason == 'admin_deactivated',
                 'price_paid': float(purchase.price_paid) if purchase.price_paid else None,
                 'purchased_by_name': purchase.purchased_by.full_name if purchase.purchased_by else None,
@@ -311,9 +326,14 @@ def list_company_agents(request):
                 'active_label': active_label,
                 'created_at': purchase.created_at.isoformat() if purchase.created_at else None,
                 'updated_at': purchase.updated_at.isoformat() if purchase.updated_at else None,
+                # Stripe subscription fields
+                'stripe_subscription_id': purchase.stripe_subscription_id,
+                'current_period_end': purchase.current_period_end.isoformat() if purchase.current_period_end else None,
+                'cancel_at_period_end': purchase.cancel_at_period_end,
+                'billing_interval': purchase.billing_interval,
             })
 
-        # Summary stats - compute expired properly (DB may still say 'active' but expires_at passed)
+        # Summary stats — use is_active() which handles both Stripe and legacy expiry
         all_purchases_qs = CompanyModulePurchase.objects.all()
         active_count = 0
         expired_count = 0
@@ -321,12 +341,10 @@ def list_company_agents(request):
         for p in all_purchases_qs:
             if p.status == 'cancelled':
                 cancelled_count += 1
-            elif p.status == 'active' and p.expires_at and now > p.expires_at:
-                expired_count += 1
-            elif p.status == 'expired':
-                expired_count += 1
-            elif p.status == 'active':
+            elif p.is_active():
                 active_count += 1
+            else:
+                expired_count += 1
         stats = {
             'total_purchases': all_purchases_qs.count(),
             'active_count': active_count,
@@ -357,7 +375,16 @@ def list_company_agents(request):
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def toggle_company_agent_status(request, purchaseId):
-    """Toggle AI agent module status between active and cancelled (Admin only)"""
+    """Toggle AI agent module status between active and cancelled (Admin only).
+
+    Deactivating a company that is on a live Stripe subscription ALSO cancels
+    that subscription immediately — access and billing stop together, so we never
+    keep charging someone we just cut off.
+
+    Activating grants complimentary access, which bypasses the Stripe lifecycle
+    and therefore must carry an expiry date (`complimentary_days`, default 30).
+    Open-ended free access is too easy to grant by accident and never notice.
+    """
     try:
         purchase = get_object_or_404(CompanyModulePurchase, id=purchaseId)
 
@@ -372,6 +399,54 @@ def toggle_company_agent_status(request, purchaseId):
         if isinstance(keep_history, str):
             keep_history = keep_history.lower() not in ('false', '0', 'no')
 
+        # How long complimentary access lasts. Bounded so a typo can't grant a
+        # decade of free access; 0/None is rejected rather than meaning "forever".
+        complimentary_days = request.data.get('complimentary_days', 30)
+        if new_status == 'active':
+            try:
+                complimentary_days = int(complimentary_days)
+            except (TypeError, ValueError):
+                return Response({
+                    'status': 'error',
+                    'message': 'complimentary_days must be a whole number of days.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if not (1 <= complimentary_days <= 3650):
+                return Response({
+                    'status': 'error',
+                    'message': 'complimentary_days must be between 1 and 3650.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Cancel the live Stripe subscription BEFORE touching local state: if
+        # Stripe rejects it we must not end up with access revoked locally while
+        # the customer's card keeps getting charged.
+        stripe_cancelled = False
+        if new_status == 'cancelled' and purchase.stripe_subscription_id:
+            import stripe as _stripe
+            _stripe.api_key = getattr(djsettings, 'STRIPE_SECRET_KEY', None)
+            try:
+                _stripe.Subscription.cancel(purchase.stripe_subscription_id)
+                stripe_cancelled = True
+            except _stripe.error.InvalidRequestError as exc:
+                # Already gone at Stripe's end — nothing left to cancel, proceed.
+                logger.warning(
+                    'Admin deactivate: Stripe subscription %s not cancellable (%s); '
+                    'continuing with local deactivation.',
+                    purchase.stripe_subscription_id, exc,
+                )
+            except _stripe.error.StripeError as exc:
+                logger.error(
+                    'Admin deactivate: failed to cancel Stripe subscription %s: %s',
+                    purchase.stripe_subscription_id, exc, exc_info=True,
+                )
+                return Response({
+                    'status': 'error',
+                    'message': (
+                        'Could not cancel the Stripe subscription, so access was left '
+                        'unchanged to avoid billing a company with no access. '
+                        'Please retry or cancel it in the Stripe dashboard.'
+                    ),
+                }, status=status.HTTP_502_BAD_GATEWAY)
+
         from django.db import transaction as db_transaction
         with db_transaction.atomic():
             purchase.status = new_status
@@ -379,30 +454,40 @@ def toggle_company_agent_status(request, purchaseId):
                 purchase.cancelled_at = timezone.now()
                 purchase.cancelled_reason = 'admin_deactivated'
                 purchase.history_kept = keep_history
+                purchase.is_complimentary = False
                 purchase.save()
 
                 if not keep_history:
                     from core.models import AgentTokenQuota, CompanyAPIKey, KeyRequest
                     company = purchase.company
                     agent_name = purchase.module_name
-                    # Delete KeyRequest first — it has a FK to CompanyAPIKey (linked_key_id)
                     KeyRequest.objects.filter(company=company, agent_name=agent_name).delete()
                     CompanyAPIKey.objects.filter(company=company, agent_name=agent_name).delete()
                     AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).delete()
             else:
+                # Admin-granted complimentary access — not tied to Stripe.
                 purchase.cancelled_at = None
                 purchase.cancelled_reason = None
                 purchase.history_kept = None
-                from datetime import timedelta
+                purchase.is_complimentary = True
                 purchase.purchased_at = timezone.now()
-                purchase.expires_at = timezone.now() + timedelta(days=30)
+                # Complimentary access is time-boxed. `is_active()` short-circuits
+                # on is_complimentary, so this date is enforced by the same hourly
+                # sweep that expires legacy purchases (which skips Stripe rows —
+                # and a complimentary row has no subscription id by definition).
+                purchase.expires_at = timezone.now() + timedelta(days=complimentary_days)
+                # Stripe fields are cleared because this row is no longer billed —
+                # but the subscription id is DELIBERATELY preserved, since wiping it
+                # orphans a live subscription: every webhook handler looks the row up
+                # by that id, so clearing it means renewals keep charging the customer
+                # with nothing left to reconcile them against.
+                purchase.current_period_start = None
+                purchase.current_period_end = None
+                purchase.cancel_at_period_end = False
+                purchase.billing_interval = None
                 purchase.save()
 
-                # Re-activation quota handling:
-                # - history kept (keep_history=True): quota row still exists with all
-                #   original tokens/usage — leave it completely untouched.
-                # - history deleted (keep_history=False): quota was deleted above,
-                #   so get_or_create will make a fresh row.
+                # Quota handling
                 from core.models import AgentTokenQuota, AdminPricingConfig, DEFAULT_FREE_TOKENS
                 company = purchase.company
                 agent_name = purchase.module_name
@@ -412,14 +497,11 @@ def toggle_company_agent_status(request, purchaseId):
                 except AdminPricingConfig.DoesNotExist:
                     free_tokens = DEFAULT_FREE_TOKENS
 
-                # Only create if missing — never overwrite existing quota when history was kept
                 quota_obj, created = AgentTokenQuota.objects.get_or_create(
                     company=company,
                     agent_name=agent_name,
                     defaults={'included_tokens': free_tokens},
                 )
-                # If quota existed with preferred_pool='managed' but no managed key,
-                # reset to None so frontend shows free tokens as active automatically
                 if not created and quota_obj.preferred_pool == 'managed':
                     from core.models import CompanyAPIKey as _CAK
                     has_managed = _CAK.objects.filter(
@@ -430,12 +512,13 @@ def toggle_company_agent_status(request, purchaseId):
 
         return Response({
             'status': 'success',
-            'message': f'{purchase.get_module_name_display()} for {purchase.company.name} has been {"activated" if new_status == "active" else "deactivated"}',
+            'message': f'{purchase.get_module_name_display()} for {purchase.company.name} has been {"activated (complimentary)" if new_status == "active" else "deactivated"}',
             'data': {
                 'id': purchase.id,
                 'module_name': purchase.module_name,
                 'module_display_name': purchase.get_module_name_display(),
                 'status': purchase.status,
+                'is_complimentary': purchase.is_complimentary,
                 'company_name': purchase.company.name,
                 'cancelled_at': purchase.cancelled_at.isoformat() if purchase.cancelled_at else None,
                 'history_kept': purchase.history_kept,

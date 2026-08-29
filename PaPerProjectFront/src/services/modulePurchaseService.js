@@ -56,23 +56,8 @@ export const checkModuleAccess = async (moduleName) => {
 };
 
 /**
- * Purchase a module (legacy – no Stripe). Prefer createCheckoutSession for Stripe payments.
- */
-export const purchaseModule = async (moduleName, planId) => {
-  try {
-    const response = await companyApi.post('/modules/purchase', {
-      module_name: moduleName,
-      plan_id: planId,
-    });
-    return response;
-  } catch (error) {
-    console.error('Purchase module error:', error);
-    throw error;
-  }
-};
-
-/**
- * Create Stripe Checkout session for module purchase. Returns { url } to redirect to Stripe.
+ * Create Stripe Checkout session for a recurring subscription.
+ * Returns { url } to redirect to Stripe.
  */
 export const createCheckoutSession = async (moduleName, planId) => {
   try {
@@ -102,12 +87,103 @@ export const verifySession = async (sessionId) => {
   return data;
 };
 
+/**
+ * Cancel a Stripe subscription at the end of the current billing period.
+ */
+export const cancelSubscription = async (moduleName) => {
+  try {
+    const response = await companyApi.post(`/modules/${moduleName}/cancel`);
+    return response;
+  } catch (error) {
+    console.error('Cancel subscription error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Reactivate a subscription that was scheduled for cancellation.
+ */
+export const reactivateSubscription = async (moduleName) => {
+  try {
+    const response = await companyApi.post(`/modules/${moduleName}/reactivate`);
+    return response;
+  } catch (error) {
+    console.error('Reactivate subscription error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Billing overview — subscriptions, invoices and saved card, read live from Stripe.
+ * `live: false` in the response means Stripe was unreachable and the figures came
+ * from our local mirror, so they may be stale.
+ */
+export const getBillingOverview = async () => {
+  try {
+    const response = await companyApi.get('/modules/billing-overview');
+    return response;
+  } catch (error) {
+    console.error('Get billing overview error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Create a Stripe Billing Portal session. Returns { url } to redirect.
+ * Secondary surface only — the card is edited in-app; the portal covers billing
+ * address, tax IDs and the full receipt archive.
+ */
+export const createBillingPortal = async () => {
+  try {
+    const response = await companyApi.post('/modules/billing-portal');
+    return response;
+  } catch (error) {
+    console.error('Create billing portal error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Start an in-app card save. Returns { client_secret } for Stripe Elements.
+ */
+export const createSetupIntent = async () => {
+  try {
+    const response = await companyApi.post('/modules/setup-intent');
+    return response;
+  } catch (error) {
+    console.error('Create setup intent error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Promote a saved card to the default for the company. Must be called after
+ * confirmSetup succeeds — Stripe attaches the card to the customer, but nothing
+ * points any existing subscription at it until this runs.
+ */
+export const setDefaultPaymentMethod = async (paymentMethodId) => {
+  try {
+    const response = await companyApi.post('/modules/payment-method', {
+      payment_method_id: paymentMethodId,
+    });
+    return response;
+  } catch (error) {
+    console.error('Set default payment method error:', error);
+    throw error;
+  }
+};
+
 export default {
   getModulePrices,
   getModulePlans,
   getPurchasedModules,
   checkModuleAccess,
-  purchaseModule,
   createCheckoutSession,
   verifySession,
+  cancelSubscription,
+  reactivateSubscription,
+  getBillingOverview,
+  createBillingPortal,
+  createSetupIntent,
+  setDefaultPaymentMethod,
 };

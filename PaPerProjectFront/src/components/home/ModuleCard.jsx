@@ -224,7 +224,7 @@ const ModuleCard = ({
                   </span>
                   {selectedPlan && (
                     <span className="text-muted-foreground">
-                      /{selectedPlan.label} ({selectedPlan.duration_days} days)
+                      /{selectedPlan.billing_interval === 'year' ? 'year' : 'month'}
                     </span>
                   )}
                 </div>
@@ -246,7 +246,7 @@ const ModuleCard = ({
                               : "border-border text-muted-foreground hover:border-primary/50"
                           )}
                         >
-                          {p.label} · ${Number(p.price_usd).toLocaleString()}
+                          ${Number(p.price_usd).toLocaleString()}/{p.billing_interval === 'year' ? 'yr' : 'mo'}
                         </button>
                       );
                     })}
@@ -290,7 +290,7 @@ const ModuleCard = ({
               size="lg"
             >
               <CheckCircle2 className="mr-2 h-4 w-4" />
-              Already Purchased
+              Active Subscription
             </Button>
           ) : !isLoggedIn ? (
             <Button
@@ -304,7 +304,7 @@ const ModuleCard = ({
               size="lg"
             >
               <Lock className="mr-2 h-4 w-4" />
-              Login to Buy
+              Login to Subscribe
             </Button>
           ) : (
             <Button
@@ -327,7 +327,7 @@ const ModuleCard = ({
                 </>
               ) : (
                 <>
-                  Buy Now
+                  Subscribe
                   <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </>
               )}
