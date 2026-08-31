@@ -159,6 +159,29 @@
         background: rgba(139,92,246,0.55);
       }
 
+      /* Thin violet scrollbar for horizontally-scrolling tables.
+         The sidebar variant above only sets `width`, which does nothing for a
+         horizontal bar — that needs `height`. Both are set here so the class
+         works on either axis. */
+      .scrollbar-violet {
+        scrollbar-width: thin; /* Firefox */
+        scrollbar-color: rgba(139,92,246,0.45) transparent;
+      }
+      .scrollbar-violet::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+      }
+      .scrollbar-violet::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .scrollbar-violet::-webkit-scrollbar-thumb {
+        background: rgba(139,92,246,0.45);
+        border-radius: 4px;
+      }
+      .scrollbar-violet::-webkit-scrollbar-thumb:hover {
+        background: rgba(139,92,246,0.7);
+      }
+
       /* Utility to hide scrollbars but keep scroll functionality */
       .no-scrollbar {
         scrollbar-width: none; /* Firefox */

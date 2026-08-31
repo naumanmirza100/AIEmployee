@@ -2118,7 +2118,7 @@ const AdminDashboardPage = () => {
                       <p className="text-sm font-medium">No, delete everything</p>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Permanently deletes token quota, all keys (BYOK + managed), and all key request history.
-                        If company re-purchases, they start completely fresh with no history.
+                        But it will maintain its company data.
                       </p>
                     </div>
                   </div>

@@ -20,6 +20,14 @@ export const listResetLogs = (params = {}) => {
   return companyApi.get(`/company/agent-keys/reset-logs${qs ? `?${qs}` : ''}`);
 };
 
+// Managed-key lifecycle history (assigned / renewed / expired / revoked).
+// The key row itself is overwritten on every re-issue, so this log is the only
+// place previous expiry and renewal dates survive.
+export const listKeyEvents = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return companyApi.get(`/company/agent-keys/key-events${qs ? `?${qs}` : ''}`);
+};
+
 export const listKeyRequests = () => companyApi.get('/company/key-requests');
 
 export const createKeyRequest = ({ agent_name, provider, note, preferred_duration, is_renewal }) =>
@@ -41,6 +49,7 @@ export default {
   setTokenPool,
   setByokLimit,
   listResetLogs,
+  listKeyEvents,
   listKeyRequests,
   createKeyRequest,
   payForRequest,

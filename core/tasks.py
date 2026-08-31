@@ -11,85 +11,29 @@ logger = logging.getLogger(__name__)
 
 @shared_task(name='core.tasks.reset_weekly_token_quotas')
 def reset_weekly_token_quotas():
+    """Apply every managed-token reset that is due right now.
+
+    This is a thin delegate to `core.api_key_service.run_due_token_resets`,
+    which is the single canonical reset implementation (also driven by the
+    APScheduler `token_resets` job).
+
+    It used to carry its own copy of the reset logic, which diverged from the
+    canonical one in two ways that corrupted the reset history: it advanced
+    next_reset_at in hard-coded 7-day steps (ignoring the key's
+    reset_interval_days, so daily keys jumped a week), and it never wrote a
+    WeeklyResetLog row, so a quota reset by this task showed as
+    "Not yet reset" in the admin UI forever. Whichever engine won the race
+    decided both outcomes. Delegating keeps beat scheduling intact while
+    guaranteeing one behaviour.
     """
-    Reset managed token quotas that are due for their weekly reset.
-    Runs every hour — only acts on quotas whose next_reset_at has passed.
+    from core.api_key_service import run_due_token_resets
 
-    For each due quota:
-      - managed_used_tokens → 0
-      - managed_included_tokens → tokens_per_period from the managed key
-      - next_reset_at → advanced by 7 days
-      - notification flags reset
-      - Company notified via PMNotification
-    """
-    from core.models import AgentTokenQuota, CompanyAPIKey
-
-    now = timezone.now()
-    due_quotas = AgentTokenQuota.objects.filter(
-        next_reset_at__isnull=False,
-        next_reset_at__lte=now,
-    ).select_related('company')
-
-    count = 0
-    for quota in due_quotas:
-        # Get the active managed key to read tokens_per_period
-        managed_key = CompanyAPIKey.objects.filter(
-            company=quota.company,
-            agent_name=quota.agent_name,
-            mode='managed',
-            status='active',
-        ).first()
-
-        if not managed_key or not managed_key.renewal_period or managed_key.renewal_period == 'none':
-            # No renewal — clear next_reset_at so this never fires again
-            AgentTokenQuota.objects.filter(pk=quota.pk).update(next_reset_at=None)
-            continue
-
-        if not managed_key.tokens_per_period or managed_key.tokens_per_period <= 0:
-            continue
-
-        # Advance next_reset_at by 7-day steps until it is in the future
-        next_reset = quota.next_reset_at
-        while next_reset <= now:
-            next_reset = next_reset + timedelta(days=7)
-
-        AgentTokenQuota.objects.filter(pk=quota.pk).update(
-            managed_used_tokens=0,
-            managed_included_tokens=managed_key.tokens_per_period,
-            next_reset_at=next_reset,
-            last_reset_at=now,
-            managed_notified_80pct=False,
-            managed_notified_90pct=False,
-            managed_notified_100pct=False,
-        )
-        count += 1
-
-        # Notify company
-        try:
-            from project_manager_agent.models import PMNotification
-            from core.models import CompanyUser
-            agent_label = managed_key.get_agent_name_display()
-            for cu in CompanyUser.objects.filter(company=quota.company, is_active=True):
-                PMNotification.objects.create(
-                    company_user=cu,
-                    notification_type='custom',
-                    severity='info',
-                    title=f"Weekly tokens reset — {agent_label}",
-                    message=(
-                        f"Your weekly token quota for {agent_label} has been reset. "
-                        f"{managed_key.tokens_per_period:,} tokens are available again. "
-                        f"Next reset: {next_reset.strftime('%d %b %Y')}."
-                    ),
-                )
-        except Exception as exc:
-            logger.warning("Failed to send weekly reset notification for %s/%s: %s",
-                           quota.company_id, quota.agent_name, exc)
-
-        logger.info("Weekly token reset: company=%s agent=%s tokens=%s next_reset=%s",
-                    quota.company_id, quota.agent_name,
-                    managed_key.tokens_per_period, next_reset)
-
-    return f'Reset {count} quota(s)'
+    result = run_due_token_resets()
+    logger.info(
+        "reset_weekly_token_quotas: applied %s of %s due",
+        result.get('applied'), result.get('checked'),
+    )
+    return f"Reset {result.get('applied', 0)} quota(s)"
 
 
 @shared_task(name='core.tasks.expire_managed_keys')
@@ -112,6 +56,10 @@ def expire_managed_keys():
         key.status = 'expired'
         key.save(update_fields=['status', 'updated_at'])
         count += 1
+
+        from core.api_key_service import record_key_event
+        record_key_event(key.company, key.agent_name, 'expired', key=key,
+                         note='Auto-expired: valid_until passed')
 
         try:
             from project_manager_agent.models import PMNotification
