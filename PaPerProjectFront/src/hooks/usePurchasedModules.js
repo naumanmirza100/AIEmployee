@@ -12,8 +12,23 @@ const CACHE_KEY = 'company_purchased_modules';
  * Once the API responds, its result ALWAYS wins (even if empty).
  */
 
+// Last known module list, used ONLY to paint the sidebar while the API call is
+// in flight. Navigating to a page that renders its own shell (API Keys,
+// Notifications) remounts this hook, and starting from [] made the sidebar
+// empty itself and re-animate on every such navigation — which read as a full
+// page reload. The API response still always wins; see the note above.
+const readCache = () => {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 const usePurchasedModules = () => {
-  const [purchasedModules, setPurchasedModules] = useState([]);
+  const [purchasedModules, setPurchasedModules] = useState(readCache);
   const [allPurchases, setAllPurchases] = useState([]);
   const [modulesLoaded, setModulesLoaded] = useState(false);
 

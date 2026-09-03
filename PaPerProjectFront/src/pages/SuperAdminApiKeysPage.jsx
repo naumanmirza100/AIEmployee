@@ -509,12 +509,28 @@ const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, o
 );
 
 // -------------------- Pricing Tab --------------------
+// Starting values for an agent that has never been priced. They are only used
+// to seed the form for an all-zero (unconfigured) row so the admin edits real
+// numbers instead of a wall of 0.00 — every field stays editable, and 0 is a
+// legal value to save here (unlike the key-assign form, where 0 tokens would
+// hand out an unusable key).
+const PRICING_SEED = {
+  monthly_flat_usd: '10.00',
+  service_charge_usd: '4.00',
+  managed_key_tokens: 50000,
+};
+
 const PricingRow = ({ row, onSave, saving }) => {
+  // "Unconfigured" = never priced: cost, service charge and token grant all 0.
+  const isUnconfigured =
+    Number(row.monthly_flat_usd) === 0 &&
+    Number(row.service_charge_usd) === 0 &&
+    Number(row.managed_key_tokens ?? 0) === 0;
   const [draft, setDraft] = useState({
-    monthly_flat_usd: row.monthly_flat_usd,
-    service_charge_usd: row.service_charge_usd,
+    monthly_flat_usd: isUnconfigured ? PRICING_SEED.monthly_flat_usd : row.monthly_flat_usd,
+    service_charge_usd: isUnconfigured ? PRICING_SEED.service_charge_usd : row.service_charge_usd,
     free_tokens_on_purchase: row.free_tokens_on_purchase,
-    managed_key_tokens: row.managed_key_tokens ?? 0,
+    managed_key_tokens: isUnconfigured ? PRICING_SEED.managed_key_tokens : (row.managed_key_tokens ?? 0),
     yearly_discount_pct: row.yearly_discount_pct ?? '0',
     monthly_discount_pct: row.monthly_discount_pct ?? '0',
   });
@@ -539,7 +555,17 @@ const PricingRow = ({ row, onSave, saving }) => {
   return (
     <div className={`${ROW_CLASS} rounded-lg p-4`}>
       <div className="flex items-center justify-between mb-3">
-        <h4 className="text-white font-semibold">{row.agent_label}</h4>
+        <h4 className="text-white font-semibold">
+          {row.agent_label}
+          {isUnconfigured && (
+            <span
+              title="This agent has no pricing yet. Suggested starting values are filled in below — adjust them and click Save. Nothing is stored until you save."
+              className="ml-2 align-middle text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30"
+            >
+              Not saved — suggested
+            </span>
+          )}
+        </h4>
         <span className="text-[10px] text-white/40 font-mono">{row.agent_name}</span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
@@ -680,7 +706,10 @@ const PricingTab = ({ pricing, onSave, savingAgent }) => (
       <Info className="w-4 h-4 text-violet-300 mt-0.5 shrink-0" />
       <p className="text-xs text-white/70 leading-relaxed">
         <span className="text-white font-semibold">Key Cost</span> and <span className="text-white font-semibold">Service Charge</span> are pre-filled in the Approve Request modal — admin can still override them per company.{' '}
-        <span className="text-white font-semibold">Free Tokens</span> are automatically granted when a managed key is assigned.
+        <span className="text-white font-semibold">Free Tokens</span> are automatically granted when a managed key is assigned.{' '}
+        Editing a price inside Approve or Edit Request affects only that company, unless{' '}
+        <span className="text-violet-300 font-semibold">“Also save as global pricing”</span> is ticked there — that writes back to this tab.
+        Agents with no pricing yet show suggested starting values; 0 is allowed here.
       </p>
     </div>
     {pricing.map(row => <PricingRow key={row.agent_name} row={row} onSave={onSave} saving={savingAgent === row.agent_name} />)}
@@ -815,12 +844,15 @@ const REQUEST_STATUS_META = {
 };
 
 // Single timeline entry for one KeyRequest record (or a synthetic revocation node)
-const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pricing }) => {
+const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pricing, isCurrentAssignment = false, keyStatus }) => {
   const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
   const { Icon } = meta;
   const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
   const agentPricing = pricing?.find(p => p.agent_name === r.agent_name);
-  const isActive = ['key_assigned', 'approved'].includes(r.status) && !r._synthetic && r.linked_key_status !== 'expired';
+  // Only the CURRENT assignment can be active, and only while the key still is.
+  // Reading linked_key_status per row marked every past assignment with the
+  // shared key's latest state.
+  const isActive = isCurrentAssignment && keyStatus !== 'expired' && keyStatus !== 'revoked';
   const isNegative = ['rejected', 'revoked'].includes(r.status);
   const isPending = ['pending', 'payment_pending', 'payment_received'].includes(r.status);
   // _ts is set on synthetic revocation nodes; otherwise use resolved_at or created_at
@@ -852,6 +884,7 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pr
               </span>
               <span className="text-[10px] text-white/30 uppercase">{r.provider}</span>
               {isActive && <span className="text-[9px] text-emerald-400/70 font-medium">● ACTIVE</span>}
+              {isCurrentAssignment && keyStatus === 'expired' && <span className="text-[9px] text-amber-400/70 font-medium">● EXPIRED</span>}
             </div>
 
             {r.note && <p className="text-xs text-white/50 mt-1 italic">User note: "{r.note}"</p>}
@@ -924,14 +957,18 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pr
   );
 };
 
-// Expand a request list into timeline entries, splitting assigned-then-revoked
-// records into two nodes: one "Key Assigned" (green) and one "Revoked" (orange).
-function expandEntries(requests) {
-  const sorted = [...requests].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  const latestAssignedId = [...sorted].reverse().find(r => r.status === 'key_assigned')?.id;
-
+// Build the timeline for one (company, agent): the requests, merged with the
+// RECORDED key lifecycle events (KeyEventLog).
+//
+// This used to synthesise "Key Expired" nodes from the CURRENT key's status and
+// valid_until. That row is overwritten on every re-issue, so only the latest
+// expiry could ever show — stamped onto whichever requests referenced that key,
+// losing every earlier one. The events are real rows, so each expiry/revocation
+// appears once, at the time it actually happened.
+function expandEntries(requests, keyEvents = []) {
   const entries = [];
-  for (const r of sorted) {
+
+  for (const r of [...requests].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))) {
     if (r.was_assigned) {
       entries.push({ ...r, status: 'key_assigned', _ts: r.resolved_at });
       entries.push({
@@ -941,62 +978,62 @@ function expandEntries(requests) {
         _ts: r.revoked_at,
         _synthetic: true,
       });
-    } else if (r.status === 'key_assigned' && r.id !== latestAssignedId) {
-      // Older key_assigned — show assigned then expired
-      entries.push({ ...r, _ts: r.resolved_at });
-      entries.push({
-        ...r,
-        _syntheticId: `${r.id}_expired`,
-        status: 'key_expired',
-        _ts: r.linked_key_valid_until || r.resolved_at,
-        _synthetic: true,
-        note: null,
-        admin_note: null,
-      });
-    } else if (r.status === 'key_assigned' && r.linked_key_status === 'expired') {
-      // Latest key but expired
-      entries.push({ ...r, _ts: r.resolved_at });
-      entries.push({
-        ...r,
-        _syntheticId: `${r.id}_expired`,
-        status: 'key_expired',
-        _ts: r.linked_key_valid_until || r.resolved_at,
-        _synthetic: true,
-        note: null,
-        admin_note: null,
-      });
     } else {
-      if (r.is_renewal) {
-        entries.push({
-          ...r,
-          _syntheticId: `${r.id}_expired`,
-          status: 'key_expired',
-          _ts: r.created_at,
-          _synthetic: true,
-          note: null,
-          admin_note: null,
-        });
-      }
-      entries.push(r);
+      entries.push({ ...r, _ts: r.resolved_at || r.created_at });
     }
   }
+
+  // Only expiries/revocations come from the log — assign and renew events are
+  // already represented by the requests above.
+  for (const e of keyEvents) {
+    if (e.event !== 'expired' && e.event !== 'revoked') continue;
+    entries.push({
+      id: `evt_${e.id}`,
+      _syntheticId: `evt_${e.id}`,
+      _synthetic: true,
+      _event: true,
+      status: e.event === 'expired' ? 'key_expired' : 'revoked',
+      _ts: e.occurred_at,
+      provider: e.provider,
+      preferred_duration: e.renewal_period,
+      note: null,
+      admin_note: null,
+    });
+  }
+
+  entries.sort((a, b) => {
+    const ta = new Date(a._ts || a.created_at).getTime();
+    const tb = new Date(b._ts || b.created_at).getTime();
+    return ta - tb;
+  });
   return entries;
 }
 
 // Grouped card: one card per (company, agent) showing full timeline
-const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, onEdit, pricing }) => {
+const RequestGroupCard = ({ group, keyEvents = [], onApprove, onAssignKey, onReject, onEdit, pricing }) => {
   const [expanded, setExpanded] = useState(group.hasAction);
 
-  // Expand revoked-assignment records into two timeline nodes each
-  const entries = React.useMemo(() => expandEntries(group.requests), [group.requests]);
+  // Requests plus the recorded lifecycle events (see expandEntries).
+  const entries = React.useMemo(
+    () => expandEntries(group.requests, keyEvents),
+    [group.requests, keyEvents],
+  );
 
   const latest = entries[entries.length - 1];
   const latestReal = [...entries].reverse().find(e => !e._synthetic) || latest;
-  const isKeyExpired = latestReal.status === 'key_assigned' && latestReal.linked_key_status === 'expired';
+  // The live key state comes from the LATEST request's linked_key_status (it is
+  // read fresh from the key row on every load). Older requests point at the
+  // same key, so reading it from any of them would mislabel history.
+  const currentAssignmentId = [...entries]
+    .reverse()
+    .find((e) => !e._synthetic && ['key_assigned', 'approved'].includes(e.status))?.id;
+  const currentAssignment = entries.find((e) => e.id === currentAssignmentId);
+  const keyStatus = currentAssignment?.linked_key_status;
+  const isKeyExpired = keyStatus === 'expired';
   const effectiveStatus = isKeyExpired ? 'key_expired' : latest.status;
   const latestMeta = REQUEST_STATUS_META[effectiveStatus] || REQUEST_STATUS_META.pending;
   const { Icon: LatestIcon } = latestMeta;
-  const isCurrentlyActive = ['key_assigned', 'approved'].includes(latestReal.status) && !isKeyExpired;
+  const isCurrentlyActive = !!currentAssignment && !isKeyExpired && keyStatus !== 'revoked';
 
   return (
     <div className={`${ROW_CLASS} rounded-xl overflow-hidden`}>
@@ -1079,6 +1116,8 @@ const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, onEdit, pri
               onReject={onReject}
               onEdit={onEdit}
               pricing={pricing}
+              isCurrentAssignment={r.id === currentAssignmentId}
+              keyStatus={keyStatus}
             />
           ))}
         </div>
@@ -1087,7 +1126,7 @@ const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, onEdit, pri
   );
 };
 
-const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, onEdit, filter, setFilter, onRefresh, loading, pricing }) => {
+const RequestsTab = ({ requests, keyEvents = [], onApprove, onAssignKey, onReject, onEdit, filter, setFilter, onRefresh, loading, pricing }) => {
   // Group by (company_id + agent_name), sorted oldest→newest within each group
   const groups = React.useMemo(() => {
     const map = {};
@@ -1157,6 +1196,9 @@ const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, onEdit, filte
             <RequestGroupCard
               key={g.key}
               group={g}
+              keyEvents={keyEvents.filter(
+                (e) => e.company_id === g.company_id && e.agent_name === g.agent_name,
+              )}
               onApprove={onApprove}
               onAssignKey={onAssignKey}
               onReject={onReject}
@@ -1237,6 +1279,7 @@ const SuperAdminApiKeysPage = () => {
   const [pricing, setPricing] = useState([]);
   const [quotas, setQuotas] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [keyEvents, setKeyEvents] = useState([]);
   const [platformKeys, setPlatformKeys] = useState([]);
   const [savingProvider, setSavingProvider] = useState(null);
   const [revokingProvider, setRevokingProvider] = useState(null);
@@ -1247,7 +1290,7 @@ const SuperAdminApiKeysPage = () => {
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
   const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '', reset_interval_days: '7' });
-  const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '' });
+  const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '', sync_global_pricing: false });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   // Edit a request's price/duration/note before payment (pending / payment_pending).
   const [editModal, setEditModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' });
@@ -1261,13 +1304,16 @@ const SuperAdminApiKeysPage = () => {
   const loadAll = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const [o, k, p, q, r, pk] = await Promise.all([
+      const [o, k, p, q, r, pk, ev] = await Promise.all([
         adminApiKeysService.getOverview(),
         adminApiKeysService.listAllKeys(keyFilter),
         adminApiKeysService.listPricing(),
         adminApiKeysService.listQuotas(quotaFilter),
         adminApiKeysService.listRequests(requestFilter),
         adminApiKeysService.listPlatformKeys(),
+        // Recorded key lifecycle events — the timeline used to guess expiries
+        // from the current key row, which could only ever show the latest one.
+        adminApiKeysService.listKeyEvents({ limit: 200 }).catch(() => ({ events: [] })),
       ]);
       setStats(o.stats || {});
       setKeys(k.keys || []);
@@ -1275,6 +1321,7 @@ const SuperAdminApiKeysPage = () => {
       setQuotas(q.quotas || []);
       setRequests(r.requests || []);
       setPlatformKeys(pk.platform_keys || []);
+      setKeyEvents(ev.events || []);
     } catch (e) {
       if (!silent) toast({ title: 'Load failed', description: String(e.message || e), variant: 'destructive' });
     } finally {
@@ -1340,8 +1387,12 @@ const SuperAdminApiKeysPage = () => {
   };
   const reloadRequests = async () => {
     try {
-      const r = await adminApiKeysService.listRequests(requestFilter);
+      const [r, ev] = await Promise.all([
+        adminApiKeysService.listRequests(requestFilter),
+        adminApiKeysService.listKeyEvents({ limit: 200 }).catch(() => ({ events: [] })),
+      ]);
       setRequests(r.requests || []);
+      setKeyEvents(ev.events || []);
     } catch (e) { toast({ title: 'Failed', description: String(e.message || e), variant: 'destructive' }); }
   };
 
@@ -1349,11 +1400,16 @@ const SuperAdminApiKeysPage = () => {
   useEffect(() => { const t = setTimeout(reloadQuotas, 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [quotaFilter]);
   useEffect(() => { const t = setTimeout(reloadRequests, 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [requestFilter]);
 
+  // Default managed-token grant when nothing else supplies one. A key saved
+  // with 0 tokens is unusable (every call hard-blocks immediately), so the
+  // form starts from a sane figure and submit refuses 0 outright.
+  const DEFAULT_MANAGED_TOKENS = '50000';
+
   const openAssign = (existingOrRequest, prefill = null) => {
     if (prefill) {
       const duration = prefill.preferred_duration || 'monthly';
       const p = pricing.find(x => x.agent_name === prefill.agent_name);
-      const defaultTokens = p?.managed_key_tokens ? String(p.managed_key_tokens) : '';
+      const defaultTokens = p?.managed_key_tokens ? String(p.managed_key_tokens) : DEFAULT_MANAGED_TOKENS;
       setAssignForm({
         company_id: prefill.company_id,
         agent_name: prefill.agent_name,
@@ -1375,14 +1431,14 @@ const SuperAdminApiKeysPage = () => {
         reset_tokens: !hasUsage,
         managed_tokens: existingOrRequest.quota?.managed_included_tokens > 0
           ? String(existingOrRequest.quota.managed_included_tokens)
-          : '',
+          : DEFAULT_MANAGED_TOKENS,
         renewal_period: existingOrRequest.renewal_period || 'none',
         duration_months: '',
         reset_interval_days: String(existingOrRequest.reset_interval_days || 7),
       });
       setAssignModal({ open: true, replacingKey: existingOrRequest, prefillRequest: null });
     } else {
-      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '', reset_interval_days: '7' });
+      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: DEFAULT_MANAGED_TOKENS, renewal_period: 'none', duration_months: '', reset_interval_days: '7' });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: null });
     }
   };
@@ -1390,6 +1446,19 @@ const SuperAdminApiKeysPage = () => {
   const submitAssign = async () => {
     if (!assignForm.company_id || !assignForm.api_key) {
       toast({ title: 'Missing fields', description: 'Company and API key are required.', variant: 'destructive' });
+      return;
+    }
+    // A key with a 0-token grant is dead on arrival: resolve_for_call
+    // hard-blocks every request the moment the quota is exhausted, so the
+    // company would get a key it can never use. Refuse it here.
+    const tokensRaw = String(assignForm.managed_tokens ?? '').trim();
+    const tokensNum = Number(tokensRaw);
+    if (tokensRaw === '' || !Number.isFinite(tokensNum) || tokensNum <= 0) {
+      toast({
+        title: 'Tokens required',
+        description: 'Enter a token amount greater than 0 — a key with 0 tokens cannot make any calls.',
+        variant: 'destructive',
+      });
       return;
     }
     setSubmitting(true);
@@ -1403,7 +1472,7 @@ const SuperAdminApiKeysPage = () => {
         renewal_period: assignForm.renewal_period,
         reset_interval_days: Number(assignForm.reset_interval_days) || 7,
       };
-      if (assignForm.managed_tokens.trim() !== '') payload.managed_tokens = assignForm.managed_tokens;
+      payload.managed_tokens = tokensRaw;
       if (assignForm.duration_months.trim() !== '') payload.duration_months = Number(assignForm.duration_months);
       if (assignModal.prefillRequest) payload.request_id = assignModal.prefillRequest.id;
       await adminApiKeysService.assignManagedKey(payload);
@@ -1459,18 +1528,42 @@ const SuperAdminApiKeysPage = () => {
         : action === 'set_included'
           ? String(quota?.included_tokens ?? 0)
           : '1000000';
-    setAdjustModal({ open: true, quota, action, value: defaultVal });
+    setAdjustModal({
+      open: true, quota, action, value: defaultVal,
+      reset_interval_days: String(quota?.reset_interval_days ?? 7),
+      recompute_next: false,
+    });
   };
 
   const submitAdjust = async () => {
     const { quota, action, value } = adjustModal;
+    // Reset schedule is edited alongside the token limit; only send it when the
+    // admin actually changed the interval (or asked to restart the cycle), so a
+    // plain token edit does not silently touch the schedule.
+    const newInterval = Math.max(1, Math.min(365, Number(adjustModal.reset_interval_days) || 0));
+    const intervalChanged =
+      action === 'set_managed' &&
+      quota?.key_id &&
+      quota?.key_mode === 'managed' &&
+      newInterval >= 1 &&
+      (newInterval !== Number(quota.reset_interval_days ?? 7) || adjustModal.recompute_next);
     setSubmitting(true);
     try {
       const noValueActions = ['reset', 'reset_managed'];
       const payload = noValueActions.includes(action) ? { action } : { action, value: Number(value) };
       await adminApiKeysService.adjustQuota(quota.id, payload);
-      toast({ title: 'Quota updated' });
-      setAdjustModal({ open: false, quota: null, action: '', value: '' });
+      if (intervalChanged) {
+        await adminApiKeysService.updateResetSchedule({
+          key_id: quota.key_id,
+          reset_interval_days: newInterval,
+          recompute_next: !!adjustModal.recompute_next,
+        });
+      }
+      toast({
+        title: 'Quota updated',
+        description: intervalChanged ? `Reset schedule set to every ${newInterval} day(s).` : undefined,
+      });
+      setAdjustModal({ open: false, quota: null, action: '', value: '', reset_interval_days: '7', recompute_next: false });
       reloadQuotas(); loadAll();
     } catch (e) {
       toast({ title: 'Adjust failed', description: String(e.message || e), variant: 'destructive' });
@@ -1489,9 +1582,15 @@ const SuperAdminApiKeysPage = () => {
         service_charge: parseFloat((rawSvc * multiplier).toFixed(2)),
         discount_pct: discPct,
         admin_note: approveModal.admin_note,
+        sync_global_pricing: approveModal.sync_global_pricing,
       });
-      toast({ title: 'Request approved', description: 'Company notified to complete payment.' });
-      setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '' });
+      toast({
+        title: 'Request approved',
+        description: approveModal.sync_global_pricing
+          ? 'Company notified to complete payment. Global pricing updated.'
+          : 'Company notified to complete payment.',
+      });
+      setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '', sync_global_pricing: false });
       reloadRequests(); loadAll();
     } catch (e) {
       toast({ title: 'Approve failed', description: String(e.message || e), variant: 'destructive' });
@@ -1511,9 +1610,16 @@ const SuperAdminApiKeysPage = () => {
         discount_pct: discPct,
         preferred_duration: editModal.preferred_duration,
         admin_note: editModal.admin_note,
+        sync_global_pricing: editModal.sync_global_pricing,
       });
-      toast({ title: 'Request updated', description: editModal.request.status === 'payment_pending' ? 'Company notified of the new amount due.' : 'Changes saved.' });
-      setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' });
+      toast({
+        title: 'Request updated',
+        description: [
+          editModal.request.status === 'payment_pending' ? 'Company notified of the new amount due.' : 'Changes saved.',
+          editModal.sync_global_pricing ? 'Global pricing updated.' : '',
+        ].filter(Boolean).join(' '),
+      });
+      setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '', sync_global_pricing: false });
       reloadRequests(); loadAll();
     } catch (e) {
       toast({ title: 'Update failed', description: String(e.message || e), variant: 'destructive' });
@@ -1600,6 +1706,11 @@ const SuperAdminApiKeysPage = () => {
                     used_tokens: q.used_tokens,
                     managed_included_tokens: q.managed_included_tokens,
                     managed_used_tokens: q.managed_used_tokens,
+                    // Needed to edit the weekly reset schedule from this modal.
+                    key_id: key.id,
+                    key_mode: key.mode,
+                    reset_interval_days: key.reset_interval_days ?? 7,
+                    next_reset_at: q.next_reset_at,
                   }, 'set_managed');
                 }}
                 filter={keyFilter}
@@ -1620,34 +1731,65 @@ const SuperAdminApiKeysPage = () => {
             <TabsContent value="requests">
               <RequestsTab
                 requests={requests}
+                keyEvents={keyEvents}
                 pricing={pricing}
                 onApprove={(r) => {
+                  // Prefer the request's own price snapshot (an admin may have
+                  // already edited this request) and only fall back to global
+                  // pricing when the request carries no price yet. Reading
+                  // global pricing unconditionally meant an edited request —
+                  // or any agent whose global pricing is still 0 — opened the
+                  // approve dialog showing 0.00 and discarded the real amount.
                   const p = pricing.find(x => x.agent_name === r.agent_name);
-                  const duration = r.preferred_duration || 'monthly';
-                  const monthlyDiscountPct = parseFloat(p?.monthly_discount_pct || 0);
-                  const monthlyKey = parseFloat(p?.monthly_flat_usd || 0);
-                  const monthlySvc = parseFloat(p?.service_charge_usd || 0);
-                  const keyCost = (monthlyKey * (1 - monthlyDiscountPct / 100)).toFixed(2);
-                  const svcCharge = (monthlySvc * (1 - monthlyDiscountPct / 100)).toFixed(2);
-                  const discPct = parseFloat(p?.monthly_discount_pct || 0);
-                  setApproveModal({ open: true, request: r, key_cost: keyCost, service_charge: svcCharge, discount_pct: String(discPct), admin_note: '' });
+                  // 0 counts as unpriced: requests are created with 0.00, not
+                  // null, so a `!= null` test would pin the modal to 0 and hide
+                  // the configured global price. Matches the warning banner below.
+                  const hasSnapshot =
+                    Number(r.key_cost_snapshot ?? 0) > 0 || Number(r.service_charge_snapshot ?? 0) > 0;
+                  let keyCost;
+                  let svcCharge;
+                  let discPct;
+                  if (hasSnapshot) {
+                    // Snapshots are stored already-discounted (see submitEdit),
+                    // so they are used as-is — re-applying the discount here
+                    // would deduct it twice.
+                    keyCost = Number(r.key_cost_snapshot ?? 0).toFixed(2);
+                    svcCharge = Number(r.service_charge_snapshot ?? 0).toFixed(2);
+                    discPct = parseFloat(r.discount_pct_snapshot ?? 0);
+                  } else {
+                    const monthlyDiscountPct = parseFloat(p?.monthly_discount_pct || 0);
+                    const monthlyKey = parseFloat(p?.monthly_flat_usd || 0);
+                    const monthlySvc = parseFloat(p?.service_charge_usd || 0);
+                    keyCost = (monthlyKey * (1 - monthlyDiscountPct / 100)).toFixed(2);
+                    svcCharge = (monthlySvc * (1 - monthlyDiscountPct / 100)).toFixed(2);
+                    discPct = monthlyDiscountPct;
+                  }
+                  setApproveModal({ open: true, request: r, key_cost: keyCost, service_charge: svcCharge, discount_pct: String(discPct), admin_note: r.admin_note || '', sync_global_pricing: false });
                 }}
                 onAssignKey={(r) => openAssign(null, r)}
                 onReject={(r) => setRejectModal({ open: true, request: r, note: '' })}
                 onEdit={(r) => {
                   // Prefill from the request's current snapshot; fall back to
-                  // pricing config for a still-pending request with no price yet.
+                  // pricing config when the request has no real price yet.
+                  // A snapshot of 0 counts as "unpriced" — requests are created
+                  // with 0.00 rather than null, so a `!= null` test made every
+                  // fresh request show 0 and hid the configured global price.
                   const p = pricing.find(x => x.agent_name === r.agent_name);
-                  const hasSnapshot = r.key_cost_snapshot != null || r.service_charge_snapshot != null;
+                  const hasSnapshot =
+                    Number(r.key_cost_snapshot ?? 0) > 0 || Number(r.service_charge_snapshot ?? 0) > 0;
                   const keyCost = hasSnapshot ? (r.key_cost_snapshot ?? 0) : parseFloat(p?.monthly_flat_usd || 0);
                   const svcCharge = hasSnapshot ? (r.service_charge_snapshot ?? 0) : parseFloat(p?.service_charge_usd || 0);
+                  const discPct = hasSnapshot
+                    ? (r.discount_pct_snapshot ?? 0)
+                    : parseFloat(p?.monthly_discount_pct || 0);
                   setEditModal({
                     open: true, request: r,
                     key_cost: String(keyCost),
                     service_charge: String(svcCharge),
-                    discount_pct: String(r.discount_pct_snapshot ?? 0),
+                    discount_pct: String(discPct),
                     preferred_duration: r.preferred_duration || 'monthly',
                     admin_note: r.admin_note || '',
+                    sync_global_pricing: false,
                   });
                 }}
                 filter={requestFilter}
@@ -1994,6 +2136,35 @@ const SuperAdminApiKeysPage = () => {
               </p>
             </div>
           )}
+          {/* Weekly reset schedule — editable here so the admin does not have to
+              go to the Reset Logs tab just to change how often tokens refill. */}
+          {adjustModal.action === 'set_managed' && adjustModal.quota?.key_id && adjustModal.quota?.key_mode === 'managed' && (
+            <div className="space-y-2 py-2 border-t border-[#2d2342] mt-1 pt-3">
+              <Label className="text-white/70 text-sm">Reset every (days)</Label>
+              <Input
+                type="number" min="1" max="365"
+                className="bg-[#1a1333] border-[#3a295a] text-white"
+                value={adjustModal.reset_interval_days}
+                onChange={(e) => setAdjustModal({ ...adjustModal, reset_interval_days: e.target.value })}
+              />
+              {/* <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-violet-500"
+                  checked={!!adjustModal.recompute_next}
+                  onChange={(e) => setAdjustModal({ ...adjustModal, recompute_next: e.target.checked })}
+                />
+                <span className="text-[11px] text-white/50 leading-snug">
+                  Restart the cycle from now
+                  <span className="block text-white/30">
+                    Next reset becomes today + {Number(adjustModal.reset_interval_days) || 7} day(s).
+                    Leave off to keep the current next reset
+                    {adjustModal.quota?.next_reset_at ? ` (${new Date(adjustModal.quota.next_reset_at).toLocaleDateString()})` : ''} and apply the new interval afterwards.
+                  </span>
+                </span>
+              </label> */}
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setAdjustModal({ ...adjustModal, open: false })}>Cancel</Button>
             <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitAdjust} disabled={submitting}>
@@ -2010,10 +2181,13 @@ const SuperAdminApiKeysPage = () => {
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-emerald-400" /> Approve Key Request
             </DialogTitle>
-            <DialogDescription className="text-white/60">
+            {/* <DialogDescription className="text-white/60">
               {approveModal.request?.company_name} — {approveModal.request?.agent_label} ({approveModal.request?.provider?.toUpperCase()})
-              <br />Pre-filled from global pricing. Edit here to set a custom price for this company only — global pricing stays unchanged.
-            </DialogDescription>
+              <br />
+              {((approveModal.request?.key_cost_snapshot ?? 0) > 0 || (approveModal.request?.service_charge_snapshot ?? 0) > 0)
+                ? 'Pre-filled from this request’s saved price. Edit here to change it for this company only — global pricing stays unchanged.'
+                : 'Pre-filled from global pricing. Edit here to set a custom price for this company only — global pricing stays unchanged.'}
+            </DialogDescription> */}
           </DialogHeader>
           <div className="space-y-4 py-2">
             {/* Duration badge — what company requested */}
@@ -2023,14 +2197,20 @@ const SuperAdminApiKeysPage = () => {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-white/70">
                     Company requested a <span className="text-violet-300 font-semibold capitalize">{approveModal.request.preferred_duration}</span> key.
-                    Price has been auto-calculated from global pricing below.
+                    {((approveModal.request?.key_cost_snapshot ?? 0) > 0 || (approveModal.request?.service_charge_snapshot ?? 0) > 0)
+                      ? ' The saved price for this request is shown below.'
+                      : ' Price has been auto-calculated from global pricing below.'}
                   </p>
                 </div>
               </div>
             )}
             {(() => {
               const p = pricing.find(x => x.agent_name === approveModal.request?.agent_name);
-              const notSet = !p || (Number(p.monthly_flat_usd) === 0 && Number(p.service_charge_usd) === 0);
+              const r = approveModal.request;
+              // A request that already carries its own price is not blocked by
+              // unset global pricing — the snapshot is what gets approved.
+              const hasSnapshot = (r?.key_cost_snapshot ?? 0) > 0 || (r?.service_charge_snapshot ?? 0) > 0;
+              const notSet = !hasSnapshot && (!p || (Number(p.monthly_flat_usd) === 0 && Number(p.service_charge_usd) === 0));
               return notSet ? (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
@@ -2086,6 +2266,23 @@ const SuperAdminApiKeysPage = () => {
                       </div>
                     </div>
                   </div>
+                  {/* Opt-in: also write this price to the agent's GLOBAL pricing
+                      config. Off by default so the per-company override stays
+                      the normal behaviour. */}
+                  <label className="flex items-start gap-2 px-3 py-2.5 bg-[#1a1333]/60 border border-[#3a295a] rounded-lg cursor-pointer hover:border-violet-500/40 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 accent-violet-500"
+                      checked={!!approveModal.sync_global_pricing}
+                      onChange={(e) => setApproveModal({ ...approveModal, sync_global_pricing: e.target.checked })}
+                    />
+                    <span className="text-xs text-white/70 leading-snug">
+                      Also save as <span className="font-semibold text-violet-300">global pricing</span> for {approveModal.request?.agent_label}
+                      <span className="block text-[10px] text-amber-300/70 mt-0.5">
+                        Updates the Pricing tab — every company will be quoted these values from now on.
+                      </span>
+                    </span>
+                  </label>
                   {fullTotal > 0 && (
                     <div className="flex items-center justify-between px-4 py-2.5 bg-emerald-500/8 border border-emerald-500/20 rounded-lg">
                       <span className="text-sm text-white/60">Total due</span>
@@ -2114,7 +2311,7 @@ const SuperAdminApiKeysPage = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '' })}>Cancel</Button>
+            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '', sync_global_pricing: false })}>Cancel</Button>
             <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={submitApprove} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Approve & Notify
             </Button>
@@ -2171,7 +2368,7 @@ const SuperAdminApiKeysPage = () => {
                 <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
                   <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="yearly">Yearly</SelectItem>
+                  {/* <SelectItem value="yearly">Yearly</SelectItem> */}
                 </SelectContent>
               </Select>
             </div>
@@ -2213,9 +2410,24 @@ const SuperAdminApiKeysPage = () => {
                 onChange={(e) => setEditModal({ ...editModal, admin_note: e.target.value })}
                 placeholder="Internal / company-facing note…" />
             </div>
+            {/* Opt-in: also write this price to the agent's GLOBAL pricing config. */}
+            <label className="flex items-start gap-2 px-3 py-2.5 bg-[#1a1333]/60 border border-[#3a295a] rounded-lg cursor-pointer hover:border-violet-500/40 transition-colors">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-violet-500"
+                checked={!!editModal.sync_global_pricing}
+                onChange={(e) => setEditModal({ ...editModal, sync_global_pricing: e.target.checked })}
+              />
+              <span className="text-xs text-white/70 leading-snug">
+                Also save as <span className="font-semibold text-violet-300">global pricing</span> for {editModal.request?.agent_label}
+                <span className="block text-[10px] text-amber-300/70 mt-0.5">
+                  Updates the Pricing tab — every company will be quoted these values from now on.
+                </span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
-            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' })}>Cancel</Button>
+            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '', sync_global_pricing: false })}>Cancel</Button>
             <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitEdit} disabled={editing}>
               {editing && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Save Changes
             </Button>

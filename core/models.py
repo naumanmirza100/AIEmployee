@@ -2261,7 +2261,10 @@ class AgentTokenQuota(models.Model):
     byok_notified_80pct = models.BooleanField(default=False)
     byok_notified_90pct = models.BooleanField(default=False)
     byok_notified_100pct = models.BooleanField(default=False)
-    last_reset_at = models.DateTimeField(auto_now_add=True)
+    # NOT auto_now_add: that stamped row-creation time and silently ignored
+    # every assignment, so a quota that had never reset still reported a
+    # "last reset". Null means genuinely never reset; the reset paths set it.
+    last_reset_at = models.DateTimeField(null=True, blank=True)
     # Weekly auto-reset: tokens reset every 7 days when a renewal key is active.
     # Set to None when the key has no renewal (one-time).
     next_reset_at = models.DateTimeField(
@@ -2353,6 +2356,59 @@ class WeeklyResetLog(models.Model):
 
     def __str__(self):
         return f"{self.company_id}/{self.agent_name} reset @ {self.reset_at:%Y-%m-%d %H:%M} (used {self.tokens_used_before_reset})"
+
+
+class KeyEventLog(models.Model):
+    """Append-only history of managed-key lifecycle events.
+
+    CompanyAPIKey holds ONE row per (company, agent) that is overwritten on
+    every assign/renew — so `valid_until` only ever describes the current key
+    and each previous expiry date is lost the moment a new one is issued. That
+    made questions like "when did it expire last time, and when was it renewed"
+    unanswerable. Each event is recorded here instead, and rows are never
+    updated, so the timeline survives any number of re-issues.
+
+    Related: [[WeeklyResetLog]] does the same for token resets.
+    """
+    EVENT_CHOICES = [
+        ('assigned', 'Key Assigned'),
+        ('renewed',  'Key Renewed'),
+        ('expired',  'Key Expired'),
+        ('revoked',  'Key Revoked'),
+    ]
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_events')
+    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
+    # The key this event refers to. SET_NULL so history outlives key deletion.
+    key = models.ForeignKey(
+        'CompanyAPIKey', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='events',
+    )
+    event = models.CharField(max_length=20, choices=EVENT_CHOICES, db_index=True)
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+    provider = models.CharField(max_length=20, blank=True, null=True)
+    # Snapshot of the key's terms AT THIS EVENT — the live key row will change.
+    valid_until = models.DateTimeField(null=True, blank=True)
+    tokens_per_period = models.BigIntegerField(default=0)
+    renewal_period = models.CharField(max_length=20, blank=True, null=True)
+    # Who caused it: an admin for assign/renew/revoke, empty for auto-expiry.
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='key_events_caused',
+    )
+    note = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-occurred_at']
+        indexes = [
+            models.Index(fields=['company', 'agent_name', '-occurred_at']),
+        ]
+        verbose_name = 'Key Event Log'
+        verbose_name_plural = 'Key Event Logs'
+
+    def __str__(self):
+        return f"{self.company_id}/{self.agent_name} {self.event} @ {self.occurred_at:%Y-%m-%d %H:%M}"
 
 
 class AgentProviderUsage(models.Model):
