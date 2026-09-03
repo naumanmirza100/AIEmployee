@@ -289,6 +289,7 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
       : []),
     { label: 'AI Agents',       icon: BrainCircuit, path: '/company/dashboard/ai-agents' },
     { label: 'API Keys',        icon: KeyRound,     path: '/company/settings/api-keys' },
+    { label: 'Notifications',   icon: Bell,         path: '/notifications' },
   ];
 
   const items = [
@@ -296,6 +297,11 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
       label: 'Dashboard',
       icon: Building2,
       section: 'dashboard',
+      // Company pages that live OUTSIDE /company/dashboard (API Keys, and the
+      // notifications page) still belong to this group. Without extraPaths the
+      // sidebar could only match on `section`, so opening one of them collapsed
+      // the whole Dashboard group.
+      extraPaths: ['/company/settings', '/notifications'],
       children: dashboardChildren,
       onClick: () => navigate('/company/dashboard'),
     },

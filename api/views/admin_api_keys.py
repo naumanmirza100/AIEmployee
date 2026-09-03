@@ -27,6 +27,7 @@ from core.models import (
     KeyRequest,
     PlatformAPIKey,
     WeeklyResetLog,
+    KeyEventLog,
     AgentPlan,
 )
 
@@ -247,6 +248,17 @@ def _assign_managed_key_impl(request):
     else:
         token_limit = pricing_conf.managed_key_tokens if pricing_conf else 0
 
+    # Reject a 0-token grant. Such a key is unusable — resolve_for_call
+    # hard-blocks as soon as the managed quota is exhausted, so the company
+    # would receive a key that can never make a single call. The UI blocks this
+    # too; this guard covers direct API callers and an unset pricing config.
+    if token_limit <= 0:
+        return Response(
+            {'status': 'error',
+             'message': 'Token amount must be greater than 0 — a key with 0 tokens cannot make any calls.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     # Compute valid_until from duration_months (or from renewal_period default)
     now = timezone.now()
     if duration_months > 0:
@@ -263,10 +275,14 @@ def _assign_managed_key_impl(request):
     next_reset_at = (now + _td(days=reset_interval_days)) if renewal_period != 'none' else None
 
     with transaction.atomic():
-        key, _ = CompanyAPIKey.objects.get_or_create(
+        key, _created = CompanyAPIKey.objects.get_or_create(
             company=company, agent_name=agent_name, mode='managed',
             defaults={'provider': provider, 'encrypted_key': ''},
         )
+        # Capture the previous reset schedule BEFORE overwriting it, so we can
+        # tell a genuine schedule change from a plain key re-issue below.
+        prev_renewal_period = None if _created else key.renewal_period
+        prev_interval_days = None if _created else (getattr(key, 'reset_interval_days', 7) or 7)
         key.provider = provider
         key.status = 'active'
         key.set_plaintext_key(api_key)
@@ -277,6 +293,16 @@ def _assign_managed_key_impl(request):
         key.reset_interval_days = reset_interval_days
         key.save()
 
+        # Record the lifecycle event. `_created` is only True the very first
+        # time this (company, agent) ever gets a managed key row; every later
+        # assignment overwrites that same row and counts as a renewal.
+        from core.api_key_service import record_key_event
+        record_key_event(
+            company, agent_name,
+            'assigned' if _created else 'renewed',
+            key=key, actor=request.user,
+        )
+
         # Set managed token quota on the AgentTokenQuota row
         from core.api_key_service import _ensure_quota
         quota = _ensure_quota(company, agent_name)
@@ -286,8 +312,46 @@ def _assign_managed_key_impl(request):
             quota_update['managed_notified_80pct'] = False
             quota_update['managed_notified_90pct'] = False
             quota_update['managed_notified_100pct'] = False
-        quota_update['next_reset_at'] = next_reset_at
+        # Only re-anchor the reset clock when it genuinely changes. Overwriting
+        # it on every re-issue pushed next_reset_at to now+interval each time an
+        # admin re-assigned or renewed a key, which desynced it from the last
+        # actual reset (e.g. a 7-day key last reset Aug 18 showing next reset
+        # Sep 1 instead of Aug 25). Re-anchor when: the quota has no schedule
+        # yet, the renewal/interval changed, renewal was turned off, or the
+        # admin explicitly asked to reset the token counters.
+        schedule_changed = (
+            prev_renewal_period != renewal_period
+            or prev_interval_days != reset_interval_days
+        )
+        if (
+            next_reset_at is None
+            or quota.next_reset_at is None
+            or schedule_changed
+            or reset_tokens
+        ):
+            quota_update['next_reset_at'] = next_reset_at
+        # Zeroing the counters IS a reset, so stamp it as one. Without this the
+        # UI kept showing a stale "Last reset" (or "Not yet reset") from before
+        # the key was re-issued, while the next reset had already moved on.
+        if reset_tokens:
+            quota_update['last_reset_at'] = now
         AgentTokenQuota.objects.filter(pk=quota.pk).update(**quota_update)
+
+        # Record the reset in the queryable history too, so the reset-log pages
+        # show this cycle instead of jumping from an old date to the next one.
+        if reset_tokens:
+            try:
+                from core.models import WeeklyResetLog
+                WeeklyResetLog.objects.create(
+                    company=company,
+                    agent_name=agent_name,
+                    reset_at=now,
+                    tokens_used_before_reset=quota.managed_used_tokens or 0,
+                    new_included_limit=token_limit,
+                    next_reset_at=quota_update.get('next_reset_at', quota.next_reset_at),
+                )
+            except Exception as exc:
+                logger.warning("Failed to write WeeklyResetLog on assign: %s", exc)
 
         approved_req = None
         if request_id:
@@ -366,9 +430,13 @@ def revoke_key(request, key_id):
             # Delete KeyRequest first (FK to CompanyAPIKey via linked_key_id)
             KeyRequest.objects.filter(company=company, agent_name=agent_name).delete()
             CompanyAPIKey.objects.filter(company=company, agent_name=agent_name).delete()
-            from core.models import AgentTokenQuota
+            from core.models import AgentTokenQuota, KeyEventLog
             AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).delete()
+            # Admin asked for a clean wipe — the event history goes too.
+            KeyEventLog.objects.filter(company=company, agent_name=agent_name).delete()
         else:
+            from core.api_key_service import record_key_event
+            record_key_event(company, agent_name, 'revoked', key=key, actor=request.user)
             key.status = 'revoked'
             key.save(update_fields=['status', 'updated_at'])
 
@@ -662,6 +730,9 @@ def _serialize_request_admin(r: KeyRequest, revoked_keys: dict = None, linked_ke
         'discount_pct_snapshot': float(r.discount_pct_snapshot) if r.discount_pct_snapshot is not None else 0,
         'amount_paid': float(r.amount_paid) if r.amount_paid is not None else None,
         'paid_at': r.paid_at.isoformat() if r.paid_at else None,
+        # linked_key_id lets the timeline collapse repeated "Key Expired" nodes
+        # (several requests can reference the SAME key — one expiry, not many).
+        'linked_key_id': r.linked_key_id,
         'linked_key_status': (linked_key_statuses or {}).get(r.linked_key_id, {}).get('status') if r.linked_key_id else None,
         'linked_key_valid_until': (linked_key_statuses or {}).get(r.linked_key_id, {}).get('valid_until') if r.linked_key_id else None,
     }
@@ -712,6 +783,29 @@ def list_requests(request):
     })
 
 
+
+def _sync_global_pricing(agent_name, key_cost, service_charge, discount_pct, user):
+    """Write a per-request price back to the agent's GLOBAL pricing config.
+
+    Only called when the admin explicitly ticks "also save as global pricing" —
+    this changes the default every other company will be quoted, so it must
+    never happen implicitly. Returns True when a row was written.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        conf, _created = AdminPricingConfig.objects.get_or_create(agent_name=agent_name)
+        conf.monthly_flat_usd = key_cost
+        conf.service_charge_usd = service_charge
+        conf.monthly_discount_pct = discount_pct
+        conf.updated_by = user
+        conf.save()
+        return True
+    except Exception as exc:
+        _log.warning("Failed to sync global pricing for %s: %s", agent_name, exc)
+        return False
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def approve_key_request(request, request_id):
@@ -749,6 +843,12 @@ def approve_key_request(request, request_id):
     if admin_note:
         req.admin_note = admin_note
     req.save()
+
+    # Optionally push this price into the agent's global pricing config.
+    pricing_synced = False
+    if str(request.data.get('sync_global_pricing', '')).lower() in ('1', 'true', 'yes'):
+        pricing_synced = _sync_global_pricing(
+            req.agent_name, key_cost, service_charge, discount_pct, request.user)
 
     agent_label = req.get_agent_name_display()
     amount_str = f"${total_due:.2f}" if total_due > 0 else "no charge"
@@ -794,7 +894,11 @@ def approve_key_request(request, request_id):
     except Exception as exc:
         logger.warning("Email failed on approve: %s", exc)
 
-    return Response({'status': 'success', 'request': _serialize_request_admin(req)})
+    return Response({
+        'status': 'success',
+        'request': _serialize_request_admin(req),
+        'global_pricing_updated': pricing_synced,
+    })
 
 
 @api_view(['POST'])
@@ -870,6 +974,17 @@ def edit_key_request(request, request_id):
     req.resolved_by = request.user
     req.save()
 
+    # Optionally push this price into the agent's global pricing config.
+    pricing_synced = False
+    if changed_price and str(request.data.get('sync_global_pricing', '')).lower() in ('1', 'true', 'yes'):
+        pricing_synced = _sync_global_pricing(
+            req.agent_name,
+            req.key_cost_snapshot or 0,
+            req.service_charge_snapshot or 0,
+            req.discount_pct_snapshot or 0,
+            request.user,
+        )
+
     # If a price was changed on an already-approved (payment_pending) request,
     # tell the company the amount due changed so they pay the right amount.
     if changed_price and req.status == 'payment_pending':
@@ -894,7 +1009,11 @@ def edit_key_request(request, request_id):
         except Exception as exc:
             logger.warning("PMNotification failed on edit_key_request: %s", exc)
 
-    return Response({'status': 'success', 'request': _serialize_request_admin(req)})
+    return Response({
+        'status': 'success',
+        'request': _serialize_request_admin(req),
+        'global_pricing_updated': pricing_synced,
+    })
 
 
 # ----------------------------------------------------------------------------
@@ -1062,6 +1181,8 @@ def weekly_reset_logs(request):
 
     Returns newest-first log rows with company/agent labels.
     """
+    from django.db.models import OuterRef, Exists
+
     qs = WeeklyResetLog.objects.select_related('company').all()
 
     company_id = request.query_params.get('company_id')
@@ -1085,6 +1206,14 @@ def weekly_reset_logs(request):
     rows = list(qs[start:start + page_size])
 
     agent_labels = dict(AGENT_CHOICES)
+    # Live next-reset per (company, agent). A log row's stored next_reset_at is
+    # a snapshot from that moment and goes stale when the interval changes or
+    # the key is re-assigned, so the column shows the CURRENT schedule and
+    # keeps the snapshot as a tooltip.
+    live_next = {
+        (q.company_id, q.agent_name): q.next_reset_at
+        for q in AgentTokenQuota.objects.filter(next_reset_at__isnull=False)
+    }
     logs = [{
         'id': r.id,
         'company_id': r.company_id,
@@ -1094,23 +1223,49 @@ def weekly_reset_logs(request):
         'reset_at': r.reset_at.isoformat() if r.reset_at else None,
         'tokens_used_before_reset': r.tokens_used_before_reset,
         'new_included_limit': r.new_included_limit,
-        'next_reset_at': r.next_reset_at.isoformat() if r.next_reset_at else None,
+        'next_reset_at': (live_next[(r.company_id, r.agent_name)].isoformat()
+                          if live_next.get((r.company_id, r.agent_name)) else None),
+        'next_reset_at_then': r.next_reset_at.isoformat() if r.next_reset_at else None,
     } for r in rows]
 
     # Upcoming resets — active managed keys with a recurring reset scheduled.
     # Lets the UI show "next reset: <date>" even before any reset has happened.
-    up_keys = CompanyAPIKey.objects.filter(
-        mode='managed', status='active',
-    ).exclude(renewal_period='none').select_related('company')
+    # Include expired keys alongside active ones. An expired key's reset never
+    # fires (run_due_token_resets only acts on status='active'), so dropping it
+    # from this list made the row silently vanish with no explanation of why the
+    # schedule had stalled. It is surfaced with is_expired so the UI can badge it.
+    #
+    # Agents whose PURCHASE has lapsed are excluded outright — the company no
+    # longer owns the agent, so there is no schedule to speak of. (Distinct from
+    # an expired key, where the agent is still owned.) Admin keeps the full
+    # history table below; only the forward-looking list is scoped to owned agents.
+    _admin_active_purchase_sq = CompanyModulePurchase.objects.filter(
+        company_id=OuterRef('company_id'),
+        module_name=OuterRef('agent_name'),
+        status='active',
+    )
+    up_keys = (
+        CompanyAPIKey.objects
+        .filter(mode='managed', status__in=('active', 'expired'))
+        .exclude(renewal_period='none')
+        .annotate(has_active_purchase=Exists(_admin_active_purchase_sq))
+        .filter(has_active_purchase=True)
+        .select_related('company')
+    )
     if company_id:
         up_keys = up_keys.filter(company_id=company_id)
     if agent_name:
         up_keys = up_keys.filter(agent_name=agent_name)
 
-    quota_next = {
-        (q.company_id, q.agent_name): q.next_reset_at
-        for q in AgentTokenQuota.objects.filter(next_reset_at__isnull=False)
-    }
+    quota_next = {}
+    # Fallback "last reset" straight off the quota row, for resets applied
+    # before WeeklyResetLog existed (or by the old Celery task, which never
+    # wrote a log row) — otherwise those show "Not yet reset" forever.
+    quota_last = {}
+    for q in AgentTokenQuota.objects.filter(next_reset_at__isnull=False):
+        quota_next[(q.company_id, q.agent_name)] = q.next_reset_at
+        if q.last_reset_at:
+            quota_last[(q.company_id, q.agent_name)] = q.last_reset_at
     # Most-recent actual reset per (company, agent), so the row can show when the
     # last reset happened (or "not yet" for a freshly-assigned key).
     last_reset = {}
@@ -1123,7 +1278,16 @@ def weekly_reset_logs(request):
         nra = quota_next.get((k.company_id, k.agent_name))
         if not nra:
             continue
-        lra = last_reset.get((k.company_id, k.agent_name))
+        # Prefer whichever source is NEWER, not just the log. Resets applied
+        # by the old Celery task updated the quota but wrote no log row, so a
+        # log-first rule would report a months-old reset as the latest one.
+        _cands = [
+            d for d in (
+                last_reset.get((k.company_id, k.agent_name)),
+                quota_last.get((k.company_id, k.agent_name)),
+            ) if d
+        ]
+        lra = max(_cands) if _cands else None
         upcoming.append({
             'key_id': k.id,
             'company_id': k.company_id,
@@ -1134,8 +1298,12 @@ def weekly_reset_logs(request):
             'next_reset_at': nra.isoformat(),
             'reset_interval_days': getattr(k, 'reset_interval_days', 7),
             'tokens_per_period': k.tokens_per_period,
+            'key_status': k.status,
+            'is_expired': k.status == 'expired',
+            'valid_until': k.valid_until.isoformat() if k.valid_until else None,
         })
-    upcoming.sort(key=lambda x: x['next_reset_at'])
+    # Expired rows last: they are stalled, not genuinely upcoming.
+    upcoming.sort(key=lambda x: (x['is_expired'], x['next_reset_at']))
 
     return Response({
         'status': 'success',
@@ -1279,3 +1447,48 @@ def save_agent_plans(request):
                 sort_order=int(p.get('sort_order', i)) if str(p.get('sort_order', i)).isdigit() else i,
             ))
     return Response({'status': 'success', 'plans': [_serialize_plan(p) for p in created]})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def key_events(request):
+    """Managed-key lifecycle history across companies (admin view).
+
+    Query params (optional): company_id, agent_name, event, limit (max 200).
+    """
+    qs = KeyEventLog.objects.select_related('company', 'actor').all()
+
+    company_id = request.query_params.get('company_id')
+    if company_id:
+        qs = qs.filter(company_id=company_id)
+    agent_name = (request.query_params.get('agent_name') or '').strip()
+    if agent_name:
+        qs = qs.filter(agent_name=agent_name)
+    event = (request.query_params.get('event') or '').strip()
+    if event:
+        qs = qs.filter(event=event)
+
+    try:
+        limit = min(max(int(request.query_params.get('limit', 100)), 1), 200)
+    except (TypeError, ValueError):
+        limit = 100
+
+    agent_labels = dict(AGENT_CHOICES)
+    events = [{
+        'id': e.id,
+        'company_id': e.company_id,
+        'company_name': e.company.name if e.company_id else '',
+        'agent_name': e.agent_name,
+        'agent_label': agent_labels.get(e.agent_name, e.agent_name),
+        'event': e.event,
+        'event_label': e.get_event_display(),
+        'occurred_at': e.occurred_at.isoformat(),
+        'provider': e.provider,
+        'valid_until': e.valid_until.isoformat() if e.valid_until else None,
+        'tokens_per_period': e.tokens_per_period,
+        'renewal_period': e.renewal_period,
+        'actor': e.actor.username if e.actor else None,
+        'note': e.note,
+    } for e in qs[:limit]]
+
+    return Response({'status': 'success', 'events': events})

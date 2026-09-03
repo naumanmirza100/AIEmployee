@@ -15,6 +15,7 @@ import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { API_BASE_URL } from '@/config/apiConfig';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
+import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
 
 /**
  * Full-page notification list.
@@ -131,6 +132,14 @@ const NotificationsPage = () => {
     ? `${API_BASE_URL}/project-manager/ai/notifications`
     : `${API_BASE_URL}/notifications`;
 
+  // Company users get the same profile block the dashboard shows. Project users
+  // authenticate differently, so they keep the plain navbar.
+  const companyUser = useMemo(() => (isCompanyUser ? getCompanyUser() : null), [isCompanyUser]);
+  const handleLogout = async () => {
+    await logoutCompany();
+    navigate('/company/login');
+  };
+
   const fetchNotifications = async () => {
     try {
       if (!authToken) return;
@@ -215,8 +224,12 @@ const NotificationsPage = () => {
           icon={Bell}
           title="Notifications"
           subtitle="All your alerts, reminders and updates in one place"
+          user={companyUser}
+          userRole={companyUser ? 'Company User' : undefined}
+          onLogout={companyUser ? handleLogout : undefined}
           showNavTabs
-          navItems={getAgentNavItems(purchasedModules, undefined, navigate)}
+          activeSection={companyUser ? 'dashboard' : undefined}
+          navItems={getAgentNavItems(purchasedModules, companyUser ? 'dashboard' : undefined, navigate)}
           sidebarLoading={!modulesLoaded}
         />
 

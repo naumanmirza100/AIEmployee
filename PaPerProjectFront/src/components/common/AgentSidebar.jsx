@@ -81,7 +81,10 @@ const AgentSidebar = ({
 
   const isAgentActive = (item) =>
     item.section === activeSection ||
-    (item.basePath && location.pathname.startsWith(item.basePath));
+    (item.basePath && location.pathname.startsWith(item.basePath)) ||
+    // Routes that belong to a group but sit outside its basePath (e.g. the
+    // company Dashboard group owning /company/settings/api-keys).
+    (item.extraPaths || []).some((p) => location.pathname.startsWith(p));
 
   const isAgentExpanded = (item) => {
     if (!item.children?.length) return false;
@@ -146,7 +149,13 @@ const AgentSidebar = ({
       style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
     >
       {/* Skeleton while purchased agents load from the DB */}
-      {loading ? (
+      {/* Skeletons only when there is genuinely nothing to show yet. A cached
+          module list already yields agent entries, so keep those on screen
+          while the refresh completes — swapping real items for skeletons on
+          every navigation is what made these pages look like a full reload.
+          The Dashboard group is always present, so it cannot be the signal;
+          the agent entries are. */}
+      {loading && !navItems.some((i) => i.section && i.section !== 'dashboard') ? (
         Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className={`flex items-center rounded-lg h-11 ${collapsed ? 'justify-center px-0' : 'gap-3 px-3'}`}>
             <span className="h-5 w-5 rounded-md bg-white/[0.06] animate-pulse shrink-0" />

@@ -8,7 +8,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, History, RefreshCw, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { Loader2, History, RefreshCw, ChevronLeft, ChevronRight, Clock, AlertTriangle } from 'lucide-react';
 import agentKeysService from '@/services/agentKeysService';
 
 const fmtDateTime = (iso) => {
@@ -92,7 +92,18 @@ export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '',
         <div className="mb-3 rounded-lg border border-violet-400/25 bg-violet-500/[0.07] p-3 space-y-2">
           {upcoming.map((u) => (
             <div key={u.agent_name} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-              {!locked && <span className="text-white/90 font-medium">{u.agent_label}</span>}
+              {!locked && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className={u.is_expired ? 'text-white/50 font-medium' : 'text-white/90 font-medium'}>
+                    {u.agent_label}
+                  </span>
+                  {u.is_expired && (
+                    <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-500/15 text-red-300 border border-red-400/30">
+                      <AlertTriangle className="h-2.5 w-2.5" /> Key expired
+                    </span>
+                  )}
+                </span>
+              )}
               {/* Last reset */}
               <span className="inline-flex items-center gap-1.5 text-white/60">
                 <History className="h-3.5 w-3.5 text-white/40" /> Last reset:
@@ -100,12 +111,20 @@ export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '',
                   ? <span className="text-white/80">{fmtDateTime(u.last_reset_at)}</span>
                   : <span className="text-white/35">Not yet reset</span>}
               </span>
-              {/* Next reset */}
-              <span className="inline-flex items-center gap-1.5 text-white/60">
-                <Clock className="h-3.5 w-3.5 text-violet-300" /> Next reset:
-                <span className="text-violet-200">{fmtDateTime(u.next_reset_at)}</span>
-                <span className="text-white/30">· every {u.reset_interval_days} day(s)</span>
-              </span>
+              {/* Next reset — an expired key's quota never resets, so showing a
+                  date here would promise a refill that will not arrive. */}
+              {u.is_expired ? (
+                <span className="inline-flex items-center gap-1.5 text-red-300/80">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Resets paused — renew this key to resume the schedule.
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-white/60">
+                  <Clock className="h-3.5 w-3.5 text-violet-300" /> Next reset:
+                  <span className="text-violet-200">{fmtDateTime(u.next_reset_at)}</span>
+                  <span className="text-white/30">· every {u.reset_interval_days} day(s)</span>
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -118,20 +137,27 @@ export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '',
           <History className="h-10 w-10 mx-auto mb-3 opacity-50" />
           <p className="text-sm">
             No resets have happened yet{agent ? ' for this agent' : ''}.
-            {upcoming.length > 0 ? ' The first one is scheduled above.' : " They'll appear here after the first reset cycle."}
+            {upcoming.length === 0
+              ? " They'll appear here after the first reset cycle."
+              : upcoming.every((u) => u.is_expired)
+                ? ' The key has expired, so no reset is currently scheduled.'
+                : ' The first one is scheduled above.'}
           </p>
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-white/10">
+          <div className="overflow-x-auto scrollbar-violet rounded-lg border border-white/10">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-white/5 text-white/50 text-xs uppercase tracking-wide">
+                  {/* Explicit widths: without them the date columns soaked up the
+                      spare space and the two numeric headers wrapped onto two
+                      lines while their values sat cramped. */}
                   {!locked && <th className="text-left font-semibold px-4 py-3">Agent</th>}
-                  <th className="text-left font-semibold px-4 py-3">Reset at</th>
-                  <th className="text-right font-semibold px-4 py-3">Used before reset</th>
-                  <th className="text-right font-semibold px-4 py-3">New limit</th>
-                  <th className="text-left font-semibold px-4 py-3">Next reset</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[22%] whitespace-nowrap">Reset at</th>
+                  <th className="text-right font-semibold px-4 py-3 w-[20%] whitespace-nowrap">Used before reset</th>
+                  <th className="text-right font-semibold px-4 py-3 w-[16%] whitespace-nowrap">New limit</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[22%] whitespace-nowrap">Next reset</th>
                 </tr>
               </thead>
               <tbody>
@@ -139,9 +165,10 @@ export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '',
                   <tr key={l.id} className="border-t border-white/5 text-white/80 hover:bg-white/[0.02]">
                     {!locked && <td className="px-4 py-3">{l.agent_label}</td>}
                     <td className="px-4 py-3 whitespace-nowrap">{fmtDateTime(l.reset_at)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-amber-300">{Number(l.tokens_used_before_reset).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-emerald-300">{Number(l.new_included_limit).toLocaleString()}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-white/50">{fmtDateTime(l.next_reset_at)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-amber-300 whitespace-nowrap">{Number(l.tokens_used_before_reset).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-emerald-300 whitespace-nowrap">{Number(l.new_included_limit).toLocaleString()}</td>
+                    {/* The next-reset recorded at the time of this reset. */}
+                    <td className="px-4 py-3 whitespace-nowrap text-white/50">{fmtDateTime(l.next_reset_at_then)}</td>
                   </tr>
                 ))}
               </tbody>
