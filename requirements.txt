@@ -67,7 +67,3 @@ faiss-cpu==1.13.1
 google-api-python-client==2.198.0
 google-auth==2.55.2
 google-auth-httplib2==0.4.0
-
-
-
-stripe listen --forward-to localhost:8000/api/modules/stripe-webhook

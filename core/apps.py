@@ -25,6 +25,7 @@ class CoreConfig(AppConfig):
     def ready(self):
         """Import signals when app is ready"""
         import core.signals  # noqa
+        import core.checks   # noqa — registers the Stripe configuration checks
 
         # NOTE: Stripe Product/Price sync deliberately does NOT run here.
         # ready() fires in every gunicorn worker, every celery worker and every

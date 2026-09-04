@@ -1463,20 +1463,44 @@ def save_agent_plans(request):
             }, status=status.HTTP_400_BAD_REQUEST)
         seen_intervals.add(iv)
 
+    # Reject unusable prices up front. This used to `continue` silently, which was
+    # worse than it looks: the skipped interval then fell into `removed` below and
+    # its plan was destroyed, so a typo in one field deleted a live plan.
+    for p in plans:
+        try:
+            value = float(p.get('price_usd') or 0)
+        except (TypeError, ValueError):
+            return Response({
+                'status': 'error',
+                'message': f"price_usd must be a number, got {p.get('price_usd')!r}.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if value < 0:
+            return Response({
+                'status': 'error',
+                'message': 'price_usd cannot be negative.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
     with transaction.atomic():
-        existing = list(AgentPlan.objects.filter(agent_name=agent_name))
+        # Lock the agent's rows for the transaction. Without this, two concurrent
+        # saves both read an empty/stale set and both create — which is how
+        # duplicate plans (and duplicate Stripe Prices) appeared despite the
+        # payload-level check above.
+        existing = list(AgentPlan.objects.select_for_update().filter(agent_name=agent_name))
+
         # Interval is the identity of a plan now, so it is the only match key.
-        by_interval = {p.billing_interval: p for p in existing}
+        # Prefer the ACTIVE row: inactive rows are history and may still own the
+        # Stripe Price a live subscription bills against, so reviving one would
+        # both strand that subscriber and collide with the uniqueness constraint.
+        by_interval = {}
+        for row in existing:
+            current = by_interval.get(row.billing_interval)
+            if current is None or (row.is_active and not current.is_active):
+                by_interval[row.billing_interval] = row
 
         kept_ids = set()
         saved = []
         for i, p in enumerate(plans):
-            try:
-                price = float(p.get('price_usd') or 0)
-            except (TypeError, ValueError):
-                continue
-            if price < 0:
-                continue
+            price = float(p.get('price_usd') or 0)
             billing_interval = p.get('billing_interval') or 'month'
             days = DAYS_FOR[billing_interval]
 
@@ -1510,18 +1534,80 @@ def save_agent_plans(request):
             kept_ids.add(row.id)
             saved.append(row)
 
-        removed = [p for p in existing if p.id not in kept_ids]
+        # Turn off what the admin dropped — never delete it. A dropped row still
+        # owns the Stripe Price that any subscriber on that plan is billing
+        # against; deleting it discards the only local record of that Price while
+        # Stripe keeps charging it. Deactivating keeps the history and satisfies
+        # the is_active-conditional uniqueness constraint just as well.
+        removed = [p for p in existing if p.id not in kept_ids and p.is_active]
         if removed:
-            AgentPlan.objects.filter(id__in=[p.id for p in removed]).delete()
+            AgentPlan.objects.filter(id__in=[p.id for p in removed]).update(is_active=False)
 
     # Reconcile Stripe outside the transaction — a Stripe timeout must not roll
-    # back plans the admin has already been told were saved. Failures here are
-    # logged and left for the next sync; the plan simply isn't buyable until then.
+    # back plans the admin has already been told were saved.
+    sync_warning = None
     try:
         from core.stripe_sync import sync_agent_plans_to_stripe
         sync_agent_plans_to_stripe(agent_name, archive_prices_for=removed)
     except Exception as exc:
         logger.error('Stripe sync after saving %s plans failed: %s', agent_name, exc, exc_info=True)
+        # This must not read as a clean save. On a price EDIT the row now holds the
+        # new price_usd while stripe_price_id still points at the old Stripe Price,
+        # so checkout keeps charging the old amount with nothing on screen to say
+        # so. Tell the admin to re-run the sync.
+        sync_warning = (
+            'Plans were saved, but syncing them to Stripe failed. Prices shown here '
+            'are NOT yet live — customers will be charged the previous amount until '
+            '`python manage.py sync_stripe_plans --agent %s` is run.' % agent_name
+        )
 
     saved = list(AgentPlan.objects.filter(id__in=[p.id for p in saved]))
-    return Response({'status': 'success', 'plans': [_serialize_plan(p) for p in saved]})
+    payload = {'status': 'success', 'plans': [_serialize_plan(p) for p in saved]}
+    if sync_warning:
+        payload['warning'] = sync_warning
+    return Response(payload)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def key_events(request):
+    """Managed-key lifecycle history across companies (admin view).
+
+    Query params (optional): company_id, agent_name, event, limit (max 200).
+    """
+    qs = KeyEventLog.objects.select_related('company', 'actor').all()
+
+    company_id = request.query_params.get('company_id')
+    if company_id:
+        qs = qs.filter(company_id=company_id)
+    agent_name = (request.query_params.get('agent_name') or '').strip()
+    if agent_name:
+        qs = qs.filter(agent_name=agent_name)
+    event = (request.query_params.get('event') or '').strip()
+    if event:
+        qs = qs.filter(event=event)
+
+    try:
+        limit = min(max(int(request.query_params.get('limit', 100)), 1), 200)
+    except (TypeError, ValueError):
+        limit = 100
+
+    agent_labels = dict(AGENT_CHOICES)
+    events = [{
+        'id': e.id,
+        'company_id': e.company_id,
+        'company_name': e.company.name if e.company_id else '',
+        'agent_name': e.agent_name,
+        'agent_label': agent_labels.get(e.agent_name, e.agent_name),
+        'event': e.event,
+        'event_label': e.get_event_display(),
+        'occurred_at': e.occurred_at.isoformat(),
+        'provider': e.provider,
+        'valid_until': e.valid_until.isoformat() if e.valid_until else None,
+        'tokens_per_period': e.tokens_per_period,
+        'renewal_period': e.renewal_period,
+        'actor': e.actor.username if e.actor else None,
+        'note': e.note,
+    } for e in qs[:limit]]
+
+    return Response({'status': 'success', 'events': events})
