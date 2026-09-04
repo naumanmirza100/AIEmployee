@@ -14,6 +14,7 @@ relevant Stripe information via webhooks.
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from django.http import JsonResponse
 from django.utils import timezone
@@ -169,6 +170,31 @@ def _extract_interval(subscription):
     if not interval:
         return None
     return 'year' if interval == 'year' else 'month'
+
+
+def _resolve_subscription_module(purchase, price):
+    """Name the agent a Stripe subscription is for. Returns (module_name, display).
+
+    The local purchase row is the fast path, but it is not reliable on its own:
+    there is one CompanyModulePurchase per (company, agent) and re-subscribing
+    overwrites its `stripe_subscription_id`, so every earlier subscription for that
+    agent is orphaned — which is what used to render as "Unknown agent".
+
+    Stripe still knows. `sync_agent_plans_to_stripe` stamps
+    `metadata={'agent_name': ...}` on every Price it creates, and Stripe returns the
+    full Price object inline on subscription items, so this needs no `expand` and no
+    extra API call. Price metadata survives re-purchase, price changes and archival,
+    which is exactly what the local column does not.
+    """
+    if purchase:
+        return purchase.module_name, purchase.get_module_name_display()
+
+    agent = ((price or {}).get('metadata') or {}).get('agent_name')
+    if agent and agent in MODULE_DISPLAY_NAMES:
+        return agent, MODULE_DISPLAY_NAMES[agent]
+
+    # Prices created by hand in the Stripe dashboard carry no metadata.
+    return None, 'Past subscription'
 
 
 def _serialize_purchase(purchase, now):
@@ -717,7 +743,19 @@ def _handle_subscription_updated(subscription):
         stripe_subscription_id=stripe_sub_id,
     ).first()
     if not purchase:
-        logger.warning('Webhook subscription.updated: no local purchase for sub %s', stripe_sub_id)
+        # An orphan: the company re-subscribed to this agent, so the single
+        # stripe_subscription_id column now points at the newer subscription and
+        # this one has nothing claiming it. Name it from the Price metadata so the
+        # log is actionable instead of an opaque id. Deliberately NOT re-pointing
+        # any row here — the newer subscription legitimately owns it, and adopting
+        # an older one would let a dead subscription drive live access.
+        item = ((subscription.get('items') or {}).get('data') or [{}])[0]
+        _, display = _resolve_subscription_module(None, item.get('price') or {})
+        logger.warning(
+            'Webhook subscription.updated: no local purchase for sub %s (%s, status=%s) — '
+            'likely superseded by a newer subscription for the same agent.',
+            stripe_sub_id, display, stripe_status,
+        )
         return
 
     # A comped row can still carry the id of the subscription it used to have.
@@ -789,14 +827,35 @@ def _handle_subscription_deleted(subscription):
         logger.info('Ignoring deletion of %s for complimentary purchase %s.', stripe_sub_id, purchase.id)
         return
 
+    # A subscription reaching 'deleted' straight from past_due is dunning giving up,
+    # not the customer choosing to leave. Distinguish them: the customer already
+    # knows they cancelled, but losing access to an agent because retries ran out is
+    # news, and it is the one moment they can still act on it.
+    dunning_exhausted = purchase.status == 'past_due'
+
     purchase.status = 'cancelled'
     purchase.cancelled_at = timezone.now()
-    purchase.cancelled_reason = 'user_cancelled'
+    purchase.cancelled_reason = 'payment_failed' if dunning_exhausted else 'user_cancelled'
     purchase.cancel_at_period_end = False
     purchase.save(update_fields=[
         'status', 'cancelled_at', 'cancelled_reason', 'cancel_at_period_end', 'updated_at',
     ])
-    logger.info('Subscription %s deleted — purchase %s marked cancelled', stripe_sub_id, purchase.id)
+    logger.info('Subscription %s deleted — purchase %s marked cancelled (%s)',
+                stripe_sub_id, purchase.id, purchase.cancelled_reason)
+
+    if dunning_exhausted:
+        display = purchase.get_module_name_display()
+        _notify_company(
+            purchase,
+            title=f'Access ended — {display}',
+            message=(
+                f'We could not collect payment for {display} after several attempts, '
+                'so the subscription has ended and access has stopped. You can '
+                'subscribe again at any time from the AI Agents page.'
+            ),
+            severity='critical',
+            data={'module_name': purchase.module_name, 'reason': 'payment_failed'},
+        )
 
 
 def _handle_invoice_paid(invoice):
@@ -833,6 +892,27 @@ def _handle_invoice_paid(invoice):
         logger.info('Invoice paid for sub %s — period extended to %s', stripe_sub_id, purchase.current_period_end)
 
 
+def _notify_company(purchase, title, message, severity='warning', data=None):
+    """Send one billing notification to every active user of a company.
+
+    Deliberately NOT swallowing exceptions: the caller runs inside the webhook's
+    transaction, so a failure here must roll the whole handler back and let Stripe
+    retry, rather than leaving the billing state changed with nobody informed.
+    """
+    from core.models import CompanyUser
+    from project_manager_agent.models import PMNotification
+
+    for cu in CompanyUser.objects.filter(company=purchase.company, is_active=True):
+        PMNotification.objects.create(
+            company_user=cu,
+            notification_type='custom',
+            severity=severity,
+            title=title,
+            message=message,
+            data=data or {},
+        )
+
+
 def _handle_invoice_payment_failed(invoice):
     """Handle invoice.payment_failed — Stripe retry/dunning in progress."""
     stripe_sub_id = _invoice_subscription_id(invoice)
@@ -850,23 +930,89 @@ def _handle_invoice_payment_failed(invoice):
         purchase.save(update_fields=['status', 'updated_at'])
         logger.warning('Payment failed for sub %s — marked past_due', stripe_sub_id)
 
-        # Notify company users
-        try:
-            from core.models import CompanyUser
-            from project_manager_agent.models import PMNotification
-            for cu in CompanyUser.objects.filter(company=purchase.company, is_active=True):
-                PMNotification.objects.create(
-                    company_user=cu,
-                    notification_type='custom',
-                    severity='critical',
-                    title=f'Payment failed — {purchase.get_module_name_display()}',
-                    message=(
-                        f'Your recurring payment for {purchase.get_module_name_display()} could not be processed. '
-                        f'Please update your payment method to avoid interruption.'
-                    ),
-                )
-        except Exception as exc:
-            logger.warning('Failed to send payment failure notification: %s', exc)
+        display = purchase.get_module_name_display()
+        _notify_company(
+            purchase,
+            title=f'Payment failed — {display}',
+            message=(
+                f'Your recurring payment for {display} could not be processed. '
+                'We will retry automatically over the next few days. Update your '
+                'payment method to avoid losing access.'
+            ),
+            severity='critical',
+            data={'module_name': purchase.module_name,
+                  'hosted_invoice_url': invoice.get('hosted_invoice_url')},
+        )
+
+
+def _handle_invoice_action_required(invoice):
+    """Handle invoice.payment_action_required — the card needs 3DS on a renewal.
+
+    Distinct from a plain failure: nothing is wrong with the card, the bank simply
+    wants the cardholder to authenticate. Only they can clear it, and only via the
+    hosted invoice page — so a notification carrying that link is the entire fix.
+    Without this the event was ignored and the subscription lapsed for a reason the
+    customer could have resolved in a few seconds.
+    """
+    stripe_sub_id = _invoice_subscription_id(invoice)
+    if not stripe_sub_id:
+        return
+
+    purchase = CompanyModulePurchase.objects.filter(
+        stripe_subscription_id=stripe_sub_id,
+    ).first()
+    if not purchase:
+        return
+
+    display = purchase.get_module_name_display()
+    url = invoice.get('hosted_invoice_url')
+    logger.warning('Sub %s needs customer authentication for renewal', stripe_sub_id)
+    _notify_company(
+        purchase,
+        title=f'Confirm your payment — {display}',
+        message=(
+            f'Your bank needs you to confirm the renewal payment for {display}. '
+            + (f'Approve it here to keep your access: {url}' if url
+               else 'Please complete the confirmation from your billing page to keep your access.')
+        ),
+        severity='critical',
+        data={'module_name': purchase.module_name, 'hosted_invoice_url': url},
+    )
+
+
+def _handle_price_changed(price):
+    """Handle price.created / price.updated — a catalogue edit made in Stripe.
+
+    Delegates the decision to stripe_sync.adopt_stripe_price, which ignores our own
+    writes coming back (they carry `metadata.plan_id`) and refuses to guess when the
+    intent is ambiguous.
+    """
+    from core.stripe_sync import adopt_stripe_price
+
+    result = adopt_stripe_price(price)
+    if result == 'adopted':
+        logger.info('Adopted dashboard price change %s', price.get('id'))
+    elif result == 'ambiguous':
+        logger.warning('Dashboard price %s needs a human — run reconcile_stripe_catalog',
+                       price.get('id'))
+
+
+def _handle_product_changed(product):
+    """Handle product.updated — only interesting if an agent's Product was archived.
+
+    Names and descriptions are cosmetic and owned by MODULE_DISPLAY_NAMES, so they
+    are not adopted. Deactivation is different: it makes every Price under it
+    unusable for new checkouts, which would break buying that agent with nothing in
+    our own UI to explain why.
+    """
+    agent_name = (product.get('metadata') or {}).get('agent_name')
+    if agent_name and not product.get('active'):
+        logger.error(
+            'Stripe Product %s for agent %s was deactivated in the dashboard — new '
+            'subscriptions for this agent will fail until it is reactivated or '
+            '`python manage.py sync_stripe_plans --agent %s` recreates it.',
+            product.get('id'), agent_name, agent_name,
+        )
 
 
 @csrf_exempt
@@ -903,6 +1049,26 @@ def stripe_webhook(request):
     event_type = event['type']
     event_data = event['data']['object']
 
+    # Events we act on. Anything else is acknowledged without writing a dedup row —
+    # Stripe sends far more than we subscribe to, and logging every one of them made
+    # StripeWebhookEvent grow without bound for no benefit.
+    HANDLERS = {
+        'checkout.session.completed': _handle_checkout_completed,
+        'customer.subscription.created': _handle_subscription_updated,
+        'customer.subscription.updated': _handle_subscription_updated,
+        'customer.subscription.deleted': _handle_subscription_deleted,
+        'invoice.paid': _handle_invoice_paid,
+        'invoice.payment_failed': _handle_invoice_payment_failed,
+        'invoice.payment_action_required': _handle_invoice_action_required,
+        'price.created': _handle_price_changed,
+        'price.updated': _handle_price_changed,
+        'product.updated': _handle_product_changed,
+    }
+    handler = HANDLERS.get(event_type)
+    if handler is None:
+        logger.debug('Unhandled Stripe event: %s', event_type)
+        return JsonResponse({'received': True, 'ignored': True}, status=200)
+
     # Idempotency gate. Stripe retries for up to three days, so the same event id
     # arrives repeatedly; the unique insert is the lock. Claim it BEFORE running
     # the handler so two concurrent deliveries can't both process.
@@ -913,24 +1079,20 @@ def stripe_webhook(request):
         return JsonResponse({'received': True, 'duplicate': True}, status=200)
 
     try:
-        if event_type == 'checkout.session.completed':
-            _handle_checkout_completed(event_data)
-        elif event_type in ('customer.subscription.created', 'customer.subscription.updated'):
-            _handle_subscription_updated(event_data)
-        elif event_type == 'customer.subscription.deleted':
-            _handle_subscription_deleted(event_data)
-        elif event_type == 'invoice.paid':
-            _handle_invoice_paid(event_data)
-        elif event_type == 'invoice.payment_failed':
-            _handle_invoice_payment_failed(event_data)
-        else:
-            logger.debug('Unhandled Stripe event: %s', event_type)
-        log_row.processed_at = timezone.now()
-        log_row.save(update_fields=['processed_at'])
+        # One transaction around the handler. Without it a handler that fails
+        # part-way leaves its earlier writes committed, and since the claim is then
+        # released for Stripe to retry, those writes happen AGAIN — which is how a
+        # single failed payment could notify every company user twice.
+        with transaction.atomic():
+            handler(event_data)
+            log_row.processed_at = timezone.now()
+            log_row.save(update_fields=['processed_at'])
     except Exception as exc:
         # Drop the claim so Stripe's retry can have another go — otherwise a
-        # transient failure would be permanently deduped away as "handled".
-        log_row.delete()
+        # transient failure would be permanently deduped away as "handled". The
+        # claim row was rolled back with the handler, so delete() is belt-and-braces
+        # for the case where the failure happened outside the atomic block.
+        StripeWebhookEvent.objects.filter(event_id=event_id).delete()
         logger.error('Error processing webhook event %s (%s): %s',
                      event_type, event_id, exc, exc_info=True)
         return JsonResponse({'error': 'Handler failed'}, status=500)
@@ -1205,12 +1367,11 @@ def billing_overview(request):
                 start, end = _extract_period(sub)
                 item = ((sub.get('items') or {}).get('data') or [{}])[0]
                 price = item.get('price') or {}
+                module_name, module_display = _resolve_subscription_module(purchase, price)
                 subscriptions.append({
                     'stripe_subscription_id': sub.get('id'),
-                    'module_name': purchase.module_name if purchase else None,
-                    'module_display_name': (
-                        purchase.get_module_name_display() if purchase else 'Unknown agent'
-                    ),
+                    'module_name': module_name,
+                    'module_display_name': module_display,
                     'stripe_status': sub.get('status'),
                     'cancel_at_period_end': bool(sub.get('cancel_at_period_end')),
                     'current_period_start': start.isoformat() if start else None,

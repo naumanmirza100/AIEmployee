@@ -2615,7 +2615,13 @@ class AgentPlan(models.Model):
 
     To change what an agent costs, edit the plan's price. `sync_agent_plans_to_stripe`
     then mints a new Stripe Price and archives the old one (Prices are immutable in
-    Stripe), and existing subscribers stay on the price they signed up at.
+    Stripe), moves existing subscribers onto the new Price effective at their next
+    renewal, and notifies them. Nobody is charged mid-cycle.
+
+    The limit is enforced by a uniqueness constraint on (agent_name,
+    billing_interval) conditional on is_active. Superseded plans are DEACTIVATED,
+    never deleted — a switched-off row may still own the Stripe Price a live
+    subscription bills against.
 
     Admin manages these in the "Agent Plans" tab; companies see the active ones on
     the module card.
@@ -2648,6 +2654,21 @@ class AgentPlan(models.Model):
     class Meta:
         ordering = ['agent_name', 'sort_order', 'duration_days']
         indexes = [models.Index(fields=['agent_name', 'is_active'])]
+        # The "one monthly, one yearly" rule above was documented but never
+        # enforced, so it held only as long as every writer behaved. It did not:
+        # concurrent saves and direct shell writes produced duplicates, each of
+        # which minted its own Stripe Price (one agent reached seven).
+        #
+        # Conditional on is_active so deactivated plans stay as history — a losing
+        # row may still own the Stripe Price a live subscription bills against, so
+        # it must never be deleted, only switched off.
+        constraints = [
+            models.UniqueConstraint(
+                fields=['agent_name', 'billing_interval'],
+                condition=models.Q(is_active=True),
+                name='uniq_active_plan_per_agent_interval',
+            ),
+        ]
         verbose_name = 'Agent Plan'
         verbose_name_plural = 'Agent Plans'
 
