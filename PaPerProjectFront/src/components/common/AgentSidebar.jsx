@@ -367,6 +367,10 @@ const AgentSidebar = ({
 // Default tab when the URL has no ?tab= yet, so the first child highlights on a
 // bare /marketing/dashboard or /frontline/dashboard.
 function defaultTabFor(path) {
+  // Admin shell: each page's own default tab, so the sidebar highlights the
+  // right child when the URL carries no ?tab= yet.
+  if (path === '/admin/dashboard') return 'contact';
+  if (path === '/admin/api-keys') return 'overview';
   if (path?.startsWith('/frontline')) return 'queue';
   // Campaign-detail tabs default to Overview; the marketing dashboard to Dashboard.
   if (path?.includes('/marketing/dashboard/campaign/')) return 'overview';
