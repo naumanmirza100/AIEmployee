@@ -242,9 +242,15 @@ export default defineConfig({
 	],
 	server: {
 		cors: true,
-		headers: {
-			'Cross-Origin-Embedder-Policy': 'credentialless',
-		},
+		// NOTE: do not reintroduce `Cross-Origin-Embedder-Policy` here.
+		//
+		// COEP (including 'credentialless') requires every cross-origin iframe to send
+		// a COEP header of its own, and Stripe does not send one on the Elements
+		// iframes. With the header set, Stripe.js loads but its iframe is blocked, so
+		// the card form in Billing → Update card renders as an empty box that never
+		// fires onReady. Nothing here needs cross-origin isolation — there is no
+		// SharedArrayBuffer or threaded wasm in the app — and it was dev-server-only
+		// boilerplate (vercel.json sets no headers, so production was never affected).
 		allowedHosts: true,
 	},
 	resolve: {

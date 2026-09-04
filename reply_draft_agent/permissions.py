@@ -46,9 +46,7 @@ def company_has_module(company):
     ).first()
     if not purchase:
         return False
-    if purchase.status == 'active' and purchase.expires_at and timezone.now() > purchase.expires_at:
-        purchase.status = 'expired'
-        purchase.save(update_fields=['status'])
+    # is_active() handles both Stripe subscription and legacy expiry checks
     return purchase.is_active()
 
 

@@ -1395,6 +1395,35 @@ def _get_company_by_widget_key(request):
                 {'status': 'error', 'message': 'Origin not allowed for this widget key'},
                 status=status.HTTP_403_FORBIDDEN
             )
+
+    # Subscription gate for the public widget routes.
+    #
+    # ModuleAccessMiddleware covers every authenticated agent endpoint, but these
+    # six are deliberately unauthenticated — the widget runs on the customer's own
+    # website and identifies itself with a widget key, not a token. With no
+    # Authorization header the middleware falls open, so without this check a
+    # company whose Frontline subscription lapsed would keep a fully working public
+    # chat widget indefinitely.
+    #
+    # It lives here rather than in the middleware because `public_submit` accepts
+    # multipart uploads: reading the body early to find the widget key would pull
+    # attachments into memory and break `request.FILES`. This resolver is the one
+    # place all six routes already funnel through, and by the time it runs the
+    # request has been parsed safely.
+    from core.models import CompanyModulePurchase
+    purchase = CompanyModulePurchase.objects.filter(
+        company=company, module_name='frontline_agent',
+    ).first()
+    if not (purchase and purchase.is_active()):
+        logger.info(
+            'Widget request rejected: company %s has no active frontline_agent '
+            'subscription.', company.id,
+        )
+        return None, Response(
+            {'status': 'error', 'message': 'This support widget is not currently active.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
     return company, None
 
 

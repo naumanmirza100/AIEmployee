@@ -688,6 +688,9 @@ class Company(models.Model):
     google_calendar_config = models.JSONField(default=dict, blank=True,
                                               help_text='Per-company Google Calendar OAuth config: {connected, refresh_token, google_email, calendar_id, last_error}.')
 
+    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True, db_index=True,
+                                          help_text="Stripe Customer ID for this company")
+
     class Meta:
         verbose_name_plural = 'Companies'
         ordering = ['name']
@@ -776,6 +779,7 @@ class CompanyModulePurchase(models.Model):
 
     STATUS_CHOICES = [
         ('active', 'Active'),
+        ('past_due', 'Past Due'),
         ('cancelled', 'Cancelled'),
         ('expired', 'Expired'),
         ('trial', 'Trial'),
@@ -787,10 +791,24 @@ class CompanyModulePurchase(models.Model):
     price_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Price paid at time of purchase")
     purchased_by = models.ForeignKey(CompanyUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchases_made')
     purchased_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(null=True, blank=True, help_text="Subscription expiration date (null for lifetime)")
+    expires_at = models.DateTimeField(null=True, blank=True, help_text="Locally-owned expiry: legacy one-time purchases and admin-granted complimentary access. Stripe subscriptions use current_period_end instead.")
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancelled_reason = models.CharField(max_length=50, blank=True, null=True, help_text="Reason for cancellation (e.g., 'admin_deactivated', 'user_cancelled')")
     history_kept = models.BooleanField(null=True, blank=True, help_text="When deactivated by admin: True = history preserved, False = history deleted, None = not applicable")
+    # Stripe subscription fields
+    stripe_subscription_id = models.CharField(max_length=255, null=True, blank=True, unique=True,
+                                              help_text="Stripe Subscription ID")
+    current_period_start = models.DateTimeField(null=True, blank=True,
+                                                help_text="Current billing period start (from Stripe)")
+    current_period_end = models.DateTimeField(null=True, blank=True,
+                                              help_text="Current billing period end (from Stripe). Source of truth for Stripe subscriptions.")
+    cancel_at_period_end = models.BooleanField(default=False,
+                                               help_text="True if user cancelled; subscription active until period end")
+    is_complimentary = models.BooleanField(default=False,
+                                           help_text="True if admin granted free access (bypasses Stripe lifecycle)")
+    billing_interval = models.CharField(max_length=10, null=True, blank=True,
+                                        choices=[('month', 'Monthly'), ('year', 'Yearly')],
+                                        help_text="Billing interval for Stripe subscriptions")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -822,12 +840,52 @@ class CompanyModulePurchase(models.Model):
         return f"{self.company.name} - {self.get_module_name_display()} ({self.status})"
 
     def is_active(self):
-        """Check if purchase is currently active"""
+        """Check if purchase is currently active.
+
+        Three sources of truth, checked in priority order:
+          - complimentary (admin-granted): local `expires_at`. It takes priority
+            over the Stripe branch because a row can keep a cancelled
+            subscription id — see the note in toggle_company_agent_status — and
+            that stale id must not drive access for a comped row.
+          - Stripe subscription: Stripe's `current_period_end`.
+          - legacy one-time purchase: local `expires_at`.
+
+        Note `current_period_end` is only trusted when set. A NULL there means we
+        failed to read the period off Stripe, and treating that as "no expiry"
+        would grant permanent access; the calling code logs loudly when it happens.
+        """
         if self.status != 'active':
             return False
+        # Complimentary access — time-boxed by expires_at, never by Stripe.
+        if self.is_complimentary:
+            if self.expires_at and timezone.now() > self.expires_at:
+                return False
+            return True
+        # Stripe subscription: use Stripe's billing period
+        if self.stripe_subscription_id:
+            if self.current_period_end and timezone.now() > self.current_period_end:
+                return False
+            return True
+        # Legacy one-time purchase: use local expires_at
         if self.expires_at and timezone.now() > self.expires_at:
             return False
         return True
+
+    @property
+    def is_scheduled_for_cancellation(self):
+        """True if the user cancelled but the subscription is still active until period end."""
+        return bool(self.stripe_subscription_id and self.cancel_at_period_end and self.status == 'active')
+
+    @property
+    def subscription_status_label(self):
+        """Human-friendly status that distinguishes Stripe vs complimentary vs legacy."""
+        if self.is_complimentary:
+            return 'complimentary'
+        if self.is_scheduled_for_cancellation:
+            return 'active_until_period_end'
+        if self.stripe_subscription_id:
+            return self.status
+        return self.status
 
 
 class CompanyRegistrationToken(models.Model):
@@ -1997,6 +2055,22 @@ class Agent(models.Model):
         return self.name
 
 
+# Human-readable display names for agent slugs — used by subscription, purchase,
+# and notification code across the platform.
+MODULE_DISPLAY_NAMES = {
+    'recruitment_agent': 'Recruitment Agent',
+    'marketing_agent': 'Marketing Agent',
+    'project_manager_agent': 'Project Manager Agent',
+    'frontline_agent': 'Frontline Agent',
+    'operations_agent': 'Operations Agent',
+    'reply_draft_agent': 'Reply Draft Agent',
+    'hr_agent': 'HR Support Agent',
+    'ai_sdr_agent': 'AI SDR Agent',
+    'crm_sync_agent': 'CRM & System Sync Agent',
+    'exec_meeting_agent': 'AI Executive Meeting Assistant',
+}
+
+
 # Backwards-compatible name: reads live from the Agent table. Kept so the many
 # existing `AGENT_CHOICES` consumers — `for slug, label in AGENT_CHOICES`,
 # `dict(AGENT_CHOICES)`, `{s for s, _ in AGENT_CHOICES}` — keep working unchanged.
@@ -2219,6 +2293,36 @@ class AgentTokenQuota(models.Model):
     @property
     def is_exhausted(self) -> bool:
         return self.used_tokens >= self.included_tokens
+
+
+class StripeWebhookEvent(models.Model):
+    """One row per Stripe webhook event we have already processed.
+
+    Stripe guarantees *at-least-once* delivery and retries a failed endpoint for
+    up to three days, so the same event id routinely arrives more than once. The
+    handlers are not all naturally idempotent — `invoice.paid`, for instance,
+    moves a billing period forward — so replays must be dropped at the door.
+
+    `event_id` is unique: the insert itself is the lock. A duplicate raises
+    IntegrityError, which the webhook view treats as "already handled, ack it".
+    """
+    event_id = models.CharField(
+        max_length=255, unique=True, db_index=True,
+        help_text="Stripe's `evt_...` id. Unique — this is the dedup key.",
+    )
+    event_type = models.CharField(max_length=100, blank=True, default='')
+    # Set once the handler returns cleanly. A row with processed_at=NULL means we
+    # started but crashed partway, which is worth seeing when reconciling.
+    processed_at = models.DateTimeField(null=True, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-received_at']
+        verbose_name = 'Stripe Webhook Event'
+        verbose_name_plural = 'Stripe Webhook Events'
+
+    def __str__(self):
+        return f"{self.event_id} ({self.event_type})"
 
 
 class WeeklyResetLog(models.Model):
@@ -2501,19 +2605,43 @@ class PlatformAPIKey(models.Model):
 
 class AgentPlan(models.Model):
     """A subscription plan an admin defines for an agent, that companies pick
-    from when buying it. Each plan = a duration (days) + price. An agent can
-    have several plans (e.g. 30 days / $X, 90 days / $Y).
+    from when buying it.
 
-    Admin manages these in the "Agent Plans" tab; companies see the active
-    ones for an agent in the key-request/buy flow.
+    An agent has AT MOST TWO plans: one monthly and one yearly. That limit is a
+    consequence of how Stripe bills — a subscription recurs on its `interval` and
+    runs until cancelled, so "how many days" is no longer something the customer
+    buys. Several monthly plans at different `duration_days` would be the same
+    subscription at different prices, with labels that misdescribe the charge.
+
+    To change what an agent costs, edit the plan's price. `sync_agent_plans_to_stripe`
+    then mints a new Stripe Price and archives the old one (Prices are immutable in
+    Stripe), and existing subscribers stay on the price they signed up at.
+
+    Admin manages these in the "Agent Plans" tab; companies see the active ones on
+    the module card.
     """
     agent_name = models.CharField(max_length=50, choices=get_agent_choices, db_index=True)
-    # Human label (auto-derived from days if blank, e.g. "1 month").
+    # Optional override for the auto-derived "Monthly"/"Yearly" label.
     label = models.CharField(max_length=80, blank=True, default='')
-    duration_days = models.PositiveIntegerField(help_text='How long the purchase stays active, in days.')
+    # Legacy. Pre-subscription, this was the length of a one-time purchase and it
+    # drove both access expiry and the label. Stripe subscriptions ignore it: the
+    # period comes from Stripe and the label from billing_interval. Kept non-null
+    # for the old one-time rows, and auto-derived (30/365) for new plans.
+    duration_days = models.PositiveIntegerField(
+        default=30,
+        help_text='Legacy one-time-purchase length. Ignored for Stripe subscriptions.',
+    )
+    billing_interval = models.CharField(max_length=10, default='month',
+                                        choices=[('month', 'Monthly'), ('year', 'Yearly')],
+                                        help_text='Stripe billing interval for recurring subscriptions.')
     price_usd = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     is_active = models.BooleanField(default=True, help_text='Only active plans are shown to companies.')
     sort_order = models.PositiveIntegerField(default=0)
+    # Stripe product/price references (synced on app startup)
+    stripe_product_id = models.CharField(max_length=255, null=True, blank=True,
+                                          help_text="Stripe Product ID (auto-synced)")
+    stripe_price_id = models.CharField(max_length=255, null=True, blank=True,
+                                        help_text="Stripe Price ID (auto-synced)")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2528,19 +2656,16 @@ class AgentPlan(models.Model):
 
     @property
     def display_label(self) -> str:
+        """Customer-facing name for the plan.
+
+        Derived from `billing_interval`, NOT `duration_days`. Stripe bills on the
+        interval and nothing else, so labelling a plan by its duration produced
+        labels that lied — a "6 months" plan with interval=month charged its full
+        price every month, forever.
+        """
         if self.label:
             return self.label
-        d = self.duration_days
-        if d % 365 == 0:
-            n = d // 365
-            return f"{n} year{'s' if n > 1 else ''}"
-        if d % 30 == 0:
-            n = d // 30
-            return f"{n} month{'s' if n > 1 else ''}"
-        if d % 7 == 0:
-            n = d // 7
-            return f"{n} week{'s' if n > 1 else ''}"
-        return f"{d} day{'s' if d > 1 else ''}"
+        return 'Yearly' if self.billing_interval == 'year' else 'Monthly'
 
 
 # Per-agent default provider — which PlatformAPIKey to use as the fallback.

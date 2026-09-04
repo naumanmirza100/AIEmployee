@@ -43,6 +43,7 @@ import {
   // Company dashboard sub-tabs
   ListTodo,
   KeyRound,
+  CreditCard,
 } from 'lucide-react';
 
 /**
@@ -288,6 +289,7 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
       ? [{ label: 'Ticket Tasks', icon: Ticket, path: '/company/dashboard/ticket-tasks' }]
       : []),
     { label: 'AI Agents',       icon: BrainCircuit, path: '/company/dashboard/ai-agents' },
+    { label: 'Billing',         icon: CreditCard,   path: '/company/dashboard/billing' },
     { label: 'API Keys',        icon: KeyRound,     path: '/company/settings/api-keys' },
     { label: 'Notifications',   icon: Bell,         path: '/notifications' },
   ];

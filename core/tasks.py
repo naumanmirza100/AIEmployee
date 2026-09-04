@@ -87,13 +87,22 @@ def expire_managed_keys():
 @shared_task(name='core.tasks.expire_module_purchases')
 def expire_module_purchases():
     """
-    Check all active module purchases and mark expired ones.
+    Auto-expire the purchases whose expiry we own locally, once past expires_at:
+    legacy one-time purchases, and admin-granted complimentary access.
+
+    Live Stripe subscriptions are excluded — their lifecycle is driven by webhooks
+    and `current_period_end`, not by this sweep. Complimentary rows are included
+    even when they carry a subscription id, because that id belongs to an already
+    cancelled subscription and no webhook will ever expire the row for us.
+
     Runs every hour via Celery Beat.
     """
+    from django.db.models import Q
     from core.models import CompanyModulePurchase
 
     now = timezone.now()
     expired_purchases = CompanyModulePurchase.objects.filter(
+        Q(stripe_subscription_id__isnull=True) | Q(is_complimentary=True),
         status='active',
         expires_at__isnull=False,
         expires_at__lt=now,
@@ -102,8 +111,8 @@ def expire_module_purchases():
     count = expired_purchases.count()
     if count > 0:
         expired_purchases.update(status='expired')
-        logger.info('Auto-expired %d module purchase(s).', count)
+        logger.info('Auto-expired %d legacy module purchase(s).', count)
     else:
-        logger.debug('No module purchases to expire.')
+        logger.debug('No legacy module purchases to expire.')
 
-    return f'Expired {count} purchase(s)'
+    return f'Expired {count} legacy purchase(s)'

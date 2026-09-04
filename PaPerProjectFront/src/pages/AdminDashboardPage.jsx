@@ -1766,6 +1766,12 @@ const AdminDashboardPage = () => {
                               <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
                                 <span><Building2 className="h-3.5 w-3.5 inline mr-1" />{agent.company_name}</span>
                                 <span className="text-xs">${agent.price_paid || 0}</span>
+                                {agent.stripe_subscription_id && (
+                                  <span className="text-xs text-purple-600">Stripe {agent.billing_interval === 'year' ? 'Yearly' : 'Monthly'}</span>
+                                )}
+                                {agent.is_complimentary && (
+                                  <span className="text-xs text-emerald-600">Complimentary</span>
+                                )}
                                 {agent.active_label && (
                                   <span className={`text-xs font-medium ${agent.status === 'active' ? 'text-blue-600' : 'text-muted-foreground'}`}>
                                     {agent.active_label}
@@ -1867,6 +1873,17 @@ const AdminDashboardPage = () => {
                       {selectedAgent.price_paid != null && (
                         <Badge variant="outline">${selectedAgent.price_paid}</Badge>
                       )}
+                      {selectedAgent.stripe_subscription_id && (
+                        <Badge variant="outline" className="text-purple-600 border-purple-400">Stripe Subscription</Badge>
+                      )}
+                      {selectedAgent.is_complimentary && (
+                        <Badge variant="outline" className="text-emerald-600 border-emerald-400">Complimentary</Badge>
+                      )}
+                      {selectedAgent.billing_interval && selectedAgent.stripe_subscription_id && (
+                        <Badge variant="outline" className="text-muted-foreground">
+                          {selectedAgent.billing_interval === 'year' ? 'Yearly' : 'Monthly'}
+                        </Badge>
+                      )}
                       {selectedAgent.active_label && (
                         <Badge variant="outline" className="text-blue-600 border-blue-500">
                           {selectedAgent.active_label}
@@ -1880,7 +1897,11 @@ const AdminDashboardPage = () => {
                     {selectedAgent.is_expired && (
                       <div className="mt-2 p-2 rounded bg-yellow-500/10 border border-yellow-500/30 text-sm text-yellow-700">
                         <Clock className="h-4 w-4 inline mr-1" />
-                        Agent subscription time has ended. The company needs to purchase again.
+                        {selectedAgent.stripe_subscription_id
+                          ? 'Stripe subscription has ended. The company needs to renew or resolve a payment issue.'
+                          : selectedAgent.is_complimentary
+                            ? 'Complimentary access has been revoked. The company needs to purchase a subscription.'
+                            : 'Agent subscription time has ended. The company needs to purchase again.'}
                       </div>
                     )}
                   </div>
@@ -1931,16 +1952,19 @@ const AdminDashboardPage = () => {
                           </p>
                         )}
                       </div>
-                      {selectedAgent.expires_at && (
+                      {(selectedAgent.expires_at || selectedAgent.current_period_end) && (
                         <div className="relative">
                           <div className={`absolute -left-[31px] top-1 w-4 h-4 rounded-full border-2 border-background ${selectedAgent.is_expired ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
-                          <p className="text-sm font-medium">{selectedAgent.is_expired ? 'Subscription Ended' : 'Expiration Date'}</p>
-                          <p className="text-xs text-muted-foreground">{formatDate(selectedAgent.expires_at)}</p>
+                          <p className="text-sm font-medium">{selectedAgent.is_expired ? (selectedAgent.stripe_subscription_id ? 'Subscription Ended' : 'Subscription Ended') : selectedAgent.stripe_subscription_id ? 'Period Ends' : 'Expiration Date'}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(selectedAgent.current_period_end || selectedAgent.expires_at)}</p>
                           {selectedAgent.time_remaining && (
                             <p className="text-xs text-green-600 font-medium mt-0.5">{selectedAgent.time_remaining}</p>
                           )}
                           {selectedAgent.time_ended_ago && (
                             <p className="text-xs text-red-500 font-medium mt-0.5">{selectedAgent.time_ended_ago}</p>
+                          )}
+                          {selectedAgent.cancel_at_period_end && !selectedAgent.is_expired && (
+                            <p className="text-xs text-yellow-600 font-medium mt-0.5">Will cancel at period end</p>
                           )}
                         </div>
                       )}
@@ -2014,7 +2038,7 @@ const AdminDashboardPage = () => {
                       The company has not made a new payment for this agent.
                     </p>
                     <p className="text-xs text-yellow-600/70 mt-1">
-                      Reactivating will grant a new 30-day subscription without payment.
+                      Reactivating will grant complimentary access with no expiration. The company can still subscribe via Stripe for paid access.
                     </p>
                   </div>
                   {confirmActivateAgent.time_ended_ago && (
