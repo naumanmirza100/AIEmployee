@@ -3,11 +3,18 @@
  *
  * Same shape (collapsible chat-history sidebar + Chat / Meetings tabs +
  * markdown-rendered assistant turns + .ics export) but talks to
- * `hrAgentService` and the HR data model. Differences vs. PM:
- *   * No accept/reject/counter-propose flow — HR meetings are
- *     organizer-driven, so we expose Edit + Cancel instead.
- *   * Participants come from the company's employees (auth.User-backed),
- *     not the M2M-with-status PM model.
+ * `hrAgentService` and the HR data model.
+ *
+ * The meeting cards mirror PM's: response-status pill, per-participant status
+ * chips, negotiation history, and the accept / decline / suggest-a-new-time
+ * actions. Differences vs. PM:
+ *   * Participants are `Employee` rows inside one company, so the same person
+ *     can hold the organizer seat or a participant seat — `is_organizer` /
+ *     `my_participant_status` on each meeting say which buttons to render.
+ *   * `status` (scheduled/completed/cancelled) and `response_status`
+ *     (pending/accepted/…) are separate fields here: lifecycle vs. negotiation.
+ *   * HR-only extras kept alongside PM's actions: Edit, Extract action items,
+ *     and Cancel.
  *   * Sensitive types (`exit_interview`, `grievance_hearing`,
  *     `performance_review`) are auto-marked private at create time on the
  *     backend.
@@ -29,7 +36,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Send, Calendar, MessageCircle, RefreshCw, Plus, Trash2,
   ChevronsLeft, ChevronsRight, Bot, Download, Pencil, X, ListChecks,
-  Sparkles,
+  Sparkles, CheckCircle, XCircle, Clock, ArrowRightLeft,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 import InfoHint from '../frontline/InfoHint';
@@ -53,11 +60,42 @@ function markdownToHtml(markdown) {
   return out.join('\n');
 }
 
+// Lifecycle badge — is this meeting still on the calendar?
 const STATUS_BADGE = {
   scheduled: { color: 'text-emerald-400', bg: 'bg-emerald-500/15', border: 'border-emerald-400/30' },
   completed: { color: 'text-violet-400', bg: 'bg-violet-500/15', border: 'border-violet-400/30' },
   cancelled: { color: 'text-rose-400', bg: 'bg-rose-500/15', border: 'border-rose-400/30' },
   rescheduled: { color: 'text-amber-400', bg: 'bg-amber-500/15', border: 'border-amber-400/30' },
+};
+
+// Negotiation pill — have the attendees agreed to the time? Same palette and
+// iconography as pm-agent/MeetingScheduler so the two dashboards read alike.
+const RESPONSE_CONFIG = {
+  pending: { color: 'text-amber-400', bg: 'bg-amber-500/20', icon: Clock, label: 'Pending' },
+  accepted: { color: 'text-emerald-400', bg: 'bg-emerald-500/20', icon: CheckCircle, label: 'Accepted' },
+  partially_accepted: { color: 'text-sky-400', bg: 'bg-sky-500/20', icon: CheckCircle, label: 'Partially Accepted' },
+  rejected: { color: 'text-red-400', bg: 'bg-red-500/20', icon: XCircle, label: 'Declined' },
+  counter_proposed: { color: 'text-violet-400', bg: 'bg-violet-500/20', icon: ArrowRightLeft, label: 'New Time Proposed' },
+  withdrawn: { color: 'text-white/55', bg: 'bg-white/[0.05]', icon: Trash2, label: 'Withdrawn' },
+};
+
+const RESPOND_TOAST = {
+  accepted: 'Meeting accepted',
+  rejected: 'Meeting declined',
+  counter_proposed: 'New time proposed',
+  withdrawn: 'Meeting withdrawn',
+};
+
+/** Which set of buttons this viewer gets on a given meeting. */
+const seatFor = (m) => (m.is_organizer || m.my_participant_status == null ? 'organizer' : 'participant');
+
+const formatWhen = (iso) => {
+  if (!iso) return 'Unscheduled';
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
+  } catch { return 'Unscheduled'; }
 };
 
 const MEETING_TYPE_LABEL = {
@@ -98,6 +136,14 @@ export default function HRMeetingScheduler() {
   const [cancelDialog, setCancelDialog] = useState({ open: false, meeting: null, reason: '' });
   const [savingEdit, setSavingEdit] = useState(false);
   const [extractingFor, setExtractingFor] = useState(null);
+
+  // Accept / decline / suggest-a-new-time. `respondingTo` holds the id of the
+  // meeting whose inline counter-propose panel is open.
+  const [respondingTo, setRespondingTo] = useState(null);
+  const [respondReason, setRespondReason] = useState('');
+  const [counterDate, setCounterDate] = useState('');
+  const [counterTime, setCounterTime] = useState('');
+  const [respondLoading, setRespondLoading] = useState(false);
 
   // ---------- Load + auto-hide on small screens ----------
   useEffect(() => {
@@ -339,6 +385,55 @@ export default function HRMeetingScheduler() {
     }
   };
 
+  const closeRespondPanel = () => {
+    setRespondingTo(null);
+    setRespondReason('');
+    setCounterDate('');
+    setCounterTime('');
+  };
+
+  /**
+   * Record a response on a meeting. `seat` decides whose answer this is —
+   * the organizer confirming/withdrawing, or an attendee replying to their
+   * own invite. The backend re-checks it; we send it so a person who holds
+   * both seats gets the one the button implied.
+   */
+  const handleRespond = async (m, action, seat) => {
+    let counterISO = null;
+    if (action === 'counter_proposed') {
+      if (!counterDate || !counterTime) {
+        toast({ title: 'Pick a date and time first', variant: 'destructive' });
+        return;
+      }
+      const parsed = new Date(`${counterDate}T${counterTime}`);
+      if (Number.isNaN(parsed.getTime())) {
+        toast({ title: 'That date/time is not valid', variant: 'destructive' });
+        return;
+      }
+      counterISO = parsed.toISOString();
+    }
+    setRespondLoading(true);
+    try {
+      const res = await hrAgentService.respondToHRMeeting(m.id, action, respondReason, counterISO, seat);
+      const updated = res?.data;
+      if (updated?.id) {
+        setMeetings((arr) => arr.map((x) => (x.id === updated.id ? updated : x)));
+      } else {
+        fetchMeetings();
+      }
+      toast({ title: RESPOND_TOAST[action] || 'Response saved' });
+      closeRespondPanel();
+    } catch (e) {
+      toast({
+        title: 'Could not save your response',
+        description: e?.data?.message || e.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setRespondLoading(false);
+    }
+  };
+
   const handleExtractActionItems = async (m) => {
     if (!m.transcript) {
       toast({
@@ -367,7 +462,18 @@ export default function HRMeetingScheduler() {
     upcoming: meetings.filter((m) => m.status === 'scheduled' && m.scheduled_at && new Date(m.scheduled_at) > new Date()).length,
     completed: meetings.filter((m) => m.status === 'completed').length,
     cancelled: meetings.filter((m) => m.status === 'cancelled').length,
+    // Negotiation counts — the numbers that tell you where to act.
+    pending: meetings.filter((m) => m.response_status === 'pending' && m.status !== 'cancelled').length,
+    accepted: meetings.filter((m) => m.response_status === 'accepted').length,
+    counter: meetings.filter((m) => ['counter_proposed', 'partially_accepted'].includes(m.response_status)).length,
+    awaitingMe: meetings.filter(
+      (m) => m.my_participant_status === 'pending' && m.status !== 'cancelled'
+        && m.response_status !== 'withdrawn',
+    ).length,
   };
+  const nextMeeting = meetings
+    .filter((m) => m.status === 'scheduled' && m.scheduled_at && new Date(m.scheduled_at) > new Date())
+    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))[0];
 
   // ---------- Render ----------
   return (
@@ -618,17 +724,38 @@ export default function HRMeetingScheduler() {
 
             {/* MEETINGS TAB */}
             {activeTab === 'meetings' && (
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-                {/* Stats banner */}
-                <div className="flex items-center gap-1.5">
-                  <div data-tour-hrmeet="stats" className="grid grid-cols-2 md:grid-cols-4 gap-3 flex-1">
-                    <StatCard label="Total" value={stats.total} />
-                    <StatCard label="Upcoming" value={stats.upcoming} />
-                    <StatCard label="Completed" value={stats.completed} />
-                    <StatCard label="Cancelled" value={stats.cancelled} />
+              <div data-tour-hrmeet="list" className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                {/* Summary pills — same shape as the PM scheduler: the counts
+                    that tell you where you still owe someone an answer. */}
+                <div className="flex items-start gap-1.5">
+                  <div data-tour-hrmeet="stats" className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.05] text-white/65">{stats.total} total</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">{stats.pending} pending</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">{stats.accepted} accepted</span>
+                    {stats.counter > 0 && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400">{stats.counter} awaiting a time</span>
+                    )}
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400">{stats.upcoming} upcoming</span>
+                    {stats.completed > 0 && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.05] text-white/55">{stats.completed} completed</span>
+                    )}
+                    {stats.cancelled > 0 && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-400">{stats.cancelled} cancelled</span>
+                    )}
+                    {stats.awaitingMe > 0 && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-300 font-medium">
+                        {stats.awaitingMe} need your reply
+                      </span>
+                    )}
                   </div>
                   <InfoHint {...HR_HINTS.hrMeetStats} />
                 </div>
+
+                {nextMeeting && (
+                  <div className="text-[11px] text-violet-400 flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> Next: {nextMeeting.title} — {formatWhen(nextMeeting.scheduled_at)}
+                  </div>
+                )}
 
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-white/50">{meetings.length} meeting{meetings.length === 1 ? '' : 's'}</span>
@@ -648,80 +775,250 @@ export default function HRMeetingScheduler() {
                     No meetings yet. Use the Chat tab to schedule one.
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {meetings.map((m) => {
+                      const rc = RESPONSE_CONFIG[m.response_status] || RESPONSE_CONFIG.pending;
+                      const RespIcon = rc.icon;
                       const sb = STATUS_BADGE[m.status] || STATUS_BADGE.scheduled;
-                      const upcoming = m.scheduled_at && new Date(m.scheduled_at) > new Date();
+                      const seat = seatFor(m);
+                      // A cancelled or withdrawn meeting is closed to further
+                      // responses — show why instead of dead buttons.
+                      const isLive = m.status !== 'cancelled' && m.response_status !== 'withdrawn';
+                      // Who suggested the time currently on the table? The
+                      // organizer must not be able to "accept" their own
+                      // proposal — that's the other side's move.
+                      const lastCounter = [...(m.responses || [])].reverse()
+                        .find((r) => r.action === 'counter_proposed');
+                      const counterFromParticipant = lastCounter?.responded_by === 'participant';
+                      const withLabel = (m.participants || [])
+                        .map((p) => p.full_name || p.work_email).join(', ');
+                      const isPast = m.scheduled_at && new Date(m.scheduled_at) < new Date();
+
                       return (
-                        <div key={m.id} className="rounded-xl border border-white/[0.08] p-3 bg-gradient-to-br from-white/[0.03] to-white/[0.005]">
+                        <div key={m.id} className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+                          {/* Title + response pill */}
                           <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <div className="font-medium truncate">{m.title}</div>
-                                <Badge className={`text-[10px] ${sb.bg} ${sb.color} ${sb.border}`} variant="outline">{m.status}</Badge>
-                                <Badge className="text-[10px]" variant="outline">{MEETING_TYPE_LABEL[m.meeting_type] || m.meeting_type}</Badge>
-                                {m.visibility === 'private' && (
-                                  <Badge className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-400/30" variant="outline">Private</Badge>
-                                )}
-                              </div>
-                              <div className="text-xs text-white/60 mt-1">
-                                {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : 'Unscheduled'}
-                                {' · '}{m.duration_minutes}m
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-medium text-white">{m.title}</h4>
+                              <p className="text-xs text-white/55 mt-0.5">
+                                With: {withLabel || '—'}
                                 {m.organizer_name ? ` · organized by ${m.organizer_name}` : ''}
-                              </div>
-                              {m.participants?.length > 0 && (
-                                <div className="text-xs text-white/50 mt-1 flex flex-wrap gap-1">
-                                  {m.participants.slice(0, 4).map((p) => (
-                                    <span key={p.id} className="px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06]">
-                                      {p.full_name || p.work_email}
-                                    </span>
-                                  ))}
-                                  {m.participants.length > 4 && (
-                                    <span className="text-white/40">+{m.participants.length - 4} more</span>
-                                  )}
-                                </div>
-                              )}
-                              {m.action_items?.length > 0 && (
-                                <div className="mt-2 text-xs">
-                                  <div className="text-white/60 font-medium flex items-center gap-1 mb-1">
-                                    <ListChecks className="h-3 w-3" /> Action items
-                                  </div>
-                                  <ul className="list-disc list-inside space-y-0.5 text-white/70">
-                                    {m.action_items.slice(0, 5).map((a, i) => (
-                                      <li key={i}>
-                                        {a.text}
-                                        {a.owner_name && <span className="text-white/40"> · {a.owner_name}</span>}
-                                        {a.due_date && <span className="text-white/40"> · due {a.due_date}</span>}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
+                              </p>
                             </div>
-                            <div data-tour-hrmeet="meeting-actions" className="flex flex-col gap-1 shrink-0">
-                              <InfoHint {...HR_HINTS.hrMeetRowActions} className="self-end mb-0.5" />
-                              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => downloadIcs(m)} disabled={!m.scheduled_at}>
-                                <Download className="h-3 w-3 mr-1" /> .ics
-                              </Button>
-                              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditDialog({ open: true, meeting: { ...m } })}>
-                                <Pencil className="h-3 w-3 mr-1" /> Edit
-                              </Button>
-                              <Button variant="outline" size="sm" className="h-7 text-xs"
-                                onClick={() => handleExtractActionItems(m)} disabled={extractingFor === m.id}>
-                                {extractingFor === m.id
-                                  ? <Loader2 className="h-3 w-3 animate-spin" />
-                                  : <ListChecks className="h-3 w-3 mr-1" />}
-                                <span className="ml-1">Extract</span>
-                              </Button>
-                              {m.status !== 'cancelled' && (
-                                <Button variant="outline" size="sm"
-                                  className="h-7 text-xs text-rose-400 hover:text-rose-300"
-                                  onClick={() => setCancelDialog({ open: true, meeting: m, reason: '' })}>
-                                  <X className="h-3 w-3 mr-1" /> Cancel
-                                </Button>
-                              )}
-                            </div>
+                            <span className={`shrink-0 flex items-center gap-1 text-xs px-2 py-1 rounded-full ${rc.bg} ${rc.color}`}>
+                              <RespIcon className="h-3 w-3" /> {rc.label}
+                            </span>
                           </div>
+
+                          {/* When / how long / what kind */}
+                          <div className="flex items-center gap-3 text-xs text-white/55 flex-wrap">
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" /> {formatWhen(m.scheduled_at)}
+                            </span>
+                            <span>{m.duration_minutes} min</span>
+                            <Badge variant="outline" className="text-[10px]">
+                              {MEETING_TYPE_LABEL[m.meeting_type] || m.meeting_type}
+                            </Badge>
+                            <Badge variant="outline" className={`text-[10px] ${sb.bg} ${sb.color} ${sb.border}`}>
+                              {m.status}
+                            </Badge>
+                            {m.visibility === 'private' && (
+                              <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-400/30">
+                                Private
+                              </Badge>
+                            )}
+                            {m.location && <span className="truncate max-w-[180px]">{m.location}</span>}
+                            <button onClick={() => downloadIcs(m)} disabled={!m.scheduled_at}
+                              title="Download .ics calendar file"
+                              className="flex items-center gap-1 text-violet-400 hover:text-violet-300 transition-colors disabled:opacity-40 disabled:hover:text-violet-400">
+                              <Download className="h-3 w-3" /> .ics
+                            </button>
+                          </div>
+
+                          {/* Per-attendee response state */}
+                          {m.participants?.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {m.participants.map((p) => {
+                                const pc = RESPONSE_CONFIG[p.status] || RESPONSE_CONFIG.pending;
+                                return (
+                                  <span key={p.id}
+                                    className={`text-[10px] px-2 py-0.5 rounded-full border border-white/10 ${pc.bg} ${pc.color}`}>
+                                    {p.full_name || p.work_email}: {(p.status || 'pending').replace('_', ' ')}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Action items */}
+                          {m.action_items?.length > 0 && (
+                            <div className="pt-1 space-y-1">
+                              <span className="text-[10px] text-white/40 uppercase tracking-wide flex items-center gap-1">
+                                <ListChecks className="h-3 w-3" /> Action items
+                              </span>
+                              {m.action_items.slice(0, 5).map((a, ai) => (
+                                <div key={ai} className="flex items-start gap-2 text-xs text-white/65">
+                                  <span className="text-violet-400 mt-0.5">•</span>
+                                  <span>
+                                    {a.text}
+                                    {a.owner_name && <span className="text-white/40"> · {a.owner_name}</span>}
+                                    {a.due_date && <span className="text-white/40"> · due {a.due_date}</span>}
+                                  </span>
+                                </div>
+                              ))}
+                              {m.action_items.length > 5 && (
+                                <div className="text-[10px] text-white/40 ml-4">
+                                  +{m.action_items.length - 5} more
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Negotiation history */}
+                          {m.responses?.length > 0 && (
+                            <div className="space-y-1 pt-2 border-t border-white/5">
+                              <span className="text-[10px] text-white/40 uppercase tracking-wide">Response history</span>
+                              {m.responses.map((r) => (
+                                <div key={r.id} className="text-xs text-white/55 flex items-center gap-2 flex-wrap">
+                                  <span className="font-medium text-white/65">{r.responder_name}</span>
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${RESPONSE_CONFIG[r.action]?.bg || 'bg-white/[0.05]'} ${RESPONSE_CONFIG[r.action]?.color || 'text-white/55'}`}>
+                                    {r.action.replace('_', ' ')}
+                                  </span>
+                                  {r.proposed_time && <span>→ {formatWhen(r.proposed_time)}</span>}
+                                  {r.reason && <span className="italic">"{r.reason}"</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Actions */}
+                          <div data-tour-hrmeet="meeting-actions"
+                            className="flex gap-2 pt-2 flex-wrap items-center border-t border-white/5">
+                            <InfoHint {...HR_HINTS.hrMeetRespond} />
+                            {respondingTo === m.id ? (
+                              <div className="w-full space-y-2 bg-white/[0.03] rounded-lg p-3">
+                                <div className="text-[11px] text-white/50">
+                                  Suggest a different time{seat === 'organizer' ? ' for everyone' : ''}.
+                                </div>
+                                <Input value={respondReason} onChange={(e) => setRespondReason(e.target.value)}
+                                  placeholder="Reason (optional)"
+                                  className="h-8 text-xs bg-white/[0.03] border-white/10" />
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Input type="date" value={counterDate} onChange={(e) => setCounterDate(e.target.value)}
+                                    className="h-8 w-auto text-xs bg-white/[0.03] border-white/10" />
+                                  <Input type="time" value={counterTime} onChange={(e) => setCounterTime(e.target.value)}
+                                    className="h-8 w-auto text-xs bg-white/[0.03] border-white/10" />
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button size="sm" className="h-7 text-xs bg-violet-600 hover:bg-violet-700"
+                                    disabled={respondLoading || !counterDate || !counterTime}
+                                    onClick={() => handleRespond(m, 'counter_proposed', seat)}>
+                                    {respondLoading
+                                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                                      : <><ArrowRightLeft className="h-3 w-3 mr-1" /> Suggest time</>}
+                                  </Button>
+                                  <Button size="sm" variant="ghost" className="h-7 text-xs"
+                                    onClick={closeRespondPanel} disabled={respondLoading}>
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                {isLive && seat === 'participant' && (
+                                  <>
+                                    {m.my_participant_status !== 'accepted' && (
+                                      <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700"
+                                        disabled={respondLoading}
+                                        onClick={() => handleRespond(m, 'accepted', 'participant')}>
+                                        <CheckCircle className="h-3 w-3 mr-1" /> Accept
+                                      </Button>
+                                    )}
+                                    {m.my_participant_status !== 'rejected' && (
+                                      <Button size="sm" variant="outline"
+                                        className="h-7 text-xs border-red-500/30 text-red-400 hover:bg-red-500/10"
+                                        disabled={respondLoading}
+                                        onClick={() => handleRespond(m, 'rejected', 'participant')}>
+                                        <XCircle className="h-3 w-3 mr-1" /> Decline
+                                      </Button>
+                                    )}
+                                    <Button size="sm" variant="outline"
+                                      className="h-7 text-xs border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
+                                      onClick={() => setRespondingTo(m.id)}>
+                                      <ArrowRightLeft className="h-3 w-3 mr-1" /> Suggest new time
+                                    </Button>
+                                  </>
+                                )}
+
+                                {isLive && seat === 'organizer' && (
+                                  <>
+                                    {/* Only the side that DIDN'T propose the current
+                                        time gets to accept it. */}
+                                    {m.response_status === 'counter_proposed' && counterFromParticipant && (
+                                      <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700"
+                                        disabled={respondLoading}
+                                        onClick={() => handleRespond(m, 'accepted', 'organizer')}>
+                                        <CheckCircle className="h-3 w-3 mr-1" /> Accept proposed time
+                                      </Button>
+                                    )}
+                                    {m.response_status === 'counter_proposed' && !counterFromParticipant && (
+                                      <span className="text-xs text-amber-400 flex items-center gap-1">
+                                        <Clock className="h-3 w-3" /> Waiting on {withLabel || 'the attendees'} to accept your new time
+                                      </span>
+                                    )}
+                                    <Button size="sm" variant="outline"
+                                      className="h-7 text-xs border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
+                                      onClick={() => setRespondingTo(m.id)}>
+                                      <ArrowRightLeft className="h-3 w-3 mr-1" /> Change time
+                                    </Button>
+                                    <Button size="sm" variant="outline"
+                                      className="h-7 text-xs border-red-500/30 text-red-400 hover:bg-red-500/10"
+                                      disabled={respondLoading}
+                                      onClick={() => handleRespond(m, 'withdrawn', 'organizer')}>
+                                      <Trash2 className="h-3 w-3 mr-1" /> Withdraw
+                                    </Button>
+                                  </>
+                                )}
+
+                                {!isLive && (
+                                  <span className="text-xs text-white/45 flex items-center gap-1">
+                                    <XCircle className="h-3 w-3" /> Closed to responses
+                                    {m.status === 'cancelled' ? ' — this meeting was cancelled.' : '.'}
+                                  </span>
+                                )}
+
+                                {/* HR-only tools, kept alongside the PM-style actions */}
+                                <span className="mx-1 h-4 w-px bg-white/10" />
+                                <Button variant="outline" size="sm" className="h-7 text-xs"
+                                  onClick={() => setEditDialog({ open: true, meeting: { ...m } })}>
+                                  <Pencil className="h-3 w-3 mr-1" /> Edit
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-7 text-xs"
+                                  onClick={() => handleExtractActionItems(m)} disabled={extractingFor === m.id}>
+                                  {extractingFor === m.id
+                                    ? <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    : <ListChecks className="h-3 w-3 mr-1" />}
+                                  Extract
+                                </Button>
+                                {m.status !== 'cancelled' && (
+                                  <Button variant="outline" size="sm"
+                                    className="h-7 text-xs text-rose-400 hover:text-rose-300"
+                                    onClick={() => setCancelDialog({ open: true, meeting: m, reason: '' })}>
+                                    <X className="h-3 w-3 mr-1" /> Cancel
+                                  </Button>
+                                )}
+                              </>
+                            )}
+                          </div>
+
+                          {/* Post-meeting nudge */}
+                          {isPast && m.status === 'scheduled' && (
+                            <div className="pt-1 border-t border-white/5">
+                              <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                                <CheckCircle className="h-3 w-3" /> Meeting time has passed — paste the transcript via Edit, then Extract action items.
+                              </span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -835,13 +1132,6 @@ export default function HRMeetingScheduler() {
     </div>
   );
 }
-
-const StatCard = ({ label, value }) => (
-  <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2">
-    <div className="text-[10px] uppercase tracking-wider text-white/50">{label}</div>
-    <div className="text-2xl font-semibold mt-0.5">{value}</div>
-  </div>
-);
 
 // Inline date/time picker rendered inside the assistant bubble when the
 // backend responds with `needs_time`. Sensible default: tomorrow, next

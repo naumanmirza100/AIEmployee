@@ -807,6 +807,7 @@ urlpatterns = [
     re_path(r'^hr/meetings/(?P<meeting_id>\d+)/?$', hr_agent.get_hr_meeting, name='hr_get_meeting'),  # GET
     re_path(r'^hr/meetings/(?P<meeting_id>\d+)/update/?$', hr_agent.update_hr_meeting, name='hr_update_meeting'),  # PATCH
     re_path(r'^hr/meetings/(?P<meeting_id>\d+)/cancel/?$', hr_agent.cancel_hr_meeting, name='hr_cancel_meeting'),  # POST
+    re_path(r'^hr/meetings/(?P<meeting_id>\d+)/respond/?$', hr_agent.respond_hr_meeting, name='hr_respond_meeting'),  # POST
     re_path(r'^hr/meetings/(?P<meeting_id>\d+)/extract-action-items/?$', hr_agent.extract_hr_meeting_action_items, name='hr_extract_meeting_action_items'),  # POST
     # Meeting Scheduler — natural-language LLM scheduling (mirrors PM agent)
     re_path(r'^hr/ai/meetings/schedule/?$', hr_agent.hr_meeting_schedule, name='hr_meeting_schedule'),  # POST

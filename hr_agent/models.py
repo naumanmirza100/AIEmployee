@@ -777,6 +777,18 @@ class HRMeeting(models.Model):
         ('cancelled', 'Cancelled'),
         ('rescheduled', 'Rescheduled'),
     ]
+    # Negotiation state, kept separate from `status` (the lifecycle state).
+    # `status` answers "is this meeting still on the calendar?"; this answers
+    # "have the attendees agreed to the time?". Mirrors
+    # `project_manager_agent.ScheduledMeeting.status`, whose values these are.
+    RESPONSE_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('partially_accepted', 'Partially Accepted'),
+        ('rejected', 'Rejected'),
+        ('counter_proposed', 'Counter Proposed'),
+        ('withdrawn', 'Withdrawn'),
+    ]
     VISIBILITY_CHOICES = [
         ('company', 'Company-visible'),
         ('private', 'Private (participants + HR only)'),
@@ -790,7 +802,8 @@ class HRMeeting(models.Model):
 
     organizer = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True,
                                   related_name='hr_meetings_organized')
-    participants = models.ManyToManyField(Employee, blank=True, related_name='hr_meetings_attending')
+    participants = models.ManyToManyField(Employee, blank=True, related_name='hr_meetings_attending',
+                                          through='HRMeetingParticipant')
 
     scheduled_at = models.DateTimeField()
     duration_minutes = models.IntegerField(default=30)
@@ -798,6 +811,10 @@ class HRMeeting(models.Model):
     meeting_link = models.URLField(blank=True, null=True)
     location = models.CharField(max_length=500, blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
+    response_status = models.CharField(
+        max_length=20, choices=RESPONSE_STATUS_CHOICES, default='pending',
+        help_text='Derived from participant responses (or set directly by the organizer).',
+    )
 
     notes = models.TextField(blank=True, default='')
     transcript = models.TextField(blank=True, default='')
@@ -821,6 +838,109 @@ class HRMeeting(models.Model):
 
     def __str__(self):
         return f"{self.title} [{self.meeting_type}] @ {self.scheduled_at}"
+
+    def update_response_status(self):
+        """Recalculate `response_status` from the participant rows.
+
+        Same precedence as `ScheduledMeeting.update_overall_status()`: an
+        outstanding counter-proposal outranks partial acceptance, and a
+        meeting is only 'accepted' once everyone has said yes. A meeting with
+        no participants keeps whatever the organizer set.
+        """
+        statuses = list(self.participant_rows.values_list('status', flat=True))
+        if not statuses:
+            return
+        if all(s == 'accepted' for s in statuses):
+            new_status = 'accepted'
+        elif any(s == 'counter_proposed' for s in statuses):
+            new_status = 'counter_proposed'
+        elif all(s == 'rejected' for s in statuses):
+            new_status = 'rejected'
+        elif any(s == 'accepted' for s in statuses) and any(s == 'pending' for s in statuses):
+            new_status = 'partially_accepted'
+        else:
+            new_status = 'pending'
+        if new_status != self.response_status:
+            self.response_status = new_status
+            self.save(update_fields=['response_status', 'updated_at'])
+
+
+class HRMeetingParticipant(models.Model):
+    """Through model for `HRMeeting.participants`, carrying each attendee's
+    own accept / reject / counter-propose state.
+
+    Mirrors `project_manager_agent.MeetingParticipant`. It maps onto the
+    table Django auto-created for the plain M2M this used to be, so the
+    migration that introduces it is state-only for the existing columns.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('counter_proposed', 'Counter Proposed'),
+    ]
+
+    meeting = models.ForeignKey(HRMeeting, on_delete=models.CASCADE,
+                                related_name='participant_rows',
+                                db_column='hrmeeting_id')
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE,
+                                 related_name='hr_meeting_participations')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    reason = models.TextField(blank=True, default='',
+                              help_text='Reason for rejection or counter-proposal.')
+    counter_proposed_time = models.DateTimeField(null=True, blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        app_label = 'hr_agent'
+        # Matches the table Django generated for the original plain M2M.
+        db_table = 'hr_agent_hrmeeting_participants'
+        unique_together = [('meeting', 'employee')]
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.employee_id} → {self.status} ({self.meeting_id})"
+
+
+class HRMeetingResponse(models.Model):
+    """One entry in a meeting's negotiation chain — the audit trail the UI
+    renders under each meeting card. Mirrors
+    `project_manager_agent.MeetingResponse`."""
+    ACTION_CHOICES = [
+        ('proposed', 'Proposed'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('counter_proposed', 'Counter Proposed'),
+        ('withdrawn', 'Withdrawn'),
+    ]
+    RESPONDED_BY_CHOICES = [
+        ('organizer', 'Organizer'),
+        ('participant', 'Participant'),
+    ]
+
+    meeting = models.ForeignKey(HRMeeting, on_delete=models.CASCADE, related_name='responses')
+    responder = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True,
+                                  related_name='hr_meeting_responses',
+                                  help_text='Employee who responded. Null for HR-admin dashboard '
+                                            'operators who have no Employee row.')
+    responder_name = models.CharField(max_length=255, blank=True, default='',
+                                      help_text='Snapshot of the responder name at response time.')
+    responded_by = models.CharField(max_length=20, choices=RESPONDED_BY_CHOICES, default='organizer')
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    proposed_time = models.DateTimeField(null=True, blank=True,
+                                         help_text='New proposed time (counter-proposals only).')
+    reason = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['created_at']
+        indexes = [models.Index(fields=['meeting', 'created_at'],
+                                name='hr_meet_resp_meeting_idx')]
+
+    def __str__(self):
+        return f"{self.responded_by} → {self.action} ({self.meeting_id})"
 
 
 # ============================================================================
