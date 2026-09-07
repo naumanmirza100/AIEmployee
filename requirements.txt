@@ -43,6 +43,9 @@ redis==5.0.1
 django-celery-beat==2.5.0
 spacy>=3.7.0,<3.8.0
 
+# AI SDR Agent embedded scheduler
+APScheduler==3.11.3
+
 # Stripe payments
 stripe==8.0.0
 
