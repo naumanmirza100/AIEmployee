@@ -148,9 +148,9 @@ export const HR_MEETINGS_TOUR = {
     // silently now. The stats / refresh / per-meeting-actions steps stay
     // because their targets are still present when the Meetings list is
     // rendered inline (which it is by default).
-    { selector: '[data-tour-hrmeet="stats"]',          title: 'Meetings snapshot',        body: 'Four counts at a glance: total, upcoming, completed, cancelled. Reflects everything the agent has scheduled for you and your team.', placement: 'bottom' },
+    { selector: '[data-tour-hrmeet="stats"]',          title: 'Meetings snapshot',        body: 'Counts at a glance: total, pending, accepted, upcoming and cancelled — plus a highlighted count of invites still waiting on your reply.', placement: 'bottom' },
     { selector: '[data-tour-hrmeet="refresh"]',        title: 'Refresh',                  body: 'Reload the meetings list from the backend. Handy if a colleague just scheduled something and you want to see it appear.', placement: 'left' },
-    { selector: '[data-tour-hrmeet="meeting-actions"]', title: 'Per-meeting actions',     body: 'Every meeting has four quick actions: Export .ics (download the invite), Edit (change title/time/attendees), Extract action items (AI pulls tasks from the transcript), and Cancel.', placement: 'top' },
+    { selector: '[data-tour-hrmeet="meeting-actions"]', title: 'Respond and manage',     body: 'Answer the invite right here — Accept, Decline, or suggest a new time. The organizer can change the time or withdraw it. Alongside those: Edit (title/time/attendees), Extract action items (AI pulls tasks from the transcript), and Cancel.', placement: 'top' },
   ],
 };
 
@@ -235,9 +235,10 @@ export const HR_HINTS = {
   hrMeetChatSamples:    { title: 'Sample prompts',              body: "Example phrasings the scheduler understands. Click one to load it as your prompt." },
   hrMeetChatInput:      { title: 'Describe the meeting',        body: "Type in plain English. Include names, date/time, duration, and agenda. Enter to send, Shift+Enter for a new line." },
   hrMeetChatSend:       { title: 'Send',                        body: 'Submit your request. The AI books the meeting or asks for missing info (like exact time).' },
-  hrMeetStats:          { title: 'Meetings snapshot',           body: 'Total, upcoming, completed, cancelled — at a glance.' },
+  hrMeetStats:          { title: 'Meetings snapshot',           body: 'Total, pending, accepted, upcoming and cancelled — plus how many invites are waiting on your reply.' },
   hrMeetRefresh:        { title: 'Refresh',                     body: 'Reload the meetings list from the backend. Handy if a colleague just scheduled something.' },
   hrMeetRowActions:     { title: 'Per-meeting actions',         body: 'Export .ics, Edit, Extract action items (AI pulls tasks from the transcript), or Cancel — right on each row.' },
+  hrMeetRespond:        { title: 'Respond to a meeting',       body: 'Accept, Decline, or suggest a new time. Attendees answer their own invite; the organizer can change the time or withdraw the meeting entirely. Every reply is logged on the card.' },
 
   // Leave
   hrLeaveList: { title: 'Leave requests', body: 'Pending, approved, and rejected requests all in one list. Approve or reject inline; the requester is notified automatically.' },

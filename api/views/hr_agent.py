@@ -35,7 +35,7 @@ from hr_agent.models import (
     Employee, LeaveBalance, LeaveRequest,
     HRDocument, HRDocumentChunk,
     HRWorkflow, HRWorkflowExecution,
-    HRMeeting,
+    HRMeeting, HRMeetingParticipant, HRMeetingResponse,
     HRNotificationTemplate, HRScheduledNotification,
     HRKnowledgeChat, HRKnowledgeChatMessage,
     HRMeetingSchedulerChat, HRMeetingSchedulerChatMessage,
@@ -1978,25 +1978,45 @@ def list_hr_meetings(request):
     company = request.user.company
     cu = request.user
     role = _resolve_asker_role(cu)
+    viewer_emp = Employee.objects.filter(company=company, company_user=cu).first()
     qs = HRMeeting.objects.filter(company=company)
     if role != 'hr':
-        asker_emp = Employee.objects.filter(company=company, company_user=cu).first()
-        emp_id = asker_emp.id if asker_emp else None
+        emp_id = viewer_emp.id if viewer_emp else None
         public_or_mine = Q(visibility='company')
         if emp_id:
             public_or_mine |= Q(participants__id=emp_id) | Q(organizer_id=emp_id)
         qs = qs.filter(public_or_mine).distinct()
-    rows = []
-    for m in qs.order_by('-scheduled_at')[:200]:
-        rows.append({
-            'id': m.id, 'title': m.title, 'meeting_type': m.meeting_type,
-            'visibility': m.visibility, 'status': m.status,
-            'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
-            'duration_minutes': m.duration_minutes,
-            'meeting_link': m.meeting_link, 'location': m.location,
-            'organizer_id': m.organizer_id,
-        })
+    # Full serializer (not a trimmed row): the cards render participants with
+    # their per-person response state, the negotiation log, and action items,
+    # all of which the old hand-rolled row shape silently omitted.
+    qs = (qs.select_related('organizer')
+            .prefetch_related('participant_rows__employee', 'responses__responder'))
+    rows = [
+        _serialize_hr_meeting(m, viewer_employee_id=viewer_emp.id if viewer_emp else None)
+        for m in qs.order_by('-scheduled_at')[:200]
+    ]
     return Response({'status': 'success', 'data': rows})
+
+
+def _seed_meeting_proposal(meeting, company_user):
+    """Open a new meeting's negotiation log with the organizer's proposal, so
+    the response history on the card reads as a full thread from turn one.
+    Mirrors the `action='proposed'` row PM writes on schedule."""
+    try:
+        from hr_agent.models import HRMeetingResponse as _Resp
+        name = (meeting.organizer.full_name if meeting.organizer_id
+                else (getattr(company_user, 'full_name', '') or 'HR'))
+        _Resp.objects.create(
+            meeting=meeting,
+            responder=meeting.organizer,
+            responder_name=name[:255],
+            responded_by='organizer',
+            action='proposed',
+            proposed_time=meeting.scheduled_at,
+        )
+    except Exception:
+        logger.warning("Failed to seed meeting proposal row for meeting %s",
+                       meeting.id, exc_info=True)
 
 
 @api_view(['POST'])
@@ -2038,6 +2058,7 @@ def create_hr_meeting(request):
     if d.get('participant_ids'):
         valid = Employee.objects.filter(pk__in=d['participant_ids'], company=company)
         m.participants.set(valid)
+    _seed_meeting_proposal(m, request.user)
     _write_audit_log(request.user, company, 'hr_meeting.create', 'HRMeeting', m.id,
                      before=None,
                      after={'title': m.title, 'meeting_type': m.meeting_type,
@@ -2589,8 +2610,21 @@ def hr_dashboard(request):
 # Meeting Scheduling Agent — chat + LLM scheduling, mirrors PM agent
 # ============================================================================
 
-def _serialize_hr_meeting(m: HRMeeting) -> dict:
-    """Compact wire shape used by both list endpoints and the scheduler chat."""
+def _serialize_hr_meeting(m: HRMeeting, *, viewer_employee_id: int | None = None) -> dict:
+    """Compact wire shape used by both list endpoints and the scheduler chat.
+
+    `viewer_employee_id` lets the card decide which response buttons to show:
+    a participant sees Accept / Decline / Suggest time for their own row, the
+    organizer sees the confirm / withdraw side. Pass None for contexts with no
+    viewer (e.g. the scheduler chat echoing a freshly created meeting).
+    """
+    # Plain `.all()` so a caller's prefetch_related is actually used — chaining
+    # select_related() here would discard it and re-query per meeting.
+    participant_rows = list(m.participant_rows.all())
+    my_status = None
+    for row in participant_rows:
+        if viewer_employee_id and row.employee_id == viewer_employee_id:
+            my_status = row.status
     return {
         'id': m.id,
         'title': m.title,
@@ -2598,13 +2632,37 @@ def _serialize_hr_meeting(m: HRMeeting) -> dict:
         'meeting_type': m.meeting_type,
         'visibility': m.visibility,
         'status': m.status,
+        'response_status': m.response_status,
         'organizer_id': m.organizer_id,
         'organizer_name': m.organizer.full_name if m.organizer_id else None,
-        'participant_ids': list(m.participants.values_list('id', flat=True)),
+        'participant_ids': [row.employee_id for row in participant_rows],
         'participants': [
-            {'id': p.id, 'full_name': p.full_name, 'work_email': p.work_email}
-            for p in m.participants.all()
+            {
+                'id': row.employee_id,
+                'full_name': row.employee.full_name,
+                'work_email': row.employee.work_email,
+                'status': row.status,
+                'reason': row.reason,
+                'counter_proposed_time': (row.counter_proposed_time.isoformat()
+                                          if row.counter_proposed_time else None),
+                'responded_at': row.responded_at.isoformat() if row.responded_at else None,
+            }
+            for row in participant_rows
         ],
+        'responses': [
+            {
+                'id': r.id,
+                'responded_by': r.responded_by,
+                'responder_name': r.responder_name or (r.responder.full_name if r.responder_id else 'HR'),
+                'action': r.action,
+                'proposed_time': r.proposed_time.isoformat() if r.proposed_time else None,
+                'reason': r.reason,
+                'created_at': r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in m.responses.all()  # Meta.ordering already sorts by created_at
+        ],
+        'my_participant_status': my_status,
+        'is_organizer': bool(viewer_employee_id and m.organizer_id == viewer_employee_id),
         'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
         'duration_minutes': m.duration_minutes,
         'timezone_name': m.timezone_name,
@@ -3320,6 +3378,7 @@ def hr_meeting_schedule(request):
             )
             valid = Employee.objects.filter(pk__in=validated_ids, company=company)
             m.participants.set(valid)
+            _seed_meeting_proposal(m, request.user)
             meeting_payload = _serialize_hr_meeting(m)
 
             # Build a strong success reply so the frontend never has to guess.
@@ -3365,7 +3424,11 @@ def hr_meeting_schedule(request):
 
 def _hr_meeting_or_404(request, meeting_id):
     company = request.user.company
-    m = HRMeeting.objects.filter(pk=meeting_id, company=company).first()
+    m = (HRMeeting.objects
+         .filter(pk=meeting_id, company=company)
+         .select_related('organizer')
+         .prefetch_related('participant_rows__employee', 'responses__responder')
+         .first())
     if not m:
         return None, Response({'status': 'error', 'message': 'Meeting not found'},
                               status=status.HTTP_404_NOT_FOUND)
@@ -3380,7 +3443,9 @@ def get_hr_meeting(request, meeting_id):
     m, err = _hr_meeting_or_404(request, meeting_id)
     if err:
         return err
-    return Response({'status': 'success', 'data': _serialize_hr_meeting(m)})
+    _viewer = _hr_viewer_employee(request)
+    return Response({'status': 'success', 'data': _serialize_hr_meeting(
+        m, viewer_employee_id=_viewer.id if _viewer else None)})
 
 
 @api_view(['PATCH'])
@@ -3410,12 +3475,20 @@ def update_hr_meeting(request, meeting_id):
         if sched is None:
             return Response({'status': 'error', 'message': 'scheduled_at must be ISO-8601'},
                             status=status.HTTP_400_BAD_REQUEST)
+        time_moved = m.scheduled_at != sched
         m.scheduled_at = sched
         dirty.append('scheduled_at')
         # Reset reminder flags so updated meetings get fresh reminders.
         m.reminder_24h_sent_at = None
         m.reminder_15m_sent_at = None
         dirty.extend(['reminder_24h_sent_at', 'reminder_15m_sent_at'])
+        if time_moved:
+            # Everyone's accept/decline was against the OLD slot — clear it so
+            # the card doesn't show stale agreement on a time nobody saw.
+            m.participant_rows.all().update(
+                status='pending', counter_proposed_time=None, responded_at=None)
+            m.response_status = 'pending'
+            dirty.append('response_status')
     if 'duration_minutes' in d:
         try:
             m.duration_minutes = max(5, min(480, int(d['duration_minutes'])))
@@ -3463,7 +3536,9 @@ def update_hr_meeting(request, meeting_id):
                                 'fields_changed': sorted(set(dirty) - {'updated_at',
                                                                       'reminder_24h_sent_at',
                                                                       'reminder_15m_sent_at'})})
-    return Response({'status': 'success', 'data': _serialize_hr_meeting(m)})
+    _viewer = _hr_viewer_employee(request)
+    return Response({'status': 'success', 'data': _serialize_hr_meeting(
+        m, viewer_employee_id=_viewer.id if _viewer else None)})
 
 
 @api_view(['POST'])
@@ -3479,10 +3554,13 @@ def cancel_hr_meeting(request, meeting_id):
     reason = (request.data or {}).get('reason') or ''
     prev_status = m.status
     m.status = 'cancelled'
+    # A cancelled meeting is off the table — carry that through to the
+    # negotiation state so the card stops showing "pending" on a dead meeting.
+    m.response_status = 'withdrawn'
     if reason:
         prefix = '\n\n[Cancelled] ' if m.notes else '[Cancelled] '
         m.notes = (m.notes or '') + prefix + reason
-    m.save(update_fields=['status', 'notes', 'updated_at'])
+    m.save(update_fields=['status', 'response_status', 'notes', 'updated_at'])
     # Audit — cancellation was the only meeting mutation not logged. Compliance
     # queries like "who cancelled this exit interview?" now have an answer.
     _write_audit_log(
@@ -3493,7 +3571,244 @@ def cancel_hr_meeting(request, meeting_id):
                'meeting_type': m.meeting_type,
                'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None},
     )
-    return Response({'status': 'success', 'data': _serialize_hr_meeting(m)})
+    _viewer = _hr_viewer_employee(request)
+    return Response({'status': 'success', 'data': _serialize_hr_meeting(
+        m, viewer_employee_id=_viewer.id if _viewer else None)})
+
+
+# ----- Accept / reject / counter-propose ----------------------------------
+# Mirrors the PM agent's meeting negotiation (`api.views.pm_agent.meeting_respond`
+# for the organizer side + `api.views.notification.meeting_respond` for the
+# invitee side), collapsed into one endpoint because HR meetings are
+# Employee↔Employee inside a single company rather than CompanyUser↔User.
+
+_HR_MEETING_ACTIONS = ('accepted', 'rejected', 'counter_proposed', 'withdrawn')
+
+
+def _hr_viewer_employee(request):
+    """The Employee row behind the logged-in CompanyUser, if there is one.
+    Dashboard operators (owner/admin) often have none — they act as HR."""
+    return Employee.objects.filter(
+        company=request.user.company, company_user=request.user,
+    ).first()
+
+
+def _send_hr_meeting_email(recipients, subject, body):
+    """Best-effort notification mail. Never raises — a dead SMTP box must not
+    fail the response the user just recorded."""
+    recipients = [e for e in dict.fromkeys(recipients or []) if e]
+    if not recipients:
+        return
+    try:
+        from django.core.mail import send_mail
+        send_mail(
+            subject=subject,
+            message=body,
+            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            recipient_list=recipients,
+            fail_silently=True,
+        )
+    except Exception:
+        logger.warning("HR meeting notification email failed for %s", recipients, exc_info=True)
+
+
+def _hr_meeting_when(m) -> str:
+    """Human-readable meeting time in the meeting's own timezone — same
+    rendering `send_hr_meeting_reminders` uses, so the notification a person
+    gets on responding matches the reminder they get later."""
+    if not m.scheduled_at:
+        return 'TBD'
+    tz_name = (m.timezone_name or '').strip()
+    local_dt = m.scheduled_at
+    if tz_name:
+        try:
+            from zoneinfo import ZoneInfo
+            local_dt = m.scheduled_at.astimezone(ZoneInfo(tz_name))
+        except Exception:
+            tz_name = 'UTC'
+    else:
+        tz_name = 'UTC'
+    return local_dt.strftime('%A, %B %d, %Y at %I:%M %p') + f' {tz_name}'
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def respond_hr_meeting(request, meeting_id):
+    """Accept, decline, suggest a new time for, or withdraw an HR meeting.
+
+    Body: ``{action, reason?, counter_time?, as_role?}`` where ``action`` is one
+    of accepted / rejected / counter_proposed / withdrawn and ``as_role`` is
+    'organizer' or 'participant' (defaults to whichever seat the caller holds).
+    ``counter_time`` is a required ISO-8601 datetime for counter-proposals.
+    """
+    m, err = _hr_meeting_or_404(request, meeting_id)
+    if err:
+        return err
+
+    company = request.user.company
+    d = request.data or {}
+    action = str(d.get('action') or '').strip()
+    reason = str(d.get('reason') or '').strip()[:2000]
+
+    if action not in _HR_MEETING_ACTIONS:
+        return Response(
+            {'status': 'error',
+             'message': f"Invalid action. Use one of: {', '.join(_HR_MEETING_ACTIONS)}"},
+            status=status.HTTP_400_BAD_REQUEST)
+
+    # --- Who is acting, and in which seat? ---------------------------------
+    viewer_emp = _hr_viewer_employee(request)
+    participant_row = None
+    if viewer_emp:
+        participant_row = HRMeetingParticipant.objects.filter(
+            meeting=m, employee=viewer_emp).first()
+    is_organizer = bool(viewer_emp and m.organizer_id == viewer_emp.id)
+    can_act_as_organizer = is_organizer or _is_hr_admin(request.user)
+    can_act_as_participant = participant_row is not None
+
+    as_role = str(d.get('as_role') or '').strip().lower()
+    if as_role not in ('organizer', 'participant'):
+        # Default: your own seat wins, unless you called the meeting.
+        as_role = 'organizer' if (is_organizer or not can_act_as_participant) else 'participant'
+    if as_role == 'organizer' and not can_act_as_organizer:
+        return Response({'status': 'error',
+                         'message': 'Only the organizer or HR can respond on the organizer side.'},
+                        status=status.HTTP_403_FORBIDDEN)
+    if as_role == 'participant' and not can_act_as_participant:
+        return Response({'status': 'error', 'message': 'You are not a participant in this meeting.'},
+                        status=status.HTTP_403_FORBIDDEN)
+    if action == 'withdrawn' and as_role != 'organizer':
+        return Response({'status': 'error', 'message': 'Only the organizer can withdraw a meeting.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # --- Guards -------------------------------------------------------------
+    if m.response_status == 'withdrawn':
+        return Response({'status': 'error', 'message': 'This meeting has already been withdrawn.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if m.status == 'cancelled' and action != 'withdrawn':
+        return Response({'status': 'error', 'message': 'This meeting is cancelled.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if action == 'accepted' and as_role == 'participant' and participant_row.status == 'accepted':
+        return Response({'status': 'error', 'message': 'You have already accepted this meeting.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    counter_time = None
+    if action == 'counter_proposed':
+        raw = d.get('counter_time')
+        if not raw:
+            return Response({'status': 'error',
+                             'message': 'counter_time is required to suggest a new time.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        counter_time = _parse_iso_dt(raw)
+        if counter_time is None:
+            return Response({'status': 'error', 'message': 'counter_time must be ISO-8601.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        # `_parse_iso_dt` passes through naive datetimes when the payload has
+        # no offset; make it aware before comparing against `now()`.
+        if timezone.is_naive(counter_time):
+            counter_time = timezone.make_aware(counter_time)
+        if counter_time <= timezone.now():
+            return Response({'status': 'error',
+                             'message': 'The suggested time must be in the future.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+    before = {'status': m.status, 'response_status': m.response_status,
+              'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None}
+    now = timezone.now()
+    responder_name = (viewer_emp.full_name if viewer_emp
+                      else (request.user.full_name or request.user.email or 'HR'))
+
+    # --- Apply --------------------------------------------------------------
+    if as_role == 'organizer':
+        meeting_fields = []
+        if action == 'accepted':
+            m.response_status = 'accepted'
+            # A participant's suggested time just won — reflect that on their
+            # chip rather than leaving it stuck on "counter_proposed".
+            m.participant_rows.filter(status='counter_proposed').update(
+                status='accepted', responded_at=now)
+        elif action == 'rejected':
+            m.response_status = 'rejected'
+            m.status = 'cancelled'
+            meeting_fields.append('status')
+        elif action == 'withdrawn':
+            m.response_status = 'withdrawn'
+            m.status = 'cancelled'
+            meeting_fields.append('status')
+        elif action == 'counter_proposed':
+            m.scheduled_at = counter_time
+            m.status = 'rescheduled'
+            m.response_status = 'counter_proposed'
+            # The time moved, so every prior answer is stale — reset the table
+            # and re-collect. Reminder flags reset too so the new slot gets its
+            # own 24h/15m nudges.
+            m.reminder_24h_sent_at = None
+            m.reminder_15m_sent_at = None
+            m.participant_rows.all().update(
+                status='pending', counter_proposed_time=None, responded_at=None)
+            meeting_fields.extend(['scheduled_at', 'status',
+                                   'reminder_24h_sent_at', 'reminder_15m_sent_at'])
+        m.save(update_fields=list(set(meeting_fields + ['response_status', 'updated_at'])))
+    else:
+        participant_row.status = action
+        participant_row.reason = reason
+        participant_row.responded_at = now
+        participant_row.counter_proposed_time = counter_time if action == 'counter_proposed' else None
+        participant_row.save(update_fields=['status', 'reason', 'responded_at',
+                                            'counter_proposed_time'])
+        if action == 'counter_proposed':
+            m.scheduled_at = counter_time
+            m.status = 'rescheduled'
+            m.reminder_24h_sent_at = None
+            m.reminder_15m_sent_at = None
+            m.save(update_fields=['scheduled_at', 'status', 'reminder_24h_sent_at',
+                                  'reminder_15m_sent_at', 'updated_at'])
+        m.refresh_from_db()
+        m.update_response_status()
+
+    HRMeetingResponse.objects.create(
+        meeting=m,
+        responder=viewer_emp,
+        responder_name=responder_name[:255],
+        responded_by=as_role,
+        action=action,
+        proposed_time=counter_time,
+        reason=reason,
+    )
+
+    # The organizer branch mutates participant rows with queryset `.update()`,
+    # which leaves the in-memory objects (and any prefetch cache) stale — so
+    # reload before serializing the response.
+    m.refresh_from_db()
+
+    # --- Notify the other side ---------------------------------------------
+    verb = {'accepted': 'accepted', 'rejected': 'declined',
+            'counter_proposed': 'suggested a new time for',
+            'withdrawn': 'withdrawn'}[action]
+    when = _hr_meeting_when(m)
+    subject = f'Meeting {action.replace("_", " ")}: {m.title}'
+    body = f'{responder_name} has {verb} the meeting "{m.title}".\n\nWhen: {when}'
+    if reason:
+        body += f'\nReason: {reason}'
+    if as_role == 'organizer':
+        recipients = [row.employee.work_email
+                      for row in m.participant_rows.select_related('employee')]
+    else:
+        recipients = [m.organizer.work_email] if m.organizer_id else []
+    _send_hr_meeting_email(recipients, subject, body)
+
+    _write_audit_log(
+        request.user, company, f'hr_meeting.{action}', 'HRMeeting', m.id,
+        before=before,
+        after={'status': m.status, 'response_status': m.response_status,
+               'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
+               'as_role': as_role, 'reason': reason[:500]},
+    )
+
+    return Response({'status': 'success', 'data': _serialize_hr_meeting(
+        m, viewer_employee_id=viewer_emp.id if viewer_emp else None)})
 
 
 @api_view(['POST'])

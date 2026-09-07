@@ -969,6 +969,30 @@ export const cancelHRMeeting = async (meetingId, reason = '') => {
   }
 };
 
+/**
+ * Respond to a meeting invite: accept, decline, suggest a new time, or withdraw.
+ * Mirrors `pmAgentService.meetingRespond`.
+ *
+ * @param {number|string} meetingId
+ * @param {'accepted'|'rejected'|'counter_proposed'|'withdrawn'} action
+ * @param {string} reason        Optional note shown to the other side.
+ * @param {string|null} counterTime  ISO datetime — required for 'counter_proposed'.
+ * @param {'organizer'|'participant'|null} asRole  Which seat you're answering
+ *        from. Omit to let the backend infer it from your Employee record.
+ */
+export const respondToHRMeeting = async (meetingId, action, reason = '', counterTime = null, asRole = null) => {
+  try {
+    const payload = { action, reason };
+    if (counterTime) payload.counter_time = counterTime;
+    if (asRole) payload.as_role = asRole;
+    const response = await companyApi.post(`/hr/meetings/${meetingId}/respond`, payload);
+    return response;
+  } catch (error) {
+    console.error('Respond to HR meeting error:', error);
+    throw error;
+  }
+};
+
 export const extractHRMeetingActionItems = async (meetingId) => {
   try {
     const response = await companyApi.post(`/hr/meetings/${meetingId}/extract-action-items`);
@@ -1265,6 +1289,7 @@ export default {
   getHRMeeting,
   updateHRMeeting,
   cancelHRMeeting,
+  respondToHRMeeting,
   extractHRMeetingActionItems,
   listHRMeetings,
   createHRMeeting,
