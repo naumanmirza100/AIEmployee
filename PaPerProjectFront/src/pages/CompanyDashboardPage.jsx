@@ -19,6 +19,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { companyJobsService } from '@/services';
 import { companyApi, logoutCompany } from '@/services/companyAuthService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
+import BillingOverview from '@/components/company/BillingOverview';
 import { getAgentNavItems } from '@/utils/agentNavItems';
 import companyUserManagementService from '@/services/companyUserManagementService';
 import companyProjectsTasksService from '@/services/companyProjectsTasksService';
@@ -32,7 +33,7 @@ import {
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2, Lock
+  Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2, Lock, CreditCard
 } from 'lucide-react';
 
 const toLocaleDateStr = (date) => {
@@ -59,7 +60,7 @@ const CompanyDashboardPage = () => {
   const { toast } = useToast();
 
   // Dashboard tabs are URL-driven so each has its own address.
-  const DASHBOARD_TABS = ['jobs', 'projects', 'applications', 'users', 'all-tasks', 'ticket-tasks', 'ai-agents'];
+  const DASHBOARD_TABS = ['jobs', 'projects', 'applications', 'users', 'all-tasks', 'ticket-tasks', 'ai-agents', 'billing'];
   const activeTab = DASHBOARD_TABS.includes(tabParam) ? tabParam : 'jobs';
   const setActiveTab = (tab) => navigate(`/company/dashboard/${tab}`);
 
@@ -2273,7 +2274,11 @@ const CompanyDashboardPage = () => {
                         const isDeactivatedByAdmin = agent.deactivated_by_admin;
                         const isExpired = agent.is_expired || agent.status === 'expired';
                         const isCancelled = agent.status === 'cancelled' && !isDeactivatedByAdmin;
-                        const canRepurchase = !isActive;
+                        // Card declined, Stripe still retrying. The subscription is
+                        // LIVE at Stripe, so offering "Resubscribe" here would open a
+                        // second one and bill them twice — they need to fix the card.
+                        const isPastDue = agent.status === 'past_due';
+                        const canRepurchase = !isActive && !isPastDue;
 
                         return (
                           <motion.div
@@ -2309,7 +2314,27 @@ const CompanyDashboardPage = () => {
                                           <CheckCircle2 className="h-3 w-3" /> Active
                                         </span>
                                       )}
-                                      {agent.active_label && (
+                                      {isPastDue && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">
+                                          <AlertCircle className="h-3 w-3" /> Payment failed
+                                        </span>
+                                      )}
+                                      {isActive && agent.cancel_at_period_end && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                                          <Clock className="h-3 w-3" /> Cancels at period end
+                                        </span>
+                                      )}
+                                      {isActive && agent.is_complimentary && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                          <CheckCircle2 className="h-3 w-3" /> Complimentary
+                                        </span>
+                                      )}
+                                      {isActive && agent.is_subscription && agent.next_billing_date && (
+                                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                                          <Clock className="h-3 w-3" /> Next billing: {formatDate(agent.next_billing_date)}
+                                        </span>
+                                      )}
+                                      {agent.active_label && !agent.is_subscription && (
                                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20">
                                           <Clock className="h-3 w-3" /> {agent.active_label}
                                           {agent.time_remaining && <>&nbsp;&middot;&nbsp;{agent.time_remaining}</>}
@@ -2322,7 +2347,7 @@ const CompanyDashboardPage = () => {
                                       )}
                                       {isExpired && (
                                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
-                                          <Clock className="h-3 w-3" /> Time Ended
+                                          <Clock className="h-3 w-3" /> Expired
                                         </span>
                                       )}
                                       {isExpired && agent.time_ended_ago && (
@@ -2362,7 +2387,47 @@ const CompanyDashboardPage = () => {
                                     <p className="text-xs text-yellow-300/60 mt-1 ml-6">
                                       {agent.expires_at ? `Expired on ${formatDate(agent.expires_at)}` : 'Subscription period has ended'}.
                                       {agent.time_ended_ago && <span className="font-semibold text-yellow-300/80"> ({agent.time_ended_ago})</span>}
-                                      {' '}Purchase again to continue using this agent.
+                                      {' '}Resubscribe to continue using this agent.
+                                    </p>
+                                  </div>
+                                )}
+
+                                {/* Payment Failed Banner — subscription still live at Stripe */}
+                                {isPastDue && (
+                                  <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                                    <p className="text-sm text-red-300 font-medium flex items-center gap-2">
+                                      <AlertCircle className="h-4 w-4 shrink-0" />
+                                      Payment failed — action required
+                                    </p>
+                                    <p className="text-xs text-red-300/60 mt-1 ml-6">
+                                      We could not charge your card. Update your payment method to
+                                      restore access — your subscription has not been cancelled.
+                                    </p>
+                                    {/* Billing lives in one place. Navigate there rather than
+                                        opening the Stripe portal from a second entry point. */}
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="mt-2 ml-6 border-red-500/30 text-red-300 hover:bg-red-500/10"
+                                      onClick={() => navigate('/company/dashboard/billing')}
+                                    >
+                                      <CreditCard className="h-4 w-4 mr-2" />
+                                      Update payment method
+                                    </Button>
+                                  </div>
+                                )}
+
+                                {/* Scheduled Cancellation Banner */}
+                                {isActive && agent.cancel_at_period_end && (
+                                  <div className="mt-3 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                                    <p className="text-sm text-orange-300 font-medium flex items-center gap-2">
+                                      <Clock className="h-4 w-4 shrink-0" />
+                                      Subscription scheduled for cancellation
+                                    </p>
+                                    <p className="text-xs text-orange-300/60 mt-1 ml-6">
+                                      {agent.current_period_end
+                                        ? `Access continues until ${formatDate(agent.current_period_end)}. Your subscription will not renew.`
+                                        : 'Your subscription will not renew at the end of the billing period.'}
                                     </p>
                                   </div>
                                 )}
@@ -2448,7 +2513,7 @@ const CompanyDashboardPage = () => {
                                       disabled
                                     >
                                       <CheckCircle2 className="h-4 w-4 mr-2" />
-                                      Active
+                                      {agent.cancel_at_period_end ? 'Active (cancelling)' : 'Active'}
                                     </Button>
                                     {/* Open Agent Dashboard button */}
                                     {({
@@ -2478,6 +2543,55 @@ const CompanyDashboardPage = () => {
                                         Open Agent
                                       </Button>
                                     )}
+                                    {/* Subscription management for Stripe subscriptions.
+                                        Cancel/Reactivate only — these are genuinely per-agent
+                                        (/modules/{module}/cancel). The old "Manage Billing" button
+                                        lived here too, but the Stripe portal is account-scoped, so
+                                        it opened the identical page on every card. Billing now has
+                                        one home: /company/dashboard/billing. */}
+                                    {agent.is_subscription && !agent.is_complimentary && (
+                                      <>
+                                        {agent.cancel_at_period_end ? (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-green-500/30 text-green-400 hover:bg-green-500/10 w-full"
+                                            onClick={async () => {
+                                              try {
+                                                const { reactivateSubscription } = await import('@/services/modulePurchaseService');
+                                                await reactivateSubscription(agent.module_name);
+                                                toast({ title: 'Reactivated', description: 'Subscription will now renew at period end.' });
+                                                refetchModules();
+                                              } catch (err) {
+                                                toast({ title: 'Error', description: err?.message || 'Failed to reactivate.', variant: 'destructive' });
+                                              }
+                                            }}
+                                          >
+                                            <RotateCcw className="h-4 w-4 mr-2" />
+                                            Reactivate
+                                          </Button>
+                                        ) : (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10 w-full"
+                                            onClick={async () => {
+                                              if (!window.confirm('Cancel subscription? Access continues until the end of the billing period.')) return;
+                                              try {
+                                                const { cancelSubscription } = await import('@/services/modulePurchaseService');
+                                                await cancelSubscription(agent.module_name);
+                                                toast({ title: 'Scheduled', description: 'Subscription will cancel at the end of the billing period.' });
+                                                refetchModules();
+                                              } catch (err) {
+                                                toast({ title: 'Error', description: err?.message || 'Failed to cancel.', variant: 'destructive' });
+                                              }
+                                            }}
+                                          >
+                                            Cancel Subscription
+                                          </Button>
+                                        )}
+                                      </>
+                                    )}
                                   </>
                                 )}
                                 {canRepurchase && (
@@ -2487,7 +2601,7 @@ const CompanyDashboardPage = () => {
                                     size="sm"
                                   >
                                     <RotateCcw className="h-4 w-4 mr-2" />
-                                    Purchase Again
+                                    Resubscribe
                                   </Button>
                                 )}
                               </div>
@@ -2499,6 +2613,10 @@ const CompanyDashboardPage = () => {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="billing" className="space-y-4">
+              <BillingOverview />
             </TabsContent>
           </Tabs>
         )}

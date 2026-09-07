@@ -161,9 +161,12 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
         <div className="rounded-xl border border-violet-400/25 bg-violet-500/[0.06] overflow-hidden">
           <div className="flex items-center gap-1.5 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-violet-300 border-b border-violet-400/20">
             <Clock className="h-3.5 w-3.5" /> Upcoming resets
-            <span className="text-white/30 normal-case font-normal tracking-normal">· scheduled, not yet run</span>
+            <span className="text-white/30 normal-case font-normal tracking-normal">
+              · scheduled, not yet run
+              {upcoming.some((u) => u.is_expired) && ' · expired keys are paused'}
+            </span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto scrollbar-violet">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-violet-500/[0.08] text-white/60 text-xs uppercase tracking-wide">
@@ -180,7 +183,9 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
                 {upcoming.slice(0, 20).map((u, i) => (
                   <tr
                     key={`${u.company_id}-${u.agent_name}-${i}`}
-                    className="border-t border-violet-400/15 text-white/80 hover:bg-white/[0.02]"
+                    className={`border-t border-violet-400/15 hover:bg-white/[0.02] ${
+                      u.is_expired ? 'text-white/40' : 'text-white/80'
+                    }`}
                   >
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1.5">
@@ -188,15 +193,38 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
                         {u.company_name || `#${u.company_id}`}
                       </span>
                     </td>
-                    <td className="px-4 py-3">{u.agent_label}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-1.5">
+                        {u.agent_label}
+                        {u.is_expired && (
+                          <span
+                            title={
+                              'This key has expired, so its quota will NOT reset. '
+                              + 'Assign or renew the key to resume the schedule.'
+                            }
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-500/15 text-red-300 border border-red-400/30"
+                          >
+                            <AlertTriangle className="h-2.5 w-2.5" /> Expired
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap text-white/50">
                       {u.last_reset_at ? fmtDateTime(u.last_reset_at) : <span className="text-white/30">Not yet reset</span>}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-violet-200">{fmtDateTime(u.next_reset_at)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {u.is_expired ? (
+                        <span className="text-red-300/70" title="Resets are paused while the key is expired.">
+                          Paused — key expired
+                        </span>
+                      ) : (
+                        <span className="text-violet-200">{fmtDateTime(u.next_reset_at)}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap text-white/50">
                       <span className="inline-flex items-center gap-1.5">
                         every {u.reset_interval_days || 7} days
-                        {scheduleDrifted(u) && (
+                        {!u.is_expired && scheduleDrifted(u) && (
                           <span
                             title="Next reset is further out than the interval. Click Edit → Save to realign it from now."
                             className="inline-flex items-center gap-0.5 text-amber-400/90 text-[11px]"
@@ -247,16 +275,18 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
             <p className="text-sm">No weekly resets logged{agent || search ? ' for this filter' : ' yet'}.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto scrollbar-violet">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-[#231845] text-white/60 text-xs uppercase tracking-wide">
-                  <th className="text-left font-semibold px-4 py-3">Company</th>
-                  <th className="text-left font-semibold px-4 py-3">Agent</th>
-                  <th className="text-left font-semibold px-4 py-3">Reset at</th>
-                  <th className="text-right font-semibold px-4 py-3">Used before reset</th>
-                  <th className="text-right font-semibold px-4 py-3">New limit</th>
-                  <th className="text-left font-semibold px-4 py-3">Next reset</th>
+                  {/* Explicit widths so the date columns stop soaking up the
+                      spare space while the numeric headers wrap. */}
+                  <th className="text-left font-semibold px-4 py-3 w-[16%]">Company</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[14%]">Agent</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[18%] whitespace-nowrap">Reset at</th>
+                  <th className="text-right font-semibold px-4 py-3 w-[18%] whitespace-nowrap">Used before reset</th>
+                  <th className="text-right font-semibold px-4 py-3 w-[14%] whitespace-nowrap">New limit</th>
+                  <th className="text-left font-semibold px-4 py-3 w-[20%] whitespace-nowrap">Next reset</th>
                 </tr>
               </thead>
               <tbody>
@@ -270,9 +300,10 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
                     </td>
                     <td className="px-4 py-3">{l.agent_label}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{fmtDateTime(l.reset_at)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-amber-300">{Number(l.tokens_used_before_reset).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-emerald-300">{Number(l.new_included_limit).toLocaleString()}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-white/50">{fmtDateTime(l.next_reset_at)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-amber-300 whitespace-nowrap">{Number(l.tokens_used_before_reset).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-emerald-300 whitespace-nowrap">{Number(l.new_included_limit).toLocaleString()}</td>
+                    {/* The next-reset recorded at the time of this reset. */}
+                    <td className="px-4 py-3 whitespace-nowrap text-white/50">{fmtDateTime(l.next_reset_at_then)}</td>
                   </tr>
                 ))}
               </tbody>

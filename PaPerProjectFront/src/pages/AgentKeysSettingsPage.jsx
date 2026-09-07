@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import agentKeysService from '@/services/agentKeysService';
+import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
 import { CompanyResetLogs } from '@/components/marketing/CompanyResetLogs';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
@@ -48,6 +49,13 @@ const modeBadge = (a) => {
   else if (hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
   else active = freeExhausted ? 'free_exhausted' : 'platform';
 
+  // An expired managed key while the company still prefers the managed pool:
+  // calls silently fall back to free tokens, so say so explicitly rather than
+  // showing a generic label that hides the reason.
+  // ('none' wins — an explicitly disabled agent is disabled regardless of key state.)
+  if (active !== 'disabled' && a.managed?.status === 'expired' && (p === 'managed' || !p) && !a.byok) {
+    return { label: 'Managed Key Expired', class: 'bg-amber-500/15 text-amber-300 border border-amber-500/30' };
+  }
   if (active === 'disabled')           return { label: 'Disabled',             class: 'bg-gray-500/15 text-gray-400 border border-gray-500/30' };
   if (active === 'byok_exhausted')     return { label: 'BYOK Cap Reached',     class: 'bg-orange-500/15 text-orange-300 border border-orange-500/30' };
   if (active === 'managed_exhausted')  return { label: 'Managed Quota Full',   class: 'bg-red-500/15 text-red-300 border border-red-500/30' };
@@ -306,17 +314,29 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                 </div>
               </div>
             )}
-            {q && q.managed_included_tokens > 0 && (
-              <div>
-                <div className="flex justify-between text-[10px] text-white/40 mb-1">
-                  <span className="uppercase tracking-wide">Managed key</span>
-                  <span>{formatTokens(Math.min(q.managed_used_tokens, q.managed_included_tokens))} / {formatTokens(q.managed_included_tokens)} · {managedPct.toFixed(0)}%</span>
+            {q && q.managed_included_tokens > 0 && (() => {
+              // An expired key's quota is frozen: it cannot be spent and will not
+              // reset. Rendering it as a normal live bar implied usable tokens,
+              // so it is greyed out and labelled instead of silently misleading.
+              const keyExpired = agent.managed?.status === 'expired';
+              return (
+                <div className={keyExpired ? 'opacity-50' : undefined}>
+                  <div className="flex justify-between text-[10px] text-white/40 mb-1">
+                    <span className="uppercase tracking-wide">
+                      Managed key
+                      {keyExpired && <span className="ml-1 text-amber-400/80 normal-case">· expired, not usable</span>}
+                    </span>
+                    <span>{formatTokens(Math.min(q.managed_used_tokens, q.managed_included_tokens))} / {formatTokens(q.managed_included_tokens)} · {managedPct.toFixed(0)}%</span>
+                  </div>
+                  <div className="h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                    <div
+                      className={keyExpired ? 'h-full bg-white/20' : `h-full bg-gradient-to-r ${barColor(managedPct)} transition-all`}
+                      style={{ width: `${managedPct}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
-                  <div className={`h-full bg-gradient-to-r ${barColor(managedPct)} transition-all`} style={{ width: `${managedPct}%` }} />
-                </div>
-              </div>
-            )}
+              );
+            })()}
             {agent.byok && q && (
               <div>
                 <div className="flex justify-between text-[10px] text-white/40 mb-1">
@@ -383,24 +403,44 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                     {q.remaining <= 0 ? 'Free · Fully used' : <>Free{actualPool === 'free' && ' ●'}</>}
                   </button>
                 )}
-                {agent.managed?.status === 'active' && (
-                  <button
-                    onClick={() => !q?.managed_is_exhausted && onSetPool(agent.agent_name, 'managed')}
-                    disabled={!!q?.managed_is_exhausted}
-                    title={q?.managed_is_exhausted ? 'Managed quota exhausted — LLM calls are hard-blocked. Ask your admin to reset/top-up the quota, or add a BYOK key.' : 'Use managed key'}
-                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
-                      q?.managed_is_exhausted
-                        ? 'cursor-not-allowed border-red-500/40 bg-red-500/8 text-red-400/80'
-                        : actualPool === 'managed'
-                          ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-200'
-                          : 'border-white/10 text-white/40 hover:border-emerald-500/30 hover:text-emerald-300'
-                    }`}
-                  >
-                    <Zap className="w-2.5 h-2.5 inline mr-0.5 mb-[2px]" />
-                    {q?.managed_is_exhausted ? 'Managed · Fully used' : <>Managed{actualPool === 'managed' && ' ●'}</>}
-                  </button>
-                )}
-                {!agent.byok && agent.managed?.status !== 'active' && (
+                {/* Managed chip stays visible when the key has EXPIRED (disabled,
+                    with the reason) instead of vanishing silently — otherwise the
+                    option just disappears and the user has no idea why the agent
+                    quietly fell back to free tokens. */}
+                {(agent.managed?.status === 'active' || agent.managed?.status === 'expired') && (() => {
+                  const keyExpired = agent.managed?.status === 'expired';
+                  const blocked = keyExpired || !!q?.managed_is_exhausted;
+                  return (
+                    <button
+                      onClick={() => !blocked && onSetPool(agent.agent_name, 'managed')}
+                      disabled={blocked}
+                      title={
+                        keyExpired
+                          ? 'Managed key has expired — it can no longer be used and its quota will not reset. Request a renewal from your admin to use it again.'
+                          : q?.managed_is_exhausted
+                            ? 'Managed quota exhausted — LLM calls are hard-blocked. Ask your admin to reset/top-up the quota, or add a BYOK key.'
+                            : 'Use managed key'
+                      }
+                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                        keyExpired
+                          ? 'cursor-not-allowed border-amber-500/40 bg-amber-500/8 text-amber-400/80'
+                          : q?.managed_is_exhausted
+                            ? 'cursor-not-allowed border-red-500/40 bg-red-500/8 text-red-400/80'
+                            : actualPool === 'managed'
+                              ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-200'
+                              : 'border-white/10 text-white/40 hover:border-emerald-500/30 hover:text-emerald-300'
+                      }`}
+                    >
+                      <Zap className="w-2.5 h-2.5 inline mr-0.5 mb-[2px]" />
+                      {keyExpired
+                        ? 'Managed · Expired'
+                        : q?.managed_is_exhausted
+                          ? 'Managed · Fully used'
+                          : <>Managed{actualPool === 'managed' && ' ●'}</>}
+                    </button>
+                  );
+                })()}
+                {!agent.byok && agent.managed?.status !== 'active' && agent.managed?.status !== 'expired' && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full border border-white/10 text-white/25">
                     <Activity className="w-2.5 h-2.5 inline mr-0.5" />Platform
                   </span>
@@ -606,66 +646,65 @@ const RequestTimeline = ({ r }) => {
 
 // Expand requests: split was_assigned records into (Key Assigned) + (Revoked) nodes
 // Also inject a synthetic "Key Expired" node when key is expired
-function expandRequestEntries(requests) {
-  const sorted = [...requests].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  // Find the latest key_assigned request id — only this one is "active"
-  const latestAssignedId = [...sorted].reverse().find(r => r.status === 'key_assigned')?.id;
-
+// Build the timeline for one agent: the company's own requests, merged with the
+// RECORDED key lifecycle events (KeyEventLog).
+//
+// This used to synthesise "Key Expired" nodes by inspecting the CURRENT key's
+// status and valid_until. That key row is overwritten on every re-issue, so the
+// only expiry it could ever show was the latest one — stamped onto whichever
+// requests happened to reference that key, and losing every earlier expiry.
+// The events are now real rows, so each expiry/renewal appears once, at the
+// time it actually happened.
+function expandRequestEntries(requests, keyEvents = []) {
   const entries = [];
-  for (const r of sorted) {
+
+  for (const r of [...requests].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))) {
     if (r.was_assigned) {
+      // Assigned-then-revoked records still split into two nodes.
       entries.push({ ...r, status: 'key_assigned', _ts: r.resolved_at });
       entries.push({ ...r, _syntheticId: `${r.id}_revoked`, status: 'revoked', _ts: r.revoked_at, _synthetic: true });
-    } else if (r.status === 'key_assigned' && r.id !== latestAssignedId) {
-      // Older key_assigned — show as assigned then synthetically expired
-      entries.push({ ...r, _ts: r.resolved_at });
-      entries.push({
-        ...r,
-        _syntheticId: `${r.id}_expired`,
-        status: 'key_expired',
-        _ts: r.linked_key_valid_until || r.resolved_at,
-        _synthetic: true,
-        note: null,
-        admin_note: null,
-      });
-    } else if (r.status === 'key_assigned' && r.linked_key_status === 'expired') {
-      // Latest key_assigned but key has since expired
-      entries.push({ ...r, _ts: r.resolved_at });
-      entries.push({
-        ...r,
-        _syntheticId: `${r.id}_expired`,
-        status: 'key_expired',
-        _ts: r.linked_key_valid_until || r.resolved_at,
-        _synthetic: true,
-        note: null,
-        admin_note: null,
-      });
     } else {
-      // Inject synthetic "Key Expired" node before a renewal request
-      if (r.is_renewal) {
-        entries.push({
-          ...r,
-          _syntheticId: `${r.id}_expired`,
-          status: 'key_expired',
-          _ts: r.created_at,
-          _synthetic: true,
-          note: null,
-          admin_note: null,
-        });
-      }
-      entries.push(r);
+      entries.push({ ...r, _ts: r.resolved_at || r.created_at });
     }
   }
+
+  // Expiries and revocations come from the event log. Assign/renew events are
+  // skipped: the requests above already represent those, and showing both would
+  // duplicate every assignment.
+  for (const e of keyEvents) {
+    if (e.event !== 'expired' && e.event !== 'revoked') continue;
+    entries.push({
+      id: `evt_${e.id}`,
+      _syntheticId: `evt_${e.id}`,
+      _synthetic: true,
+      _event: true,
+      status: e.event === 'expired' ? 'key_expired' : 'revoked',
+      _ts: e.occurred_at,
+      provider: e.provider,
+      preferred_duration: e.renewal_period,
+      note: null,
+      admin_note: null,
+    });
+  }
+
+  entries.sort((a, b) => {
+    const ta = new Date(a._ts || a.created_at).getTime();
+    const tb = new Date(b._ts || b.created_at).getTime();
+    return ta - tb;
+  });
   return entries;
 }
 
 // Single timeline node for company-side request history
-const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
+const CompanyTimelineEntry = ({ r, isLast, onPay, paying, isCurrentAssignment = false, keyStatus }) => {
   const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
   const { Icon } = meta;
   const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
   const displayTime = r._ts || r.resolved_at || r.created_at;
-  const isActive = r.status === 'key_assigned' && !r._synthetic && r.linked_key_status !== 'expired';
+  // Only the CURRENT assignment can be active, and only while the key itself
+  // still is. Previously every past assignment carried this badge because it
+  // read the (shared, overwritten) key row.
+  const isActive = isCurrentAssignment && keyStatus === 'active';
   const isNegative = ['rejected', 'revoked'].includes(r.status);
   const isPending = ['pending', 'payment_pending', 'payment_received'].includes(r.status);
   const dotColor = isActive
@@ -692,7 +731,7 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
               </span>
               <span className="text-[10px] text-white/30 uppercase">{r.provider}</span>
               {isActive && <span className="text-[9px] text-emerald-400/70 font-medium">● ACTIVE</span>}
-              {r.status === 'key_assigned' && !r._synthetic && r.linked_key_status === 'expired' && <span className="text-[9px] text-amber-400/70 font-medium">● EXPIRED</span>}
+              {isCurrentAssignment && keyStatus === 'expired' && <span className="text-[9px] text-amber-400/70 font-medium">● EXPIRED</span>}
               {r.is_renewal && !r._synthetic && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-500/40 text-sky-300 font-medium">RENEWAL</span>}
             </div>
 
@@ -761,8 +800,11 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying }) => {
 };
 
 // Grouped card: one card per agent showing full timeline of requests
-const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) => {
-  const entries = useMemo(() => expandRequestEntries(group.requests), [group.requests]);
+const AgentRequestGroupCard = ({ group, managedKey, quota, keyEvents = [], onPay, payingId }) => {
+  const entries = useMemo(
+    () => expandRequestEntries(group.requests, keyEvents),
+    [group.requests, keyEvents],
+  );
   const hasPending = group.requests.some(r => ['pending', 'payment_pending', 'payment_received'].includes(r.status));
   const [expanded, setExpanded] = useState(hasPending);
   // "Weekly" reset-history pop-up for this agent.
@@ -770,11 +812,24 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
 
   const latest = entries[entries.length - 1];
   const latestReal = [...entries].reverse().find(e => !e._synthetic) || latest;
-  const isKeyExpired = latestReal.status === 'key_assigned' && latestReal.linked_key_status === 'expired';
-  const effectiveStatus = isKeyExpired ? 'key_expired' : latest.status;
+  // The key's own status is authoritative for the header badge — inferring it
+  // from the last timeline node made a historical expiry look like the current
+  // state (and vice-versa).
+  const isKeyExpired = managedKey?.status === 'expired';
+  const isKeyRevoked = managedKey?.status === 'revoked';
+  const effectiveStatus = isKeyExpired
+    ? 'key_expired'
+    : isKeyRevoked
+      ? 'revoked'
+      : latest?.status;
   const latestMeta = REQUEST_STATUS_META[effectiveStatus] || REQUEST_STATUS_META.pending;
   const { Icon: LatestIcon } = latestMeta;
-  const isActive = latestReal.status === 'key_assigned' && !isKeyExpired;
+  const isActive = managedKey?.status === 'active';
+  // The most recent real assignment — the only node the key's live status
+  // describes. Everything before it is history.
+  const currentAssignmentId = [...entries]
+    .reverse()
+    .find((e) => !e._synthetic && e.status === 'key_assigned')?.id;
 
   return (
     <div className="bg-[#0f0a20] border border-[#2d2342] rounded-xl overflow-hidden hover:border-violet-500/30 transition-colors">
@@ -878,6 +933,8 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, onPay, payingId }) =>
               isLast={i === entries.length - 1}
               onPay={onPay}
               paying={payingId === r.id}
+              isCurrentAssignment={r.id === currentAssignmentId}
+              keyStatus={managedKey?.status}
             />
           ))}
         </div>
@@ -909,11 +966,22 @@ const AgentKeysSettingsPage = () => {
   // Purchased agents drive the global left sidebar (same as the agent shell).
   const { purchasedModules, modulesLoaded } = usePurchasedModules();
 
+  // The signed-in company user, read from the same localStorage key the
+  // dashboard uses. Without it DashboardNavbar renders no profile block, so
+  // the top bar looked "logged out" on this page only.
+  const companyUser = useMemo(() => getCompanyUser(), []);
+
+  const handleLogout = async () => {
+    await logoutCompany();
+    navigate('/company/login');
+  };
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [agents, setAgents] = useState([]);
   const [providers, setProviders] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [keyEvents, setKeyEvents] = useState([]);
 
   const [byokModal, setByokModal] = useState({ open: false, agent: null, provider: 'openai', apiKey: '', error: '' });
   const [requestModal, setRequestModal] = useState({ open: false, agent: null, provider: 'openai', note: '', preferred_duration: 'monthly', is_renewal: false });
@@ -935,13 +1003,18 @@ const AgentKeysSettingsPage = () => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const [keys, reqs] = await Promise.all([
+      const [keys, reqs, events] = await Promise.all([
         agentKeysService.listAgentKeys(),
         agentKeysService.listKeyRequests(),
+        // Real lifecycle history — the timeline used to guess expiries from the
+        // CURRENT key's status, which showed one expiry (always the latest) and
+        // stamped it on every request. These are the recorded events.
+        agentKeysService.listKeyEvents({ limit: 200 }).catch(() => ({ events: [] })),
       ]);
       setAgents(keys.agents || []);
       setProviders(keys.providers || []);
       setRequests(reqs.requests || []);
+      setKeyEvents(events.events || []);
     } catch (e) {
       toast({ title: 'Failed to load', description: String(e.message || e), variant: 'destructive' });
     } finally {
@@ -1118,8 +1191,14 @@ const AgentKeysSettingsPage = () => {
           icon={Key}
           title="API Keys & Token Quota"
           subtitle="Manage BYOK keys, quotas, and managed-key requests"
+          user={companyUser}
+          userRole="Company User"
+          onLogout={handleLogout}
           showNavTabs
-          navItems={getAgentNavItems(purchasedModules, undefined, navigate)}
+          // This page belongs to the company Dashboard group, so the sidebar
+          // keeps that group expanded instead of collapsing to nothing.
+          activeSection="dashboard"
+          navItems={getAgentNavItems(purchasedModules, 'dashboard', navigate)}
           sidebarLoading={!modulesLoaded}
         />
 
@@ -1231,6 +1310,7 @@ const AgentKeysSettingsPage = () => {
                         group={g}
                         managedKey={agentData?.managed}
                         quota={agentData?.quota}
+                        keyEvents={keyEvents.filter(e => e.agent_name === g.agent_name)}
                         onPay={(req) => setPayModal({ open: true, request: req })}
                         payingId={paying ? payModal.request?.id : null}
                       />

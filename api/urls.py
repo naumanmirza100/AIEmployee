@@ -655,12 +655,20 @@ urlpatterns = [
     # Module Purchase endpoints
     re_path(r'^modules/prices/?$', module_purchase.get_module_prices, name='get_module_prices'),  # GET (public)
     re_path(r'^modules/purchased/?$', module_purchase.get_purchased_modules, name='get_purchased_modules'),  # GET
-    re_path(r'^modules/purchase/?$', module_purchase.purchase_module, name='purchase_module'),  # POST (legacy)
     re_path(r'^modules/checkout/?$', module_purchase.create_checkout_session, name='create_checkout_session'),  # POST
     re_path(r'^modules/stripe-webhook/?$', module_purchase.stripe_webhook, name='stripe_webhook'),  # POST (raw, no auth)
     re_path(r'^modules/verify-session/?$', module_purchase.verify_session, name='verify_session'),  # POST (public)
     re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
     re_path(r'^modules/(?P<module_name>[a-z_]+)/plans/?$', module_purchase.get_module_plans, name='get_module_plans'),  # GET (public)
+    # Subscription management
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/cancel/?$', module_purchase.cancel_subscription, name='cancel_subscription'),  # POST
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/reactivate/?$', module_purchase.reactivate_subscription, name='reactivate_subscription'),  # POST
+    re_path(r'^modules/billing-overview/?$', module_purchase.billing_overview, name='billing_overview'),  # GET
+    re_path(r'^modules/billing-portal/?$', module_purchase.create_billing_portal, name='create_billing_portal'),  # POST
+    # In-app card management (Stripe Elements). Hyphenated, so neither collides with
+    # the ^modules/(?P<module_name>[a-z_]+)/... patterns above.
+    re_path(r'^modules/setup-intent/?$', module_purchase.create_setup_intent, name='create_setup_intent'),  # POST
+    re_path(r'^modules/payment-method/?$', module_purchase.set_default_payment_method, name='set_default_payment_method'),  # POST
 
     # Company API Key management (user-side: BYOK + key requests)
     re_path(r'^company/agent-keys/?$', company_api_keys.list_agent_keys, name='list_agent_keys'),  # GET
@@ -669,6 +677,7 @@ urlpatterns = [
     re_path(r'^company/agent-keys/pool/?$', company_api_keys.set_token_pool, name='set_token_pool'),  # POST
     re_path(r'^company/agent-keys/byok-limit/?$', company_api_keys.set_byok_limit, name='set_byok_limit'),  # POST
     re_path(r'^company/agent-keys/reset-logs/?$', company_api_keys.company_reset_logs, name='company_reset_logs'),  # GET
+    re_path(r'^company/agent-keys/key-events/?$', company_api_keys.company_key_events, name='company_key_events'),  # GET
     re_path(r'^company/agent-keys/plans/?$', company_api_keys.agent_plans, name='company_agent_plans'),  # GET ?agent_name=
     re_path(r'^company/key-requests/?$', company_api_keys.list_key_requests, name='list_key_requests'),  # GET
     re_path(r'^company/key-requests/create/?$', company_api_keys.create_key_request, name='create_key_request'),  # POST
@@ -685,6 +694,7 @@ urlpatterns = [
     re_path(r'^admin/pricing-config/(?P<agent_name>[a-z_]+)/?$', admin_api_keys.update_pricing, name='admin_update_pricing'),  # PUT
     re_path(r'^admin/token-quotas/?$', admin_api_keys.list_quotas, name='admin_list_quotas'),  # GET
     re_path(r'^admin/weekly-reset-logs/?$', admin_api_keys.weekly_reset_logs, name='admin_weekly_reset_logs'),  # GET
+    re_path(r'^admin/key-events/?$', admin_api_keys.key_events, name='admin_key_events'),  # GET
     re_path(r'^admin/reset-schedule/?$', admin_api_keys.update_reset_schedule, name='admin_update_reset_schedule'),  # POST
     re_path(r'^admin/agent-plans/?$', admin_api_keys.list_agent_plans, name='admin_list_agent_plans'),  # GET ?agent_name=
     re_path(r'^admin/agent-plans/save/?$', admin_api_keys.save_agent_plans, name='admin_save_agent_plans'),  # POST

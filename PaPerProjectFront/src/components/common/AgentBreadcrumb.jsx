@@ -100,6 +100,10 @@ function goTo(navigate, item) {
 // Same defaults the sidebar uses so a bare /frontline or /marketing highlights
 // the first tab.
 function defaultTabFor(path) {
+  // Admin shell: each page's own default tab, so the sidebar highlights the
+  // right child when the URL carries no ?tab= yet.
+  if (path === '/admin/dashboard') return 'contact';
+  if (path === '/admin/api-keys') return 'overview';
   if (path?.startsWith('/frontline')) return 'queue';
   if (path?.startsWith('/marketing')) return 'dashboard';
   if (path?.startsWith('/project-manager')) return 'overview';
