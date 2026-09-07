@@ -1318,6 +1318,50 @@ def weekly_reset_logs(request):
     })
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdmin])
+def key_events(request):
+    """Managed-key lifecycle history (assign/renew/expire/revoke) across all companies.
+
+    CompanyAPIKey is overwritten on each re-issue, so this log is the only
+    place a previous expiry or renewal date survives.
+
+    Query params (all optional): company_id, agent_name, limit (default 50, max 200).
+    """
+    qs = KeyEventLog.objects.select_related('company').all()
+
+    company_id = request.query_params.get('company_id')
+    if company_id:
+        qs = qs.filter(company_id=company_id)
+    agent_name = (request.query_params.get('agent_name') or '').strip()
+    if agent_name:
+        qs = qs.filter(agent_name=agent_name)
+
+    try:
+        limit = min(max(int(request.query_params.get('limit', 50)), 1), 200)
+    except (TypeError, ValueError):
+        limit = 50
+
+    agent_labels = dict(AGENT_CHOICES)
+    events = [{
+        'id': e.id,
+        'company_id': e.company_id,
+        'company_name': e.company.name if e.company_id else '',
+        'agent_name': e.agent_name,
+        'agent_label': agent_labels.get(e.agent_name, e.agent_name),
+        'event': e.event,
+        'event_label': e.get_event_display(),
+        'occurred_at': e.occurred_at.isoformat(),
+        'provider': e.provider,
+        'valid_until': e.valid_until.isoformat() if e.valid_until else None,
+        'tokens_per_period': e.tokens_per_period,
+        'renewal_period': e.renewal_period,
+        'note': e.note,
+    } for e in qs[:limit]]
+
+    return Response({'status': 'success', 'events': events})
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsAdmin])
 def update_reset_schedule(request):
