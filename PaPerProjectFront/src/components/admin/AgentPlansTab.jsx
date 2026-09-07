@@ -97,7 +97,9 @@ export const AgentPlansTab = ({ agents = [], loading: agentsLoading = false }) =
     const current = rowsFor(agentValue);
 
     // Only enabled rows are sent. An interval the admin switched off is simply
-    // absent from the payload, and the backend deletes that row for us.
+    // absent from the payload, and the backend deactivates that row (it is never
+    // deleted — the row still owns the Stripe Price any existing subscriber on
+    // that plan is billing against).
     const enabled = current.filter((r) => r.is_active);
     for (const r of enabled) {
       const price = Number(r.price);
@@ -110,6 +112,31 @@ export const AgentPlansTab = ({ agents = [], loading: agentsLoading = false }) =
         });
         return;
       }
+    }
+
+    // Changing the price of a plan that already exists now moves EXISTING
+    // subscribers onto it at their next renewal, and notifies them. That is a
+    // money-affecting action, so confirm it rather than doing it on one click.
+    const previous = saved[agentValue] || [];
+    const repriced = enabled.filter((r) => {
+      const before = previous.find((p) => p.billing_interval === r.billing_interval);
+      return before?.exists && before.is_active && String(before.price) !== String(r.price);
+    });
+    if (repriced.length) {
+      const lines = repriced
+        .map((r) => {
+          const before = previous.find((p) => p.billing_interval === r.billing_interval);
+          const period = r.billing_interval === 'year' ? 'yearly' : 'monthly';
+          return `  • ${period}: $${before.price} → $${r.price}`;
+        })
+        .join('\n');
+      const ok = window.confirm(
+        `This changes the price of a live plan:\n\n${lines}\n\n`
+        + 'Existing subscribers will move to the new price at their next renewal '
+        + '(next month for monthly, next year for yearly). They are not charged '
+        + 'anything extra today, and they will be notified.\n\nContinue?'
+      );
+      if (!ok) return;
     }
 
     setSavingAgent(agentValue);
@@ -130,10 +157,24 @@ export const AgentPlansTab = ({ agents = [], loading: agentsLoading = false }) =
       );
       setRows((prev) => ({ ...prev, [agentValue]: next }));
       setSaved((prev) => ({ ...prev, [agentValue]: next }));
-      toast({
-        title: 'Plans saved',
-        description: 'Stripe prices updated. Existing subscribers keep the price they signed up at.',
-      });
+
+      // The backend reports a partial success when the plan row saved but the
+      // Stripe sync did not. That is not a clean save — the price on screen is
+      // not the price customers are charged — so it must not look like one.
+      if (res?.warning) {
+        toast({
+          title: 'Saved, but not live in Stripe',
+          description: res.warning,
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Plans saved',
+          description: repriced.length
+            ? 'Stripe prices updated. Existing subscribers move to the new price at their next renewal and have been notified.'
+            : 'Stripe prices updated.',
+        });
+      }
     } catch (e) {
       toast({
         title: 'Could not save plans',
