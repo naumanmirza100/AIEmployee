@@ -34,6 +34,8 @@ import React from 'react';
     import AgenticAiModelsPage from '@/pages/AgenticAiModelsPage';
     import AgenticAiResourcePage from '@/pages/AgenticAiResourcePage';
 import ApplyForProjectsPage from '@/pages/ApplyForProjectsPage';
+import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
+import TermsOfServicePage from '@/pages/TermsOfServicePage';
 import LoginPage from '@/pages/LoginPage';
 import AdminDashboardPage from '@/pages/AdminDashboardPage';
 import SuperAdminApiKeysPage from '@/pages/SuperAdminApiKeysPage';
@@ -294,6 +296,8 @@ import { useTranslation } from 'react-i18next';
             <Route path="/agentic-ai-models" element={<PublicLayout><AgenticAiModelsPage /></PublicLayout>} />
             <Route path="/resources/agentic-ai-explained" element={<PublicLayout><AgenticAiResourcePage /></PublicLayout>} />
             <Route path="/apply-for-projects" element={<PublicLayout><ApplyForProjectsPage /></PublicLayout>} />
+            <Route path="/privacy-policy" element={<PublicLayout><PrivacyPolicyPage /></PublicLayout>} />
+            <Route path="/terms-of-service" element={<PublicLayout><TermsOfServicePage /></PublicLayout>} />
           </Routes>
           <Toaster />
         </>
