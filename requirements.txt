@@ -46,6 +46,9 @@ redis==5.0.1
 django-celery-beat==2.5.0
 spacy>=3.7.0,<3.8.0
 
+# AI SDR Agent embedded scheduler
+APScheduler==3.11.3
+
 # Stripe payments
 stripe==8.0.0
 
@@ -70,7 +73,3 @@ faiss-cpu==1.13.1
 google-api-python-client==2.198.0
 google-auth==2.55.2
 google-auth-httplib2==0.4.0
-
-
-
-stripe listen --forward-to localhost:8000/api/modules/stripe-webhook

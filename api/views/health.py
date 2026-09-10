@@ -7,6 +7,14 @@ from django.utils import timezone
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
+def ping(request):
+    """Bare liveness check — no DB, no auth. Confirms only that the
+    backend process is up and serving requests."""
+    return Response({'status': 'ok', 'message': 'pong'}, status=200)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
 def health_check(request):
     """Health check endpoint"""
     try:

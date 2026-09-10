@@ -38,18 +38,64 @@ class Command(BaseCommand):
             help='Apply the changes. Without this the command only reports.',
         )
 
+    def _live_price_ids(self):
+        """Price ids that a real Stripe subscription is billing against.
+
+        Ask Stripe, not the local rows. The previous version inferred this from
+        AgentPlan by taking an arbitrary `.first()` for the agent with no interval
+        filter — but `stripe_price_id` is overwritten every time a price changes,
+        so after any edit the genuinely-live price id is no longer stored on any
+        plan row. The "never strand a payer" guarantee silently stopped holding at
+        exactly the moment it mattered.
+        """
+        from django.conf import settings
+        import stripe
+
+        secret = getattr(settings, 'STRIPE_SECRET_KEY', None)
+        if not secret or secret == 'sk_test_placeholder':
+            self.stdout.write(self.style.WARNING(
+                'Stripe is not configured — cannot confirm which prices are in use. '
+                'Falling back to local data; review the plan carefully before --commit.'
+            ))
+            return {
+                p.stripe_price_id
+                for p in AgentPlan.objects.exclude(stripe_price_id=None)
+            }, False
+
+        stripe.api_key = secret
+        live = set()
+        try:
+            for sub in stripe.Subscription.list(status='all', limit=100).auto_paging_iter():
+                if sub.get('status') not in ('active', 'trialing', 'past_due', 'unpaid'):
+                    continue
+                for item in (sub.get('items') or {}).get('data') or []:
+                    price_id = (item.get('price') or {}).get('id')
+                    if price_id:
+                        live.add(price_id)
+        except stripe.error.StripeError as exc:
+            self.stdout.write(self.style.ERROR(
+                f'Could not read subscriptions from Stripe: {exc}\n'
+                'Refusing to guess which plans are safe to deactivate.'
+            ))
+            return set(), False
+        return live, True
+
     def handle(self, *args, **opts):
         commit = opts['commit']
 
-        # Price ids that a real subscription is billing against — never deactivate
-        # the row that owns one if we can help it.
-        live_price_ids = set()
-        for pur in CompanyModulePurchase.objects.exclude(stripe_subscription_id=None):
-            plan = AgentPlan.objects.filter(
-                agent_name=pur.module_name, stripe_price_id__isnull=False,
-            ).first()
-            if plan and plan.stripe_price_id:
-                live_price_ids.add(plan.stripe_price_id)
+        live_price_ids, live_is_authoritative = self._live_price_ids()
+        if commit and not live_is_authoritative:
+            self.stdout.write(self.style.ERROR(
+                '\nRefusing to --commit without an authoritative view of which prices '
+                'are in use, since that risks deactivating a plan a customer is paying '
+                'for. Fix Stripe access and re-run.'
+            ))
+            return
+
+        # Any plan row whose price a live subscription uses, plus a report of live
+        # prices no plan row owns any more (orphaned by a past price edit).
+        owned = {p.stripe_price_id for p in AgentPlan.objects.exclude(stripe_price_id=None)}
+        stranded = live_price_ids - owned
 
         agents = (
             AgentPlan.objects.filter(is_active=True)
@@ -96,6 +142,21 @@ class Command(BaseCommand):
             self.stdout.write(
                 f'  {p.agent_name:<24} {p.billing_interval:<6} ${p.price_usd:<10} '
                 f'[{label}] — {why}'
+            )
+
+        # Subscriptions billing against a Price that no plan row owns any more.
+        # These are invisible to every other tool: the customer is being charged,
+        # but nothing local can name the price they are on.
+        if stranded:
+            self.stdout.write(self.style.MIGRATE_HEADING('\nLIVE PRICES NOT OWNED BY ANY PLAN:'))
+            for price_id in sorted(stranded):
+                self.stdout.write(
+                    f'  {price_id} — a subscription is billing against this, but no '
+                    'AgentPlan row references it (superseded by a price edit).'
+                )
+            self.stdout.write(
+                '  These keep billing correctly; they are listed so you know they exist. '
+                'Nothing here is changed by this command.'
             )
 
         if not commit:
