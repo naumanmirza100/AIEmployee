@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { contactService, careerService, companyService } from '@/services';
@@ -16,6 +16,7 @@ import { useAgents } from '@/hooks/useAgents';
 import adminApiKeysService from '@/services/adminApiKeysService';
 import { aiPredictorService } from '@/services/aiPredictorService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import { getAdminNavItems } from '@/utils/adminNavItems';
 import { AgentPlansTab } from '@/components/admin/AgentPlansTab';
 import { 
   Search, 
@@ -45,7 +46,10 @@ import {
 } from 'lucide-react';
 
 const AdminDashboardPage = () => {
-  const [activeTab, setActiveTab] = useState('contact');
+  // Tab lives in the URL so the sidebar drives it without remounting the page.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'contact';
+  const setActiveTab = (tab) => setSearchParams({ tab }, { replace: false });
   
   // Contact Messages State
   const [messages, setMessages] = useState([]);
@@ -131,9 +135,7 @@ const AdminDashboardPage = () => {
         params.search = applicationsSearchTerm;
       }
 
-      console.log('Fetching applications with params:', params);
       const response = await careerService.getAllApplications(params);
-      console.log('Applications response:', response);
       
       if (response.status === 'success') {
         setApplications(response.data || []);
@@ -179,7 +181,6 @@ const AdminDashboardPage = () => {
 
       const response = await companyService.getAllCompanies(params);
       
-      console.log('Companies response:', response); // Debug log
       
       if (response.status === 'success') {
         setCompanies(response.data || []);
@@ -334,9 +335,7 @@ const AdminDashboardPage = () => {
           companyData[key] = null;
         }
       });
-      
-      console.log('Sending company data:', companyData);
-      
+            
       const response = await companyService.createCompany(companyData);
       if (response.status === 'success') {
         toast({
@@ -391,12 +390,10 @@ const AdminDashboardPage = () => {
   const handleGenerateToken = async (companyId) => {
     try {
       const response = await companyService.generateToken(companyId);
-      console.log('Generate token response:', response);
       
       if (response.status === 'success') {
         // Get the token from the response
         const token = response.data.token;
-        console.log('Extracted token:', token);
         
         if (!token) {
           console.error('Token not found in response data:', response.data);
@@ -413,7 +410,6 @@ const AdminDashboardPage = () => {
         
         // Construct the full registration link
         const registrationLink = `${window.location.origin}/company/register?token=${encodedToken}`;
-        console.log('Generated registration link:', registrationLink);
         
         toast({
           title: '✅ Success',
@@ -540,7 +536,7 @@ const AdminDashboardPage = () => {
   // Debug modal state
   useEffect(() => {
     if (showCreateCompanyModal) {
-      console.log('Create Company Modal is now visible');
+      // console.log('Create Company Modal is now visible');
     }
   }, [showCreateCompanyModal]);
 
@@ -561,8 +557,6 @@ const AdminDashboardPage = () => {
       }
 
       const response = await contactService.getAllContactMessages(params);
-      
-      console.log('Contact messages response:', response); // Debug log
       
       if (response.status === 'success') {
         setMessages(response.data || []);
@@ -637,9 +631,7 @@ const AdminDashboardPage = () => {
       }
 
       const response = await aiPredictorService.getAllPredictions(params);
-      
-      console.log('Predictions response:', response); // Debug log
-      
+            
       if (response.status === 'success') {
         setPredictions(response.data || []);
         if (response.pagination) {
@@ -753,50 +745,17 @@ const AdminDashboardPage = () => {
           subtitle="Manage submissions and predictions"
           user={user}
           userRole="Admin"
-          showNavTabs={false}
+          showNavTabs
+          activeSection="admin-dashboard"
+          navItems={getAdminNavItems(navigate, { pendingRequests: pendingRequestsCount || 0 })}
           onLogout={handleLogout}
         />
 
         <div className="container mx-auto px-4 py-4 sm:py-6 lg:py-8">
-          <div className="mb-4 flex justify-end">
-            <Button variant="outline" onClick={() => navigate('/admin/api-keys')} className="gap-2 relative">
-              <BrainCircuit className="h-4 w-4" />
-              API Keys & Pricing Control
-              {pendingRequestsCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold shadow-lg">
-                  {pendingRequestsCount > 99 ? '99+' : pendingRequestsCount}
-                </span>
-              )}
-            </Button>
-          </div>
+          {/* API Keys shortcut removed — it is a sidebar group now. */}
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-2 md:grid-cols-6 gap-2 mb-6 h-auto p-2">
-              <TabsTrigger value="contact" className="flex items-center justify-center gap-2 py-2 sm:py-3">
-                <MessageSquare className="h-4 w-4 shrink-0" />
-                <span className="text-xs sm:text-sm truncate">Contact Messages</span>
-              </TabsTrigger>
-              <TabsTrigger value="predictions" className="flex items-center justify-center gap-2 py-2 sm:py-3">
-                <BrainCircuit className="h-4 w-4 shrink-0" />
-                <span className="text-xs sm:text-sm truncate">AI Predictions</span>
-              </TabsTrigger>
-              <TabsTrigger value="applications" className="flex items-center justify-center gap-2 py-2 sm:py-3">
-                <FileCheck className="h-4 w-4 shrink-0" />
-                <span className="text-xs sm:text-sm truncate">Career Applications</span>
-              </TabsTrigger>
-              <TabsTrigger value="companies" className="flex items-center justify-center gap-2 py-2 sm:py-3">
-                <UsersIcon className="h-4 w-4 shrink-0" />
-                <span className="text-xs sm:text-sm truncate">Companies</span>
-              </TabsTrigger>
-              <TabsTrigger value="agents" className="flex items-center justify-center gap-2 py-2 sm:py-3">
-                <BrainCircuit className="h-4 w-4 shrink-0" />
-                <span className="text-xs sm:text-sm truncate">AI Agents</span>
-              </TabsTrigger>
-              <TabsTrigger value="agent-plans" className="flex items-center justify-center gap-2 py-2 sm:py-3">
-                <DollarSign className="h-4 w-4 shrink-0" />
-                <span className="text-xs sm:text-sm truncate">Agent Plans</span>
-              </TabsTrigger>
-            </TabsList>
+            {/* Tab strip removed — the sidebar drives ?tab= instead. */}
 
             {/* Contact Messages Tab */}
             <TabsContent value="contact" className="space-y-6">
@@ -1525,7 +1484,6 @@ const AdminDashboardPage = () => {
                 </div>
                 <Button 
                   onClick={() => {
-                    console.log('Create Company button clicked');
                     setShowCreateCompanyModal(true);
                   }} 
                   className="w-full sm:w-auto"
@@ -1766,6 +1724,12 @@ const AdminDashboardPage = () => {
                               <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
                                 <span><Building2 className="h-3.5 w-3.5 inline mr-1" />{agent.company_name}</span>
                                 <span className="text-xs">${agent.price_paid || 0}</span>
+                                {agent.stripe_subscription_id && (
+                                  <span className="text-xs text-purple-600">Stripe {agent.billing_interval === 'year' ? 'Yearly' : 'Monthly'}</span>
+                                )}
+                                {agent.is_complimentary && (
+                                  <span className="text-xs text-emerald-600">Complimentary</span>
+                                )}
                                 {agent.active_label && (
                                   <span className={`text-xs font-medium ${agent.status === 'active' ? 'text-blue-600' : 'text-muted-foreground'}`}>
                                     {agent.active_label}
@@ -1867,6 +1831,17 @@ const AdminDashboardPage = () => {
                       {selectedAgent.price_paid != null && (
                         <Badge variant="outline">${selectedAgent.price_paid}</Badge>
                       )}
+                      {selectedAgent.stripe_subscription_id && (
+                        <Badge variant="outline" className="text-purple-600 border-purple-400">Stripe Subscription</Badge>
+                      )}
+                      {selectedAgent.is_complimentary && (
+                        <Badge variant="outline" className="text-emerald-600 border-emerald-400">Complimentary</Badge>
+                      )}
+                      {selectedAgent.billing_interval && selectedAgent.stripe_subscription_id && (
+                        <Badge variant="outline" className="text-muted-foreground">
+                          {selectedAgent.billing_interval === 'year' ? 'Yearly' : 'Monthly'}
+                        </Badge>
+                      )}
                       {selectedAgent.active_label && (
                         <Badge variant="outline" className="text-blue-600 border-blue-500">
                           {selectedAgent.active_label}
@@ -1880,7 +1855,11 @@ const AdminDashboardPage = () => {
                     {selectedAgent.is_expired && (
                       <div className="mt-2 p-2 rounded bg-yellow-500/10 border border-yellow-500/30 text-sm text-yellow-700">
                         <Clock className="h-4 w-4 inline mr-1" />
-                        Agent subscription time has ended. The company needs to purchase again.
+                        {selectedAgent.stripe_subscription_id
+                          ? 'Stripe subscription has ended. The company needs to renew or resolve a payment issue.'
+                          : selectedAgent.is_complimentary
+                            ? 'Complimentary access has been revoked. The company needs to purchase a subscription.'
+                            : 'Agent subscription time has ended. The company needs to purchase again.'}
                       </div>
                     )}
                   </div>
@@ -1931,16 +1910,19 @@ const AdminDashboardPage = () => {
                           </p>
                         )}
                       </div>
-                      {selectedAgent.expires_at && (
+                      {(selectedAgent.expires_at || selectedAgent.current_period_end) && (
                         <div className="relative">
                           <div className={`absolute -left-[31px] top-1 w-4 h-4 rounded-full border-2 border-background ${selectedAgent.is_expired ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
-                          <p className="text-sm font-medium">{selectedAgent.is_expired ? 'Subscription Ended' : 'Expiration Date'}</p>
-                          <p className="text-xs text-muted-foreground">{formatDate(selectedAgent.expires_at)}</p>
+                          <p className="text-sm font-medium">{selectedAgent.is_expired ? (selectedAgent.stripe_subscription_id ? 'Subscription Ended' : 'Subscription Ended') : selectedAgent.stripe_subscription_id ? 'Period Ends' : 'Expiration Date'}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(selectedAgent.current_period_end || selectedAgent.expires_at)}</p>
                           {selectedAgent.time_remaining && (
                             <p className="text-xs text-green-600 font-medium mt-0.5">{selectedAgent.time_remaining}</p>
                           )}
                           {selectedAgent.time_ended_ago && (
                             <p className="text-xs text-red-500 font-medium mt-0.5">{selectedAgent.time_ended_ago}</p>
+                          )}
+                          {selectedAgent.cancel_at_period_end && !selectedAgent.is_expired && (
+                            <p className="text-xs text-yellow-600 font-medium mt-0.5">Will cancel at period end</p>
                           )}
                         </div>
                       )}
@@ -2014,7 +1996,7 @@ const AdminDashboardPage = () => {
                       The company has not made a new payment for this agent.
                     </p>
                     <p className="text-xs text-yellow-600/70 mt-1">
-                      Reactivating will grant a new 30-day subscription without payment.
+                      Reactivating will grant complimentary access with no expiration. The company can still subscribe via Stripe for paid access.
                     </p>
                   </div>
                   {confirmActivateAgent.time_ended_ago && (
@@ -2118,7 +2100,7 @@ const AdminDashboardPage = () => {
                       <p className="text-sm font-medium">No, delete everything</p>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Permanently deletes token quota, all keys (BYOK + managed), and all key request history.
-                        If company re-purchases, they start completely fresh with no history.
+                        But it will maintain its company data.
                       </p>
                     </div>
                   </div>
@@ -2466,7 +2448,6 @@ const AdminDashboardPage = () => {
           <div 
             className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-[100] overflow-y-auto"
             onClick={() => {
-              console.log('Modal backdrop clicked');
               setShowCreateCompanyModal(false);
             }}
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
@@ -2476,7 +2457,7 @@ const AdminDashboardPage = () => {
               animate={{ opacity: 1, scale: 1 }}
               onClick={(e) => {
                 e.stopPropagation();
-                console.log('Modal content clicked');
+                // console.log('Modal content clicked');
               }}
               className="bg-card border rounded-lg max-w-2xl w-full max-h-[95vh] sm:max-h-[90vh] my-auto overflow-y-auto shadow-xl"
               style={{ 

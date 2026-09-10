@@ -48,6 +48,14 @@ export const listWeeklyResetLogs = (params = {}) => {
   return req(`/admin/weekly-reset-logs${qs ? `?${qs}` : ''}`);
 };
 
+// Managed-key lifecycle history (assigned / renewed / expired / revoked).
+// The key row is overwritten on each re-issue, so this log is the only place
+// previous expiry and renewal dates survive.
+export const listKeyEvents = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return req(`/admin/key-events${qs ? `?${qs}` : ''}`);
+};
+
 // Change the reset interval (and optionally recompute next reset) for one managed key.
 export const updateResetSchedule = (payload) =>
   req('/admin/reset-schedule', { method: 'POST', body: JSON.stringify(payload) });
@@ -110,6 +118,7 @@ export default {
   updateResetSchedule,
   listAgentPlans,
   saveAgentPlans,
+  listKeyEvents,
   listRequests,
   approveRequest,
   editRequest,

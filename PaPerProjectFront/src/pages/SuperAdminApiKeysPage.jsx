@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAgents } from '@/hooks/useAgents';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -10,1167 +10,32 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Key, ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
   Send, Trash2, ChevronLeft, ChevronRight, ChevronDown, RefreshCw, DollarSign, Gauge,
-  Inbox, Building2, Sparkles, Save, Plus, Info, Settings, Globe, Search, Clock, CreditCard, Pencil
+  Inbox, Building2, Save, Plus, Info, Settings, Globe, Search, Clock, CreditCard, Pencil
 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import { getAdminNavItems } from '@/utils/adminNavItems';
+import { useAuth } from '@/contexts/AuthContext';
 import adminApiKeysService from '@/services/adminApiKeysService';
 import { ResetLogsTab } from '@/components/admin/ResetLogsTab';
+// Tab panels live in their own files; this page keeps the state, data loading
+// and modals that they all share.
+import {
+  GRADIENT_BG, CARD_CLASS, ROW_CLASS, ProviderLogo, PROVIDER_OPTIONS,
+  formatTokens, StatCard, REQUEST_STATUS_META,
+} from '@/components/admin/apiKeysShared';
+import PlatformTab from '@/components/admin/PlatformKeysTab';
+import OverviewTab from '@/components/admin/OverviewTab';
+import KeysTab from '@/components/admin/CompanyKeysTab';
+import PricingTab from '@/components/admin/PricingTab';
+import QuotasTab from '@/components/admin/QuotasTab';
+import RequestsTab from '@/components/admin/RequestsTab';
 
-const GRADIENT_BG = 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)';
-const CARD_CLASS = 'bg-[#120d22] border border-[#2d2342]';
-const ROW_CLASS = 'bg-[#0f0a20] border border-[#2d2342] hover:border-violet-500/30 transition-colors';
-
-const ProviderLogo = ({ provider, size = 20 }) => {
-  const s = size;
-  switch (provider) {
-    case 'groq': return (
-      <svg width={s} height={s} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="32" cy="32" r="32" fill="#F55036"/>
-        <path d="M44 26H36V38H44C44 38 48 38 48 32C48 26 44 26 44 26Z" fill="white"/>
-        <path d="M20 26C20 26 16 26 16 32C16 38 20 38 20 38H32V32H24V30H32V26H20Z" fill="white"/>
-      </svg>
-    );
-    case 'openai': return (
-      <svg width={s} height={s} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="32" cy="32" r="32" fill="#10a37f"/>
-        <path d="M46 28.5C46 22.7 41.3 18 35.5 18C32.4 18 29.6 19.3 27.6 21.4C26.7 21.1 25.7 21 24.7 21C19.7 21 15.7 25 15.7 30C15.7 30.9 15.8 31.8 16.1 32.6C14.8 33.9 14 35.7 14 37.7C14 41.7 17.3 45 21.3 45C22.3 45 23.2 44.8 24.1 44.4C25.8 45.4 27.7 46 29.8 46C33 46 35.9 44.6 37.9 42.4C38.4 42.5 38.9 42.5 39.4 42.5C44.1 42.5 48 38.6 48 33.9C48 31.9 47.3 30.1 46.1 28.7L46 28.5Z" fill="white" opacity="0.9"/>
-      </svg>
-    );
-    case 'claude': return (
-      <svg width={s} height={s} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="32" cy="32" r="32" fill="#CC785C"/>
-        <text x="32" y="42" textAnchor="middle" fontSize="28" fontWeight="bold" fill="white" fontFamily="serif">A</text>
-      </svg>
-    );
-    case 'gemini': return (
-      <svg width={s} height={s} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="32" cy="32" r="32" fill="#1a73e8"/>
-        <path d="M32 14C32 14 22 32 32 32C42 32 32 50 32 50C32 50 42 32 32 32C22 32 32 14 32 14Z" fill="white"/>
-      </svg>
-    );
-    case 'grok': return (
-      <svg width={s} height={s} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="32" cy="32" r="32" fill="#000"/>
-        <text x="32" y="42" textAnchor="middle" fontSize="28" fontWeight="bold" fill="white" fontFamily="sans-serif">X</text>
-      </svg>
-    );
-    default: return (
-      <div style={{ width: s, height: s }} className="rounded-full bg-violet-500/30 flex items-center justify-center text-white text-xs font-bold">
-        {provider[0]?.toUpperCase()}
-      </div>
-    );
-  }
-};
-
-const PROVIDER_OPTIONS = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'groq', label: 'Groq (Llama)' },
-  { value: 'claude', label: 'Claude / Anthropic' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'grok', label: 'xAI Grok' },
-];
-
-// Agent lists now come from the DB via useAgents() — see the hook for why.
-// Nothing agent-specific should be hardcoded in this file.
-
-const formatTokens = (n) => {
-  if (n == null) return '—';
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-};
-
-const StatCard = ({ icon: Icon, label, value, accent }) => (
-  <div className={`${CARD_CLASS} rounded-xl p-4 hover:border-violet-500/30 transition-colors`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-[11px] uppercase tracking-wider text-white/40 mb-1">{label}</p>
-        <p className="text-2xl font-bold text-white">{value}</p>
-      </div>
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${accent}`}>
-        <Icon className="w-5 h-5" />
-      </div>
-    </div>
-  </div>
-);
-
-// -------------------- Platform Keys Tab --------------------
-// Expected key prefixes per provider for frontend validation
-const PROVIDER_KEY_PREFIXES = {
-  openai:  { prefixes: ['sk-'], hint: 'OpenAI keys start with sk-' },
-  groq:    { prefixes: ['gsk_'], hint: 'Groq keys start with gsk_' },
-  claude:  { prefixes: ['sk-ant-'], hint: 'Anthropic keys start with sk-ant-' },
-  gemini:  { prefixes: ['AIza'], hint: 'Gemini keys start with AIza' },
-  grok:    { prefixes: ['xai-'], hint: 'xAI Grok keys start with xai-' },
-};
-
-const PlatformKeyRow = ({ row, onSave, onRevoke, saving, revoking }) => {
-  const [apiKey, setApiKey] = useState('');
-
-  const prefixInfo = PROVIDER_KEY_PREFIXES[row.provider];
-  const validPrefix = !apiKey || !prefixInfo ||
-    prefixInfo.prefixes.some(p => apiKey.startsWith(p));
-  const prefixError = apiKey.length > 3 && !validPrefix
-    ? `Wrong key format. ${prefixInfo.hint}.`
-    : null;
-
-  return (
-    <div className={`${ROW_CLASS} rounded-lg p-4`}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
-            <Globe className="w-5 h-5 text-violet-300" />
-          </div>
-          <div>
-            <h4 className="text-white font-semibold">{row.provider_label}</h4>
-            <p className="text-xs text-white/50 font-mono">
-              {row.configured ? row.masked : 'Not configured'}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
-            row.configured && row.status === 'active'
-              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-              : 'bg-gray-500/15 text-gray-400 border-gray-500/30'
-          }`}>
-            {row.configured && row.status === 'active' ? 'Active' : 'Not set'}
-          </span>
-          {row.configured && row.status === 'active' && (
-            <button
-              onClick={() => onRevoke(row.provider)}
-              disabled={revoking}
-              title="Remove this key"
-              className="text-[10px] px-2 py-0.5 rounded-full border border-red-500/30 text-red-400/70 hover:bg-red-500/10 hover:text-red-300 transition-all disabled:opacity-50"
-            >
-              {revoking ? <Loader2 className="w-3 h-3 animate-spin inline" /> : <Trash2 className="w-3 h-3 inline" />}
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="flex items-end gap-2">
-        <div className="flex-1">
-          <div className='flex justify-start items-center gap-2'>
-          <Label className="text-white/60 text-xs">
-            {row.configured ? 'Replace key' : 'Paste new key'}
-          </Label>
-           {prefixError && (
-            <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3 inline" /> {prefixError}
-            </p>
-          )}
-          </div>
-          <Input
-            type="password" autoComplete="off"
-            placeholder={prefixInfo ? prefixInfo.prefixes[0] + '...' : 'sk-...'}
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className={`bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono ${prefixError ? 'border-red-500/60' : ''}`}
-          />
-        </div>
-        <Button
-          className="bg-violet-600 hover:bg-violet-700 text-white"
-          disabled={saving || apiKey.length < 10 || !!prefixError}
-          onClick={() => onSave(row.provider, apiKey, () => setApiKey(''))}
-        >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
-          Save
-        </Button>
-      </div>
-      {row.updated_at && (
-        <p className="text-[10px] text-white/30 mt-2">
-          Last updated: {row.updated_by ? `${row.updated_by} • ` : ''}{new Date(row.updated_at).toLocaleString()}
-        </p>
-      )}
-    </div>
-  );
-};
-
-// Each agent's default provider now travels with the agent itself
-// (Agent.default_provider), so this no longer needs to mirror the backend by hand.
-const PROVIDER_LABELS = Object.fromEntries(PROVIDER_OPTIONS.map(p => [p.value, p.label]));
-
-const PROVIDER_ACCENT = {
-  openai:  'text-green-300 bg-green-500/10 border-green-500/20',
-  groq:    'text-violet-300 bg-violet-500/10 border-violet-500/20',
-  claude:  'text-orange-300 bg-orange-500/10 border-orange-500/20',
-  gemini:  'text-blue-300 bg-blue-500/10 border-blue-500/20',
-  grok:    'text-red-300 bg-red-500/10 border-red-500/20',
-};
-
-const AgentProviderReferenceTable = ({ agents = [] }) => (
-  <div className="bg-[#0f0a20] border border-[#2d2342] rounded-lg overflow-hidden">
-    <div className="px-4 py-2.5 border-b border-[#2d2342] flex items-center gap-2">
-      <Key className="w-3.5 h-3.5 text-violet-300" />
-      <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">Agent → Provider Mapping (Default / Free Tokens)</span>
-    </div>
-    <div className="divide-y divide-[#2d2342]">
-      {agents.map(row => (
-        <div key={row.slug} className="flex items-center justify-between px-4 py-2 hover:bg-white/2 transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-5 h-5 rounded flex items-center justify-center">
-              <ProviderLogo provider={row.default_provider} size={16} />
-            </div>
-            <div>
-              <p className="text-xs text-white font-medium">{row.name}</p>
-              <p className="text-[10px] text-white/30 font-mono">{row.slug}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`text-[10px] px-2 py-0.5 rounded border font-medium ${PROVIDER_ACCENT[row.default_provider] || 'text-white/40 bg-white/5 border-white/10'}`}>
-              {PROVIDER_LABELS[row.default_provider] || row.default_provider}
-            </span>
-            <span className="text-[10px] text-white/30">default</span>
-          </div>
-        </div>
-      ))}
-    </div>
-    <div className="px-4 py-2 bg-[#0c0820] border-t border-[#2d2342]">
-      <p className="text-[10px] text-white/30 leading-relaxed">
-        <span className="text-white/50">Note:</span> Companies can override the default provider by adding a BYOK key with a different provider,
-        or an admin can assign a managed key with any supported provider. The table above shows which platform key is consumed on the free-tokens path.
-      </p>
-    </div>
-  </div>
-);
-
-const PlatformTab = ({ platformKeys, onSave, onRevoke, savingProvider, revokingProvider, agentOptions = [] }) => (
-  <div className="space-y-3">
-    <div className="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-lg p-4 flex items-start gap-3">
-      <Globe className="w-5 h-5 text-emerald-300 shrink-0 mt-0.5" />
-      <div className="text-sm text-white/70">
-        <p className="text-white font-semibold mb-1">Platform keys = the "free tokens" path</p>
-        <p className="text-white/60 leading-relaxed">
-          Set <span className="text-white font-semibold">one key per provider</span>. Every company uses these keys automatically
-          until their per-agent quota (1M default) is exhausted. Keys are encrypted at rest — only the masked preview is shown.
-          <span className="text-white/80 font-medium"> When a managed or BYOK key quota is exhausted, calls are hard-blocked — there is no automatic fallback to another pool.</span>
-        </p>
-      </div>
-    </div>
-    <AgentProviderReferenceTable agents={agentOptions} />
-    {platformKeys.map(row => (
-      <PlatformKeyRow
-        key={row.provider}
-        row={row}
-        onSave={onSave}
-        onRevoke={onRevoke}
-        saving={savingProvider === row.provider}
-        revoking={revokingProvider === row.provider}
-      />
-    ))}
-  </div>
-);
-
-// -------------------- Overview Tab --------------------
-const OverviewTab = ({ stats }) => (
-  <div className="space-y-6">
-    {/* Row 1: Company & request health */}
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <StatCard icon={Building2} label="Companies" value={stats.total_companies ?? '—'} accent="bg-violet-500/15 text-violet-300" />
-      <StatCard icon={Gauge} label="Active Purchases" value={stats.total_purchases ?? '—'} accent="bg-fuchsia-500/15 text-fuchsia-300" />
-      <StatCard icon={Inbox} label="Pending Requests" value={stats.pending_requests ?? '—'} accent={stats.pending_requests > 0 ? 'bg-amber-500/15 text-amber-300' : 'bg-gray-500/15 text-gray-400'} />
-      <StatCard icon={Globe} label="Platform Keys Set" value={stats.platform_keys_configured ?? '—'} accent={stats.platform_keys_configured > 0 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'} />
-    </div>
-
-    {/* Row 2: Keys breakdown */}
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <StatCard icon={ShieldCheck} label="Active Keys (Total)" value={stats.total_keys ?? '—'} accent="bg-emerald-500/15 text-emerald-300" />
-      <StatCard icon={Key} label="Managed Keys" value={stats.managed_keys ?? '—'} accent="bg-emerald-500/15 text-emerald-300" />
-      <StatCard icon={Key} label="BYOK Keys" value={stats.byok_keys ?? '—'} accent="bg-blue-500/15 text-blue-300" />
-      {/* Exhausted Quotas — dual number card */}
-      {(() => {
-        const hasExhausted = (stats.exhausted_quotas > 0 || stats.exhausted_managed_quotas > 0);
-        const accent = hasExhausted ? 'bg-red-500/15 text-red-300' : 'bg-gray-500/15 text-gray-400';
-        return (
-          <div className={`${CARD_CLASS} rounded-xl p-4 hover:border-violet-500/30 transition-colors`}>
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <p className="text-[11px] uppercase tracking-wider text-white/40 mb-2">Exhausted Quotas</p>
-                <div className="flex items-end gap-3">
-                  <div>
-                    <p className="text-2xl font-bold text-white leading-none">{stats.exhausted_quotas ?? 0}</p>
-                    <p className="text-[10px] text-white/40 mt-1">free</p>
-                  </div>
-                  <span className="text-white/20 text-lg mb-4">·</span>
-                  <div>
-                    <p className="text-2xl font-bold text-white leading-none">{stats.exhausted_managed_quotas ?? 0}</p>
-                    <p className="text-[10px] text-white/40 mt-1">managed</p>
-                  </div>
-                </div>
-              </div>
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${accent}`}>
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-    </div>
-
-    {/* Token Ledger */}
-    <Card className={CARD_CLASS}>
-      <CardHeader>
-        <CardTitle className="text-white flex items-center gap-2">
-          <Gauge className="w-5 h-5 text-violet-400" /> Token Ledger
-        </CardTitle>
-        <CardDescription className="text-white/50">Aggregate token usage across all companies and agents.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Free platform tokens */}
-        <div>
-          <p className="text-xs text-white/40 uppercase tracking-wider mb-2">Free Platform Tokens</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-              <p className="text-xs text-white/40 uppercase mb-1">Included</p>
-              <p className="text-xl font-bold text-white">{formatTokens(stats.total_included_tokens)}</p>
-            </div>
-            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-              <p className="text-xs text-white/40 uppercase mb-1">Used</p>
-              <p className="text-xl font-bold text-violet-300">{formatTokens(stats.total_used_tokens)}</p>
-            </div>
-          </div>
-        </div>
-        {/* Managed key tokens */}
-        <div>
-          <p className="text-xs text-white/40 uppercase tracking-wider mb-2">Managed Key Tokens</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-              <p className="text-xs text-white/40 uppercase mb-1">Included</p>
-              <p className="text-xl font-bold text-white">{formatTokens(stats.total_managed_included_tokens)}</p>
-            </div>
-            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-              <p className="text-xs text-white/40 uppercase mb-1">Used</p>
-              <p className="text-xl font-bold text-emerald-300">{formatTokens(stats.total_managed_used_tokens)}</p>
-            </div>
-          </div>
-        </div>
-        {/* BYOK info */}
-        <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
-          <p className="text-xs text-white/40 uppercase mb-1">BYOK (tracked, info only)</p>
-          <p className="text-xl font-bold text-blue-300">{formatTokens(stats.total_byok_info_tokens)}</p>
-        </div>
-        {/* Per-provider breakdown */}
-        {stats.provider_totals && Object.keys(stats.provider_totals).length > 0 && (
-          <div>
-            <p className="text-xs text-white/40 uppercase mb-2">By Provider</p>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(stats.provider_totals).map(([provider, tokens]) => (
-                <div key={provider} className="p-3 bg-[#1a1333] border border-[#2d2342] rounded-lg text-center hover:border-violet-500/30 transition-colors min-w-[110px]">
-                  <div className="flex items-center justify-center mb-1.5">
-                    <ProviderLogo provider={provider} size={24} />
-                  </div>
-                  <p className="text-[10px] uppercase font-semibold text-white/50 tracking-wider">{provider}</p>
-                  <p className="text-base font-bold text-white mt-1">{formatTokens(tokens)}</p>
-                  <p className="text-[10px] text-white/30 mt-0.5">tokens</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  </div>
-);
-
-// -------------------- Keys Tab --------------------
-const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFilter, onRefresh, loading, agentOptions = [] }) => (
-  <div className="space-y-4">
-    <div className="flex items-center gap-2 flex-wrap">
-      <Input
-        placeholder="Search company..."
-        value={filter.search || ''}
-        onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-        className="bg-[#1a1333] border-[#3a295a] text-white w-60 placeholder:text-white/30"
-      />
-      <Select value={filter.mode || 'all'} onValueChange={(v) => setFilter({ ...filter, mode: v === 'all' ? '' : v })}>
-        <SelectTrigger className="w-40 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All modes" /></SelectTrigger>
-        <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-          <SelectItem value="all">All modes</SelectItem>
-          <SelectItem value="managed">Managed</SelectItem>
-          <SelectItem value="byok">BYOK</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select value={filter.agent_name || 'all'} onValueChange={(v) => setFilter({ ...filter, agent_name: v === 'all' ? '' : v })}>
-        <SelectTrigger className="w-52 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All agents" /></SelectTrigger>
-        <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-          <SelectItem value="all">All agents</SelectItem>
-          {agentOptions.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
-        {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />} Refresh
-      </Button>
-      <Button className="bg-violet-600 hover:bg-violet-700 text-white ml-auto" onClick={() => onAssign(null)}>
-        <Plus className="w-4 h-4 mr-1" /> Assign Managed Key
-      </Button>
-    </div>
-
-    {keys.length === 0 ? (
-      <Card className={CARD_CLASS}>
-        <CardContent className="p-12 text-center text-white/50">
-          <Key className="w-10 h-10 text-white/20 mx-auto mb-3" />
-          No keys match the current filters.
-        </CardContent>
-      </Card>
-    ) : (
-      <div className="space-y-2">
-        {keys.map(k => {
-          const q = k.quota;
-          const freePct = q && q.included_tokens > 0 ? Math.min(100, (q.used_tokens / q.included_tokens) * 100) : 0;
-          const mPct = q && q.managed_included_tokens > 0 ? Math.min(100, (q.managed_used_tokens / q.managed_included_tokens) * 100) : 0;
-          const freeBar = freePct >= 100 ? 'bg-red-500' : freePct >= 80 ? 'bg-amber-400' : 'bg-emerald-400';
-          const mBar = mPct >= 100 ? 'bg-red-500' : mPct >= 80 ? 'bg-amber-400' : 'bg-violet-500';
-          return (
-            <div key={k.id} className={`${ROW_CLASS} rounded-lg p-4`}>
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-white font-semibold truncate">{k.company_name}</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                      k.status === 'revoked'
-                        ? 'bg-red-500/15 text-red-300 border border-red-500/30'
-                        : k.mode === 'managed'
-                          ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                          : 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
-                    }`}>{k.status === 'revoked' ? 'revoked' : k.mode}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/30">{k.provider}</span>
-                  </div>
-                  <p className="text-xs text-white/50 mt-1">{k.agent_label} • <span className="font-mono text-white/70">{k.masked}</span></p>
-                  <p className="text-[10px] text-white/30 mt-0.5">
-                    {k.assigned_by ? `Assigned by ${k.assigned_by}` : 'Self-added'} • {new Date(k.updated_at).toLocaleString()}
-                  </p>
-
-                  {/* Token usage */}
-                  {q ? (
-                    <div className="mt-3 space-y-2">
-                      {/* <div>
-                        <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
-                          <span>Free tokens</span>
-                          <span>{formatTokens(Math.min(q.used_tokens, q.included_tokens))} / {formatTokens(q.included_tokens)} ({freePct.toFixed(0)}%)</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
-                          <div className={`h-full ${freeBar} transition-all`} style={{ width: `${freePct}%` }} />
-                        </div>
-                      </div> */}
-                      {q.managed_included_tokens > 0 && (
-                        <div>
-                          <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
-                            <span>Managed key tokens</span>
-                            <span>{formatTokens(Math.min(q.managed_used_tokens, q.managed_included_tokens))} / {formatTokens(q.managed_included_tokens)} ({mPct.toFixed(0)}%)</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
-                            <div className={`h-full ${mBar} transition-all`} style={{ width: `${mPct}%` }} />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-white/25 mt-2 italic">No quota record yet</p>
-                  )}
-                </div>
-
-                <div className="flex flex-col items-end gap-2 shrink-0">
-                  {k.status !== 'revoked' && (
-                    <Button size="sm" variant="ghost" className="text-red-300 hover:text-red-200 hover:bg-red-500/10" onClick={() => onRevoke(k)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  )}
-                  {q && k.status !== 'revoked' && (
-                    <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjustQuota(q, k)}>
-                       Edit tokens
-                    </Button>
-                  )}
-                  {k.status === 'revoked' ? (
-                    <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
-                      Re-assign
-                    </Button>
-                  ) : (
-                    k.mode === 'managed' && (
-                      <Button size="sm" className="pr-4 pl-4 bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
-                        Replace
-                      </Button>
-                    )
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    )}
-  </div>
-);
-
-// -------------------- Pricing Tab --------------------
-const PricingRow = ({ row, onSave, saving }) => {
-  const [draft, setDraft] = useState({
-    monthly_flat_usd: row.monthly_flat_usd,
-    service_charge_usd: row.service_charge_usd,
-    free_tokens_on_purchase: row.free_tokens_on_purchase,
-    managed_key_tokens: row.managed_key_tokens ?? 0,
-    yearly_discount_pct: row.yearly_discount_pct ?? '0',
-    monthly_discount_pct: row.monthly_discount_pct ?? '0',
-  });
-  const dirty = useMemo(() =>
-    String(draft.monthly_flat_usd) !== String(row.monthly_flat_usd) ||
-    String(draft.service_charge_usd) !== String(row.service_charge_usd) ||
-    Number(draft.free_tokens_on_purchase) !== Number(row.free_tokens_on_purchase) ||
-    Number(draft.managed_key_tokens) !== Number(row.managed_key_tokens ?? 0) ||
-    String(draft.yearly_discount_pct) !== String(row.yearly_discount_pct ?? '0') ||
-    String(draft.monthly_discount_pct) !== String(row.monthly_discount_pct ?? '0'),
-    [draft, row]
-  );
-
-  // Live price calculations
-  const monthly = parseFloat(draft.monthly_flat_usd) || 0;
-  const svc = parseFloat(draft.service_charge_usd) || 0;
-  const monthlyDiscountPct = Math.min(100, Math.max(0, parseFloat(draft.monthly_discount_pct) || 0));
-  const monthlyTotal = monthly + svc;
-  const monthlyDiscounted = monthlyTotal * (1 - monthlyDiscountPct / 100);
-  const monthlySaving = monthlyTotal - monthlyDiscounted;
-
-  return (
-    <div className={`${ROW_CLASS} rounded-lg p-4`}>
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="text-white font-semibold">{row.agent_label}</h4>
-        <span className="text-[10px] text-white/40 font-mono">{row.agent_name}</span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-        <div>
-          <Label className="text-white/60 text-xs">
-            Key Cost <span className="text-violet-300 font-semibold">/ month</span>
-            <span className="text-white/30 ml-1">— pre-filled in Approve modal</span>
-          </Label>
-          <div className="relative mt-1">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
-            <Input
-              type="number" step="0.01"
-              className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
-              value={draft.monthly_flat_usd}
-              onChange={(e) => setDraft({ ...draft, monthly_flat_usd: e.target.value })}
-            />
-          </div>
-        </div>
-        <div>
-          <Label className="text-white/60 text-xs">
-            Service Charge <span className="text-violet-300 font-semibold">/ month</span>
-            <span className="text-white/30 ml-1">— platform fee</span>
-          </Label>
-          <div className="relative mt-1">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
-            <Input
-              type="number" step="0.01"
-              className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
-              value={draft.service_charge_usd}
-              onChange={(e) => setDraft({ ...draft, service_charge_usd: e.target.value })}
-            />
-          </div>
-        </div>
-        <div>
-          <Label className="text-white/60 text-xs">
-            Monthly Discount <span className="text-white/30">— % off the monthly price (0 = no discount)</span>
-          </Label>
-          <div className="relative mt-1">
-            <Input
-              type="number" min="0" max="100" step="1"
-              className="bg-[#1a1333] border-[#3a295a] text-white pr-7"
-              value={draft.monthly_discount_pct}
-              onChange={(e) => {
-                const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
-                setDraft({ ...draft, monthly_discount_pct: String(v) });
-              }}
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">%</span>
-          </div>
-          <p className="text-[10px] text-white/40 mt-1">0% = no discount · 20% = 20% off monthly price</p>
-        </div>
-        {/* Yearly discount hidden — yearly plan not offered
-        <div>
-          <Label className="text-white/60 text-xs">
-            Yearly Discount <span className="text-white/30">— % off when company pays yearly (0 = no discount)</span>
-          </Label>
-          <div className="relative mt-1">
-            <Input
-              type="number" min="0" max="100" step="1"
-              className="bg-[#1a1333] border-[#3a295a] text-white pr-7"
-              value={draft.yearly_discount_pct}
-              onChange={(e) => {
-                const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
-                setDraft({ ...draft, yearly_discount_pct: String(v) });
-              }}
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">%</span>
-          </div>
-          <p className="text-[10px] text-white/40 mt-1">
-            0% = no discount · 20% = 20% off · 100% = free
-          </p>
-        </div>
-        */}
-        <div>
-          <Label className="text-white/60 text-xs">
-            Managed Key Tokens <span className="text-white/30">— per weekly reset</span>
-          </Label>
-          <Input
-            type="number"
-            className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-            value={draft.managed_key_tokens}
-            onChange={(e) => setDraft({ ...draft, managed_key_tokens: e.target.value })}
-          />
-          <p className="text-[10px] text-white/40 mt-1">{formatTokens(Number(draft.managed_key_tokens))} tokens / week</p>
-        </div>
-        <div>
-          <Label className="text-white/60 text-xs">Free Platform Tokens <span className="text-white/30">— included with agent purchase</span></Label>
-          <Input
-            type="number"
-            className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
-            value={draft.free_tokens_on_purchase}
-            onChange={(e) => setDraft({ ...draft, free_tokens_on_purchase: e.target.value })}
-          />
-          <p className="text-[10px] text-white/40 mt-1">{formatTokens(Number(draft.free_tokens_on_purchase))} — updates all existing quotas on save</p>
-        </div>
-      {/* Live price calculator */}
-      {monthlyTotal > 0 && (
-        <div className="grid grid-cols-2 gap-2 mb-3 p-3 bg-violet-500/5 border border-violet-500/20 rounded-lg">
-          <div>
-            <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Full price</p>
-            <p className="text-white/50 font-bold line-through text-sm">${monthlyTotal.toFixed(2)}<span className="text-white/30 font-normal text-[10px]"> /mo</span></p>
-            <p className="text-[10px] text-white/30">(${monthly.toFixed(2)} key + ${svc.toFixed(2)} svc)</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">
-              After discount {monthlyDiscountPct > 0 && <span className="text-emerald-400">({monthlyDiscountPct}% off)</span>}
-            </p>
-            <p className="text-white font-bold">${monthlyDiscounted.toFixed(2)}<span className="text-white/40 font-normal text-[10px]"> /mo</span></p>
-            {monthlySaving > 0 && <p className="text-[10px] text-emerald-400">saves ${monthlySaving.toFixed(2)}</p>}
-            {monthlyDiscountPct === 0 && <p className="text-[10px] text-white/30">no discount set</p>}
-          </div>
-        </div>
-      )}
-      </div>
-
-
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-white/30">
-          Last updated: {row.updated_by ? `${row.updated_by} • ` : ''}{new Date(row.updated_at).toLocaleString()}
-        </span>
-        <Button
-          size="sm"
-          disabled={!dirty || saving}
-          className="bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-40"
-          onClick={() => onSave(row.agent_name, draft)}
-        >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}
-          Save
-        </Button>
-      </div>
-    </div>
-  );
-};
-
-const PricingTab = ({ pricing, onSave, savingAgent }) => (
-  <div className="space-y-3">
-    <div className="bg-gradient-to-r from-violet-500/10 to-fuchsia-500/10 border border-violet-500/20 rounded-lg p-3 flex items-start gap-2">
-      <Info className="w-4 h-4 text-violet-300 mt-0.5 shrink-0" />
-      <p className="text-xs text-white/70 leading-relaxed">
-        <span className="text-white font-semibold">Key Cost</span> and <span className="text-white font-semibold">Service Charge</span> are pre-filled in the Approve Request modal — admin can still override them per company.{' '}
-        <span className="text-white font-semibold">Free Tokens</span> are automatically granted when a managed key is assigned.
-      </p>
-    </div>
-    {pricing.map(row => <PricingRow key={row.agent_name} row={row} onSave={onSave} saving={savingAgent === row.agent_name} />)}
-  </div>
-);
-
-// -------------------- Quotas Tab --------------------
-const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, loading, agentOptions = [] }) => (
-  <div className="space-y-4">
-    <div className="flex items-center gap-2 flex-wrap">
-      <Input
-        placeholder="Search company..."
-        value={filter.search || ''}
-        onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-        className="bg-[#1a1333] border-[#3a295a] text-white w-60 placeholder:text-white/30"
-      />
-      <Select value={filter.agent_name || 'all'} onValueChange={(v) => setFilter({ ...filter, agent_name: v === 'all' ? '' : v })}>
-        <SelectTrigger className="w-52 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All agents" /></SelectTrigger>
-        <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-          <SelectItem value="all">All agents</SelectItem>
-          {agentOptions.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
-        {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />} Refresh
-      </Button>
-    </div>
-    {quotas.length === 0 ? (
-      <Card className={CARD_CLASS}>
-        <CardContent className="p-12 text-center text-white/50">No quotas match.</CardContent>
-      </Card>
-    ) : (
-      <div className="space-y-2">
-        {quotas.map(q => {
-          const pct = q.included_tokens > 0 ? Math.min(100, (q.used_tokens / q.included_tokens) * 100) : 0;
-          const bar = pct >= 100 ? 'from-red-500 to-rose-500' : pct >= 80 ? 'from-amber-400 to-orange-500' : 'from-emerald-400 to-teal-500';
-          const mPct = q.managed_included_tokens > 0 ? Math.min(100, (q.managed_used_tokens / q.managed_included_tokens) * 100) : 0;
-          const mBar = mPct >= 100 ? 'from-red-500 to-rose-500' : mPct >= 80 ? 'from-amber-400 to-orange-500' : 'from-violet-500 to-purple-500';
-          return (
-            <div key={q.id} className={`${ROW_CLASS} rounded-lg p-4`}>
-              <div className="flex items-center justify-between mb-2 gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-white font-semibold truncate">{q.company_name}</p>
-                  <p className="text-xs text-white/50">{q.agent_label}</p>
-                </div>
-              </div>
-
-              {/* Free platform tokens */}
-              <div className="mb-3">
-                <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
-                  <span className="uppercase tracking-wider font-medium">Free platform tokens</span>
-                  <span>
-                    {formatTokens(Math.min(q.used_tokens, q.included_tokens))} / {formatTokens(q.included_tokens)}
-                    <span className="ml-1 text-white/30">({pct.toFixed(1)}% used)</span>
-                  </span>
-                </div>
-                <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
-                  <div className={`h-full bg-gradient-to-r ${bar}`} style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-
-              {/* Managed key tokens */}
-              {q.managed_included_tokens > 0 && (
-                <div className="mb-3">
-                  <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
-                    <span className="uppercase tracking-wider font-medium">Managed key tokens</span>
-                    <span>
-                      {formatTokens(Math.min(q.managed_used_tokens, q.managed_included_tokens))} / {formatTokens(q.managed_included_tokens)}
-                      <span className="ml-1 text-white/30">({mPct.toFixed(1)}% used)</span>
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
-                    <div className={`h-full bg-gradient-to-r ${mBar}`} style={{ width: `${mPct}%` }} />
-                  </div>
-                </div>
-              )}
-
-              {q.provider_breakdown && Object.keys(q.provider_breakdown).length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {Object.entries(q.provider_breakdown).map(([provider, tokens]) => (
-                    <span key={provider} className="text-[10px] px-2 py-0.5 rounded-full bg-[#1a1333] border border-[#2d2342] text-white/60">
-                      <span className="text-white/80 font-semibold uppercase">{provider}</span>
-                      {' '}{formatTokens(Math.min(tokens, q.included_tokens))}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex items-center gap-2 justify-between flex-wrap">
-                <div className="flex items-center gap-2">
-                <span className="text-[10px] text-white/25 mr-auto">Free quota:</span>
-                <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjust(q, 'reset')}>
-                  Reset used
-                </Button>
-                {/* <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjust(q, 'add_tokens')}>
-                  + Add
-                </Button> */}
-                <Button size="sm" variant="outline" className="border-white/15 text-white/70 hover:bg-white/5 hover:text-white text-xs" onClick={() => onAdjust(q, 'set_included')}>
-                  Set
-                </Button>
-                </div>
-                {q.managed_key_status !== 'revoked' && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-white/25 ml-2">Managed:</span>
-                    <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'set_managed')}>
-                      Set tokens
-                    </Button>
-                    <Button size="sm" variant="outline" className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs" onClick={() => onAdjust(q, 'reset_managed')}>
-                      Reset used
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    )}
-  </div>
-);
-
-// -------------------- Requests Tab --------------------
-const REQUEST_STATUS_META = {
-  pending:          { label: 'Pending',           cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30',     Icon: Clock },
-  payment_pending:  { label: 'Payment Required',  cls: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30', Icon: DollarSign },
-  payment_received: { label: 'Payment Received',  cls: 'bg-blue-500/15 text-blue-300 border-blue-500/30',       Icon: CreditCard },
-  key_assigned:     { label: 'Key Assigned',      cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', Icon: ShieldCheck },
-  key_expired:      { label: 'Key Expired',       cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30',       Icon: Clock },
-  approved:         { label: 'Approved',          cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', Icon: CheckCircle2 },
-  rejected:         { label: 'Rejected',          cls: 'bg-red-500/15 text-red-300 border-red-500/30',           Icon: XCircle },
-  revoked:          { label: 'Revoked',           cls: 'bg-orange-500/15 text-orange-300 border-orange-500/30',  Icon: XCircle },
-};
-
-// Single timeline entry for one KeyRequest record (or a synthetic revocation node)
-const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pricing }) => {
-  const meta = REQUEST_STATUS_META[r.status] || REQUEST_STATUS_META.pending;
-  const { Icon } = meta;
-  const total = (r.key_cost_snapshot ?? 0) + (r.service_charge_snapshot ?? 0);
-  const agentPricing = pricing?.find(p => p.agent_name === r.agent_name);
-  const isActive = ['key_assigned', 'approved'].includes(r.status) && !r._synthetic && r.linked_key_status !== 'expired';
-  const isNegative = ['rejected', 'revoked'].includes(r.status);
-  const isPending = ['pending', 'payment_pending', 'payment_received'].includes(r.status);
-  // _ts is set on synthetic revocation nodes; otherwise use resolved_at or created_at
-  const displayTime = r._ts || r.resolved_at || r.created_at;
-
-  const dotColor = isActive
-    ? 'bg-emerald-500 border-emerald-400 shadow-emerald-500/40'
-    : isNegative
-    ? 'bg-orange-500 border-orange-400 shadow-orange-500/40'
-    : isPending
-    ? 'bg-amber-500 border-amber-400 shadow-amber-500/40 animate-pulse'
-    : 'bg-white/20 border-white/20';
-
-  return (
-    <div className="flex gap-3">
-      {/* Dot + line */}
-      <div className="flex flex-col items-center shrink-0">
-        <div className={`w-3 h-3 rounded-full border-2 shadow-sm mt-1 ${dotColor}`} />
-        {!isLast && <div className="w-px flex-1 bg-[#2d2342] mt-1 mb-0" />}
-      </div>
-
-      {/* Content */}
-      <div className={`flex-1 pb-4 min-w-0 ${isLast ? '' : ''}`}>
-        <div className="flex items-start justify-between gap-2 flex-wrap">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${meta.cls}`}>
-                <Icon className="w-3 h-3" />{meta.label}
-              </span>
-              <span className="text-[10px] text-white/30 uppercase">{r.provider}</span>
-              {isActive && <span className="text-[9px] text-emerald-400/70 font-medium">● ACTIVE</span>}
-            </div>
-
-            {r.note && <p className="text-xs text-white/50 mt-1 italic">User note: "{r.note}"</p>}
-            {r.admin_note && <p className="text-xs text-violet-300 mt-1">Admin: "{r.admin_note}"</p>}
-
-            {r.status === 'payment_pending' && total > 0 && (
-              <p className="text-xs text-yellow-300 mt-1">
-                Amount due: <span className="font-semibold">${total.toFixed(2)}</span>
-                <span className="text-white/40 ml-1">(key ${(r.key_cost_snapshot ?? 0).toFixed(2)} + svc ${(r.service_charge_snapshot ?? 0).toFixed(2)})</span>
-                {r.discount_pct_snapshot > 0 && (
-                  <span className="ml-2 text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded-full text-[10px]">{r.discount_pct_snapshot}% discount applied</span>
-                )}
-              </p>
-            )}
-            {r.status === 'payment_received' && r.amount_paid != null && (
-              <p className="text-xs text-blue-300 mt-1">
-                Paid: <span className="font-semibold">${r.amount_paid.toFixed(2)}</span>
-                {r.paid_at && <span className="text-white/40 ml-1">• {new Date(r.paid_at).toLocaleString()}</span>}
-              </p>
-            )}
-
-            <p className="text-[10px] text-white/25 mt-1">
-              {r._synthetic && r.status === 'key_expired'
-                ? <span className="text-amber-300/50">{displayTime ? new Date(displayTime).toLocaleString() : 'Key expired'}</span>
-                : r._synthetic
-                ? <><span className="italic text-orange-300/50">Key revoked</span>{' · '}{new Date(displayTime).toLocaleString()}</>
-                : <>
-                    {r.requested_by
-                      ? <><span className="text-white/40">{r.requested_by}</span> requested</>
-                      : <span className="italic">Direct admin assignment</span>
-                    }
-                    {r.resolved_by && <> · resolved by <span className="text-white/40">{r.resolved_by}</span></>}
-                    {' · '}{new Date(displayTime).toLocaleString()}
-                  </>
-              }
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {!r._synthetic && r.status === 'pending' && (
-              <>
-                <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2" onClick={() => onApprove(r)}>
-                  <CheckCircle2 className="w-3 h-3 mr-1" />Approve
-                </Button>
-                <Button size="sm" variant="outline" className="h-7 border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs px-2" onClick={() => onEdit(r)}>
-                  <Pencil className="w-3 h-3 mr-1" />Edit
-                </Button>
-                <Button size="sm" variant="outline" className="h-7 border-red-500/40 text-red-300 hover:bg-red-500/10 text-xs px-2" onClick={() => onReject(r)}>
-                  <XCircle className="w-3 h-3 mr-1" />Reject
-                </Button>
-              </>
-            )}
-            {!r._synthetic && r.status === 'payment_pending' && (
-              <>
-                <Button size="sm" variant="outline" className="h-7 border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs px-2" onClick={() => onEdit(r)}>
-                  <Pencil className="w-3 h-3 mr-1" />Edit
-                </Button>
-                <span className="text-[10px] text-yellow-300/70 italic">Awaiting payment</span>
-              </>
-            )}
-            {!r._synthetic && r.status === 'payment_received' && (
-              <Button size="sm" className="h-7 bg-violet-600 hover:bg-violet-700 text-white text-xs px-2" onClick={() => onAssignKey(r)}>
-                <Key className="w-3 h-3 mr-1" />Assign Key
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Expand a request list into timeline entries, splitting assigned-then-revoked
-// records into two nodes: one "Key Assigned" (green) and one "Revoked" (orange).
-function expandEntries(requests) {
-  const sorted = [...requests].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  const latestAssignedId = [...sorted].reverse().find(r => r.status === 'key_assigned')?.id;
-
-  const entries = [];
-  for (const r of sorted) {
-    if (r.was_assigned) {
-      entries.push({ ...r, status: 'key_assigned', _ts: r.resolved_at });
-      entries.push({
-        ...r,
-        _syntheticId: `${r.id}_revoked`,
-        status: 'revoked',
-        _ts: r.revoked_at,
-        _synthetic: true,
-      });
-    } else if (r.status === 'key_assigned' && r.id !== latestAssignedId) {
-      // Older key_assigned — show assigned then expired
-      entries.push({ ...r, _ts: r.resolved_at });
-      entries.push({
-        ...r,
-        _syntheticId: `${r.id}_expired`,
-        status: 'key_expired',
-        _ts: r.linked_key_valid_until || r.resolved_at,
-        _synthetic: true,
-        note: null,
-        admin_note: null,
-      });
-    } else if (r.status === 'key_assigned' && r.linked_key_status === 'expired') {
-      // Latest key but expired
-      entries.push({ ...r, _ts: r.resolved_at });
-      entries.push({
-        ...r,
-        _syntheticId: `${r.id}_expired`,
-        status: 'key_expired',
-        _ts: r.linked_key_valid_until || r.resolved_at,
-        _synthetic: true,
-        note: null,
-        admin_note: null,
-      });
-    } else {
-      if (r.is_renewal) {
-        entries.push({
-          ...r,
-          _syntheticId: `${r.id}_expired`,
-          status: 'key_expired',
-          _ts: r.created_at,
-          _synthetic: true,
-          note: null,
-          admin_note: null,
-        });
-      }
-      entries.push(r);
-    }
-  }
-  return entries;
-}
-
-// Grouped card: one card per (company, agent) showing full timeline
-const RequestGroupCard = ({ group, onApprove, onAssignKey, onReject, onEdit, pricing }) => {
-  const [expanded, setExpanded] = useState(group.hasAction);
-
-  // Expand revoked-assignment records into two timeline nodes each
-  const entries = React.useMemo(() => expandEntries(group.requests), [group.requests]);
-
-  const latest = entries[entries.length - 1];
-  const latestReal = [...entries].reverse().find(e => !e._synthetic) || latest;
-  const isKeyExpired = latestReal.status === 'key_assigned' && latestReal.linked_key_status === 'expired';
-  const effectiveStatus = isKeyExpired ? 'key_expired' : latest.status;
-  const latestMeta = REQUEST_STATUS_META[effectiveStatus] || REQUEST_STATUS_META.pending;
-  const { Icon: LatestIcon } = latestMeta;
-  const isCurrentlyActive = ['key_assigned', 'approved'].includes(latestReal.status) && !isKeyExpired;
-
-  return (
-    <div className={`${ROW_CLASS} rounded-xl overflow-hidden`}>
-      {/* Header */}
-      <button
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
-        onClick={() => setExpanded(e => !e)}
-      >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-white font-semibold text-sm">{group.company_name}</span>
-            <span className="text-xs text-white/40">{group.agent_label}</span>
-            <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${latestMeta.cls}`}>
-              <LatestIcon className="w-3 h-3" />{latestMeta.label}
-            </span>
-            {isCurrentlyActive && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">Active key</span>
-            )}
-            {latestReal.preferred_duration && latestReal.preferred_duration !== 'none' && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 font-medium capitalize">{latestReal.preferred_duration}</span>
-            )}
-            {(isCurrentlyActive || isKeyExpired) && (
-              <>
-                {(latestReal.amount_paid != null || latestReal.key_cost_snapshot > 0) && (
-                  <>
-                    <span className="text-white/15 text-sm">·</span>
-                    <span className="text-[10px] text-white/40">
-                      Paid <span className={`font-semibold ${isCurrentlyActive ? 'text-emerald-300' : 'text-amber-300'}`}>${(latestReal.amount_paid ?? (latestReal.key_cost_snapshot ?? 0) + (latestReal.service_charge_snapshot ?? 0)).toFixed(2)}</span>
-                      <span className="text-white/25 ml-1">(${(latestReal.key_cost_snapshot ?? 0).toFixed(2)} + ${(latestReal.service_charge_snapshot ?? 0).toFixed(2)} svc)</span>
-                    </span>
-                  </>
-                )}
-                {/* {latestReal.preferred_duration && (
-                  <>
-                    <span className="text-white/15 text-sm">·</span>
-                    <span className="text-[11px] text-white/40">
-                      <span className="text-white/25">Plan: </span>
-                      <span className="text-violet-300 font-medium capitalize">{latestReal.preferred_duration}</span>
-                    </span>
-                  </>
-                )} */}
-                {latestReal.linked_key_valid_until && (
-                  <>
-                    <span className="text-white/15 text-sm">·</span>
-                    {(() => {
-                      const expiry = new Date(latestReal.linked_key_valid_until);
-                      const daysLeft = Math.ceil((expiry - new Date()) / (1000 * 60 * 60 * 24));
-                      const expired = daysLeft < 0;
-                      return (
-                        <span className={`text-[11px] font-medium ${expired ? 'text-amber-400' : daysLeft <= 7 ? 'text-amber-400' : 'text-white/40'}`}>
-                          <span className="text-white/25">{expired ? 'Expired: ' : 'Expires: '}</span>
-                          {expiry.toLocaleDateString()}{expired ? ` ⚠ ${daysLeft}d` : daysLeft <= 7 ? ` ⚠ ${daysLeft}d` : ''}
-                        </span>
-                      );
-                    })()}
-                  </>
-                )}
-              </>
-            )}
-          </div>
-          <p className="text-[10px] text-white/30 mt-0.5">
-            {entries.length} event{entries.length > 1 ? 's' : ''} · Latest {new Date(latest._ts || latest.resolved_at || latest.created_at).toLocaleDateString()}
-          </p>
-        </div>
-        <div className="shrink-0 text-white/30">
-          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-        </div>
-      </button>
-
-      {/* Timeline */}
-      {expanded && (
-        <div className="px-4 pb-2 pt-1 border-t border-[#2d2342]">
-          {entries.map((r, i) => (
-            <TimelineEntry
-              key={r._syntheticId || r.id}
-              r={r}
-              isLast={i === entries.length - 1}
-              onApprove={onApprove}
-              onAssignKey={onAssignKey}
-              onReject={onReject}
-              onEdit={onEdit}
-              pricing={pricing}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const RequestsTab = ({ requests, onApprove, onAssignKey, onReject, onEdit, filter, setFilter, onRefresh, loading, pricing }) => {
-  // Group by (company_id + agent_name), sorted oldest→newest within each group
-  const groups = React.useMemo(() => {
-    const map = {};
-    requests.forEach(r => {
-      const key = `${r.company_id}__${r.agent_name}`;
-      if (!map[key]) map[key] = {
-        key,
-        company_id: r.company_id,
-        company_name: r.company_name,
-        agent_name: r.agent_name,
-        agent_label: r.agent_label,
-        requests: [],
-        hasAction: false,
-      };
-      map[key].requests.push(r);
-      if (['pending', 'payment_received'].includes(r.status)) map[key].hasAction = true;
-    });
-    // Sort each group oldest→newest so timeline reads top-to-bottom
-    Object.values(map).forEach(g => g.requests.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
-    // Sort groups: action-needed first, then by latest event desc
-    return Object.values(map).sort((a, b) => {
-      if (a.hasAction !== b.hasAction) return a.hasAction ? -1 : 1;
-      const aLatest = new Date(a.requests[a.requests.length - 1].created_at);
-      const bLatest = new Date(b.requests[b.requests.length - 1].created_at);
-      return bLatest - aLatest;
-    });
-  }, [requests]);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 flex-wrap">
-        <Select value={filter.status || 'all'} onValueChange={(v) => setFilter({ ...filter, status: v === 'all' ? '' : v })}>
-          <SelectTrigger className="w-48 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All statuses" /></SelectTrigger>
-          <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="payment_pending">Payment Required</SelectItem>
-            <SelectItem value="payment_received">Payment Received</SelectItem>
-            <SelectItem value="key_assigned">Key Assigned</SelectItem>
-            <SelectItem value="approved">Approved (legacy)</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-            <SelectItem value="revoked">Revoked</SelectItem>
-          </SelectContent>
-        </Select>
-        <Input
-          placeholder="Search company..."
-          value={filter.search || ''}
-          onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-          className="bg-[#1a1333] border-[#3a295a] text-white w-60 placeholder:text-white/30"
-        />
-        <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
-          {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />} Refresh
-        </Button>
-        {groups.length > 0 && (
-          <span className="text-xs text-white/30 ml-1">{groups.length} company{groups.length > 1 ? '/agent pairs' : '/agent pair'} · {requests.length} total events</span>
-        )}
-      </div>
-      {groups.length === 0 ? (
-        <Card className={CARD_CLASS}>
-          <CardContent className="p-12 text-center text-white/50">
-            <Inbox className="w-10 h-10 text-white/20 mx-auto mb-2" /> No requests.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {groups.map(g => (
-            <RequestGroupCard
-              key={g.key}
-              group={g}
-              onApprove={onApprove}
-              onAssignKey={onAssignKey}
-              onReject={onReject}
-              onEdit={onEdit}
-              pricing={pricing}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// -------------------- Company Picker (searchable) --------------------
 const CompanyPicker = ({ value, onChange, disabled, lockedLabel }) => {
   const [search, setSearch] = useState('');
   const [options, setOptions] = useState([]);
@@ -1223,6 +88,15 @@ const CompanyPicker = ({ value, onChange, disabled, lockedLabel }) => {
 // -------------------- Main Page --------------------
 const SuperAdminApiKeysPage = () => {
   const navigate = useNavigate();
+  const { logout, user } = useAuth();
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
   const { toast } = useToast();
 
   // The agent catalogue, from the DB. Fetched once here and threaded into the
@@ -1230,13 +104,19 @@ const SuperAdminApiKeysPage = () => {
   // Agent table — adding an agent needs no change to this file.
   const { agents: agentOptions } = useAgents({ includeInactive: true });
 
-  const [activeTab, setActiveTab] = useState('overview');
+  // Tab lives in the URL so the sidebar can drive it. Switching tabs is then a
+  // same-route change: this page stays mounted and only the panel swaps, which
+  // is what stops every sidebar click from looking like a page reload.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'overview';
+  const setActiveTab = (tab) => setSearchParams({ tab }, { replace: false });
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({});
   const [keys, setKeys] = useState([]);
   const [pricing, setPricing] = useState([]);
   const [quotas, setQuotas] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [keyEvents, setKeyEvents] = useState([]);
   const [platformKeys, setPlatformKeys] = useState([]);
   const [savingProvider, setSavingProvider] = useState(null);
   const [revokingProvider, setRevokingProvider] = useState(null);
@@ -1247,7 +127,7 @@ const SuperAdminApiKeysPage = () => {
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
   const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '', reset_interval_days: '7' });
-  const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '' });
+  const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '', sync_global_pricing: false });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   // Edit a request's price/duration/note before payment (pending / payment_pending).
   const [editModal, setEditModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' });
@@ -1261,13 +141,16 @@ const SuperAdminApiKeysPage = () => {
   const loadAll = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const [o, k, p, q, r, pk] = await Promise.all([
+      const [o, k, p, q, r, pk, ev] = await Promise.all([
         adminApiKeysService.getOverview(),
         adminApiKeysService.listAllKeys(keyFilter),
         adminApiKeysService.listPricing(),
         adminApiKeysService.listQuotas(quotaFilter),
         adminApiKeysService.listRequests(requestFilter),
         adminApiKeysService.listPlatformKeys(),
+        // Recorded key lifecycle events — the timeline used to guess expiries
+        // from the current key row, which could only ever show the latest one.
+        adminApiKeysService.listKeyEvents({ limit: 200 }).catch(() => ({ events: [] })),
       ]);
       setStats(o.stats || {});
       setKeys(k.keys || []);
@@ -1275,6 +158,7 @@ const SuperAdminApiKeysPage = () => {
       setQuotas(q.quotas || []);
       setRequests(r.requests || []);
       setPlatformKeys(pk.platform_keys || []);
+      setKeyEvents(ev.events || []);
     } catch (e) {
       if (!silent) toast({ title: 'Load failed', description: String(e.message || e), variant: 'destructive' });
     } finally {
@@ -1340,8 +224,12 @@ const SuperAdminApiKeysPage = () => {
   };
   const reloadRequests = async () => {
     try {
-      const r = await adminApiKeysService.listRequests(requestFilter);
+      const [r, ev] = await Promise.all([
+        adminApiKeysService.listRequests(requestFilter),
+        adminApiKeysService.listKeyEvents({ limit: 200 }).catch(() => ({ events: [] })),
+      ]);
       setRequests(r.requests || []);
+      setKeyEvents(ev.events || []);
     } catch (e) { toast({ title: 'Failed', description: String(e.message || e), variant: 'destructive' }); }
   };
 
@@ -1349,11 +237,16 @@ const SuperAdminApiKeysPage = () => {
   useEffect(() => { const t = setTimeout(reloadQuotas, 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [quotaFilter]);
   useEffect(() => { const t = setTimeout(reloadRequests, 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [requestFilter]);
 
+  // Default managed-token grant when nothing else supplies one. A key saved
+  // with 0 tokens is unusable (every call hard-blocks immediately), so the
+  // form starts from a sane figure and submit refuses 0 outright.
+  const DEFAULT_MANAGED_TOKENS = '50000';
+
   const openAssign = (existingOrRequest, prefill = null) => {
     if (prefill) {
       const duration = prefill.preferred_duration || 'monthly';
       const p = pricing.find(x => x.agent_name === prefill.agent_name);
-      const defaultTokens = p?.managed_key_tokens ? String(p.managed_key_tokens) : '';
+      const defaultTokens = p?.managed_key_tokens ? String(p.managed_key_tokens) : DEFAULT_MANAGED_TOKENS;
       setAssignForm({
         company_id: prefill.company_id,
         agent_name: prefill.agent_name,
@@ -1375,14 +268,14 @@ const SuperAdminApiKeysPage = () => {
         reset_tokens: !hasUsage,
         managed_tokens: existingOrRequest.quota?.managed_included_tokens > 0
           ? String(existingOrRequest.quota.managed_included_tokens)
-          : '',
+          : DEFAULT_MANAGED_TOKENS,
         renewal_period: existingOrRequest.renewal_period || 'none',
         duration_months: '',
         reset_interval_days: String(existingOrRequest.reset_interval_days || 7),
       });
       setAssignModal({ open: true, replacingKey: existingOrRequest, prefillRequest: null });
     } else {
-      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '', reset_interval_days: '7' });
+      setAssignForm({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: DEFAULT_MANAGED_TOKENS, renewal_period: 'none', duration_months: '', reset_interval_days: '7' });
       setAssignModal({ open: true, replacingKey: null, prefillRequest: null });
     }
   };
@@ -1390,6 +283,19 @@ const SuperAdminApiKeysPage = () => {
   const submitAssign = async () => {
     if (!assignForm.company_id || !assignForm.api_key) {
       toast({ title: 'Missing fields', description: 'Company and API key are required.', variant: 'destructive' });
+      return;
+    }
+    // A key with a 0-token grant is dead on arrival: resolve_for_call
+    // hard-blocks every request the moment the quota is exhausted, so the
+    // company would get a key it can never use. Refuse it here.
+    const tokensRaw = String(assignForm.managed_tokens ?? '').trim();
+    const tokensNum = Number(tokensRaw);
+    if (tokensRaw === '' || !Number.isFinite(tokensNum) || tokensNum <= 0) {
+      toast({
+        title: 'Tokens required',
+        description: 'Enter a token amount greater than 0 — a key with 0 tokens cannot make any calls.',
+        variant: 'destructive',
+      });
       return;
     }
     setSubmitting(true);
@@ -1403,7 +309,7 @@ const SuperAdminApiKeysPage = () => {
         renewal_period: assignForm.renewal_period,
         reset_interval_days: Number(assignForm.reset_interval_days) || 7,
       };
-      if (assignForm.managed_tokens.trim() !== '') payload.managed_tokens = assignForm.managed_tokens;
+      payload.managed_tokens = tokensRaw;
       if (assignForm.duration_months.trim() !== '') payload.duration_months = Number(assignForm.duration_months);
       if (assignModal.prefillRequest) payload.request_id = assignModal.prefillRequest.id;
       await adminApiKeysService.assignManagedKey(payload);
@@ -1459,18 +365,42 @@ const SuperAdminApiKeysPage = () => {
         : action === 'set_included'
           ? String(quota?.included_tokens ?? 0)
           : '1000000';
-    setAdjustModal({ open: true, quota, action, value: defaultVal });
+    setAdjustModal({
+      open: true, quota, action, value: defaultVal,
+      reset_interval_days: String(quota?.reset_interval_days ?? 7),
+      recompute_next: false,
+    });
   };
 
   const submitAdjust = async () => {
     const { quota, action, value } = adjustModal;
+    // Reset schedule is edited alongside the token limit; only send it when the
+    // admin actually changed the interval (or asked to restart the cycle), so a
+    // plain token edit does not silently touch the schedule.
+    const newInterval = Math.max(1, Math.min(365, Number(adjustModal.reset_interval_days) || 0));
+    const intervalChanged =
+      action === 'set_managed' &&
+      quota?.key_id &&
+      quota?.key_mode === 'managed' &&
+      newInterval >= 1 &&
+      (newInterval !== Number(quota.reset_interval_days ?? 7) || adjustModal.recompute_next);
     setSubmitting(true);
     try {
       const noValueActions = ['reset', 'reset_managed'];
       const payload = noValueActions.includes(action) ? { action } : { action, value: Number(value) };
       await adminApiKeysService.adjustQuota(quota.id, payload);
-      toast({ title: 'Quota updated' });
-      setAdjustModal({ open: false, quota: null, action: '', value: '' });
+      if (intervalChanged) {
+        await adminApiKeysService.updateResetSchedule({
+          key_id: quota.key_id,
+          reset_interval_days: newInterval,
+          recompute_next: !!adjustModal.recompute_next,
+        });
+      }
+      toast({
+        title: 'Quota updated',
+        description: intervalChanged ? `Reset schedule set to every ${newInterval} day(s).` : undefined,
+      });
+      setAdjustModal({ open: false, quota: null, action: '', value: '', reset_interval_days: '7', recompute_next: false });
       reloadQuotas(); loadAll();
     } catch (e) {
       toast({ title: 'Adjust failed', description: String(e.message || e), variant: 'destructive' });
@@ -1489,9 +419,15 @@ const SuperAdminApiKeysPage = () => {
         service_charge: parseFloat((rawSvc * multiplier).toFixed(2)),
         discount_pct: discPct,
         admin_note: approveModal.admin_note,
+        sync_global_pricing: approveModal.sync_global_pricing,
       });
-      toast({ title: 'Request approved', description: 'Company notified to complete payment.' });
-      setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '' });
+      toast({
+        title: 'Request approved',
+        description: approveModal.sync_global_pricing
+          ? 'Company notified to complete payment. Global pricing updated.'
+          : 'Company notified to complete payment.',
+      });
+      setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '', sync_global_pricing: false });
       reloadRequests(); loadAll();
     } catch (e) {
       toast({ title: 'Approve failed', description: String(e.message || e), variant: 'destructive' });
@@ -1511,9 +447,16 @@ const SuperAdminApiKeysPage = () => {
         discount_pct: discPct,
         preferred_duration: editModal.preferred_duration,
         admin_note: editModal.admin_note,
+        sync_global_pricing: editModal.sync_global_pricing,
       });
-      toast({ title: 'Request updated', description: editModal.request.status === 'payment_pending' ? 'Company notified of the new amount due.' : 'Changes saved.' });
-      setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' });
+      toast({
+        title: 'Request updated',
+        description: [
+          editModal.request.status === 'payment_pending' ? 'Company notified of the new amount due.' : 'Changes saved.',
+          editModal.sync_global_pricing ? 'Global pricing updated.' : '',
+        ].filter(Boolean).join(' '),
+      });
+      setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '', sync_global_pricing: false });
       reloadRequests(); loadAll();
     } catch (e) {
       toast({ title: 'Update failed', description: String(e.message || e), variant: 'destructive' });
@@ -1536,47 +479,24 @@ const SuperAdminApiKeysPage = () => {
     <>
       <Helmet><title>Super Admin — API Keys & Pricing</title></Helmet>
       <div className="min-h-screen overflow-x-hidden" style={{ background: GRADIENT_BG }}>
-        <DashboardNavbar icon={Settings} title="Super Admin — API Keys" subtitle="Control plane for keys, pricing, quotas & requests" />
+        <DashboardNavbar
+          icon={Settings}
+          title="API Keys & Pricing"
+          subtitle="Control plane for keys, pricing, quotas & requests"
+          user={user}
+          userRole="Admin"
+          onLogout={handleLogout}
+          showNavTabs
+          activeSection="admin-api-keys"
+          navItems={getAdminNavItems(navigate, { pendingRequests: stats.pending_requests || 0 })}
+        />
 
         <div className="container mx-auto px-4 py-8 max-w-7xl">
-          <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-            <div>
-              <button onClick={() => navigate('/admin/dashboard')} className="flex items-center gap-1 text-sm text-white/50 hover:text-white mb-2 transition-colors">
-                <ChevronLeft className="w-4 h-4" /> Back to admin dashboard
-              </button>
-              <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-2">
-                <Sparkles className="w-6 h-6 text-violet-400" /> API Keys Control Panel
-              </h1>
-              <p className="text-sm text-white/50 mt-1">Assign managed keys, set pricing, adjust quotas, review requests.</p>
-            </div>
-          </div>
+          {/* Page title lives in the navbar above — repeating it here just
+              pushed the content down. */}
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="bg-[#1a1333] border border-[#3a295a] rounded-xl p-1 flex w-full h-auto mb-6">
-              {[
-                { value: 'overview', icon: Gauge, label: 'Overview' },
-                { value: 'platform', icon: Globe, label: 'Platform Keys' },
-                { value: 'keys', icon: Key, label: 'Per-Company Keys' },
-                { value: 'pricing', icon: DollarSign, label: 'Pricing' },
-                { value: 'quotas', icon: Gauge, label: 'Quotas' },
-                { value: 'reset-logs', icon: RefreshCw, label: 'Reset Logs' },
-                { value: 'requests', icon: Inbox, label: 'Requests', badge: stats.pending_requests },
-              ].map(t => (
-                <TabsTrigger
-                  key={t.value}
-                  value={t.value}
-                  className="flex-1 flex items-center justify-center gap-1.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-[0_0_12px_rgba(139,92,246,0.3)] text-white/60 hover:text-white rounded-lg py-2"
-                >
-                  <t.icon className="h-4 w-4 shrink-0" />
-                  <span className="text-sm font-medium truncate">{t.label}</span>
-                  {t.badge > 0 && (
-                    <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold shrink-0">
-                      {t.badge > 99 ? '99+' : t.badge}
-                    </span>
-                  )}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+            {/* Tab strip removed — the sidebar drives ?tab= instead. */}
 
             <TabsContent value="platform">
               {loading ? <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div>
@@ -1600,6 +520,11 @@ const SuperAdminApiKeysPage = () => {
                     used_tokens: q.used_tokens,
                     managed_included_tokens: q.managed_included_tokens,
                     managed_used_tokens: q.managed_used_tokens,
+                    // Needed to edit the weekly reset schedule from this modal.
+                    key_id: key.id,
+                    key_mode: key.mode,
+                    reset_interval_days: key.reset_interval_days ?? 7,
+                    next_reset_at: q.next_reset_at,
                   }, 'set_managed');
                 }}
                 filter={keyFilter}
@@ -1620,34 +545,65 @@ const SuperAdminApiKeysPage = () => {
             <TabsContent value="requests">
               <RequestsTab
                 requests={requests}
+                keyEvents={keyEvents}
                 pricing={pricing}
                 onApprove={(r) => {
+                  // Prefer the request's own price snapshot (an admin may have
+                  // already edited this request) and only fall back to global
+                  // pricing when the request carries no price yet. Reading
+                  // global pricing unconditionally meant an edited request —
+                  // or any agent whose global pricing is still 0 — opened the
+                  // approve dialog showing 0.00 and discarded the real amount.
                   const p = pricing.find(x => x.agent_name === r.agent_name);
-                  const duration = r.preferred_duration || 'monthly';
-                  const monthlyDiscountPct = parseFloat(p?.monthly_discount_pct || 0);
-                  const monthlyKey = parseFloat(p?.monthly_flat_usd || 0);
-                  const monthlySvc = parseFloat(p?.service_charge_usd || 0);
-                  const keyCost = (monthlyKey * (1 - monthlyDiscountPct / 100)).toFixed(2);
-                  const svcCharge = (monthlySvc * (1 - monthlyDiscountPct / 100)).toFixed(2);
-                  const discPct = parseFloat(p?.monthly_discount_pct || 0);
-                  setApproveModal({ open: true, request: r, key_cost: keyCost, service_charge: svcCharge, discount_pct: String(discPct), admin_note: '' });
+                  // 0 counts as unpriced: requests are created with 0.00, not
+                  // null, so a `!= null` test would pin the modal to 0 and hide
+                  // the configured global price. Matches the warning banner below.
+                  const hasSnapshot =
+                    Number(r.key_cost_snapshot ?? 0) > 0 || Number(r.service_charge_snapshot ?? 0) > 0;
+                  let keyCost;
+                  let svcCharge;
+                  let discPct;
+                  if (hasSnapshot) {
+                    // Snapshots are stored already-discounted (see submitEdit),
+                    // so they are used as-is — re-applying the discount here
+                    // would deduct it twice.
+                    keyCost = Number(r.key_cost_snapshot ?? 0).toFixed(2);
+                    svcCharge = Number(r.service_charge_snapshot ?? 0).toFixed(2);
+                    discPct = parseFloat(r.discount_pct_snapshot ?? 0);
+                  } else {
+                    const monthlyDiscountPct = parseFloat(p?.monthly_discount_pct || 0);
+                    const monthlyKey = parseFloat(p?.monthly_flat_usd || 0);
+                    const monthlySvc = parseFloat(p?.service_charge_usd || 0);
+                    keyCost = (monthlyKey * (1 - monthlyDiscountPct / 100)).toFixed(2);
+                    svcCharge = (monthlySvc * (1 - monthlyDiscountPct / 100)).toFixed(2);
+                    discPct = monthlyDiscountPct;
+                  }
+                  setApproveModal({ open: true, request: r, key_cost: keyCost, service_charge: svcCharge, discount_pct: String(discPct), admin_note: r.admin_note || '', sync_global_pricing: false });
                 }}
                 onAssignKey={(r) => openAssign(null, r)}
                 onReject={(r) => setRejectModal({ open: true, request: r, note: '' })}
                 onEdit={(r) => {
                   // Prefill from the request's current snapshot; fall back to
-                  // pricing config for a still-pending request with no price yet.
+                  // pricing config when the request has no real price yet.
+                  // A snapshot of 0 counts as "unpriced" — requests are created
+                  // with 0.00 rather than null, so a `!= null` test made every
+                  // fresh request show 0 and hid the configured global price.
                   const p = pricing.find(x => x.agent_name === r.agent_name);
-                  const hasSnapshot = r.key_cost_snapshot != null || r.service_charge_snapshot != null;
+                  const hasSnapshot =
+                    Number(r.key_cost_snapshot ?? 0) > 0 || Number(r.service_charge_snapshot ?? 0) > 0;
                   const keyCost = hasSnapshot ? (r.key_cost_snapshot ?? 0) : parseFloat(p?.monthly_flat_usd || 0);
                   const svcCharge = hasSnapshot ? (r.service_charge_snapshot ?? 0) : parseFloat(p?.service_charge_usd || 0);
+                  const discPct = hasSnapshot
+                    ? (r.discount_pct_snapshot ?? 0)
+                    : parseFloat(p?.monthly_discount_pct || 0);
                   setEditModal({
                     open: true, request: r,
                     key_cost: String(keyCost),
                     service_charge: String(svcCharge),
-                    discount_pct: String(r.discount_pct_snapshot ?? 0),
+                    discount_pct: String(discPct),
                     preferred_duration: r.preferred_duration || 'monthly',
                     admin_note: r.admin_note || '',
+                    sync_global_pricing: false,
                   });
                 }}
                 filter={requestFilter}
@@ -1994,6 +950,35 @@ const SuperAdminApiKeysPage = () => {
               </p>
             </div>
           )}
+          {/* Weekly reset schedule — editable here so the admin does not have to
+              go to the Reset Logs tab just to change how often tokens refill. */}
+          {adjustModal.action === 'set_managed' && adjustModal.quota?.key_id && adjustModal.quota?.key_mode === 'managed' && (
+            <div className="space-y-2 py-2 border-t border-[#2d2342] mt-1 pt-3">
+              <Label className="text-white/70 text-sm">Reset every (days)</Label>
+              <Input
+                type="number" min="1" max="365"
+                className="bg-[#1a1333] border-[#3a295a] text-white"
+                value={adjustModal.reset_interval_days}
+                onChange={(e) => setAdjustModal({ ...adjustModal, reset_interval_days: e.target.value })}
+              />
+              {/* <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-violet-500"
+                  checked={!!adjustModal.recompute_next}
+                  onChange={(e) => setAdjustModal({ ...adjustModal, recompute_next: e.target.checked })}
+                />
+                <span className="text-[11px] text-white/50 leading-snug">
+                  Restart the cycle from now
+                  <span className="block text-white/30">
+                    Next reset becomes today + {Number(adjustModal.reset_interval_days) || 7} day(s).
+                    Leave off to keep the current next reset
+                    {adjustModal.quota?.next_reset_at ? ` (${new Date(adjustModal.quota.next_reset_at).toLocaleDateString()})` : ''} and apply the new interval afterwards.
+                  </span>
+                </span>
+              </label> */}
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setAdjustModal({ ...adjustModal, open: false })}>Cancel</Button>
             <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitAdjust} disabled={submitting}>
@@ -2010,10 +995,13 @@ const SuperAdminApiKeysPage = () => {
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-emerald-400" /> Approve Key Request
             </DialogTitle>
-            <DialogDescription className="text-white/60">
+            {/* <DialogDescription className="text-white/60">
               {approveModal.request?.company_name} — {approveModal.request?.agent_label} ({approveModal.request?.provider?.toUpperCase()})
-              <br />Pre-filled from global pricing. Edit here to set a custom price for this company only — global pricing stays unchanged.
-            </DialogDescription>
+              <br />
+              {((approveModal.request?.key_cost_snapshot ?? 0) > 0 || (approveModal.request?.service_charge_snapshot ?? 0) > 0)
+                ? 'Pre-filled from this request’s saved price. Edit here to change it for this company only — global pricing stays unchanged.'
+                : 'Pre-filled from global pricing. Edit here to set a custom price for this company only — global pricing stays unchanged.'}
+            </DialogDescription> */}
           </DialogHeader>
           <div className="space-y-4 py-2">
             {/* Duration badge — what company requested */}
@@ -2023,14 +1011,20 @@ const SuperAdminApiKeysPage = () => {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-white/70">
                     Company requested a <span className="text-violet-300 font-semibold capitalize">{approveModal.request.preferred_duration}</span> key.
-                    Price has been auto-calculated from global pricing below.
+                    {((approveModal.request?.key_cost_snapshot ?? 0) > 0 || (approveModal.request?.service_charge_snapshot ?? 0) > 0)
+                      ? ' The saved price for this request is shown below.'
+                      : ' Price has been auto-calculated from global pricing below.'}
                   </p>
                 </div>
               </div>
             )}
             {(() => {
               const p = pricing.find(x => x.agent_name === approveModal.request?.agent_name);
-              const notSet = !p || (Number(p.monthly_flat_usd) === 0 && Number(p.service_charge_usd) === 0);
+              const r = approveModal.request;
+              // A request that already carries its own price is not blocked by
+              // unset global pricing — the snapshot is what gets approved.
+              const hasSnapshot = (r?.key_cost_snapshot ?? 0) > 0 || (r?.service_charge_snapshot ?? 0) > 0;
+              const notSet = !hasSnapshot && (!p || (Number(p.monthly_flat_usd) === 0 && Number(p.service_charge_usd) === 0));
               return notSet ? (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
@@ -2086,6 +1080,23 @@ const SuperAdminApiKeysPage = () => {
                       </div>
                     </div>
                   </div>
+                  {/* Opt-in: also write this price to the agent's GLOBAL pricing
+                      config. Off by default so the per-company override stays
+                      the normal behaviour. */}
+                  <label className="flex items-start gap-2 px-3 py-2.5 bg-[#1a1333]/60 border border-[#3a295a] rounded-lg cursor-pointer hover:border-violet-500/40 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 accent-violet-500"
+                      checked={!!approveModal.sync_global_pricing}
+                      onChange={(e) => setApproveModal({ ...approveModal, sync_global_pricing: e.target.checked })}
+                    />
+                    <span className="text-xs text-white/70 leading-snug">
+                      Also save as <span className="font-semibold text-violet-300">global pricing</span> for {approveModal.request?.agent_label}
+                      <span className="block text-[10px] text-amber-300/70 mt-0.5">
+                        Updates the Pricing tab — every company will be quoted these values from now on.
+                      </span>
+                    </span>
+                  </label>
                   {fullTotal > 0 && (
                     <div className="flex items-center justify-between px-4 py-2.5 bg-emerald-500/8 border border-emerald-500/20 rounded-lg">
                       <span className="text-sm text-white/60">Total due</span>
@@ -2114,7 +1125,7 @@ const SuperAdminApiKeysPage = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '' })}>Cancel</Button>
+            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '', sync_global_pricing: false })}>Cancel</Button>
             <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={submitApprove} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Approve & Notify
             </Button>
@@ -2171,7 +1182,7 @@ const SuperAdminApiKeysPage = () => {
                 <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
                   <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="yearly">Yearly</SelectItem>
+                  {/* <SelectItem value="yearly">Yearly</SelectItem> */}
                 </SelectContent>
               </Select>
             </div>
@@ -2213,9 +1224,24 @@ const SuperAdminApiKeysPage = () => {
                 onChange={(e) => setEditModal({ ...editModal, admin_note: e.target.value })}
                 placeholder="Internal / company-facing note…" />
             </div>
+            {/* Opt-in: also write this price to the agent's GLOBAL pricing config. */}
+            <label className="flex items-start gap-2 px-3 py-2.5 bg-[#1a1333]/60 border border-[#3a295a] rounded-lg cursor-pointer hover:border-violet-500/40 transition-colors">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-violet-500"
+                checked={!!editModal.sync_global_pricing}
+                onChange={(e) => setEditModal({ ...editModal, sync_global_pricing: e.target.checked })}
+              />
+              <span className="text-xs text-white/70 leading-snug">
+                Also save as <span className="font-semibold text-violet-300">global pricing</span> for {editModal.request?.agent_label}
+                <span className="block text-[10px] text-amber-300/70 mt-0.5">
+                  Updates the Pricing tab — every company will be quoted these values from now on.
+                </span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
-            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '' })}>Cancel</Button>
+            <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '', sync_global_pricing: false })}>Cancel</Button>
             <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitEdit} disabled={editing}>
               {editing && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Save Changes
             </Button>

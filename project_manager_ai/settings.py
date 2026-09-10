@@ -327,6 +327,11 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Enforces agent subscriptions server-side. Must sit after
+    # AuthenticationMiddleware (it inspects request.user to exempt staff) and
+    # before the agent middlewares below, so an unsubscribed company's request is
+    # rejected instead of triggering their background work.
+    'api.middleware.module_access.ModuleAccessMiddleware',
     'recruitment_agent.middleware.AutoInterviewFollowupMiddleware',  # Auto follow-up email checking
     'ai_sdr_agent.middleware.AutoLeadResearchMiddleware',  # Apify auto lead research every 24h
 ]

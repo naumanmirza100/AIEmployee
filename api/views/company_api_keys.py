@@ -26,6 +26,7 @@ from core.models import (
     CompanyModulePurchase,
     KeyRequest,
     WeeklyResetLog,
+    KeyEventLog,
     AgentPlan,
 )
 
@@ -393,6 +394,10 @@ def list_key_requests(request):
             'discount_pct_snapshot': float(r.discount_pct_snapshot) if r.discount_pct_snapshot is not None else 0,
             'amount_paid': float(r.amount_paid) if r.amount_paid is not None else None,
             'paid_at': r.paid_at.isoformat() if r.paid_at else None,
+            # linked_key_id lets the timeline collapse repeated "Key Expired"
+            # nodes: several requests can reference the SAME key, and without
+            # the id the UI cannot tell one key's single expiry from many.
+            'linked_key_id': r.linked_key_id,
             'linked_key_status': linked_key_statuses.get(r.linked_key_id, {}).get('status'),
             'linked_key_valid_until': linked_key_statuses.get(r.linked_key_id, {}).get('valid_until'),
         })
@@ -679,8 +684,25 @@ def company_reset_logs(request):
 
     Query params (optional): agent_name, page, page_size (default 1 / 25).
     """
+    from django.db.models import OuterRef, Exists
     company = request.user.company
-    qs = WeeklyResetLog.objects.filter(company=company)
+
+    # Only show history for agents the company still owns. An EXPIRED/cancelled
+    # agent purchase means the company no longer has that agent at all, so its
+    # reset history must not linger here. (This is distinct from an expired
+    # KEY — the agent is still owned then, only the key needs renewing, and
+    # that history is deliberately kept.)
+    active_purchase_sq = CompanyModulePurchase.objects.filter(
+        company=company,
+        module_name=OuterRef('agent_name'),
+        status='active',
+    )
+    qs = (
+        WeeklyResetLog.objects
+        .filter(company=company)
+        .annotate(has_active_purchase=Exists(active_purchase_sq))
+        .filter(has_active_purchase=True)
+    )
 
     agent_name = (request.query_params.get('agent_name') or '').strip()
     if agent_name:
@@ -700,6 +722,14 @@ def company_reset_logs(request):
     rows = list(qs[start:start + page_size])
 
     agent_labels = dict(AGENT_CHOICES)
+    # Live next-reset per agent. The value stored on a log row is a snapshot of
+    # what was scheduled at that moment, so it goes stale as soon as the
+    # interval changes or the key is re-assigned. The UI shows the CURRENT
+    # schedule instead, and keeps the snapshot only as a tooltip.
+    live_next = {
+        q.agent_name: q.next_reset_at
+        for q in AgentTokenQuota.objects.filter(company=company, next_reset_at__isnull=False)
+    }
     logs = [{
         'id': r.id,
         'agent_name': r.agent_name,
@@ -707,20 +737,37 @@ def company_reset_logs(request):
         'reset_at': r.reset_at.isoformat() if r.reset_at else None,
         'tokens_used_before_reset': r.tokens_used_before_reset,
         'new_included_limit': r.new_included_limit,
-        'next_reset_at': r.next_reset_at.isoformat() if r.next_reset_at else None,
+        # What the schedule says right now (None once the cycle has stopped).
+        'next_reset_at': live_next[r.agent_name].isoformat() if live_next.get(r.agent_name) else None,
+        # What was scheduled at the time of this reset, for reference.
+        'next_reset_at_then': r.next_reset_at.isoformat() if r.next_reset_at else None,
     } for r in rows]
 
     # Upcoming resets — this company's active managed keys with a recurring
     # reset scheduled. Shows "next reset: <date>" even before any reset yet.
-    up_keys = CompanyAPIKey.objects.filter(
-        company=company, mode='managed', status='active',
-    ).exclude(renewal_period='none')
+    # Expired keys are included too (their reset never fires) so the company can
+    # see WHY the schedule stalled instead of the row silently disappearing.
+    # Same ownership rule as the history above: agents whose purchase has
+    # lapsed drop out entirely, expired KEYS stay (badged) so the company can
+    # see why their schedule stalled.
+    up_keys = (
+        CompanyAPIKey.objects
+        .filter(company=company, mode='managed', status__in=('active', 'expired'))
+        .exclude(renewal_period='none')
+        .annotate(has_active_purchase=Exists(active_purchase_sq))
+        .filter(has_active_purchase=True)
+    )
     if agent_name:
         up_keys = up_keys.filter(agent_name=agent_name)
-    quota_next = {
-        q.agent_name: q.next_reset_at
-        for q in AgentTokenQuota.objects.filter(company=company, next_reset_at__isnull=False)
-    }
+    quota_next = {}
+    # Fallback "last reset" off the quota row, for resets applied before
+    # WeeklyResetLog existed (or by the old Celery task, which wrote no log
+    # row) — mirrors the admin view so both screens agree.
+    quota_last = {}
+    for q in AgentTokenQuota.objects.filter(company=company, next_reset_at__isnull=False):
+        quota_next[q.agent_name] = q.next_reset_at
+        if q.last_reset_at:
+            quota_last[q.agent_name] = q.last_reset_at
     # Most-recent actual reset per agent (from the logged history), so the row
     # can show "Last reset" or "Not yet reset" — mirrors the admin view.
     # (WeeklyResetLog is already imported at module level — a local import here
@@ -735,7 +782,9 @@ def company_reset_logs(request):
         nra = quota_next.get(k.agent_name)
         if not nra:
             continue
-        lra = last_reset.get(k.agent_name)
+        # Prefer whichever source is NEWER (see admin view for rationale).
+        _cands = [d for d in (last_reset.get(k.agent_name), quota_last.get(k.agent_name)) if d]
+        lra = max(_cands) if _cands else None
         upcoming.append({
             'agent_name': k.agent_name,
             'agent_label': agent_labels.get(k.agent_name, k.agent_name),
@@ -743,8 +792,12 @@ def company_reset_logs(request):
             'next_reset_at': nra.isoformat(),
             'reset_interval_days': getattr(k, 'reset_interval_days', 7),
             'tokens_per_period': k.tokens_per_period,
+            'key_status': k.status,
+            'is_expired': k.status == 'expired',
+            'valid_until': k.valid_until.isoformat() if k.valid_until else None,
         })
-    upcoming.sort(key=lambda x: x['next_reset_at'])
+    # Expired rows last: they are stalled, not genuinely upcoming.
+    upcoming.sort(key=lambda x: (x['is_expired'], x['next_reset_at']))
 
     return Response({
         'status': 'success',
@@ -777,3 +830,58 @@ def agent_plans(request):
         'price_usd': float(p.price_usd),
     } for p in qs]
     return Response({'status': 'success', 'plans': plans})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def company_key_events(request):
+    """This company's managed-key lifecycle history (assign/renew/expire/revoke).
+
+    CompanyAPIKey is overwritten on each re-issue, so this log is the only
+    place a previous expiry or renewal date survives.
+
+    Query params (optional): agent_name, limit (default 50, max 200).
+    """
+    from django.db.models import OuterRef, Exists
+    company = request.user.company
+
+    # Same ownership rule as the reset logs: an agent whose purchase has lapsed
+    # is no longer the company's, so its history drops out.
+    active_purchase_sq = CompanyModulePurchase.objects.filter(
+        company=company,
+        module_name=OuterRef('agent_name'),
+        status='active',
+    )
+    qs = (
+        KeyEventLog.objects
+        .filter(company=company)
+        .annotate(has_active_purchase=Exists(active_purchase_sq))
+        .filter(has_active_purchase=True)
+    )
+
+    agent_name = (request.query_params.get('agent_name') or '').strip()
+    if agent_name:
+        qs = qs.filter(agent_name=agent_name)
+
+    try:
+        limit = min(max(int(request.query_params.get('limit', 50)), 1), 200)
+    except (TypeError, ValueError):
+        limit = 50
+
+    agent_labels = dict(AGENT_CHOICES)
+    events = [{
+        'id': e.id,
+        'agent_name': e.agent_name,
+        'agent_label': agent_labels.get(e.agent_name, e.agent_name),
+        'event': e.event,
+        'event_label': e.get_event_display(),
+        'occurred_at': e.occurred_at.isoformat(),
+        'provider': e.provider,
+        'valid_until': e.valid_until.isoformat() if e.valid_until else None,
+        'tokens_per_period': e.tokens_per_period,
+        'renewal_period': e.renewal_period,
+        'note': e.note,
+    } for e in qs[:limit]]
+
+    return Response({'status': 'success', 'events': events})

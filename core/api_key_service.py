@@ -191,6 +191,7 @@ def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIK
     """Reset managed_used_tokens every 7 days while the key is active and has renewal."""
     import logging
     from datetime import timedelta
+    from django.db import transaction
     _log = logging.getLogger(__name__)
     now = timezone.now()
 
@@ -203,6 +204,36 @@ def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIK
     if now < quota.next_reset_at:
         return
 
+    # The checks above are a cheap early-out on a possibly-stale in-memory row.
+    # Two runners (the APScheduler `token_resets` job and the per-request path)
+    # can both pass them for the same quota and each write a reset — which is
+    # how duplicate WeeklyResetLog rows with identical timestamps appeared.
+    # Re-read the row under a lock and re-check due-ness; the loser sees the
+    # winner's advanced next_reset_at and backs out.
+    with transaction.atomic():
+        locked = (
+            AgentTokenQuota.objects
+            .select_for_update()
+            .filter(pk=quota.pk)
+            .first()
+        )
+        if locked is None:
+            return
+        if locked.next_reset_at is None or now < locked.next_reset_at:
+            # Another runner already applied this cycle.
+            quota.next_reset_at = locked.next_reset_at
+            quota.managed_used_tokens = locked.managed_used_tokens
+            quota.managed_included_tokens = locked.managed_included_tokens
+            return
+        _apply_reset_locked(locked, quota, managed_key, now)
+
+
+def _apply_reset_locked(locked, quota, managed_key, now) -> None:
+    """Perform the actual reset write. Caller holds a row lock on the quota."""
+    import logging
+    from datetime import timedelta
+    _log = logging.getLogger(__name__)
+
     # Next reset is anchored to when this reset actually happens (`now`), so the
     # displayed "Last reset" and "Next reset" stay consistent: next = last +
     # interval. (Previously it advanced the old scheduled next_reset, which could
@@ -212,9 +243,9 @@ def _apply_weekly_reset_if_due(quota: AgentTokenQuota, managed_key: 'CompanyAPIK
 
     # Capture how many managed tokens were used this week BEFORE we zero it,
     # so the reset-log records the real usage for the period.
-    used_before = quota.managed_used_tokens or 0
+    used_before = locked.managed_used_tokens or 0
 
-    AgentTokenQuota.objects.filter(pk=quota.pk).update(
+    AgentTokenQuota.objects.filter(pk=locked.pk).update(
         managed_used_tokens=0,
         managed_included_tokens=managed_key.tokens_per_period,
         next_reset_at=next_reset,
@@ -310,6 +341,35 @@ def run_due_token_resets() -> dict:
     return {'checked': checked, 'applied': applied}
 
 
+def record_key_event(company, agent_name, event, key=None, actor=None, note=None):
+    """Append one row to the managed-key history. Never raises.
+
+    CompanyAPIKey is overwritten in place on each re-issue, so without this the
+    previous expiry/renewal dates are lost. History writes must never block the
+    operation that triggered them, hence the broad except.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        from core.models import KeyEventLog
+        KeyEventLog.objects.create(
+            company=company,
+            agent_name=agent_name,
+            key=key,
+            event=event,
+            occurred_at=timezone.now(),
+            provider=getattr(key, 'provider', None),
+            valid_until=getattr(key, 'valid_until', None),
+            tokens_per_period=getattr(key, 'tokens_per_period', 0) or 0,
+            renewal_period=getattr(key, 'renewal_period', None),
+            actor=actor,
+            note=note,
+        )
+    except Exception as exc:
+        _log.warning("Failed to write KeyEventLog (%s): %s", event, exc)
+
+
+
 def _check_key_expiry(managed_key: 'CompanyAPIKey', company, agent_name: str) -> None:
     """Auto-expire a managed key when valid_until has passed.
 
@@ -326,6 +386,8 @@ def _check_key_expiry(managed_key: 'CompanyAPIKey', company, agent_name: str) ->
     # Key has expired — mark it
     CompanyAPIKey.objects.filter(pk=managed_key.pk).update(status='expired')
     managed_key.status = 'expired'
+    record_key_event(company, agent_name, 'expired', key=managed_key,
+                     note='Auto-expired: valid_until passed')
     _log.info("Managed key expired: company=%s agent=%s", company.id, agent_name)
     try:
         from project_manager_agent.models import PMNotification

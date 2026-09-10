@@ -15,6 +15,9 @@ import DashboardNavbar from '@/components/common/DashboardNavbar';
 import { API_BASE_URL } from '@/config/apiConfig';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
+import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
+import { getAdminNavItems } from '@/utils/adminNavItems';
+import { useAuth } from '@/contexts/AuthContext';
 
 /**
  * Full-page notification list.
@@ -131,6 +134,22 @@ const NotificationsPage = () => {
     ? `${API_BASE_URL}/project-manager/ai/notifications`
     : `${API_BASE_URL}/notifications`;
 
+  // Company users get the same profile block the dashboard shows. Project users
+  // authenticate differently, so they keep the plain navbar.
+  const companyUser = useMemo(() => (isCompanyUser ? getCompanyUser() : null), [isCompanyUser]);
+  // An admin signs in with auth_token only — they get the admin shell instead.
+  const isAdminUser = !isCompanyUser && !!localStorage.getItem('auth_token');
+  const { logout: adminLogout, user: adminUser } = useAuth();
+  const handleLogout = async () => {
+    if (isAdminUser) {
+      try { await adminLogout(); } catch (e) { console.error('Logout error:', e); }
+      navigate('/login');
+      return;
+    }
+    await logoutCompany();
+    navigate('/company/login');
+  };
+
   const fetchNotifications = async () => {
     try {
       if (!authToken) return;
@@ -215,9 +234,19 @@ const NotificationsPage = () => {
           icon={Bell}
           title="Notifications"
           subtitle="All your alerts, reminders and updates in one place"
+          user={companyUser || (isAdminUser ? adminUser : null)}
+          userRole={companyUser ? 'Company User' : isAdminUser ? 'Admin' : undefined}
+          onLogout={companyUser || isAdminUser ? handleLogout : undefined}
           showNavTabs
-          navItems={getAgentNavItems(purchasedModules, undefined, navigate)}
-          sidebarLoading={!modulesLoaded}
+          activeSection={
+            isAdminUser ? 'admin-notifications' : companyUser ? 'dashboard' : undefined
+          }
+          navItems={
+            isAdminUser
+              ? getAdminNavItems(navigate)
+              : getAgentNavItems(purchasedModules, companyUser ? 'dashboard' : undefined, navigate)
+          }
+          sidebarLoading={!isAdminUser && !modulesLoaded}
         />
 
         <div className="container mx-auto px-4 py-8 max-w-5xl">
@@ -381,7 +410,7 @@ const NotificationsPage = () => {
                             <Clock className="w-3 h-3" />
                             {formatTimeAgo(n.created_at)} · {formatFullTime(n.created_at)}
                           </span>
-                          {target && (
+                          {/* {target && (
                             <button
                               onClick={() => { if (!n.is_read) markAsRead(n.id); navigate(target); }}
                               className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-400 hover:text-violet-300"
@@ -389,7 +418,7 @@ const NotificationsPage = () => {
                               <ExternalLink className="w-3 h-3" />
                               Open
                             </button>
-                          )}
+                          )} */}
                           {!n.is_read && (
                             <button
                               onClick={() => markAsRead(n.id)}
