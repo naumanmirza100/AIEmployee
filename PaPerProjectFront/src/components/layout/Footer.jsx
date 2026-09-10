@@ -59,15 +59,8 @@ const Footer = () => {
             <div className="text-center sm:text-left">
               <p className="text-lg font-medium text-foreground">{t('footer_legal')}</p>
               <ul className="mt-8 space-y-4 text-sm">
-                <li>
-                  <button
-                    onClick={() => window.open('/PayPerProject_Documentation.html', '_blank')}
-                    className="text-muted-foreground transition hover:text-primary"
-                  >
-                    {t('footer_terms')}
-                  </button>
-                </li>
-                <li><button onClick={() => toast({ title: 'Coming Soon!' })} className="text-muted-foreground transition hover:text-primary">{t('footer_privacy')}</button></li>
+                <li><Link to="/terms-of-service" className="text-muted-foreground transition hover:text-primary">{t('footer_terms')}</Link></li>
+                <li><Link to="/privacy-policy" className="text-muted-foreground transition hover:text-primary">{t('footer_privacy')}</Link></li>
                 <li><button onClick={() => toast({ title: 'Coming Soon!' })} className="text-muted-foreground transition hover:text-primary">{t('footer_cookies')}</button></li>
               </ul>
             </div>
