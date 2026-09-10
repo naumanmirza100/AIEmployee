@@ -6,6 +6,8 @@
 
 from django.db import migrations, models
 
+from ._ensure_columns import ensure_columns
+
 
 class Migration(migrations.Migration):
 
@@ -30,4 +32,5 @@ class Migration(migrations.Migration):
             ],
             database_operations=[],  # columns already exist in the DB; no-op
         ),
+        ensure_columns('core', 'AgentTokenQuota', ['managed_included_tokens', 'managed_used_tokens']),
     ]

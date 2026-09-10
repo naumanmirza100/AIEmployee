@@ -75,6 +75,10 @@ def _run_qualify_queue():
             logger.debug("SDR qualify_queue → %s", result)
     except Exception as exc:
         logger.exception("SDR qualify_queue crashed: %s", exc)
+    finally:
+        # Every other job wrapper in this module does this; without it the
+        # pooled thread keeps a stale connection between ticks.
+        _close_db()
 
 
 def _run_check_inbox():

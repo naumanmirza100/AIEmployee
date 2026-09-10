@@ -1,5 +1,7 @@
 from django.db import migrations, models
 
+from ._ensure_columns import ensure_columns
+
 
 class Migration(migrations.Migration):
     """
@@ -23,4 +25,5 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        ensure_columns('core', 'KeyRequest', ['key_cost_snapshot']),
     ]

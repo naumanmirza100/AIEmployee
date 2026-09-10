@@ -188,9 +188,14 @@ class TicketMessage(models.Model):
     body_text = models.TextField(blank=True, help_text='Plain-text body (reply-stripped when possible).')
     body_html = models.TextField(blank=True, help_text='Sanitized HTML body (bleach-stripped).')
 
-    message_id = models.CharField(max_length=998, blank=True, db_index=True,
+    # 255, not RFC 5322's theoretical 998: an indexed utf8mb4 column of 998
+    # chars needs 3992 bytes, over InnoDB's 3072-byte index-key limit, so MySQL
+    # refuses to build the index at all. Real Message-IDs are far shorter — the
+    # longest across this database is 150 chars — so 255 keeps a comfortable
+    # margin while staying indexable on both engines.
+    message_id = models.CharField(max_length=255, blank=True, db_index=True,
                                   help_text='RFC 5322 Message-ID header. Used for reply threading.')
-    in_reply_to = models.CharField(max_length=998, blank=True, db_index=True,
+    in_reply_to = models.CharField(max_length=255, blank=True, db_index=True,
                                    help_text='In-Reply-To header from the incoming email.')
     references = models.JSONField(default=list, blank=True,
                                   help_text='Ordered list of Message-IDs from the References header.')

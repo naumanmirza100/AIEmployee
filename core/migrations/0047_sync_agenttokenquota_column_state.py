@@ -9,6 +9,8 @@ with an empty database_operations list so the DB itself is left alone.
 """
 
 from django.db import migrations, models
+
+from ._ensure_columns import rename_or_ensure_columns
 from core.models import DEFAULT_FREE_TOKENS
 
 
@@ -34,4 +36,11 @@ class Migration(migrations.Migration):
                 ),
             ],
         ),
+        # The production DB had these columns renamed out-of-band; a fresh
+        # database still has the pre-rename names, so rename rather than add
+        # (leaving both would break every INSERT — see the helper's docstring).
+        rename_or_ensure_columns('core', 'AgentTokenQuota', {
+            'included_tokens': 'included_tokens',
+            'used_tokens': 'used_tokens',
+        }),
     ]
