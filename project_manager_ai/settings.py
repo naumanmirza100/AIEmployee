@@ -358,34 +358,84 @@ WSGI_APPLICATION = 'project_manager_ai.wsgi.application'
 # Install Microsoft ODBC Driver: https://docs.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server
 # Then set DB_DRIVER in .env to match (e.g. "ODBC Driver 17 for SQL Server" or "ODBC Driver 18 for SQL Server").
 # List installed drivers: Get-OdbcDriver (PowerShell) or run: pyodbc.drivers() in Python.
-_db_driver = os.getenv('DB_DRIVER', 'ODBC Driver 18 for SQL Server')
-DATABASES = {
-    'default': {
-        'ENGINE': 'mssql',
-        'NAME': os.getenv('DB_NAME'),
-        'HOST': os.getenv('DB_HOST'),
-        'PORT': os.getenv('DB_PORT', '1433'),
-        'USER': os.getenv('DB_USER'),
-        'PASSWORD': os.getenv('DB_PASSWORD'),
-        'OPTIONS': {
-            'driver': _db_driver,
-            # Driver 18 encrypts by default; disable encryption + trust cert for self-signed servers
-            'extra_params': 'Encrypt=no;TrustServerCertificate=yes',
-            'connection_timeout': 60,
-            'login_timeout': 60,
-        },
-        # Persistent connections — reuse the same TCP connection for 60s
-        # of idle time across requests instead of dialing a fresh MSSQL
-        # session for every API call. The TCP handshake + login round-trip
-        # is the dominant cost on a remote SQL Server (often 200-500ms);
-        # reusing connections collapses that to ~0 for warm requests.
-        # Health check before reuse so a stale/dropped connection doesn't
-        # surface as a confusing 500 to the user.
-        'CONN_MAX_AGE': 60,
-        'CONN_HEALTH_CHECKS': True,
-        'TIME_ZONE': 'UTC',
+# Engine is switchable so we can move between the SQL Server instance and the
+# Hostinger MariaDB without editing this file. Set DB_ENGINE=mysql in .env to
+# use Hostinger; anything else (or unset) keeps the original SQL Server config.
+_db_engine = os.getenv('DB_ENGINE', 'mssql').strip().lower()
+
+if _db_engine in ('mysql', 'mariadb'):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.getenv('DB_NAME'),
+            'HOST': os.getenv('DB_HOST'),
+            'PORT': os.getenv('DB_PORT', '3306'),
+            'USER': os.getenv('DB_USER'),
+            'PASSWORD': os.getenv('DB_PASSWORD'),
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+                # Two things per connection, as one statement (init_command is
+                # executed as a single query):
+                #
+                # 1. sql_mode — the server ships permissive
+                #    (NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION). Without
+                #    strict mode MySQL silently truncates oversized values
+                #    instead of erroring, corrupting data quietly.
+                #
+                # 2. wait_timeout — the server default is 20 SECONDS, which is
+                #    shorter than our own slow paths (constructing a
+                #    FrontlineAgent loads the embedding model twice, ~13s each)
+                #    and far shorter than the gap between background scheduler
+                #    ticks. That produced constant
+                #    "(2006, 'Server has gone away')". The global is fixed on
+                #    shared hosting but the SESSION value can be raised, so we
+                #    lift it to 10 minutes on every connection.
+                'init_command': (
+                    "SET sql_mode='STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION', "
+                    "SESSION wait_timeout=600, SESSION interactive_timeout=600"
+                ),
+                'connect_timeout': 30,
+            },
+            # Safe at 60 only because init_command raises the session
+            # wait_timeout to 600s above. Against the server's 20s default this
+            # would guarantee "Server has gone away" on connection reuse.
+            # A fresh handshake costs ~200ms at this latency, so reusing
+            # connections matters — but never set this above the session
+            # wait_timeout.
+            'CONN_MAX_AGE': 60,
+            'CONN_HEALTH_CHECKS': True,
+            'TIME_ZONE': 'UTC',
+        }
     }
-}
+else:
+    _db_driver = os.getenv('DB_DRIVER', 'ODBC Driver 18 for SQL Server')
+    DATABASES = {
+        'default': {
+            'ENGINE': 'mssql',
+            'NAME': os.getenv('DB_NAME'),
+            'HOST': os.getenv('DB_HOST'),
+            'PORT': os.getenv('DB_PORT', '1433'),
+            'USER': os.getenv('DB_USER'),
+            'PASSWORD': os.getenv('DB_PASSWORD'),
+            'OPTIONS': {
+                'driver': _db_driver,
+                # Driver 18 encrypts by default; disable encryption + trust cert for self-signed servers
+                'extra_params': 'Encrypt=no;TrustServerCertificate=yes',
+                'connection_timeout': 60,
+                'login_timeout': 60,
+            },
+            # Persistent connections — reuse the same TCP connection for 60s
+            # of idle time across requests instead of dialing a fresh MSSQL
+            # session for every API call. The TCP handshake + login round-trip
+            # is the dominant cost on a remote SQL Server (often 200-500ms);
+            # reusing connections collapses that to ~0 for warm requests.
+            # Health check before reuse so a stale/dropped connection doesn't
+            # surface as a confusing 500 to the user.
+            'CONN_MAX_AGE': 60,
+            'CONN_HEALTH_CHECKS': True,
+            'TIME_ZONE': 'UTC',
+        }
+    }
 
 # --------------------
 # Password validation
@@ -842,9 +892,19 @@ CELERY_TASK_ACKS_LATE = True  # Tasks acknowledged after completion
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Prefetch only 1 task at a time
 CELERY_TASK_REJECT_ON_WORKER_LOST = True  # Reject tasks if worker dies
 
-# Windows-specific worker settings (fixes ValueError unpacking issue)
-CELERY_WORKER_POOL = 'solo'  # Use solo pool on Windows (avoids multiprocessing issues)
-CELERY_WORKER_CONCURRENCY = 1  # Single worker process on Windows
+# Worker pool. `solo` is a Windows workaround — the prefork pool's
+# multiprocessing breaks there — but it runs exactly one task at a time, so a
+# single slow job (a large document ingest, say) blocks everything behind it,
+# including SLA escalations and meeting reminders. On Linux (i.e. any real
+# deployment) use prefork so tasks actually run concurrently.
+# Both are env-overridable for tuning without a code change.
+import sys as _sys
+
+_ON_WINDOWS = _sys.platform == 'win32'
+CELERY_WORKER_POOL = os.getenv(
+    'CELERY_WORKER_POOL', 'solo' if _ON_WINDOWS else 'prefork')
+CELERY_WORKER_CONCURRENCY = int(os.getenv(
+    'CELERY_WORKER_CONCURRENCY', '1' if _ON_WINDOWS else '4'))
 
 # Retry settings
 CELERY_TASK_DEFAULT_RETRY_DELAY = 300  # 5 minutes default retry delay

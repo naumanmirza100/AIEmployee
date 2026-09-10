@@ -1,0 +1,75 @@
+# Three processes from one image — web, worker, beat — plus Redis.
+#
+# The Dockerfile's CMD starts gunicorn only, and core/apps.py auto-starts Celery
+# solely under `manage.py runserver`. So under gunicorn nothing consumes the
+# queue: document ingestion sits at "processing" forever and all 33 Beat
+# schedules (SLA escalation, meeting reminders, leave accrual, scheduled
+# notifications) silently never fire. Running `worker` and `beat` is what fixes
+# that — this file exists to make that hard to forget.
+#
+#   docker compose up --build
+#
+# The database is external (Hostinger MariaDB); only Redis is local to the stack.
+
+services:
+  redis:
+    image: redis:7-alpine
+    # No persistence needed: Celery re-queues on failure and nothing here is a
+    # source of truth. Drop `--save ""` if you want an RDB snapshot.
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  web:
+    build: .
+    env_file: .env
+    environment:
+      # Override the .env localhost values — inside the network the host is
+      # the service name.
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      USE_REDIS: "True"
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      USE_REDIS: "True"
+    # prefork + concurrency 4 come from settings on Linux; override here per
+    # container size if needed.
+    command: celery -A project_manager_ai worker -l info
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        # Let the web container finish `migrate` before the worker touches the DB.
+        condition: service_started
+    restart: unless-stopped
+
+  beat:
+    build: .
+    env_file: .env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      USE_REDIS: "True"
+    # Exactly one beat process, ever — a second one double-fires every schedule.
+    command: celery -A project_manager_ai beat -l info
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped

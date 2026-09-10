@@ -2,6 +2,8 @@
 
 from django.db import migrations, connection
 
+from ._rename_utils import alter_table_if_exists
+
 
 def rename_m2m_table(apps, schema_editor):
     """Rename the M2M table if it exists"""
@@ -31,9 +33,23 @@ def rename_m2m_table(apps, schema_editor):
                 # Use sp_rename for SQL Server
                 cursor.execute("EXEC sp_rename 'marketing_agent_campaign_leads', 'ppp_marketingagent_campaign_leads'")
     else:
-        # PostgreSQL, MySQL, etc.
+        # PostgreSQL, MySQL, etc. Mirror the existence check the SQLite and
+        # SQL Server branches already do — on a fresh database the table was
+        # created under its new name to begin with, so there is nothing to
+        # rename and an unguarded ALTER dies with "table doesn't exist".
         with schema_editor.connection.cursor() as cursor:
-            cursor.execute("ALTER TABLE marketing_agent_campaign_leads RENAME TO ppp_marketingagent_campaign_leads")
+            if _table_exists(cursor, 'marketing_agent_campaign_leads'):
+                cursor.execute("ALTER TABLE marketing_agent_campaign_leads RENAME TO ppp_marketingagent_campaign_leads")
+
+
+def _table_exists(cursor, table_name):
+    """Backend-agnostic existence check for the non-SQLite/MSSQL branches."""
+    cursor.execute(
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_schema = DATABASE() AND table_name = %s",
+        [table_name],
+    )
+    return cursor.fetchone()[0] > 0
 
 
 def reverse_rename_m2m_table(apps, schema_editor):
@@ -64,7 +80,8 @@ def reverse_rename_m2m_table(apps, schema_editor):
                 cursor.execute("EXEC sp_rename 'ppp_marketingagent_campaign_leads', 'marketing_agent_campaign_leads'")
     else:
         with schema_editor.connection.cursor() as cursor:
-            cursor.execute("ALTER TABLE ppp_marketingagent_campaign_leads RENAME TO marketing_agent_campaign_leads")
+            if _table_exists(cursor, 'ppp_marketingagent_campaign_leads'):
+                cursor.execute("ALTER TABLE ppp_marketingagent_campaign_leads RENAME TO marketing_agent_campaign_leads")
 
 
 class Migration(migrations.Migration):
@@ -75,62 +92,20 @@ class Migration(migrations.Migration):
 
     operations = [
         # Rename all main tables
-        migrations.AlterModelTable(
-            name='lead',
-            table='ppp_marketingagent_lead',
-        ),
-        migrations.AlterModelTable(
-            name='campaign',
-            table='ppp_marketingagent_campaign',
-        ),
-        migrations.AlterModelTable(
-            name='marketresearch',
-            table='ppp_marketingagent_marketresearch',
-        ),
-        migrations.AlterModelTable(
-            name='campaignperformance',
-            table='ppp_marketingagent_campaignperformance',
-        ),
-        migrations.AlterModelTable(
-            name='marketingdocument',
-            table='ppp_marketingagent_marketingdocument',
-        ),
-        migrations.AlterModelTable(
-            name='notificationrule',
-            table='ppp_marketingagent_notificationrule',
-        ),
-        migrations.AlterModelTable(
-            name='marketingnotification',
-            table='ppp_marketingagent_marketingnotification',
-        ),
-        migrations.AlterModelTable(
-            name='emailtemplate',
-            table='ppp_marketingagent_emailtemplate',
-        ),
-        migrations.AlterModelTable(
-            name='emailsequence',
-            table='ppp_marketingagent_emailsequence',
-        ),
-        migrations.AlterModelTable(
-            name='emailsequencestep',
-            table='ppp_marketingagent_emailsequencestep',
-        ),
-        migrations.AlterModelTable(
-            name='emailsendhistory',
-            table='ppp_marketingagent_emailsendhistory',
-        ),
-        migrations.AlterModelTable(
-            name='emailaccount',
-            table='ppp_marketingagent_emailaccount',
-        ),
-        migrations.AlterModelTable(
-            name='campaigncontact',
-            table='ppp_marketingagent_campaigncontact',
-        ),
-        migrations.AlterModelTable(
-            name='reply',
-            table='ppp_marketingagent_reply',
-        ),
+        alter_table_if_exists('lead', 'ppp_marketingagent_lead'),
+        alter_table_if_exists('campaign', 'ppp_marketingagent_campaign'),
+        alter_table_if_exists('marketresearch', 'ppp_marketingagent_marketresearch'),
+        alter_table_if_exists('campaignperformance', 'ppp_marketingagent_campaignperformance'),
+        alter_table_if_exists('marketingdocument', 'ppp_marketingagent_marketingdocument'),
+        alter_table_if_exists('notificationrule', 'ppp_marketingagent_notificationrule'),
+        alter_table_if_exists('marketingnotification', 'ppp_marketingagent_marketingnotification'),
+        alter_table_if_exists('emailtemplate', 'ppp_marketingagent_emailtemplate'),
+        alter_table_if_exists('emailsequence', 'ppp_marketingagent_emailsequence'),
+        alter_table_if_exists('emailsequencestep', 'ppp_marketingagent_emailsequencestep'),
+        alter_table_if_exists('emailsendhistory', 'ppp_marketingagent_emailsendhistory'),
+        alter_table_if_exists('emailaccount', 'ppp_marketingagent_emailaccount'),
+        alter_table_if_exists('campaigncontact', 'ppp_marketingagent_campaigncontact'),
+        alter_table_if_exists('reply', 'ppp_marketingagent_reply'),
         # Rename the many-to-many table for Campaign.leads (conditionally)
         migrations.RunPython(
             rename_m2m_table,

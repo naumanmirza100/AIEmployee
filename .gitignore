@@ -181,3 +181,6 @@ PaPerProjectFront/New/
 
 # Code snippets / scratch notebooks (local only)
 CodsSnipits/
+
+# Local notes / scratch docs (may contain credentials)
+MDS/

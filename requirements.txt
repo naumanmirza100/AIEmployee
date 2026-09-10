@@ -7,8 +7,11 @@ Django==4.2.10
 djangorestframework==3.14.0
 djangorestframework-simplejwt==5.3.0
 django-cors-headers==4.3.0
+# SQL Server (set DB_ENGINE=mssql)
 mssql-django==1.6
 pyodbc>=4.0
+# MySQL / MariaDB (set DB_ENGINE=mysql) — Hostinger deployment
+mysqlclient==2.2.8
 sentence-transformers>=3.0.0
 
 

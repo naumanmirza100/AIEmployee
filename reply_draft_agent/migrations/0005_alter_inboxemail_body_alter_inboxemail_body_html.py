@@ -8,6 +8,37 @@
 
 from django.db import migrations, models
 
+_TABLE = 'ppp_replydraftagent_inboxemail'
+
+# Same intent on every backend — let `body_html` hold NULL — but the column
+# type and the ALTER spelling differ. `nvarchar(max)` is what TextField maps to
+# on SQL Server; MySQL/MariaDB uses `longtext` and `MODIFY` rather than
+# `ALTER COLUMN`.
+_SQL = {
+    'microsoft': (
+        f"ALTER TABLE {_TABLE} ALTER COLUMN body_html nvarchar(max) NULL;",
+        f"ALTER TABLE {_TABLE} ALTER COLUMN body_html nvarchar(max) NOT NULL;",
+    ),
+    'mysql': (
+        f"ALTER TABLE {_TABLE} MODIFY body_html longtext NULL;",
+        f"ALTER TABLE {_TABLE} MODIFY body_html longtext NOT NULL;",
+    ),
+}
+
+
+def _apply(schema_editor, index):
+    pair = _SQL.get(schema_editor.connection.vendor)
+    if pair:
+        schema_editor.execute(pair[index])
+
+
+def _forward(apps, schema_editor):
+    _apply(schema_editor, 0)
+
+
+def _reverse(apps, schema_editor):
+    _apply(schema_editor, 1)
+
 
 class Migration(migrations.Migration):
 
@@ -20,12 +51,10 @@ class Migration(migrations.Migration):
             database_operations=[
                 # Allow NULL on body_html so any caller (including older
                 # workers that haven't reloaded the model) can insert
-                # without 23000 unique-constraint violations. nvarchar(max)
-                # mirrors what `models.TextField` maps to on SQL Server.
-                migrations.RunSQL(
-                    sql="ALTER TABLE ppp_replydraftagent_inboxemail ALTER COLUMN body_html nvarchar(max) NULL;",
-                    reverse_sql="ALTER TABLE ppp_replydraftagent_inboxemail ALTER COLUMN body_html nvarchar(max) NOT NULL;",
-                ),
+                # without 23000 unique-constraint violations.
+                # atomic=False: MySQL can't roll back DDL, so Django refuses to
+                # run this inside the transaction it would otherwise open.
+                migrations.RunPython(_forward, _reverse, atomic=False),
             ],
             state_operations=[
                 migrations.AlterField(
