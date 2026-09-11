@@ -833,13 +833,19 @@ class OperationsKnowledgeQAAgent(MarketingBaseAgent):
         scan (fallback). Empty dict when no embedding provider / no vectors —
         the caller then relies purely on keyword retrieval.
         """
+        # Bound to the tenant so the provider can fall back to this company's
+        # own key when no env key is set — otherwise the question never gets a
+        # vector and retrieval silently drops to keyword-only, which is what
+        # made large documents win on raw word frequency.
         try:
-            from core.Frontline_agent.embedding_service import EmbeddingService
+            from operations_agent.agents.document_processing_agent import (
+                build_embedding_service,
+            )
+            svc = build_embedding_service(company_id)
         except Exception:
             return {}
 
-        svc = EmbeddingService()
-        if not svc.is_available():
+        if svc is None or not svc.is_available():
             self.last_retrieval_path += 'no_embeddings|'
             return {}
 

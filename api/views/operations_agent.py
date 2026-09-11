@@ -728,8 +728,11 @@ def dashboard_stats(request):
         # of this company's files actually have embeddings? The UI shows a banner
         # when semantic search is off so users know retrieval is keyword-only.
         try:
-            from core.Frontline_agent.embedding_service import EmbeddingService
-            provider_available = EmbeddingService().is_available()
+            from operations_agent.agents.document_processing_agent import (
+                build_embedding_service,
+            )
+            _svc = build_embedding_service(company.id)
+            provider_available = bool(_svc) and _svc.is_available()
         except Exception:
             provider_available = False
         indexed_docs = OperationsDocument.objects.filter(company=company, is_indexed=True).count()
