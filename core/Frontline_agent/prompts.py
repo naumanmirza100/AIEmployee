@@ -4,6 +4,8 @@ Enterprise-level prompts that enforce strict data-only responses
 """
 import logging
 
+from django.conf import settings
+
 from .prompt_safety import (
     sanitize_user_input,
     wrap_untrusted,
@@ -138,7 +140,12 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
         knowledge_text = "No matching information found in knowledge base."
     else:
         knowledge_items = []
-        for idx, result in enumerate(knowledge_results[:5], 1):  # Limit to top 5
+        # Top 8 by default, not 5: retrieval is now allowed to return 10, and
+        # silently dropping half of them here made "list every X" questions
+        # answer from a fraction of the document. Tunable via
+        # FRONTLINE_QA_PROMPT_SOURCES.
+        _max_sources = int(getattr(settings, 'FRONTLINE_QA_PROMPT_SOURCES', 8))
+        for idx, result in enumerate(knowledge_results[:_max_sources], 1):
             item_text = f"\n{idx}. "
             
             # Handle format from get_answer (has 'answer' key directly)
@@ -148,11 +155,21 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
                 source = result.get('source', 'Unknown')
                 doc_type = result.get('type', 'unknown')
                 
-                # Cap at 6000 chars — enough to comfortably cover 4-5 of the
-                # new 1200-char chunks so the LLM has the full picture to
-                # produce a detailed, structured answer. TTFT still under 2s.
-                if len(answer_content) > 6000:
-                    answer_content = answer_content[:6000] + '\n\n[... content truncated ...]'
+                # This string is every retrieved chunk joined together, so the
+                # cap decides how much of the document the model actually sees.
+                # 6000 was sized for 1200-char chunks; FRONTLINE_CHUNK_SIZE is
+                # now 4000, so 6000 chars discarded most of a 10-chunk
+                # retrieval and broke "list all X" answers. 24000 chars is
+                # ~6k tokens — comfortable for gpt-4.1-mini's window.
+                # Tunable via FRONTLINE_QA_CONTEXT_CHARS.
+                _ctx_cap = int(getattr(settings, 'FRONTLINE_QA_CONTEXT_CHARS', 24000))
+                if len(answer_content) > _ctx_cap:
+                    answer_content = (
+                        answer_content[:_ctx_cap]
+                        + f'\n\n[... truncated at {_ctx_cap} chars — {len(answer_content) - _ctx_cap} '
+                          'more characters were retrieved but not shown. Say so if the '
+                          'answer looks incomplete rather than implying it is exhaustive.]'
+                    )
 
                 item_text += f"Source: {source}\n   Type: {doc_type}\n   Content Length: {len(answer_content)} chars\n\nDocument Content:\n{answer_content}"
             

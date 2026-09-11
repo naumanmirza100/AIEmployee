@@ -2082,7 +2082,12 @@ def knowledge_qa_stream(request):
         scope_document_ids = data.get('scope_document_ids') or None
         min_similarity = data.get('min_similarity')
         max_age_days = data.get('max_age_days')
-        max_results = int(data.get('max_results') or 3)
+        # 10, not 3 — the non-streaming `knowledge_qa` endpoint above already
+        # uses 10, and this one being lower meant the UI (which streams) saw a
+        # third of the context for the same question. On a 156-chunk document,
+        # 3 chunks cannot answer "list all X". Tunable via FRONTLINE_QA_MAX_RESULTS.
+        max_results = int(data.get('max_results')
+                          or getattr(settings, "FRONTLINE_QA_MAX_RESULTS", 10))
         history = data.get('chat_history') or None
 
         agent = FrontlineAgent(company_id=company.id)

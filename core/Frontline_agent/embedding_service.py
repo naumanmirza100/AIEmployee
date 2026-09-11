@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 if not NUMPY_AVAILABLE:
     logger.warning("NumPy not available. Cosine similarity will use basic implementation.")
 
+# Tri-state cache for the optional sentence-transformers import: None = not yet
+# tried, True = failed (don't retry), False = succeeded. See `_init_local`.
+_LOCAL_IMPORT_FAILED = None
+
 
 class EmbeddingService:
     """
@@ -29,12 +33,20 @@ class EmbeddingService:
     dev — no API keys, no rate limits, no per-token cost).
     """
 
-    def __init__(self):
-        """Initialize embedding service — tries providers in priority order."""
+    def __init__(self, company_id=None, agent_key_name='frontline_agent'):
+        """Initialize embedding service — tries providers in priority order.
+
+        `company_id` lets the OpenAI provider fall back to the tenant's own key
+        via `core.api_key_service` when no environment key is configured — the
+        same resolution the LLM calls use. Omit it for contexts with no tenant
+        (the service then relies on env keys alone).
+        """
         self.provider = None  # 'local', 'openrouter', 'deepseek', 'groq', or 'openai'
         self.client = None
         self.embedding_model = None
         self.available = False
+        self.company_id = company_id
+        self.agent_key_name = agent_key_name
 
         # Check which provider to use
         embedding_provider = getattr(settings, 'EMBEDDING_PROVIDER', 'auto').lower()
@@ -98,9 +110,25 @@ class EmbeddingService:
                                   (384-dim, ~90% of OpenAI 3-small quality).
           LOCAL_EMBEDDING_DEVICE — 'cpu' (default) or 'cuda' if a GPU is available.
         """
+        # Only ever attempt the import once per process. Retrying a broken
+        # import on every EmbeddingService construction is not just wasted work
+        # — a failing import removes the half-built module from `sys.modules`,
+        # and Django's autoreloader iterates that dict in another thread
+        # (`sorted(sys.modules)` then a lookup per key). Land the delete between
+        # those two steps and the reloader dies with
+        # `KeyError: 'sentence_transformers'`, taking the dev server with it.
+        # Caching the failure shrinks that race to a single attempt at startup.
+        global _LOCAL_IMPORT_FAILED
+        if _LOCAL_IMPORT_FAILED is not None:
+            if _LOCAL_IMPORT_FAILED:
+                logger.debug("Skipping local embeddings — import already failed "
+                             "earlier in this process.")
+                return False
         try:
             from sentence_transformers import SentenceTransformer
+            _LOCAL_IMPORT_FAILED = False
         except ImportError:
+            _LOCAL_IMPORT_FAILED = True
             logger.debug(
                 "sentence-transformers not installed. Run "
                 "`pip install sentence-transformers` to enable local embeddings."
@@ -111,10 +139,12 @@ class EmbeddingService:
             # any of which can raise RuntimeError on version mismatch. Don't let
             # that kill the whole EmbeddingService — fall through to the next
             # provider so unrelated features (summarize, chat) keep working.
+            _LOCAL_IMPORT_FAILED = True
             logger.warning(
                 f"sentence-transformers import failed (dependency conflict?): {e}. "
                 "Try: `pip install --upgrade huggingface_hub accelerate transformers sentence-transformers`. "
-                "Falling back to next embedding provider."
+                "Falling back to next embedding provider. This will not be retried "
+                "in this process."
             )
             return False
 
@@ -325,14 +355,46 @@ class EmbeddingService:
             logger.debug(f"Failed to initialize Groq embeddings: {e}")
             return False
     
+    def _resolve_company_openai_key(self):
+        """Fall back to the per-company/platform key when no env key is set.
+
+        LLM calls already route through `core.api_key_service.resolve_for_call`
+        (BYOK → quota → managed → platform). Embeddings historically read only
+        `OPENAI_API_KEY` from the environment, so a tenant with a perfectly good
+        platform key in the database still got "no embedding provider available"
+        and silently fell back to keyword-only retrieval.
+
+        Returns the key string, or None. Never raises — embeddings are optional,
+        and a quota block here must not break summarize/chat.
+        """
+        if not self.company_id:
+            return None
+        try:
+            from core.models import Company
+            from core.api_key_service import resolve_for_call
+            company = Company.objects.get(pk=self.company_id)
+            ctx = resolve_for_call(company, self.agent_key_name)
+            # Only OpenAI exposes an embeddings endpoint we support here.
+            if ctx.provider == 'openai':
+                return ctx.api_key
+            logger.debug("Resolved key provider %r has no supported embeddings "
+                         "endpoint; skipping.", ctx.provider)
+        except Exception as exc:
+            logger.debug("Could not resolve a company key for embeddings: %s", exc)
+        return None
+
     def _init_openai(self) -> bool:
         """Initialize OpenAI client for embeddings"""
         try:
-            openai_api_key = os.getenv('OPENAI_API_KEY') or getattr(settings, 'OPENAI_API_KEY', None)
-            
+            openai_api_key = (
+                os.getenv('OPENAI_API_KEY')
+                or getattr(settings, 'OPENAI_API_KEY', None)
+                or self._resolve_company_openai_key()
+            )
+
             if not openai_api_key:
                 return False
-            
+
             from openai import OpenAI
             self.client = OpenAI(api_key=openai_api_key)
             self.embedding_model = getattr(settings, 'OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')

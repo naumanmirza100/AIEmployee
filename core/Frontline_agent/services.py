@@ -151,7 +151,7 @@ class KnowledgeService:
     def __init__(self, company_id: Optional[int] = None):
         self.db_service = PayPerProjectDatabaseService()
         self.company_id = company_id
-        self.embedding_service = EmbeddingService()
+        self.embedding_service = EmbeddingService(company_id=company_id, agent_key_name='frontline_agent')
         # Sub-phase timing for the most recent search — bubbled up so the
         # frontend / logs can pinpoint whether retrieval time is going into
         # FAISS, the JSON-scan fallback, keyword SQL, or the LLM re-rank.

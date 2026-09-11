@@ -169,7 +169,7 @@ class HRKnowledgeService:
         self.company_id = company_id
         # Lazy-imported to avoid a hard dependency at scaffold time.
         from core.Frontline_agent.embedding_service import EmbeddingService
-        self.embedding_service = EmbeddingService()
+        self.embedding_service = EmbeddingService(company_id=company_id, agent_key_name='hr_agent')
         # Per-call sub-phase timing so the UI + logs can pinpoint which step
         # is slow (query_embed / json_scan / keyword / chunk_fetch / …).
         # Mirrors the Frontline `KnowledgeService` shape.
