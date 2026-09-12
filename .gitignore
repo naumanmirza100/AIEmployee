@@ -184,3 +184,10 @@ CodsSnipits/
 
 # Local notes / scratch docs (may contain credentials)
 MDS/
+
+# Playwright MCP session artifacts — page snapshots, console logs and
+# screenshots written into the repo root while driving a browser. Local
+# debugging output, and the snapshots can capture whatever was on screen.
+.playwright-mcp/
+sheet-*.png
+sort-*.png
