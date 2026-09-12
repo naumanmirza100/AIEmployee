@@ -193,7 +193,10 @@ def process_hr_document(self, document_id):
         document.save(update_fields=['document_content', 'file_hash',
                                      'chunks_total', 'updated_at'])
 
-        embedding_service = EmbeddingService()
+        # See the note in Frontline_agent/tasks.py — the tenant is needed for
+        # company-key fallback, or chunks get stored without embeddings.
+        embedding_service = EmbeddingService(
+            company_id=document.company_id, agent_key_name='hr_agent')
         has_embeddings = embedding_service.is_available()
         # Batch size is provider-aware: smaller for local (finer progress bar
         # ticks; encode() cost is trivial) and larger for API providers

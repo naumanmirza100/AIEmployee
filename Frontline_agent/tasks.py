@@ -117,7 +117,12 @@ def process_document(self, document_id):
         document.save(update_fields=['document_content', 'file_hash',
                                      'chunks_total', 'updated_at'])
 
-        embedding_service = EmbeddingService()
+        # Pass the tenant so the OpenAI provider can fall back to the
+        # company/platform key when no env key is set — otherwise ingestion
+        # silently writes chunks with no vectors and retrieval degrades to
+        # literal keyword matching.
+        embedding_service = EmbeddingService(
+            company_id=document.company_id, agent_key_name='frontline_agent')
         has_embeddings = embedding_service.is_available()
         # Batch size is provider-aware: smaller for local (finer progress bar
         # ticks; encode() cost is trivial) and larger for API providers
