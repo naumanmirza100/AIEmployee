@@ -13,6 +13,8 @@ import logging
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import Project, Task, UserProfile
+from core.tenancy import AssigneeNotAllowed, resolve_member
+from api.pagination import paginate
 
 logger = logging.getLogger(__name__)
 
@@ -196,21 +198,13 @@ def update_company_task(request, task_id):
             # be assignable; we already filter them out of the dropdown).
             assignee_id = data.get('assignee_id')
             if assignee_id:
+                # Single membership rule shared with every other assignee path —
+                # see core.tenancy. (This view already had it right; the others
+                # didn't, which is why it moved to one place.)
                 try:
-                    profile_qs = UserProfile.objects.filter(
-                        user_id=assignee_id, user__is_active=True,
-                    )
-                    if company is not None:
-                        profile_qs = profile_qs.filter(
-                            created_by_company_user__company=company,
-                        )
-                    else:
-                        profile_qs = profile_qs.filter(
-                            created_by_company_user=company_user,
-                        )
-                    assignee_profile = profile_qs.get()
-                    task.assignee = assignee_profile.user
-                except UserProfile.DoesNotExist:
+                    task.assignee = resolve_member(
+                        assignee_id, company=company, company_user=company_user)
+                except AssigneeNotAllowed:
                     return Response({
                         'status': 'error',
                         'message': 'Invalid assignee. User must belong to your company and be active.'
@@ -276,43 +270,14 @@ def delete_company_task(request, task_id):
 
     DELETE /api/company/tasks/{task_id}/delete
 
-    Same company-scope policy as `update_company_task` — any CompanyUser in
-    the same company can delete any task in the company's projects. Subtasks
-    cascade via the FK on_delete=CASCADE.
+    Delegates to api.views.pm_deletes, shared with
+    /api/project-manager/tasks/<id>/delete. The previous body caught
+    Task.DoesNotExist around get_object_or_404 (which raises Http404), so a
+    missing or foreign task fell through to `except Exception` and returned 500
+    instead of 404. It also wrote no audit entry.
     """
-    try:
-        company_user = request.user
-        company = getattr(company_user, 'company', None)
-
-        task_qs_kwargs = {'id': task_id}
-        if company is not None:
-            task_qs_kwargs['project__company'] = company
-        else:
-            task_qs_kwargs['project__created_by_company_user'] = company_user
-        task = get_object_or_404(Task, **task_qs_kwargs)
-
-        task_title = task.title
-        task.delete()
-
-        return Response({
-            'status': 'success',
-            'message': 'Task deleted successfully',
-            'data': {'id': task_id, 'title': task_title},
-        }, status=status.HTTP_200_OK)
-
-    except Task.DoesNotExist:
-        return Response({
-            'status': 'error',
-            'message': 'Task not found or you do not have permission to delete it.',
-        }, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        logger.exception(f"Error deleting task: {str(e)}")
-        return Response({
-            'status': 'error',
-            'message': 'Failed to delete task',
-            'error': str(e),
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+    from api.views.pm_deletes import delete_task_as_company_user
+    return delete_task_as_company_user(request, task_id)
 
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
@@ -338,7 +303,10 @@ def get_company_users_for_assignment(request):
             profile_qs = profile_qs.filter(created_by_company_user__company=company)
         else:
             profile_qs = profile_qs.filter(created_by_company_user=company_user)
-        user_profiles = profile_qs.select_related('user')
+        user_profiles, pagination = paginate(
+            request, profile_qs.select_related('user').order_by('id'),
+            default_limit=500, max_limit=1000,
+        )
 
         users_data = []
         for profile in user_profiles:
@@ -352,7 +320,8 @@ def get_company_users_for_assignment(request):
         
         return Response({
             'status': 'success',
-            'data': users_data
+            'data': users_data,
+            'pagination': pagination,
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
