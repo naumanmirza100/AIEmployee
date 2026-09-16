@@ -10,11 +10,14 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.utils import timezone
-from django.db import models
+from django.db import models, transaction
 from datetime import datetime
 import logging
 
 from core.models import Project, Task, UserProfile, Company, TaskRecurrence
+from core.tenancy import AssigneeNotAllowed, company_of_user, resolve_member
+from api.pagination import paginate
+from django.db.models import Prefetch, prefetch_related_objects
 
 logger = logging.getLogger(__name__)
 
@@ -147,14 +150,24 @@ def get_project_manager_projects_tasks(request):
             }, status=status.HTTP_403_FORBIDDEN)
         
         # Get all projects where this user has at least one task assigned OR is the project manager/owner
-        projects_with_tasks = Project.objects.filter(
-            models.Q(tasks__assignee=user) | models.Q(project_manager=user) | models.Q(owner=user)
-        ).distinct()
-        
+        # Explicit order with an `id` tiebreak: offset/limit over an unordered
+        # queryset can repeat or skip rows between pages.
+        page, pagination = paginate(
+            request,
+            Project.objects.filter(
+                models.Q(tasks__assignee=user) | models.Q(project_manager=user) | models.Q(owner=user)
+            ).distinct().order_by('-created_at', '-id'),
+            default_limit=200, max_limit=500,
+        )
+        # One query for every task on the page, instead of one per project.
+        prefetch_related_objects(page, Prefetch(
+            'tasks', queryset=Task.objects.select_related('assignee', 'project', 'recurrence')
+                                          .prefetch_related('depends_on')))
+
         projects_data = []
-        for project in projects_with_tasks:
+        for project in page:
             # Get ALL tasks for this project (not just user's tasks)
-            all_project_tasks = Task.objects.filter(project=project).select_related('assignee', 'project', 'recurrence').prefetch_related('depends_on')
+            all_project_tasks = project.tasks.all()
 
             tasks_data = []
             for task in all_project_tasks:
@@ -195,7 +208,8 @@ def get_project_manager_projects_tasks(request):
         
         return Response({
             'status': 'success',
-            'data': projects_data
+            'data': projects_data,
+            'pagination': pagination,
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
@@ -412,36 +426,24 @@ def create_project_manager_task(request):
                 'message': f'Invalid priority. Must be one of: {", ".join(valid_priorities)}'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Handle assignee - must be from the same company
+        # Handle assignee - must be from the same company.
+        # The previous check allowed assignment whenever BOTH users lacked a
+        # `profile.company` — but most profiles link through
+        # `created_by_company_user` instead, so that branch fired for users in
+        # different tenants. Membership now comes from core.tenancy, which
+        # understands both links. Self-assignment stays allowed for users with
+        # no company at all.
         assignee = None
         if assignee_id:
             try:
-                assignee_user = User.objects.get(id=assignee_id)
-                # Get user's company
-                user_company = None
-                if hasattr(user, 'profile') and user.profile.company:
-                    user_company = user.profile.company
-                
-                # Verify assignee is from the same company
-                assignee_company = None
-                if hasattr(assignee_user, 'profile') and assignee_user.profile.company:
-                    assignee_company = assignee_user.profile.company
-                
-                # Check if both users are from the same company (or both have no company)
-                if user_company and assignee_company and user_company == assignee_company:
-                    assignee = assignee_user
-                elif not user_company and not assignee_company:
-                    # Both have no company - allow assignment
-                    assignee = assignee_user
+                if int(assignee_id) == user.id:
+                    assignee = user
                 else:
-                    return Response({
-                        'status': 'error',
-                        'message': 'Assignee must be from the same company'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            except User.DoesNotExist:
+                    assignee = resolve_member(assignee_id, company=company_of_user(user))
+            except (AssigneeNotAllowed, TypeError, ValueError):
                 return Response({
                     'status': 'error',
-                    'message': 'Invalid assignee_id'
+                    'message': 'Assignee must be from the same company'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         # Parse due date
@@ -537,7 +539,11 @@ def get_company_users_for_pm(request):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Get all users from the same company
-        company_user_profiles = UserProfile.objects.filter(company=company).select_related('user')
+        company_user_profiles, pagination = paginate(
+            request,
+            UserProfile.objects.filter(company=company).select_related('user').order_by('id'),
+            default_limit=500, max_limit=1000,
+        )
         
         users_data = []
         for profile in company_user_profiles:
@@ -551,7 +557,8 @@ def get_company_users_for_pm(request):
         
         return Response({
             'status': 'success',
-            'data': users_data
+            'data': users_data,
+            'pagination': pagination,
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
@@ -581,10 +588,23 @@ def get_project_manager_projects(request):
             }, status=status.HTTP_403_FORBIDDEN)
         
         # Get all projects where this user has at least one task assigned OR is the project manager/owner
-        projects = Project.objects.filter(
-            models.Q(tasks__assignee=user) | models.Q(project_manager=user) | models.Q(owner=user)
-        ).distinct().order_by('-created_at')
-        
+        projects, pagination = paginate(
+            request,
+            Project.objects.filter(
+                models.Q(tasks__assignee=user) | models.Q(project_manager=user) | models.Q(owner=user)
+            ).distinct().order_by('-created_at', '-id'),
+            default_limit=200, max_limit=500,
+        )
+        # One grouped COUNT for the page instead of `project.tasks.count()` per
+        # row. Not `annotate(Count('tasks'))`: the filter above already joins
+        # through tasks (assignee=user), and Django would reuse that filtered
+        # join — counting only this user's tasks rather than all of them.
+        task_counts = dict(
+            Task.objects.filter(project_id__in=[p.id for p in projects])
+                        .values('project_id').annotate(c=models.Count('id'))
+                        .values_list('project_id', 'c')
+        )
+
         projects_data = []
         for project in projects:
             projects_data.append({
@@ -596,12 +616,13 @@ def get_project_manager_projects(request):
                 'project_type': project.project_type,
                 'start_date': project.start_date.isoformat() if project.start_date else None,
                 'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
-                'tasks_count': project.tasks.count(),
+                'tasks_count': task_counts.get(project.id, 0),
             })
         
         return Response({
             'status': 'success',
-            'data': projects_data
+            'data': projects_data,
+            'pagination': pagination,
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
@@ -826,34 +847,21 @@ def update_project_manager_task(request, task_id):
                     if isinstance(assignee_id, str):
                         assignee_id = int(assignee_id)
                     
-                    assignee_user = User.objects.get(id=assignee_id)
-                    
-                    # If the assignee is not changing, allow it (task already exists with this assignee)
-                    if task.assignee and task.assignee.id == assignee_id:
-                        # Keep the current assignee - no validation needed
-                        task.assignee = assignee_user
+                    # Unchanged assignee: keep it. Otherwise verify membership
+                    # through core.tenancy (see the create path for why the old
+                    # both-have-no-company rule was unsafe).
+                    if task.assignee_id == assignee_id:
+                        pass
+                    elif assignee_id == user.id:
+                        task.assignee = user
                     else:
-                        # New assignee - verify they are from the same company
-                        assignee_company = None
-                        if hasattr(assignee_user, 'profile') and assignee_user.profile.company:
-                            assignee_company = assignee_user.profile.company
-                        
-                        # Check if both users are from the same company (or both have no company)
-                        if user_company and assignee_company and user_company == assignee_company:
-                            task.assignee = assignee_user
-                        elif not user_company and not assignee_company:
-                            # Both have no company - allow assignment
-                            task.assignee = assignee_user
-                        else:
-                            return Response({
-                                'status': 'error',
-                                'message': 'Invalid assignee. User must be from the same company.'
-                            }, status=status.HTTP_400_BAD_REQUEST)
-                except (User.DoesNotExist, ValueError, TypeError) as e:
-                    logger.error(f"Error validating assignee_id {assignee_id}: {str(e)}")
+                        task.assignee = resolve_member(
+                            assignee_id, company=company_of_user(user))
+                except (AssigneeNotAllowed, ValueError, TypeError) as e:
+                    logger.warning(f"Rejected assignee_id {assignee_id}: {e}")
                     return Response({
                         'status': 'error',
-                        'message': f'Invalid assignee_id: {assignee_id}'
+                        'message': 'Invalid assignee. User must be from the same company.'
                     }, status=status.HTTP_400_BAD_REQUEST)
         if 'due_date' in data:
             due_date_str = data.get('due_date')
@@ -1006,12 +1014,21 @@ def bulk_update_project_manager_tasks(request):
             if raw_assignee in [None, '', 'none', 'null']:
                 new_assignee = None
             else:
+                # Membership via core.tenancy. The old pre-validation below
+                # allowed assignment whenever neither user had profile.company —
+                # the common case, since most profiles link via
+                # created_by_company_user — letting bulk updates assign tasks
+                # to users in other companies.
                 try:
-                    new_assignee = User.objects.get(id=int(raw_assignee))
-                except (User.DoesNotExist, ValueError, TypeError):
+                    if int(raw_assignee) == user.id:
+                        new_assignee = user
+                    else:
+                        new_assignee = resolve_member(
+                            raw_assignee, company=company_of_user(user))
+                except (AssigneeNotAllowed, ValueError, TypeError):
                     return Response({
                         'status': 'error',
-                        'message': f'Invalid assignee_id: {raw_assignee}'
+                        'message': 'Invalid assignee. User must be from the same company.'
                     }, status=status.HTTP_400_BAD_REQUEST)
 
         # Parse due_date once
@@ -1038,21 +1055,6 @@ def bulk_update_project_manager_tasks(request):
         if hasattr(user, 'profile') and user.profile.company:
             user_company = user.profile.company
 
-        # Pre-validate the new assignee is in the same company as the requester
-        if assignee_change and new_assignee is not None:
-            assignee_company = None
-            if hasattr(new_assignee, 'profile') and new_assignee.profile.company:
-                assignee_company = new_assignee.profile.company
-            same_company = (
-                (user_company and assignee_company and user_company == assignee_company)
-                or (not user_company and not assignee_company)
-            )
-            if not same_company:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid assignee. User must be from the same company.'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
         tasks_qs = Task.objects.filter(id__in=normalized_ids).select_related('project', 'assignee')
         found_by_id = {t.id: t for t in tasks_qs}
         not_found = [tid for tid in normalized_ids if tid not in found_by_id]
@@ -1060,58 +1062,66 @@ def bulk_update_project_manager_tasks(request):
         updated = []
         skipped = []
 
-        for tid in normalized_ids:
-            task = found_by_id.get(tid)
-            if task is None:
-                continue
-            project = task.project
+        # One transaction for the batch, a savepoint per task. The endpoint's
+        # contract is per-item (updated / skipped / not_found), so a single bad
+        # task must not roll back the others — hence the savepoint. But a crash
+        # partway used to leave some tasks changed and return a 500 with no
+        # `updated` list, so the client couldn't tell what had happened; the
+        # outer transaction makes that case a clean no-op instead.
+        with transaction.atomic():
+            for tid in normalized_ids:
+                task = found_by_id.get(tid)
+                if task is None:
+                    continue
+                project = task.project
 
-            # Access check — same as single-task update
-            has_access = (
-                project.project_manager_id == user.id
-                or project.owner_id == user.id
-                or Task.objects.filter(project=project, assignee=user).exists()
-                or (user_company and project.company_id == user_company.id)
-            )
-            if not has_access:
-                skipped.append({'id': tid, 'reason': 'access_denied'})
-                continue
+                # Access check — same as single-task update
+                has_access = (
+                    project.project_manager_id == user.id
+                    or project.owner_id == user.id
+                    or Task.objects.filter(project=project, assignee=user).exists()
+                    or (user_company and project.company_id == user_company.id)
+                )
+                if not has_access:
+                    skipped.append({'id': tid, 'reason': 'access_denied'})
+                    continue
 
-            try:
-                update_fields = []
-                if new_status is not None and task.status != new_status:
-                    # T-F1 — honour blockers on transitions to in_progress/done
-                    if new_status in ('in_progress', 'done') and not bulk_force:
-                        blockers = _get_blockers(task)
-                        if blockers:
-                            skipped.append({
-                                'id': tid,
-                                'reason': 'blocked_by_dependencies',
-                                'blocked_by': [b.id for b in blockers],
-                            })
-                            continue
-                    task.status = new_status
-                    update_fields.append('status')
-                if new_priority is not None and task.priority != new_priority:
-                    task.priority = new_priority
-                    update_fields.append('priority')
-                if assignee_change:
-                    if (task.assignee_id or None) != (new_assignee.id if new_assignee else None):
-                        task.assignee = new_assignee
-                        update_fields.append('assignee')
-                if due_date_change:
-                    if task.due_date != new_due_date:
-                        task.due_date = new_due_date
-                        update_fields.append('due_date')
+                try:
+                    with transaction.atomic():  # savepoint per task
+                        update_fields = []
+                        if new_status is not None and task.status != new_status:
+                            # T-F1 — honour blockers on transitions to in_progress/done
+                            if new_status in ('in_progress', 'done') and not bulk_force:
+                                blockers = _get_blockers(task)
+                                if blockers:
+                                    skipped.append({
+                                        'id': tid,
+                                        'reason': 'blocked_by_dependencies',
+                                        'blocked_by': [b.id for b in blockers],
+                                    })
+                                    continue
+                            task.status = new_status
+                            update_fields.append('status')
+                        if new_priority is not None and task.priority != new_priority:
+                            task.priority = new_priority
+                            update_fields.append('priority')
+                        if assignee_change:
+                            if (task.assignee_id or None) != (new_assignee.id if new_assignee else None):
+                                task.assignee = new_assignee
+                                update_fields.append('assignee')
+                        if due_date_change:
+                            if task.due_date != new_due_date:
+                                task.due_date = new_due_date
+                                update_fields.append('due_date')
 
-                if update_fields:
-                    task.save(update_fields=update_fields + ['updated_at'])
-                    updated.append(tid)
-                else:
-                    skipped.append({'id': tid, 'reason': 'no_change'})
-            except Exception as exc:
-                logger.exception(f"Bulk task update failed for task {tid}: {exc}")
-                skipped.append({'id': tid, 'reason': 'save_failed'})
+                        if update_fields:
+                            task.save(update_fields=update_fields + ['updated_at'])
+                            updated.append(tid)
+                        else:
+                            skipped.append({'id': tid, 'reason': 'no_change'})
+                except Exception as exc:
+                    logger.exception(f"Bulk task update failed for task {tid}: {exc}")
+                    skipped.append({'id': tid, 'reason': 'save_failed'})
 
         logger.info(
             f"[BULK TASK UPDATE] user={user.id} requested={len(normalized_ids)} "

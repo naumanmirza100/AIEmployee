@@ -147,6 +147,23 @@ class Project(models.Model):
     
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # The company dashboards' exact query shape:
+            # filter(created_by_company_user=...).order_by('-created_at').
+            models.Index(fields=['created_by_company_user', '-created_at'],
+                         name='proj_creator_created_idx'),
+            models.Index(fields=['company', 'status'], name='proj_company_status_idx'),
+        ]
+        constraints = [
+            # Already rejected by create_project_manual and update_company_project;
+            # the Project Pilot paths skipped the check, so the DB now enforces it
+            # everywhere. NULLs pass (a CHECK on NULL is not false).
+            models.CheckConstraint(
+                check=models.Q(budget_min__isnull=True) | models.Q(budget_max__isnull=True)
+                      | models.Q(budget_min__lte=models.F('budget_max')),
+                name='proj_budget_min_lte_max',
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -203,6 +220,20 @@ class Task(models.Model):
     
     class Meta:
         ordering = ['priority', 'due_date', 'created_at']
+        indexes = [
+            models.Index(fields=['project', 'status'], name='task_project_status_idx'),
+            models.Index(fields=['assignee', 'status'], name='task_assignee_status_idx'),
+            models.Index(fields=['project', 'due_date'], name='task_project_due_idx'),
+        ]
+        constraints = [
+            # The only write path (user_tasks.update_task_progress) already
+            # rejects values outside 0-100; this makes the DB agree.
+            models.CheckConstraint(
+                check=models.Q(progress_percentage__isnull=True)
+                      | models.Q(progress_percentage__gte=0, progress_percentage__lte=100),
+                name='task_progress_0_100',
+            ),
+        ]
     
     def __str__(self):
         return f"{self.title} - {self.project.name}"

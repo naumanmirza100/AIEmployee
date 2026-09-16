@@ -32,12 +32,14 @@ from datetime import datetime, timedelta
 import os
 import tempfile
 
+from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.core.mail import send_mail
 from django.conf import settings as django_settings
 from core.models import CompanyUser
 from core.api_key_service import KeyServiceError
+from core.tenancy import AssigneeNotAllowed, resolve_member, scope_for_company_user
 
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 
@@ -106,6 +108,17 @@ class PMLLMThrottle(SimpleRateThrottle):
             if ident:
                 return self.cache_format % {'scope': self.scope, 'ident': ident}
         return self.get_ident(request)
+
+
+class PMCRUDThrottle(PMLLMThrottle):
+    """Rate limit for plain PM CRUD endpoints, keyed per user.
+
+    `pm_crud` has been defined in REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] all
+    along, but no throttle class ever referenced it. `rate` is left unset so
+    SimpleRateThrottle reads it from settings.
+    """
+    scope = 'pm_crud'
+    rate = None
 
 
 def _get_project_owner(company_user):
@@ -798,447 +811,479 @@ def project_pilot(request):
 
         logger.info(f"Processing {len(actions)} actions from project pilot agent")
         
-        # Process all actions in order
-        for action_data in actions:
-            action_type = action_data.get("action")
-            if action_type == "create_project":
-                try:
-                    # Parse explicit start_date / deadline. We collapsed the old
-                    # end_date + deadline pair into a single `deadline` field so
-                    # users don't have to maintain two near-identical dates. The
-                    # DB column `end_date` still exists for legacy readers and is
-                    # mirrored from deadline below; new code should only touch
-                    # `deadline`.
-                    def _parse_iso_date(raw):
-                        if not raw:
-                            return None
-                        if hasattr(raw, 'year') and not isinstance(raw, str):
-                            return raw  # already a date
-                        try:
-                            return datetime.strptime(str(raw).split('T')[0], '%Y-%m-%d').date()
-                        except (ValueError, TypeError):
-                            return None
-
-                    start_date = _parse_iso_date(action_data.get("start_date"))
-                    # Accept legacy `end_date` in the LLM output, but treat it as
-                    # a deadline alias rather than a separate field.
-                    deadline = (
-                        _parse_iso_date(action_data.get("deadline"))
-                        or _parse_iso_date(action_data.get("end_date"))
-                    )
-
-                    # Legacy fallback: derive deadline from deadline_days only when
-                    # the agent didn't produce a concrete date. Anchor from
-                    # start_date (not today) when one is available.
-                    if deadline is None:
-                        deadline_days = action_data.get("deadline_days")
-                        if deadline_days:
-                            try:
-                                days = int(
-                                    str(deadline_days)
-                                    .replace("working days", "")
-                                    .replace("days", "")
-                                    .strip()
-                                )
-                                anchor = start_date or datetime.now().date()
-                                working_days = 0
-                                check_date = anchor
-                                while working_days < days:
-                                    if check_date.weekday() < 5:
-                                        working_days += 1
-                                    if working_days < days:
-                                        check_date += timedelta(days=1)
-                                deadline = check_date
-                            except (ValueError, TypeError):
-                                deadline = None
-
-                    project_manager_id = action_data.get("project_manager_id")
-                    industry_id = action_data.get("industry_id")
-                    project_type = action_data.get("project_type")
-                    budget_min = action_data.get("budget_min")
-                    budget_max = action_data.get("budget_max")
-
-                    # Create project with company association
-                    # Note: owner field is required but CompanyUser is not a User model
-                    # We'll need to set owner to None or create a dummy owner
-                    # For now, we'll set it to None if the field allows it, otherwise we need to handle it
-                    from django.contrib.auth.models import User
-                    # Try to get the first user as owner (you might want to change this logic)
-                    default_owner = _get_project_owner(company_user)
-
-                    project_data = {
-                        "name": action_data.get("project_name", "New Project"),
-                        "description": action_data.get("project_description", ""),
-                        "company": company,
-                        "created_by_company_user": company_user,
-                        "status": action_data.get("project_status", "planning"),
-                        "priority": action_data.get("project_priority", "medium"),
-                        "project_type": project_type if project_type else "web_app",
-                    }
-
-                    # Set owner if we have a default owner
-                    if default_owner:
-                        project_data["owner"] = default_owner
-
-                    # Add optional fields
-                    if start_date:
-                        project_data["start_date"] = start_date
-                    if project_manager_id:
-                        project_data["project_manager_id"] = project_manager_id
-                    if industry_id:
-                        project_data["industry_id"] = industry_id
-                    if budget_min:
-                        project_data["budget_min"] = budget_min
-                    if budget_max:
-                        project_data["budget_max"] = budget_max
-                    if deadline:
-                        # Mirror deadline into the legacy end_date column so any
-                        # consumer that still reads end_date (Gantt, exports, etc.)
-                        # keeps working without a DB migration.
-                        project_data["deadline"] = deadline
-                        project_data["end_date"] = deadline
-
-                    project = Project.objects.create(**project_data)
-                    _audit_log(company_user, 'project_created', 'Project', project.id, project.name)
-
-                    # Store the created project ID for use in subsequent task creation
-                    created_project_id = project.id
-                    # Store it in the action_data for reference
-                    action_data["_created_project_id"] = project.id
-
-                    logger.info(f"Project created successfully: {project.id} - {project.name}")
-                    action_results.append(
-                        {
-                            "action": "create_project",
-                            "success": True,
-                            "project_id": project.id,
-                            "project_name": project.name,
-                            "message": f'Project "{project.name}" created successfully!',
-                            "start_date": project.start_date.isoformat() if project.start_date else None,
-                            "deadline": (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
-                        }
-                    )
-                except Exception as e:
-                    logger.exception(f"Error creating project: {str(e)}")
-                    logger.error(f"Project data: {project_data}")
-                    action_results.append({
-                        "action": "create_project",
-                        "success": False,
-                        "error": str(e),
-                        "project_name": action_data.get("project_name", "Unknown")
-                    })
-
-        # Second pass: Create tasks and other actions, using created project IDs
-        for action_data in actions:
-            action_type = action_data.get("action")
-            if action_type == "create_project":
-                # Already handled in first pass
-                continue
-            elif action_type == "create_task":
-                try:
-                    task_project_id = action_data.get("project_id")
-                    # If no project_id specified, use the project created in this batch
-                    if not task_project_id and created_project_id:
-                        task_project_id = created_project_id
-
-                    if not task_project_id:
-                        action_results.append(
-                            {
-                                "action": "create_task",
-                                "success": False,
-                                "error": "project_id is required for task creation",
-                            }
-                        )
-                        continue
-
-                    task_project = get_object_or_404(Project, id=task_project_id, created_by_company_user=company_user)
-
-                    # Parse due date
-                    due_date = None
-                    due_date_str = action_data.get("due_date")
-                    if due_date_str:
-                        try:
-                            from django.utils import timezone
-                            from datetime import datetime as dt_time
-                            if isinstance(due_date_str, str):
-                                # Try parsing different formats
-                                for fmt in ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%SZ']:
-                                    try:
-                                        due_date = datetime.strptime(due_date_str, fmt)
-                                        if timezone.is_naive(due_date):
-                                            due_date = timezone.make_aware(due_date)
-                                        break
-                                    except ValueError:
-                                        continue
-                                # If still None, try date only
-                                if due_date is None:
-                                    date_only = datetime.strptime(due_date_str.split('T')[0], '%Y-%m-%d').date()
-                                    if date_only:
-                                        due_date = datetime.combine(date_only, dt_time(23, 59, 59))
-                                        if timezone.is_naive(due_date):
-                                            due_date = timezone.make_aware(due_date)
-                        except Exception:
-                            due_date = None
-
-                    # Fallback to project's own dates when LLM didn't supply one.
-                    # Dropped the previous `timezone.now() + 14 days` fallback —
-                    # the agent is now expected to reason about due_date itself,
-                    # and forcing a today+14 anchor was the root cause of every
-                    # task appearing to start "today" regardless of context.
-                    if due_date is None and task_project:
-                        from django.utils import timezone
-                        from datetime import datetime as dt_time
-                        if getattr(task_project, "deadline", None):
-                            d = task_project.deadline
-                            if hasattr(d, "year"):
-                                due_date = datetime.combine(d, dt_time(23, 59, 59))
-                                if timezone.is_naive(due_date):
-                                    due_date = timezone.make_aware(due_date)
-                        if due_date is None and getattr(task_project, "end_date", None):
-                            d = task_project.end_date
-                            if hasattr(d, "year"):
-                                due_date = datetime.combine(d, dt_time(23, 59, 59))
-                                if timezone.is_naive(due_date):
-                                    due_date = timezone.make_aware(due_date)
-
-                    estimated_hours = action_data.get("estimated_hours")
-                    if estimated_hours:
-                        try:
-                            estimated_hours = float(estimated_hours)
-                        except (ValueError, TypeError):
-                            estimated_hours = None
-
-                    # Capacity check — warn if assignee has too many active tasks
-                    capacity_warning = None
-                    assignee_id_val = action_data.get("assignee_id")
-                    if assignee_id_val:
-                        active_count = Task.objects.filter(
-                            assignee_id=assignee_id_val,
-                            status__in=['todo', 'in_progress', 'review']
-                        ).count()
-                        if active_count >= 10:
-                            capacity_warning = f"Warning: assignee already has {active_count} active tasks."
-
-                    task = Task.objects.create(
-                        title=action_data.get("task_title", "New Task"),
-                        description=action_data.get("task_description", ""),
-                        project=task_project,
-                        status=action_data.get("status", "todo"),
-                        priority=action_data.get("priority", "medium"),
-                        assignee_id=assignee_id_val if assignee_id_val else None,
-                        estimated_hours=estimated_hours,
-                        due_date=due_date,
-                        ai_reasoning=action_data.get("reasoning", ""),
-                    )
-                    _audit_log(company_user, 'task_created', 'Task', task.id, task.title)
-
-                    action_results.append(
-                        {
-                            "action": "create_task",
-                            "success": True,
-                            "task_id": task.id,
-                            "task_title": task.title,
-                            "project_name": task_project.name,
-                            "message": f'Task "{task.title}" created successfully!',
-                            "priority": getattr(task, "priority", None) or "medium",
-                            "assignee_username": task.assignee.username if task.assignee else None,
-                            "assignee_name": _assignee_display(task.assignee),
-                            "due_date": task.due_date.isoformat() if task.due_date else None,
-                            "deadline": task.due_date.isoformat() if task.due_date else None,
-                            "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
-                        }
-                    )
-                except Exception as e:
-                    action_results.append(
-                        {"action": "create_task", "success": False, "error": f"Error creating task: {str(e)}"}
-                    )
-
-            elif action_type == "delete_project":
-                try:
-                    project_id_to_delete = action_data.get("project_id")
-                    if not project_id_to_delete:
-                        action_results.append(
-                            {"action": "delete_project", "success": False, "error": "project_id is required"}
-                        )
-                        continue
-                    project_to_delete = get_object_or_404(Project, id=project_id_to_delete, created_by_company_user=company_user)
-                    project_name = project_to_delete.name
-                    project_to_delete.delete()
-                    action_results.append(
-                        {
-                            "action": "delete_project",
-                            "success": True,
-                            "project_id": project_id_to_delete,
-                            "project_name": project_name,
-                            "message": f'Project "{project_name}" deleted successfully!',
-                        }
-                    )
-                except Exception as e:
-                    action_results.append(
-                        {"action": "delete_project", "success": False, "error": f"Error deleting project: {str(e)}"}
-                    )
-
-            elif action_type == "delete_task":
-                try:
-                    task_id_to_delete = action_data.get("task_id")
-                    if not task_id_to_delete:
-                        action_results.append(
-                            {"action": "delete_task", "success": False, "error": "task_id is required"}
-                        )
-                        continue
-                    task_to_delete = get_object_or_404(Task, id=task_id_to_delete, project__created_by_company_user=company_user)
-                    task_title = task_to_delete.title
-                    task_to_delete.delete()
-                    action_results.append(
-                        {
-                            "action": "delete_task",
-                            "success": True,
-                            "task_id": task_id_to_delete,
-                            "task_title": task_title,
-                            "message": f'Task "{task_title}" deleted successfully!',
-                        }
-                    )
-                except Exception as e:
-                    action_results.append(
-                        {"action": "delete_task", "success": False, "error": f"Error deleting task: {str(e)}"}
-                    )
-
-            elif action_type == "update_project":
-                try:
-                    project_id_to_update = action_data.get("project_id")
-                    if not project_id_to_update:
-                        action_results.append(
-                            {"action": "update_project", "success": False, "error": "project_id is required"}
-                        )
-                        continue
-                    project_to_update = get_object_or_404(Project, id=project_id_to_update, created_by_company_user=company_user)
-                    updates = action_data.get("updates", {})
-
-                    # Update simple string/choice fields
-                    for field in ["name", "description", "status", "priority", "project_type"]:
-                        if field in updates and updates[field] is not None:
-                            setattr(project_to_update, field, updates[field])
-
-                    # Handle date fields. `end_date` is no longer a user-facing
-                    # field — if the LLM emits it (legacy), treat it as a
-                    # deadline alias and mirror to both columns.
-                    deadline_in_updates = "deadline" in updates or "end_date" in updates
-                    if deadline_in_updates:
-                        date_val = updates.get("deadline") or updates.get("end_date")
-                        if date_val:
-                            from datetime import datetime as _dt_proj
-                            try:
-                                parsed = _dt_proj.strptime(date_val, "%Y-%m-%d").date()
-                                project_to_update.deadline = parsed
-                                project_to_update.end_date = parsed
-                            except (ValueError, TypeError):
-                                pass
-                        else:
-                            project_to_update.deadline = None
-                            project_to_update.end_date = None
-
-                    if "start_date" in updates:
-                        date_val = updates.get("start_date")
-                        if date_val:
-                            from datetime import datetime as _dt_proj
-                            try:
-                                project_to_update.start_date = _dt_proj.strptime(date_val, "%Y-%m-%d").date()
-                            except (ValueError, TypeError):
-                                pass
-                        else:
-                            project_to_update.start_date = None
-
-                    # Handle budget fields
-                    for budget_field in ["budget_min", "budget_max"]:
-                        if budget_field in updates:
-                            budget_val = updates.get(budget_field)
-                            if budget_val is not None:
+        # ---- Write phase ----------------------------------------------------
+        # Same guarantee as project_manager_agent/project_pilot_pipeline.py: one
+        # transaction so a crash partway can't leave a half-applied batch (a
+        # project with half its tasks, or deletes applied without the updates
+        # they came with), plus a savepoint per action so the per-action
+        # try/except can keep going without leaving the transaction unusable.
+        with transaction.atomic():
+            # Process all actions in order
+            for action_data in actions:
+                action_type = action_data.get("action")
+                if action_type == "create_project":
+                    try:
+                        with transaction.atomic():  # savepoint per action
+                            # Parse explicit start_date / deadline. We collapsed the old
+                            # end_date + deadline pair into a single `deadline` field so
+                            # users don't have to maintain two near-identical dates. The
+                            # DB column `end_date` still exists for legacy readers and is
+                            # mirrored from deadline below; new code should only touch
+                            # `deadline`.
+                            def _parse_iso_date(raw):
+                                if not raw:
+                                    return None
+                                if hasattr(raw, 'year') and not isinstance(raw, str):
+                                    return raw  # already a date
                                 try:
-                                    setattr(project_to_update, budget_field, float(budget_val))
+                                    return datetime.strptime(str(raw).split('T')[0], '%Y-%m-%d').date()
                                 except (ValueError, TypeError):
-                                    pass
-                            else:
-                                setattr(project_to_update, budget_field, None)
+                                    return None
 
-                    project_to_update.save()
-                    action_results.append(
-                        {
-                            "action": "update_project",
-                            "success": True,
-                            "project_id": project_to_update.id,
-                            "project_name": project_to_update.name,
-                            "message": f'Project "{project_to_update.name}" updated successfully!',
-                            "status": project_to_update.status,
-                            "priority": project_to_update.priority,
-                            "deadline": project_to_update.deadline.isoformat() if project_to_update.deadline else None,
-                        }
-                    )
-                except Exception as e:
-                    action_results.append(
-                        {"action": "update_project", "success": False, "error": f"Error updating project: {str(e)}"}
-                    )
+                            start_date = _parse_iso_date(action_data.get("start_date"))
+                            # Accept legacy `end_date` in the LLM output, but treat it as
+                            # a deadline alias rather than a separate field.
+                            deadline = (
+                                _parse_iso_date(action_data.get("deadline"))
+                                or _parse_iso_date(action_data.get("end_date"))
+                            )
 
-            elif action_type == "update_task":
-                try:
-                    task_id_to_update = action_data.get("task_id")
-                    if not task_id_to_update:
+                            # Legacy fallback: derive deadline from deadline_days only when
+                            # the agent didn't produce a concrete date. Anchor from
+                            # start_date (not today) when one is available.
+                            if deadline is None:
+                                deadline_days = action_data.get("deadline_days")
+                                if deadline_days:
+                                    try:
+                                        days = int(
+                                            str(deadline_days)
+                                            .replace("working days", "")
+                                            .replace("days", "")
+                                            .strip()
+                                        )
+                                        anchor = start_date or datetime.now().date()
+                                        working_days = 0
+                                        check_date = anchor
+                                        while working_days < days:
+                                            if check_date.weekday() < 5:
+                                                working_days += 1
+                                            if working_days < days:
+                                                check_date += timedelta(days=1)
+                                        deadline = check_date
+                                    except (ValueError, TypeError):
+                                        deadline = None
+
+                            project_manager_id = action_data.get("project_manager_id")
+                            industry_id = action_data.get("industry_id")
+                            project_type = action_data.get("project_type")
+                            budget_min = action_data.get("budget_min")
+                            budget_max = action_data.get("budget_max")
+
+                            # Create project with company association
+                            # Note: owner field is required but CompanyUser is not a User model
+                            # We'll need to set owner to None or create a dummy owner
+                            # For now, we'll set it to None if the field allows it, otherwise we need to handle it
+                            from django.contrib.auth.models import User
+                            # Try to get the first user as owner (you might want to change this logic)
+                            default_owner = _get_project_owner(company_user)
+
+                            project_data = {
+                                "name": action_data.get("project_name", "New Project"),
+                                "description": action_data.get("project_description", ""),
+                                "company": company,
+                                "created_by_company_user": company_user,
+                                "status": action_data.get("project_status", "planning"),
+                                "priority": action_data.get("project_priority", "medium"),
+                                "project_type": project_type if project_type else "web_app",
+                            }
+
+                            # Set owner if we have a default owner
+                            if default_owner:
+                                project_data["owner"] = default_owner
+
+                            # Add optional fields
+                            if start_date:
+                                project_data["start_date"] = start_date
+                            if project_manager_id:
+                                project_data["project_manager_id"] = project_manager_id
+                            if industry_id:
+                                project_data["industry_id"] = industry_id
+                            if budget_min:
+                                project_data["budget_min"] = budget_min
+                            if budget_max:
+                                project_data["budget_max"] = budget_max
+                            if deadline:
+                                # Mirror deadline into the legacy end_date column so any
+                                # consumer that still reads end_date (Gantt, exports, etc.)
+                                # keeps working without a DB migration.
+                                project_data["deadline"] = deadline
+                                project_data["end_date"] = deadline
+
+                            project = Project.objects.create(**project_data)
+                            _audit_log(company_user, 'project_created', 'Project', project.id, project.name)
+
+                            # Store the created project ID for use in subsequent task creation
+                            created_project_id = project.id
+                            # Store it in the action_data for reference
+                            action_data["_created_project_id"] = project.id
+
+                            logger.info(f"Project created successfully: {project.id} - {project.name}")
+                            action_results.append(
+                                {
+                                    "action": "create_project",
+                                    "success": True,
+                                    "project_id": project.id,
+                                    "project_name": project.name,
+                                    "message": f'Project "{project.name}" created successfully!',
+                                    "start_date": project.start_date.isoformat() if project.start_date else None,
+                                    "deadline": (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
+                                }
+                            )
+                    except Exception as e:
+                        logger.exception(f"Error creating project: {str(e)}")
+                        logger.error(f"Project data: {project_data}")
+                        action_results.append({
+                            "action": "create_project",
+                            "success": False,
+                            "error": str(e),
+                            "project_name": action_data.get("project_name", "Unknown")
+                        })
+
+            # Second pass: Create tasks and other actions, using created project IDs
+            for action_data in actions:
+                action_type = action_data.get("action")
+                if action_type == "create_project":
+                    # Already handled in first pass
+                    continue
+                elif action_type == "create_task":
+                    try:
+                        with transaction.atomic():  # savepoint per action
+                            task_project_id = action_data.get("project_id")
+                            # If no project_id specified, use the project created in this batch
+                            if not task_project_id and created_project_id:
+                                task_project_id = created_project_id
+
+                            if not task_project_id:
+                                action_results.append(
+                                    {
+                                        "action": "create_task",
+                                        "success": False,
+                                        "error": "project_id is required for task creation",
+                                    }
+                                )
+                                continue
+
+                            task_project = get_object_or_404(Project, id=task_project_id, created_by_company_user=company_user)
+
+                            # Parse due date
+                            due_date = None
+                            due_date_str = action_data.get("due_date")
+                            if due_date_str:
+                                try:
+                                    from django.utils import timezone
+                                    from datetime import datetime as dt_time
+                                    if isinstance(due_date_str, str):
+                                        # Try parsing different formats
+                                        for fmt in ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%SZ']:
+                                            try:
+                                                due_date = datetime.strptime(due_date_str, fmt)
+                                                if timezone.is_naive(due_date):
+                                                    due_date = timezone.make_aware(due_date)
+                                                break
+                                            except ValueError:
+                                                continue
+                                        # If still None, try date only
+                                        if due_date is None:
+                                            date_only = datetime.strptime(due_date_str.split('T')[0], '%Y-%m-%d').date()
+                                            if date_only:
+                                                due_date = datetime.combine(date_only, dt_time(23, 59, 59))
+                                                if timezone.is_naive(due_date):
+                                                    due_date = timezone.make_aware(due_date)
+                                except Exception:
+                                    due_date = None
+
+                            # Fallback to project's own dates when LLM didn't supply one.
+                            # Dropped the previous `timezone.now() + 14 days` fallback —
+                            # the agent is now expected to reason about due_date itself,
+                            # and forcing a today+14 anchor was the root cause of every
+                            # task appearing to start "today" regardless of context.
+                            if due_date is None and task_project:
+                                from django.utils import timezone
+                                from datetime import datetime as dt_time
+                                if getattr(task_project, "deadline", None):
+                                    d = task_project.deadline
+                                    if hasattr(d, "year"):
+                                        due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                        if timezone.is_naive(due_date):
+                                            due_date = timezone.make_aware(due_date)
+                                if due_date is None and getattr(task_project, "end_date", None):
+                                    d = task_project.end_date
+                                    if hasattr(d, "year"):
+                                        due_date = datetime.combine(d, dt_time(23, 59, 59))
+                                        if timezone.is_naive(due_date):
+                                            due_date = timezone.make_aware(due_date)
+
+                            estimated_hours = action_data.get("estimated_hours")
+                            if estimated_hours:
+                                try:
+                                    estimated_hours = float(estimated_hours)
+                                except (ValueError, TypeError):
+                                    estimated_hours = None
+
+                            # Capacity check — warn if assignee has too many active tasks
+                            capacity_warning = None
+                            assignee_id_val = action_data.get("assignee_id")
+                            # The model picks this ID. The prompt tells it to use only
+                            # listed users, but that's an instruction, not enforcement —
+                            # and a prompt-injected message or document could steer it to
+                            # any user ID in the system. Verify membership; on a miss,
+                            # create the task unassigned rather than failing the batch.
+                            if assignee_id_val:
+                                try:
+                                    _co, _cu = scope_for_company_user(company_user)
+                                    assignee_id_val = resolve_member(
+                                        assignee_id_val, company=_co, company_user=_cu).pk
+                                except AssigneeNotAllowed:
+                                    capacity_warning = (
+                                        f"Assignee {action_data.get('assignee_id')} is not a member "
+                                        "of your company — task created unassigned.")
+                                    assignee_id_val = None
+                            if assignee_id_val:
+                                active_count = Task.objects.filter(
+                                    assignee_id=assignee_id_val,
+                                    status__in=['todo', 'in_progress', 'review']
+                                ).count()
+                                if active_count >= 10:
+                                    capacity_warning = f"Warning: assignee already has {active_count} active tasks."
+
+                            task = Task.objects.create(
+                                title=action_data.get("task_title", "New Task"),
+                                description=action_data.get("task_description", ""),
+                                project=task_project,
+                                status=action_data.get("status", "todo"),
+                                priority=action_data.get("priority", "medium"),
+                                assignee_id=assignee_id_val if assignee_id_val else None,
+                                estimated_hours=estimated_hours,
+                                due_date=due_date,
+                                ai_reasoning=action_data.get("reasoning", ""),
+                            )
+                            _audit_log(company_user, 'task_created', 'Task', task.id, task.title)
+
+                            action_results.append(
+                                {
+                                    "action": "create_task",
+                                    "success": True,
+                                    "task_id": task.id,
+                                    "task_title": task.title,
+                                    "project_name": task_project.name,
+                                    "message": f'Task "{task.title}" created successfully!',
+                                    "priority": getattr(task, "priority", None) or "medium",
+                                    "assignee_username": task.assignee.username if task.assignee else None,
+                                    "assignee_name": _assignee_display(task.assignee),
+                                    "due_date": task.due_date.isoformat() if task.due_date else None,
+                                    "deadline": task.due_date.isoformat() if task.due_date else None,
+                                    "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
+                                }
+                            )
+                    except Exception as e:
                         action_results.append(
-                            {"action": "update_task", "success": False, "error": "task_id is required"}
+                            {"action": "create_task", "success": False, "error": f"Error creating task: {str(e)}"}
                         )
-                        continue
-                    task_to_update = get_object_or_404(Task, id=task_id_to_update, project__created_by_company_user=company_user)
-                    updates = action_data.get("updates", {})
 
-                    # Assignee
-                    if "assignee_id" in updates:
-                        assignee_id = updates.get("assignee_id")
-                        if assignee_id:
-                            try:
-                                from django.contrib.auth.models import User
-                                assignee = User.objects.get(id=assignee_id)
-                                task_to_update.assignee = assignee
-                            except User.DoesNotExist:
-                                pass
-                        else:
-                            task_to_update.assignee = None
+                elif action_type == "delete_project":
+                    try:
+                        with transaction.atomic():  # savepoint per action
+                            project_id_to_delete = action_data.get("project_id")
+                            if not project_id_to_delete:
+                                action_results.append(
+                                    {"action": "delete_project", "success": False, "error": "project_id is required"}
+                                )
+                                continue
+                            project_to_delete = get_object_or_404(Project, id=project_id_to_delete, created_by_company_user=company_user)
+                            project_name = project_to_delete.name
+                            project_to_delete.delete()
+                            action_results.append(
+                                {
+                                    "action": "delete_project",
+                                    "success": True,
+                                    "project_id": project_id_to_delete,
+                                    "project_name": project_name,
+                                    "message": f'Project "{project_name}" deleted successfully!',
+                                }
+                            )
+                    except Exception as e:
+                        action_results.append(
+                            {"action": "delete_project", "success": False, "error": f"Error deleting project: {str(e)}"}
+                        )
 
-                    # Update other fields
-                    for field in ["status", "priority", "title", "description"]:
-                        if field in updates:
-                            setattr(task_to_update, field, updates[field])
+                elif action_type == "delete_task":
+                    try:
+                        with transaction.atomic():  # savepoint per action
+                            task_id_to_delete = action_data.get("task_id")
+                            if not task_id_to_delete:
+                                action_results.append(
+                                    {"action": "delete_task", "success": False, "error": "task_id is required"}
+                                )
+                                continue
+                            task_to_delete = get_object_or_404(Task, id=task_id_to_delete, project__created_by_company_user=company_user)
+                            task_title = task_to_delete.title
+                            task_to_delete.delete()
+                            action_results.append(
+                                {
+                                    "action": "delete_task",
+                                    "success": True,
+                                    "task_id": task_id_to_delete,
+                                    "task_title": task_title,
+                                    "message": f'Task "{task_title}" deleted successfully!',
+                                }
+                            )
+                    except Exception as e:
+                        action_results.append(
+                            {"action": "delete_task", "success": False, "error": f"Error deleting task: {str(e)}"}
+                        )
 
-                    # Handle due_date separately (needs date parsing)
-                    if "due_date" in updates:
-                        due_date_val = updates.get("due_date")
-                        if due_date_val:
-                            from datetime import datetime as _dt_update
-                            try:
-                                task_to_update.due_date = _dt_update.strptime(due_date_val, "%Y-%m-%d").date()
-                            except (ValueError, TypeError):
-                                pass  # Skip invalid date formats
-                        else:
-                            task_to_update.due_date = None
+                elif action_type == "update_project":
+                    try:
+                        with transaction.atomic():  # savepoint per action
+                            project_id_to_update = action_data.get("project_id")
+                            if not project_id_to_update:
+                                action_results.append(
+                                    {"action": "update_project", "success": False, "error": "project_id is required"}
+                                )
+                                continue
+                            project_to_update = get_object_or_404(Project, id=project_id_to_update, created_by_company_user=company_user)
+                            updates = action_data.get("updates", {})
 
-                    task_to_update.save()
-                    action_results.append(
-                        {
-                            "action": "update_task",
-                            "success": True,
-                            "task_id": task_to_update.id,
-                            "task_title": task_to_update.title,
-                            "message": f'Task "{task_to_update.title}" updated successfully!',
-                            "priority": getattr(task_to_update, "priority", None) or "medium",
-                            "assignee_username": task_to_update.assignee.username if task_to_update.assignee else None,
-                            "assignee_name": _assignee_display(task_to_update.assignee),
-                            "due_date": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
-                            "deadline": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
-                            "created_at": task_to_update.created_at.isoformat() if getattr(task_to_update, "created_at", None) else None,
-                        }
-                    )
-                except Exception as e:
-                    action_results.append(
-                        {"action": "update_task", "success": False, "error": f"Error updating task: {str(e)}"}
-                    )
+                            # Update simple string/choice fields
+                            for field in ["name", "description", "status", "priority", "project_type"]:
+                                if field in updates and updates[field] is not None:
+                                    setattr(project_to_update, field, updates[field])
+
+                            # Handle date fields. `end_date` is no longer a user-facing
+                            # field — if the LLM emits it (legacy), treat it as a
+                            # deadline alias and mirror to both columns.
+                            deadline_in_updates = "deadline" in updates or "end_date" in updates
+                            if deadline_in_updates:
+                                date_val = updates.get("deadline") or updates.get("end_date")
+                                if date_val:
+                                    from datetime import datetime as _dt_proj
+                                    try:
+                                        parsed = _dt_proj.strptime(date_val, "%Y-%m-%d").date()
+                                        project_to_update.deadline = parsed
+                                        project_to_update.end_date = parsed
+                                    except (ValueError, TypeError):
+                                        pass
+                                else:
+                                    project_to_update.deadline = None
+                                    project_to_update.end_date = None
+
+                            if "start_date" in updates:
+                                date_val = updates.get("start_date")
+                                if date_val:
+                                    from datetime import datetime as _dt_proj
+                                    try:
+                                        project_to_update.start_date = _dt_proj.strptime(date_val, "%Y-%m-%d").date()
+                                    except (ValueError, TypeError):
+                                        pass
+                                else:
+                                    project_to_update.start_date = None
+
+                            # Handle budget fields
+                            for budget_field in ["budget_min", "budget_max"]:
+                                if budget_field in updates:
+                                    budget_val = updates.get(budget_field)
+                                    if budget_val is not None:
+                                        try:
+                                            setattr(project_to_update, budget_field, float(budget_val))
+                                        except (ValueError, TypeError):
+                                            pass
+                                    else:
+                                        setattr(project_to_update, budget_field, None)
+
+                            project_to_update.save()
+                            action_results.append(
+                                {
+                                    "action": "update_project",
+                                    "success": True,
+                                    "project_id": project_to_update.id,
+                                    "project_name": project_to_update.name,
+                                    "message": f'Project "{project_to_update.name}" updated successfully!',
+                                    "status": project_to_update.status,
+                                    "priority": project_to_update.priority,
+                                    "deadline": project_to_update.deadline.isoformat() if project_to_update.deadline else None,
+                                }
+                            )
+                    except Exception as e:
+                        action_results.append(
+                            {"action": "update_project", "success": False, "error": f"Error updating project: {str(e)}"}
+                        )
+
+                elif action_type == "update_task":
+                    try:
+                        with transaction.atomic():  # savepoint per action
+                            task_id_to_update = action_data.get("task_id")
+                            if not task_id_to_update:
+                                action_results.append(
+                                    {"action": "update_task", "success": False, "error": "task_id is required"}
+                                )
+                                continue
+                            task_to_update = get_object_or_404(Task, id=task_id_to_update, project__created_by_company_user=company_user)
+                            updates = action_data.get("updates", {})
+
+                            # Assignee
+                            if "assignee_id" in updates:
+                                assignee_id = updates.get("assignee_id")
+                                if assignee_id:
+                                    # LLM-chosen ID — verify membership (see create_task).
+                                    # An invalid one leaves the current assignee alone.
+                                    try:
+                                        _co, _cu = scope_for_company_user(company_user)
+                                        task_to_update.assignee = resolve_member(
+                                            assignee_id, company=_co, company_user=_cu)
+                                    except AssigneeNotAllowed:
+                                        logger.warning(
+                                            "project_pilot update_task: rejected non-member "
+                                            "assignee %s for task %s", assignee_id, task_to_update.id)
+                                else:
+                                    task_to_update.assignee = None
+
+                            # Update other fields
+                            for field in ["status", "priority", "title", "description"]:
+                                if field in updates:
+                                    setattr(task_to_update, field, updates[field])
+
+                            # Handle due_date separately (needs date parsing)
+                            if "due_date" in updates:
+                                due_date_val = updates.get("due_date")
+                                if due_date_val:
+                                    from datetime import datetime as _dt_update
+                                    try:
+                                        task_to_update.due_date = _dt_update.strptime(due_date_val, "%Y-%m-%d").date()
+                                    except (ValueError, TypeError):
+                                        pass  # Skip invalid date formats
+                                else:
+                                    task_to_update.due_date = None
+
+                            task_to_update.save()
+                            action_results.append(
+                                {
+                                    "action": "update_task",
+                                    "success": True,
+                                    "task_id": task_to_update.id,
+                                    "task_title": task_to_update.title,
+                                    "message": f'Task "{task_to_update.title}" updated successfully!',
+                                    "priority": getattr(task_to_update, "priority", None) or "medium",
+                                    "assignee_username": task_to_update.assignee.username if task_to_update.assignee else None,
+                                    "assignee_name": _assignee_display(task_to_update.assignee),
+                                    "due_date": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
+                                    "deadline": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
+                                    "created_at": task_to_update.created_at.isoformat() if getattr(task_to_update, "created_at", None) else None,
+                                }
+                            )
+                    except Exception as e:
+                        action_results.append(
+                            {"action": "update_task", "success": False, "error": f"Error updating task: {str(e)}"}
+                        )
 
         # Check if any critical actions failed
         project_created = any(
@@ -3107,44 +3152,14 @@ def create_project_manual(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def delete_project_manual(request, project_id):
-    """Delete a project owned by the calling company user.
+    """Delete a project in the calling company user's tenant.
 
-    Hard-deletes the Project row; cascade rules on Task / TeamMember / etc.
-    take care of related data. Only the company user who created the project
-    (or another user in the same company) can delete it — we never let one
-    company touch another company's data.
+    Delegates to api.views.pm_deletes so this route and the others can't drift
+    — see that module for the scoping, cascade reporting, and audit details.
     """
-    company_user = request.user
-    company = company_user.company
-    try:
-        try:
-            project = Project.objects.get(pk=project_id, company=company)
-        except Project.DoesNotExist:
-            return Response(
-                {'status': 'error', 'message': 'Project not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        project_name = project.name
-        project.delete()
-        _audit_log(company_user, 'project_deleted', 'Project', project_id, project_name)
-
-        return Response({
-            'status': 'success',
-            'message': 'Project deleted successfully',
-            'data': {'id': project_id, 'name': project_name},
-        }, status=status.HTTP_200_OK)
-
-    except KeyServiceError:
-        raise
-    except Exception as e:
-        logger.exception("delete_project_manual failed")
-        return Response({
-            'status': 'error',
-            'message': 'Failed to delete project',
-            'error': str(e),
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+    # Imported here: pm_deletes imports from this module at load time.
+    from api.views.pm_deletes import delete_project_as_company_user
+    return delete_project_as_company_user(request, project_id)
 
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
@@ -3215,16 +3230,17 @@ def create_task_manual(request):
             'priority': priority_val,
         }
         
-        # Handle assignee
+        # Handle assignee — must belong to this company. This used to be a bare
+        # User.objects.get(id=...), so any user ID in the system was accepted.
         if assignee_id:
             try:
-                from django.contrib.auth.models import User
-                assignee = User.objects.get(id=assignee_id)
-                task_data['assignee'] = assignee
-            except User.DoesNotExist:
+                company, scope_cu = scope_for_company_user(company_user)
+                task_data['assignee'] = resolve_member(
+                    assignee_id, company=company, company_user=scope_cu)
+            except AssigneeNotAllowed as exc:
                 return Response({
                     'status': 'error',
-                    'message': 'Invalid assignee_id'
+                    'message': str(exc),
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         # Parse due date
@@ -4712,12 +4728,16 @@ def meeting_schedule(request):
             from core.models import Notification as UserNotification
 
             invitee_users = []
+            _co, _cu = scope_for_company_user(company_user)
             for inv in invitees_data:
+                # Invitee IDs come from the LLM's parse of the user's message.
+                # Unscoped, this emailed and in-app-notified users belonging to
+                # other companies. Restrict to this company's members.
                 try:
-                    u = User.objects.get(id=int(inv["id"]), is_active=True)
-                    invitee_users.append(u)
-                except (User.DoesNotExist, ValueError, TypeError):
-                    logger.warning(f"[MEETING] Invitee user ID {inv.get('id')} not found or inactive, skipping")
+                    invitee_users.append(
+                        resolve_member(inv.get("id"), company=_co, company_user=_cu))
+                except AssigneeNotAllowed:
+                    logger.warning(f"[MEETING] Invitee user ID {inv.get('id')} is not a member of this company or inactive, skipping")
 
             if not invitee_users:
                 return Response({
@@ -5446,8 +5466,12 @@ def pm_notification_channels_list(request):
     company_user = request.user
 
     if request.method == 'GET':
-        channels = PMNotificationChannel.objects.filter(company_user=company_user)
-        return Response({'status': 'success', 'data': [_serialize_pm_channel(c) for c in channels]})
+        from api.pagination import paginate
+        channels, pagination = paginate(
+            request, PMNotificationChannel.objects.filter(company_user=company_user).order_by('-created_at', '-id'),
+            default_limit=500, max_limit=1000)
+        return Response({'status': 'success', 'data': [_serialize_pm_channel(c) for c in channels],
+                         'pagination': pagination})
 
     cleaned, err = _validate_channel_payload(request.data or {}, partial=False)
     if err is not None:
@@ -5571,8 +5595,12 @@ def pm_notification_templates_list(request):
         return Response({'status': 'error', 'message': 'CompanyUser has no company'}, status=400)
 
     if request.method == 'GET':
-        templates = PMNotificationTemplate.objects.filter(company=company)
-        return Response({'status': 'success', 'data': [_serialize_pm_template(t) for t in templates]})
+        from api.pagination import paginate
+        templates, pagination = paginate(
+            request, PMNotificationTemplate.objects.filter(company=company).order_by('notification_type', 'name', 'id'),
+            default_limit=500, max_limit=1000)
+        return Response({'status': 'success', 'data': [_serialize_pm_template(t) for t in templates],
+                         'pagination': pagination})
 
     cleaned, err = _validate_template_payload(request.data or {}, partial=False)
     if err is not None:

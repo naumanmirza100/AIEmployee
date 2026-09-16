@@ -211,6 +211,10 @@ class PMAuditLog(models.Model):
         ('meeting_withdrawn', 'Meeting Withdrawn'),
         ('meeting_rescheduled', 'Meeting Rescheduled'),
         ('subtasks_generated', 'Subtasks Generated'),
+        ('subtask_created', 'Subtask Created'),
+        ('subtask_updated', 'Subtask Updated'),
+        ('subtask_deleted', 'Subtask Deleted'),
+        ('subtasks_reordered', 'Subtasks Reordered'),
         ('priority_updated', 'Priority Updated'),
     ]
 

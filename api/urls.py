@@ -29,6 +29,8 @@ from api.views import chatbot
 from api.views import white_label
 from api.views import company_jobs
 from api.views import pm_agent
+from api.views import pm_subtasks
+from api.views import pm_deletes
 from api.views import company_dashboard
 from api.views import meeting_agent as exec_meeting_api
 from api.views import company_projects_tasks
@@ -84,8 +86,10 @@ urlpatterns = [
     re_path(r'^user/project-manager/projects/?$', user_project_manager.get_project_manager_projects, name='get_project_manager_projects'),  # GET
     re_path(r'^user/project-manager/projects/create/?$', user_project_manager.create_project_manager_project, name='create_project_manager_project'),  # POST
     re_path(r'^user/project-manager/projects/(?P<project_id>\d+)/update/?$', user_project_manager.update_project_manager_project, name='update_project_manager_project'),  # PUT/PATCH
+    re_path(r'^user/project-manager/projects/(?P<project_id>\d+)/delete/?$', pm_deletes.delete_project_manager_project, name='delete_project_manager_project'),  # DELETE/POST (GAP-2)
     re_path(r'^user/project-manager/tasks/create/?$', user_project_manager.create_project_manager_task, name='create_project_manager_task'),  # POST
     re_path(r'^user/project-manager/tasks/(?P<task_id>\d+)/update/?$', user_project_manager.update_project_manager_task, name='update_project_manager_task'),  # PUT/PATCH
+    re_path(r'^user/project-manager/tasks/(?P<task_id>\d+)/delete/?$', pm_deletes.delete_project_manager_task, name='delete_project_manager_task'),  # DELETE/POST (GAP-2)
     re_path(r'^user/project-manager/tasks/bulk-update/?$', user_project_manager.bulk_update_project_manager_tasks, name='bulk_update_project_manager_tasks'),  # POST
     re_path(r'^user/project-manager/tasks/(?P<task_id>\d+)/dependencies/?$', user_project_manager.set_project_manager_task_dependencies, name='set_project_manager_task_dependencies'),  # PUT/PATCH
     re_path(r'^user/project-manager/tasks/(?P<task_id>\d+)/recurrence/?$', user_project_manager.project_manager_task_recurrence, name='project_manager_task_recurrence'),  # GET/PUT/PATCH/DELETE
@@ -253,6 +257,13 @@ urlpatterns = [
     re_path(r'^project-manager/projects/create/?$', pm_agent.create_project_manual, name='pm_create_project_manual'),
     re_path(r'^project-manager/projects/(?P<project_id>\d+)/delete/?$', pm_agent.delete_project_manual, name='pm_delete_project_manual'),
     re_path(r'^project-manager/tasks/create/?$', pm_agent.create_task_manual, name='pm_create_task_manual'),
+    re_path(r'^project-manager/tasks/(?P<task_id>\d+)/delete/?$', pm_deletes.delete_task_manual, name='pm_delete_task_manual'),  # DELETE/POST (GAP-2)
+    # Subtask CRUD (GAP-1) — previously AI-generated only, with no way to edit them.
+    re_path(r'^project-manager/tasks/(?P<task_id>\d+)/subtasks/?$', pm_subtasks.list_subtasks, name='pm_list_subtasks'),  # GET
+    re_path(r'^project-manager/tasks/(?P<task_id>\d+)/subtasks/create/?$', pm_subtasks.create_subtask, name='pm_create_subtask'),  # POST
+    re_path(r'^project-manager/tasks/(?P<task_id>\d+)/subtasks/reorder/?$', pm_subtasks.reorder_subtasks, name='pm_reorder_subtasks'),  # POST
+    re_path(r'^project-manager/subtasks/(?P<subtask_id>\d+)/update/?$', pm_subtasks.update_subtask, name='pm_update_subtask'),  # PATCH/PUT
+    re_path(r'^project-manager/subtasks/(?P<subtask_id>\d+)/delete/?$', pm_subtasks.delete_subtask, name='pm_delete_subtask'),  # DELETE/POST
     re_path(r'^project-manager/users/?$', pm_agent.get_available_users, name='pm_get_available_users'),
     # New PM Agent endpoints
     re_path(r'^project-manager/ai/daily-standup/?$', pm_agent.daily_standup, name='pm_daily_standup'),
