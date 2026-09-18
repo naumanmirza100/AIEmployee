@@ -11,6 +11,8 @@ import {
   XCircle,
   ArrowRightLeft,
   RefreshCw,
+  Video,
+  MapPin,
 } from 'lucide-react';
 import { API_BASE_URL } from '@/config/apiConfig';
 
@@ -23,17 +25,32 @@ import { API_BASE_URL } from '@/config/apiConfig';
  * disparate actions collapsed together. This version splits them into
  * three distinct primary actions: Accept, Reject, Suggest Time.
  *
- * The federated inbox (HR + PM + exec-meeting sources into one list) is
- * still Chunk D-follow-up backend work; for now this shows the same
- * /api/meetings source the classic dashboard uses.
+ * /api/meetings returns every meeting the employee is part of, from the
+ * Project Manager, HR and Frontline agents. Ids are only unique within an
+ * agent, so items are keyed by `source` + `id`, and each answer goes to the
+ * item's own `respond_url`. A time that clashes with another meeting (in any
+ * agent) is refused by the server, and its message is shown as-is.
  */
 const STATUS_COLORS = {
   pending: 'text-yellow-400 bg-yellow-500/20',
   accepted: 'text-green-400 bg-green-500/20',
+  partially_accepted: 'text-emerald-300 bg-emerald-500/15',
   rejected: 'text-red-400 bg-red-500/20',
   counter_proposed: 'text-blue-400 bg-blue-500/20',
+  scheduled: 'text-violet-300 bg-violet-500/20',
+  rescheduled: 'text-blue-400 bg-blue-500/20',
+  completed: 'text-gray-300 bg-gray-500/20',
+  cancelled: 'text-gray-400 bg-gray-500/20',
   withdrawn: 'text-gray-400 bg-gray-500/20',
 };
+
+const SOURCE_COLORS = {
+  pm: 'text-sky-300 border-sky-500/30',
+  hr: 'text-pink-300 border-pink-500/30',
+  frontline: 'text-amber-300 border-amber-500/30',
+};
+
+const meetingKey = (m) => `${m.source || 'pm'}-${m.id}`;
 
 export default function MeetingsView() {
   const { toast } = useToast();
@@ -74,11 +91,12 @@ export default function MeetingsView() {
     setRejectReason(''); setCounterDate(''); setCounterTime('');
   };
 
-  const respond = async (id, action, extra = {}) => {
+  const respond = async (m, action, extra = {}) => {
     setRespondLoading(true);
     try {
       const token = localStorage.getItem('auth_token');
-      const res = await fetch(`${API_BASE_URL}/meetings/${id}/respond`, {
+      const url = m.respond_url || `/meetings/${m.id}/respond`;
+      const res = await fetch(`${API_BASE_URL}${url}`, {
         method: 'POST',
         headers: { 'Authorization': `Token ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ...extra }),
@@ -102,7 +120,7 @@ export default function MeetingsView() {
   };
 
   const handleReject = (m) => {
-    respond(m.id, 'rejected', { reason: rejectReason });
+    respond(m, 'rejected', { reason: rejectReason });
   };
 
   const handleSuggest = (m) => {
@@ -111,13 +129,15 @@ export default function MeetingsView() {
       return;
     }
     const counter_time = new Date(`${counterDate}T${counterTime}`).toISOString();
-    respond(m.id, 'counter_proposed', { counter_time, reason: rejectReason });
+    respond(m, 'counter_proposed', { counter_time, reason: rejectReason });
   };
 
-  const canAct = (m) =>
-    (m.my_status === 'pending' || m.my_status === 'counter_proposed'
+  // The server decides (`can_respond`); the fallback is the old PM-only rule.
+  const canAct = (m) => (typeof m.can_respond === 'boolean'
+    ? m.can_respond
+    : (m.my_status === 'pending' || m.my_status === 'counter_proposed'
       || m.status === 'pending' || m.status === 'counter_proposed')
-    && m.my_status !== 'accepted' && m.status !== 'withdrawn';
+      && m.my_status !== 'accepted' && m.status !== 'withdrawn');
 
   const pendingCount = meetings.filter(canAct).length;
 
@@ -155,17 +175,26 @@ export default function MeetingsView() {
           {meetings.map((m) => {
             const sc = STATUS_COLORS[m.status] || STATUS_COLORS.pending;
             const showActions = canAct(m);
-            const showReject = rejectFor === m.id;
-            const showSuggest = suggestFor === m.id;
+            const key = meetingKey(m);
+            const showReject = rejectFor === key;
+            const showSuggest = suggestFor === key;
 
             return (
-              <Card key={m.id} className="bg-white/[0.03] border-white/[0.08]">
+              <Card key={key} className="bg-white/[0.03] border-white/[0.08]">
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-white truncate">{m.title}</h3>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <h3 className="text-sm font-semibold text-white truncate">{m.title}</h3>
+                        {m.source_label && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border shrink-0 ${SOURCE_COLORS[m.source] || 'text-white/60 border-white/15'}`}>
+                            {m.source_label}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[11px] text-white/50 mt-0.5 truncate">
-                        From: {m.organizer_name} {m.organizer_email && <span className="text-white/30">({m.organizer_email})</span>}
+                        {m.my_status === 'organizer' ? 'You are organizing' : <>From: {m.organizer_name}</>}{' '}
+                        {m.my_status !== 'organizer' && m.organizer_email && <span className="text-white/30">({m.organizer_email})</span>}
                       </p>
                     </div>
                     <span className={`text-[10px] px-2 py-1 rounded-full font-medium capitalize shrink-0 ${sc}`}>
@@ -182,6 +211,15 @@ export default function MeetingsView() {
                       })}
                     </span>
                     <span>{m.duration_minutes} min</span>
+                    {m.location && (
+                      <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{m.location}</span>
+                    )}
+                    {m.meeting_link && (
+                      <a href={m.meeting_link} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-violet-300 hover:text-violet-200">
+                        <Video className="h-3 w-3" /> Join
+                      </a>
+                    )}
                   </div>
 
                   {m.description && <p className="text-xs text-white/50">{m.description}</p>}
@@ -237,25 +275,27 @@ export default function MeetingsView() {
                         <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
-                            onClick={() => respond(m.id, 'accepted')}
+                            onClick={() => respond(m, 'accepted')}
                             disabled={respondLoading}
                             className="bg-green-600 hover:bg-green-700 text-xs h-8"
                           >
                             <CheckCircle className="h-3 w-3 mr-1" /> Accept
                           </Button>
+                          {m.can_suggest_time !== false && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => { closeAllForms(); setSuggestFor(key); }}
+                              disabled={respondLoading}
+                              className="text-xs h-8 border-blue-500/40 text-blue-300 hover:bg-blue-500/10"
+                            >
+                              <ArrowRightLeft className="h-3 w-3 mr-1" /> Suggest a different time
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => { closeAllForms(); setSuggestFor(m.id); }}
-                            disabled={respondLoading}
-                            className="text-xs h-8 border-blue-500/40 text-blue-300 hover:bg-blue-500/10"
-                          >
-                            <ArrowRightLeft className="h-3 w-3 mr-1" /> Suggest a different time
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => { closeAllForms(); setRejectFor(m.id); }}
+                            onClick={() => { closeAllForms(); setRejectFor(key); }}
                             disabled={respondLoading}
                             className="text-xs h-8 border-red-500/40 text-red-300 hover:bg-red-500/10"
                           >

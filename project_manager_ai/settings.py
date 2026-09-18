@@ -401,13 +401,18 @@ if _db_engine in ('mysql', 'mariadb'):
                 ),
                 'connect_timeout': 30,
             },
-            # Safe at 60 only because init_command raises the session
-            # wait_timeout to 600s above. Against the server's 20s default this
-            # would guarantee "Server has gone away" on connection reuse.
-            # A fresh handshake costs ~200ms at this latency, so reusing
-            # connections matters — but never set this above the session
-            # wait_timeout.
-            'CONN_MAX_AGE': 60,
+            # How long a connection is reused. This decides how many NEW
+            # connections the app opens, and Hostinger allows this DB user only
+            # 500 per hour; past that, every connection (logins included) is
+            # refused until the hour is up. Celery closes a task's connection
+            # once it is older than this, and beat fires ~300 tasks an hour, so
+            # at 60s nearly every task dialed a fresh connection.
+            #
+            # 540s keeps each worker thread on one connection for 9 minutes.
+            # It must stay below the session wait_timeout (600s, raised in
+            # init_command above), or a reused connection may already have been
+            # dropped by the server; CONN_HEALTH_CHECKS catches any that were.
+            'CONN_MAX_AGE': min(int(os.getenv('DB_CONN_MAX_AGE', '540')), 570),
             'CONN_HEALTH_CHECKS': True,
             'TIME_ZONE': 'UTC',
         }
@@ -915,6 +920,8 @@ CELERY_WORKER_CONCURRENCY = int(os.getenv(
 CELERY_TASK_DEFAULT_RETRY_DELAY = 300  # 5 minutes default retry delay
 CELERY_TASK_MAX_RETRIES = 3  # Max 3 retries
 
+from celery.schedules import crontab as _crontab
+
 # Celery Beat Schedule (Periodic Tasks)
 # IMPORTANT: Sequence emails run every 5 minutes to check for ready emails
 # Actual email timing respects user-defined delays (delay_days, delay_hours, delay_minutes)
@@ -990,6 +997,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.tasks.expire_module_purchases',
         'schedule': 3600.0,  # Every hour (3600 seconds)
         'options': {'expires': 7200}
+    },
+
+    # Shared busy-time table (meeting clash checks) - nightly repair, 03:15 UTC.
+    # Signals keep it current; this fixes whatever they can't see.
+    'rebuild-calendar-blocks': {
+        'task': 'core.tasks.rebuild_calendar_blocks',
+        'schedule': _crontab(hour=3, minute=15),
+        'options': {'expires': 6 * 3600},
     },
 
     # Meeting reminders - runs every 5 minutes

@@ -195,105 +195,46 @@ You MUST validate that mentioned users exist in the company before scheduling.""
 
     def check_conflicts(self, user_ids: List[int], proposed_time, duration_minutes: int = 30) -> List[Dict]:
         """
-        Check if any of the given users have conflicting meetings at the proposed time.
-        Returns a list of conflicts: [{ "user_id": int, "user_name": str, "conflicting_meeting": str, "time": str }]
+        Check if any of the given users are busy at the proposed time — in any
+        agent's calendar (PM, HR, Frontline), not just PM meetings.
+        Returns one entry per busy user:
+        [{ "user_id", "user_name", "conflicting_meeting", "conflicting_time", "conflicting_date" }]
         """
-        from project_manager_agent.models import ScheduledMeeting, MeetingParticipant
-        from django.db.models import Q
+        from core.scheduling import find_conflicts
+        from core.scheduling.conflicts import clock_label, zone_info
 
         if not proposed_time:
             return []
-
-        # Calculate meeting window
-        meeting_end = proposed_time + timedelta(minutes=duration_minutes)
-
-        conflicts = []
-        for uid in user_ids:
-            # Find meetings where this user is a participant and time overlaps
-            participant_meeting_ids = MeetingParticipant.objects.filter(
-                user_id=uid,
-                status__in=['pending', 'accepted'],
-            ).values_list('meeting_id', flat=True)
-
-            overlapping = ScheduledMeeting.objects.filter(
-                Q(id__in=participant_meeting_ids) | Q(invitee_id=uid),
-                status__in=['pending', 'accepted', 'counter_proposed', 'partially_accepted'],
-            ).exclude(status='withdrawn')
-
-            for m in overlapping:
-                m_start = m.proposed_time
-                m_end = m_start + timedelta(minutes=m.duration_minutes)
-
-                # Check overlap: meeting A overlaps B if A starts before B ends AND A ends after B starts
-                if proposed_time < m_end and meeting_end > m_start:
-                    try:
-                        from django.contrib.auth import get_user_model
-                        User = get_user_model()
-                        user = User.objects.get(id=uid)
-                        user_name = user.get_full_name() or user.username
-                    except Exception:
-                        user_name = f"User {uid}"
-
-                    conflicts.append({
-                        "user_id": uid,
-                        "user_name": user_name,
-                        "conflicting_meeting": m.title,
-                        "conflicting_time": m_start.strftime("%I:%M %p") + " - " + m_end.strftime("%I:%M %p"),
-                        "conflicting_date": m_start.strftime("%b %d, %Y"),
-                    })
-                    break  # One conflict per user is enough
-
+        zone = zone_info(getattr(self, 'timezone_name', 'UTC'))
+        end = proposed_time + timedelta(minutes=duration_minutes or 30)
+        conflicts, seen = [], set()
+        for clash in find_conflicts(user_ids, proposed_time, end, viewer_source='pm'):
+            if clash.user_id in seen:
+                continue
+            seen.add(clash.user_id)
+            start_local, end_local = clash.starts_at.astimezone(zone), clash.ends_at.astimezone(zone)
+            conflicts.append({
+                "user_id": clash.user_id,
+                "user_name": clash.user_name,
+                "conflicting_meeting": clash.title or f"Busy ({clash.source_label})",
+                "conflicting_time": f"{clock_label(start_local)} - {clock_label(end_local)}",
+                "conflicting_date": start_local.strftime("%b %d, %Y"),
+            })
         return conflicts
 
     def suggest_available_slots(self, user_ids: List[int], date, duration_minutes: int = 30) -> List[str]:
         """
-        Suggest available time slots on a given date for all specified users.
-        Returns list of available slot strings like "10:00 AM", "2:00 PM".
+        Free start times on `date` for all the users, across every agent's
+        calendar, in working hours of the organizer's timezone.
+        Returns strings like "10:00 AM", "2:00 PM".
         """
-        from project_manager_agent.models import ScheduledMeeting, MeetingParticipant
-        from django.db.models import Q
+        from core.scheduling import free_slots
+        from core.scheduling.conflicts import clock_label, zone_info
 
-        # Get all meetings for these users on the given date
-        day_start = datetime.combine(date, datetime.min.time())
-        day_end = datetime.combine(date, datetime.max.time())
-        if timezone.is_naive(day_start):
-            day_start = timezone.make_aware(day_start)
-            day_end = timezone.make_aware(day_end)
-
-        # Collect all busy windows per user
-        busy_windows = []  # list of (start, end) tuples
-        for uid in user_ids:
-            participant_meeting_ids = MeetingParticipant.objects.filter(
-                user_id=uid, status__in=['pending', 'accepted'],
-            ).values_list('meeting_id', flat=True)
-
-            day_meetings = ScheduledMeeting.objects.filter(
-                Q(id__in=participant_meeting_ids) | Q(invitee_id=uid),
-                status__in=['pending', 'accepted', 'counter_proposed', 'partially_accepted'],
-                proposed_time__gte=day_start,
-                proposed_time__lte=day_end,
-            )
-            for m in day_meetings:
-                busy_windows.append((m.proposed_time, m.proposed_time + timedelta(minutes=m.duration_minutes)))
-
-        # Business hours: 9 AM to 6 PM, slots every 30 min
-        slots = []
-        for hour in range(9, 18):
-            for minute in [0, 30]:
-                slot_start = datetime.combine(date, datetime.min.time().replace(hour=hour, minute=minute))
-                if timezone.is_naive(slot_start):
-                    slot_start = timezone.make_aware(slot_start)
-                slot_end = slot_start + timedelta(minutes=duration_minutes)
-
-                # Check if slot overlaps any busy window
-                has_conflict = any(
-                    slot_start < busy_end and slot_end > busy_start
-                    for busy_start, busy_end in busy_windows
-                )
-                if not has_conflict:
-                    slots.append(slot_start.strftime("%I:%M %p"))
-
-        return slots[:8]
+        tz_name = getattr(self, 'timezone_name', 'UTC')
+        zone = zone_info(tz_name)
+        return [clock_label(slot.astimezone(zone))
+                for slot in free_slots(user_ids, date, duration_minutes, tz_name, limit=8)]
 
     def generate_occurrence_dates(self, first_time, recurrence: str, end_date=None, max_occurrences: int = 12) -> List:
         """

@@ -4,35 +4,75 @@ import sys
 from django.apps import AppConfig
 
 
+_FALSE = {'0', 'false', 'no', 'off'}
+_TRUE = {'1', 'true', 'yes', 'on'}
+
+# Management commands that serve requests. Every other command (migrate, shell,
+# check, test, sync_stripe_plans, rebuild_calendar_blocks, …) is a short job
+# that must not start background threads.
+_SERVER_COMMANDS = {'runserver', 'runserver_with_celery', 'runserver_plus'}
+
+
+def _is_celery_process(argv):
+    """`celery -A … worker|beat` and `python -m celery …`."""
+    for arg in argv[:2]:
+        name = os.path.basename(str(arg)).lower()
+        if name in ('celery', 'celery.exe') or 'celery' in os.path.normpath(str(arg)).lower().split(os.sep):
+            return True
+    return False
+
+
+def should_start_scheduler(argv=None, environ=None):
+    """Whether this process should run the SDR scheduler.
+
+    Exactly one copy should run per deployment: in the web server process.
+    Every copy runs every job, and each run costs database connections, which
+    the database user may only open 500 times an hour. Before this check the
+    Celery worker, Celery Beat and any standalone script each started their
+    own copy as well, because the only test was "not runserver".
+
+    ``SDR_SCHEDULER_ENABLED`` overrides the detection: ``false`` never starts
+    it (e.g. a developer not working on SDR), ``true`` starts it in any
+    process that isn't Celery or a one-off management command (e.g. a
+    dedicated scheduler process, or a WSGI host the detection doesn't know).
+    """
+    argv = list(sys.argv if argv is None else argv)
+    environ = os.environ if environ is None else environ
+    flag = str(environ.get('SDR_SCHEDULER_ENABLED', '')).strip().lower()
+    if flag in _FALSE:
+        return False
+    if _is_celery_process(argv):
+        return False
+
+    program = os.path.basename(str(argv[0])).lower() if argv else ''
+    if program in ('manage.py', 'manage', 'django-admin', 'django-admin.py'):
+        command = argv[1] if len(argv) > 1 else ''
+        if command not in _SERVER_COMMANDS:
+            return False
+        # The dev server runs two processes: the autoreload watcher (RUN_MAIN
+        # unset) and the worker that serves requests (RUN_MAIN=true).
+        return environ.get('RUN_MAIN') == 'true' or '--noreload' in argv
+
+    if flag in _TRUE:
+        return True
+    # A WSGI/ASGI server (gunicorn, uvicorn, waitress, Passenger, mod_wsgi …)
+    # imports Django without a manage.py command. Scripts, `python -c`, stdin,
+    # the interactive interpreter and test runners are not servers.
+    if program in ('passenger_wsgi.py', 'wsgi.py', 'asgi.py'):
+        return True
+    if program in ('', '-', '-c', 'ipython', 'pytest', 'py.test') or program.endswith('.py'):
+        return False
+    return not program.startswith(('jupyter', 'ipykernel'))
+
+
 class AiSdrAgentConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'ai_sdr_agent'
     verbose_name = 'AI SDR Agent'
 
     def ready(self):
-        # ── Skip during management commands ──────────────────────────────────
-        # We never want background threads during migrate, makemigrations,
-        # collectstatic, shell, test, check — they don't serve requests.
-        _SKIP_CMDS = {
-            'migrate', 'makemigrations', 'collectstatic',
-            'test', 'shell', 'check', 'showmigrations',
-            'sqlmigrate', 'dbshell', 'createsuperuser',
-        }
-        if len(sys.argv) > 1 and sys.argv[1] in _SKIP_CMDS:
+        if not should_start_scheduler():
             return
-
-        # ── Guard against duplicate processes (dev auto-reloader) ────────────
-        # Django's dev server (runserver) spawns two processes:
-        #   - outer watcher  →  RUN_MAIN is unset
-        #   - inner worker   →  RUN_MAIN=true  (this is the one that handles requests)
-        # We start the scheduler only in the inner worker (or in production where
-        # runserver isn't used at all).
-        is_inner_worker  = os.environ.get('RUN_MAIN') == 'true'
-        is_noreload      = '--noreload' in sys.argv
-        is_not_devserver = 'runserver' not in sys.argv   # gunicorn / waitress / etc.
-
-        if not (is_inner_worker or is_noreload or is_not_devserver):
-            return  # outer watcher process — skip
 
         # ── Start the scheduler ──────────────────────────────────────────────
         try:

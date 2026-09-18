@@ -452,9 +452,22 @@ export const timeEstimation = async (projectId) => {
 /**
  * Meeting Scheduler - Send a chat message to schedule a meeting
  */
+// The organizer's timezone: free-time suggestions in clash warnings use their
+// working hours, and new meetings store it for reminders.
+const browserTimezone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+};
+
 export const meetingSchedule = async (message) => {
   try {
-    const response = await companyApi.post('/project-manager/ai/meetings/schedule', { message });
+    const response = await companyApi.post('/project-manager/ai/meetings/schedule', {
+      message,
+      timezone: browserTimezone(),
+    });
     return response;
   } catch (error) {
     console.error('Meeting schedule error:', error);
@@ -472,6 +485,7 @@ export const meetingRespond = async (meetingId, action, reason = '', counterTime
       action,
       reason,
       counter_time: counterTime,
+      timezone: browserTimezone(),
     });
     return response;
   } catch (error) {

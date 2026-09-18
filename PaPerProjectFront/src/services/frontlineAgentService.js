@@ -538,14 +538,27 @@ export const deleteMeeting = async (meetingId) => {
   return response;
 };
 
-/** Check if a candidate slot conflicts for listed participants.
- * `participantCompanyUserIds` is an array of CompanyUser ids. */
-export const checkMeetingAvailability = async (startIso, durationMinutes = 60, participantCompanyUserIds = []) => {
-  const q = new URLSearchParams({
+/** Check if a candidate slot is free for the listed people across the PM, HR
+ * and Frontline calendars. Attendees are employee logins (`participantUserIds`);
+ * `participantCompanyUserIds` is the older dashboard-login field and only
+ * counts for dashboard logins that are also employees. Pass `excludeMeetingId`
+ * when checking a new time for an existing meeting.
+ * Returns { available, conflicts, suggested_slots, no_login }. */
+export const checkMeetingAvailability = async (
+  startIso, durationMinutes = 60, participantCompanyUserIds = [],
+  { participantUserIds = [], excludeMeetingId = null } = {},
+) => {
+  let timezone = 'UTC';
+  try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { /* keep UTC */ }
+  const params = {
     start: startIso,
     duration_minutes: String(durationMinutes),
     participant_company_user_ids: participantCompanyUserIds.join(','),
-  }).toString();
+    participant_user_ids: participantUserIds.join(','),
+    timezone,
+  };
+  if (excludeMeetingId) params.exclude_meeting_id = String(excludeMeetingId);
+  const q = new URLSearchParams(params).toString();
   const response = await companyApi.get(`/frontline/meetings/availability?${q}`);
   return response;
 };

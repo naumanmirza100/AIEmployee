@@ -39,7 +39,11 @@ from django.core.mail import send_mail
 from django.conf import settings as django_settings
 from core.models import CompanyUser
 from core.api_key_service import KeyServiceError
-from core.tenancy import AssigneeNotAllowed, resolve_member, scope_for_company_user
+from core.tenancy import AssigneeNotAllowed, members_of, resolve_member, scope_for_company_user
+from core.scheduling import (
+    ScheduleConflict, booking_guard, ensure_free, login_user_id_for_company_user, people_for,
+    zone_name,
+)
 
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 
@@ -4549,6 +4553,20 @@ def _serialize_meeting(meeting):
     }
 
 
+def _meeting_conflict_reply(clash):
+    """Chat reply for a booking refused because someone is already busy.
+
+    The scheduler chat renders `response` as markdown, so a clash is a normal
+    reply (HTTP 200, action "conflict") rather than an error.
+    """
+    return {
+        "action": "conflict",
+        "response": clash.markdown(),
+        "meeting": None,
+        "conflict": clash.payload()["data"],
+    }
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -4566,27 +4584,21 @@ def meeting_schedule(request):
         if not message:
             return Response({"status": "error", "message": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get project users (Django Users) belonging to this company user
-        from core.models import UserProfile
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-
-        logger.info(f"[MEETING] Fetching project users for company_user {company_user.id}")
-        created_profiles = UserProfile.objects.filter(
-            created_by_company_user=company_user,
-            user__is_active=True,
-        ).select_related('user')
-
+        # The company's employee logins — the same list the HR and Frontline
+        # schedulers invite from, so all three agents book the same people.
+        # (This used to be only the users this dashboard login had created.)
+        _co, _cu = scope_for_company_user(company_user)
+        tz_name = zone_name(request.data.get("timezone"))
         project_users_list = []
-        for profile in created_profiles:
-            user = profile.user
-            if getattr(user, "is_superuser", False):
-                continue
+        for user in (members_of(_co, company_user=_cu)
+                     .filter(is_superuser=False)
+                     .select_related('profile')
+                     .order_by('first_name', 'last_name', 'id')):
             project_users_list.append({
                 "id": user.id,
                 "full_name": user.get_full_name() or user.username,
                 "email": user.email or "",
-                "role": profile.role or "team_member",
+                "role": getattr(getattr(user, 'profile', None), 'role', None) or "team_member",
                 "username": user.username,
             })
 
@@ -4596,6 +4608,7 @@ def meeting_schedule(request):
         agent = AgentRegistry.get_agent("meeting_scheduler")
         agent.company_id = getattr(company_user, 'company_id', None)
         agent.agent_key_name = 'project_manager_agent'
+        agent.timezone_name = tz_name
         current_time = timezone.now().isoformat()
         result = agent.process(
             message=message,
@@ -4639,10 +4652,8 @@ def meeting_schedule(request):
             #      back-fill). "Past" = more than 5 minutes ago, so clock skew
             #      between client and server doesn't trip a legitimate
             #      "schedule for 30s from now" call.
-            #   2. Conflict detection — warn if any participant has another
-            #      accepted/pending meeting overlapping the new window. The
-            #      reschedule still proceeds (force-pattern is non-blocking)
-            #      but we surface the conflict in the response.
+            #   2. Clash check across the PM, HR and Frontline calendars — a
+            #      clash refuses the reschedule. `force` does not bypass it.
             force = str(request.data.get('force') or '').lower() in ('1', 'true', 'yes')
             past_threshold = timezone.now() - timedelta(minutes=5)
             if new_time < past_threshold and not force:
@@ -4654,26 +4665,17 @@ def meeting_schedule(request):
                     ),
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Conflict detection — same participants, overlapping window.
-            window_end = new_time + timedelta(minutes=int(meeting.duration_minutes or 30))
-            participant_user_ids = list(meeting.participants.values_list('user_id', flat=True))
-            conflict_qs = ScheduledMeeting.objects.exclude(pk=meeting.pk).filter(
-                status__in=['pending', 'accepted', 'partially_accepted', 'counter_proposed'],
-                proposed_time__lt=window_end,
-            ).filter(
-                Q(participants__user_id__in=participant_user_ids) | Q(invitee_id__in=participant_user_ids),
-            ).distinct()
-            conflict_warnings = []
-            for c in conflict_qs[:5]:  # cap to 5 for response size
-                c_end = c.proposed_time + timedelta(minutes=int(c.duration_minutes or 30))
-                if c_end > new_time:  # actual overlap
-                    conflict_warnings.append(
-                        f'"{c.title}" at {c.proposed_time.strftime("%Y-%m-%d %H:%M")}'
-                    )
-
             old_time = meeting.proposed_time.strftime("%A, %B %d at %I:%M %p") if meeting.proposed_time else "unknown"
-            meeting.proposed_time = new_time
-            meeting.save(update_fields=['proposed_time', 'updated_at'])
+            people = people_for('pm', meeting)
+            try:
+                with booking_guard(people):
+                    ensure_free(people, new_time, meeting.duration_minutes, tz_name=tz_name,
+                                exclude=[('pm', meeting.id)], viewer_source='pm')
+                    meeting.proposed_time = new_time
+                    meeting.save(update_fields=['proposed_time', 'updated_at'])
+            except ScheduleConflict as clash:
+                return Response({"status": "success", "data": _meeting_conflict_reply(clash)},
+                                status=status.HTTP_200_OK)
 
             new_time_display = new_time.strftime("%A, %B %d, %Y at %I:%M %p")
 
@@ -4697,19 +4699,12 @@ def meeting_schedule(request):
                 f"**Meeting Rescheduled!**\n\n**{meeting.title}** has been moved from "
                 f"{old_time} to **{new_time_display}**.\n\nAll participants have been notified."
             )
-            if conflict_warnings:
-                response_text += (
-                    "\n\n⚠️ Conflicts with existing meetings: "
-                    + "; ".join(conflict_warnings)
-                    + ". Reschedule still went through; review participant availability."
-                )
             return Response({
                 "status": "success",
                 "data": {
                     "action": "rescheduled",
                     "response": response_text,
                     "meeting": _serialize_meeting(meeting),
-                    "conflict_warnings": conflict_warnings,
                 }
             }, status=status.HTTP_200_OK)
 
@@ -4757,38 +4752,15 @@ def meeting_schedule(request):
                     "data": {"action": "parse_error", "response": "Could not parse the meeting time. Please try again.", "meeting": None}
                 }, status=status.HTTP_200_OK)
 
+            # The same person can come back twice from the LLM parse; one seat each.
+            invitee_users = list({u.id: u for u in invitee_users}.values())
             time_display = proposed_time.strftime("%A, %B %d, %Y at %I:%M %p")
             invitee_names = [u.get_full_name() or u.username for u in invitee_users]
-            duration = data.get("duration_minutes", 30)
+            try:
+                duration = max(5, min(24 * 60, int(data.get("duration_minutes") or 30)))
+            except (TypeError, ValueError):
+                duration = 30
             meeting_title = data.get("title") or (f"Meeting with {', '.join(invitee_names[:3])}" + (f" +{len(invitee_names)-3}" if len(invitee_names) > 3 else ""))
-
-            # ── Conflict detection ──
-            user_ids = [u.id for u in invitee_users]
-            conflicts = agent.check_conflicts(user_ids, proposed_time, duration)
-            if conflicts:
-                conflict_lines = []
-                for c in conflicts:
-                    conflict_lines.append(f"- **{c['user_name']}** has \"{c['conflicting_meeting']}\" on {c['conflicting_date']} at {c['conflicting_time']}")
-                conflict_str = "\n".join(conflict_lines)
-
-                # Suggest alternative slots
-                suggested_slots = agent.suggest_available_slots(user_ids, proposed_time.date(), duration)
-                slots_str = ""
-                if suggested_slots:
-                    slots_str = "\n\n**Available slots on that day:**\n" + "\n".join(f"- {s}" for s in suggested_slots)
-
-                return Response({
-                    "status": "success",
-                    "data": {
-                        "action": "conflict",
-                        "response": (
-                            f"**Schedule Conflict Detected!**\n\n{conflict_str}\n\n"
-                            f"The proposed time ({time_display}, {duration} min) overlaps with an existing meeting.{slots_str}\n\n"
-                            f"Please choose a different time."
-                        ),
-                        "meeting": None,
-                    }
-                }, status=status.HTTP_200_OK)
 
             # Recurrence info
             recurrence = data.get("recurrence", "none") or "none"
@@ -4798,71 +4770,74 @@ def meeting_schedule(request):
                     recurrence_end_date = datetime.strptime(data["recurrence_end_date"], "%Y-%m-%d").date()
                 except Exception:
                     pass
-
-            duration = data.get("duration_minutes", 30)
+            occurrence_dates = (agent.generate_occurrence_dates(proposed_time, recurrence, recurrence_end_date)
+                                if recurrence != 'none' else [])
 
             # Build agenda
             agenda = data.get("agenda") or []
             if agenda and not isinstance(agenda[0], dict):
                 agenda = [{"item": str(a), "done": False} for a in agenda]
 
-            # Create the parent meeting
-            meeting = ScheduledMeeting.objects.create(
-                organizer=company_user,
-                invitee=invitee_users[0],
-                title=meeting_title,
-                description=data.get("description") or "",
-                agenda=agenda if agenda else None,
-                proposed_time=proposed_time,
-                duration_minutes=duration,
-                status='pending',
-                recurrence=recurrence,
-                recurrence_end_date=recurrence_end_date,
-            )
+            # Everyone the series would occupy: the invitees, plus the organizer
+            # when their dashboard login is also an employee. The check covers
+            # the PM, HR and Frontline calendars and every occurrence; any clash
+            # refuses the whole booking.
+            organizer_login = login_user_id_for_company_user(company_user)
+            people = [u.id for u in invitee_users] + ([organizer_login] if organizer_login else [])
+            try:
+                with booking_guard(people):
+                    ensure_free(people, [proposed_time, *occurrence_dates], duration,
+                                tz_name=tz_name, viewer_source='pm')
 
-            _audit_log(company_user, 'meeting_scheduled', 'ScheduledMeeting', meeting.id, meeting.title,
-                      {'invitees': [u.username for u in invitee_users], 'time': time_display})
-
-            # Create participants for each invitee. Use get_or_create so a
-            # caller that passed the same user twice (e.g. NLP agent that
-            # matched on both "fatima noor" and "noor fatima" before the
-            # token-dedupe fix) doesn't blow up the whole request on the
-            # unique_together (meeting, user) constraint.
-            seen_user_ids = set()
-            for u in invitee_users:
-                if u.id in seen_user_ids:
-                    continue
-                seen_user_ids.add(u.id)
-                MeetingParticipant.objects.get_or_create(
-                    meeting=meeting, user=u, defaults={'status': 'pending'},
-                )
-
-            # Create initial response record
-            MeetingResponse.objects.create(
-                meeting=meeting, responded_by='organizer', action='proposed', proposed_time=proposed_time,
-            )
-
-            # Generate recurring occurrences
-            occurrences_created = 0
-            if recurrence != 'none':
-                occurrence_dates = agent.generate_occurrence_dates(proposed_time, recurrence, recurrence_end_date)
-                for occ_time in occurrence_dates:
-                    occ_meeting = ScheduledMeeting.objects.create(
+                    # Create the parent meeting
+                    meeting = ScheduledMeeting.objects.create(
                         organizer=company_user,
                         invitee=invitee_users[0],
                         title=meeting_title,
                         description=data.get("description") or "",
                         agenda=agenda if agenda else None,
-                        proposed_time=occ_time,
+                        proposed_time=proposed_time,
                         duration_minutes=duration,
+                        timezone_name=tz_name,
                         status='pending',
                         recurrence=recurrence,
                         recurrence_end_date=recurrence_end_date,
-                        parent_meeting=meeting,
                     )
                     for u in invitee_users:
-                        MeetingParticipant.objects.create(meeting=occ_meeting, user=u, status='pending')
-                    occurrences_created += 1
+                        MeetingParticipant.objects.create(meeting=meeting, user=u, status='pending')
+
+                    # Create initial response record
+                    MeetingResponse.objects.create(
+                        meeting=meeting, responded_by='organizer', action='proposed', proposed_time=proposed_time,
+                    )
+
+                    # Generate recurring occurrences
+                    occurrences_created = 0
+                    for occ_time in occurrence_dates:
+                        occ_meeting = ScheduledMeeting.objects.create(
+                            organizer=company_user,
+                            invitee=invitee_users[0],
+                            title=meeting_title,
+                            description=data.get("description") or "",
+                            agenda=agenda if agenda else None,
+                            proposed_time=occ_time,
+                            duration_minutes=duration,
+                            timezone_name=tz_name,
+                            status='pending',
+                            recurrence=recurrence,
+                            recurrence_end_date=recurrence_end_date,
+                            parent_meeting=meeting,
+                        )
+                        for u in invitee_users:
+                            MeetingParticipant.objects.create(meeting=occ_meeting, user=u, status='pending')
+                        occurrences_created += 1
+            except ScheduleConflict as clash:
+                return Response({"status": "success", "data": _meeting_conflict_reply(clash)},
+                                status=status.HTTP_200_OK)
+
+            _audit_log(company_user, 'meeting_scheduled', 'ScheduledMeeting', meeting.id, meeting.title,
+                      {'invitees': [u.username for u in invitee_users], 'time': time_display,
+                       'occurrences': occurrences_created})
 
             # Generate .ics calendar file
             try:
@@ -4990,26 +4965,40 @@ def meeting_respond(request):
         elif action == 'counter_proposed' and not counter_time_str:
             return Response({"status": "error", "message": "counter_time is required for counter proposals."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Create the response record
-        MeetingResponse.objects.create(
-            meeting=meeting,
-            responded_by='organizer',
-            action=action,
-            proposed_time=counter_time,
-            reason=reason,
-        )
+        # A counter-proposal moves the meeting, and accepting a meeting everyone
+        # had declined revives it; either way the time must be free for everyone
+        # it occupies — across the PM, HR and Frontline calendars.
+        makes_busy = action == 'counter_proposed' or (action == 'accepted' and meeting.status == 'rejected')
+        people = people_for('pm', meeting) if makes_busy else []
+        try:
+            with booking_guard(people):
+                if makes_busy:
+                    ensure_free(people, counter_time or meeting.proposed_time, meeting.duration_minutes,
+                                tz_name=zone_name(request.data.get("timezone"), meeting.timezone_name),
+                                exclude=[('pm', meeting.id)], viewer_source='pm')
 
-        # Update meeting status
-        if action == 'accepted':
-            meeting.status = 'accepted'
-        elif action == 'rejected':
-            meeting.status = 'rejected'
-        elif action == 'counter_proposed':
-            meeting.status = 'counter_proposed'
-            meeting.proposed_time = counter_time
-        elif action == 'withdrawn':
-            meeting.status = 'withdrawn'
-        meeting.save()
+                # Create the response record
+                MeetingResponse.objects.create(
+                    meeting=meeting,
+                    responded_by='organizer',
+                    action=action,
+                    proposed_time=counter_time,
+                    reason=reason,
+                )
+
+                # Update meeting status
+                if action == 'accepted':
+                    meeting.status = 'accepted'
+                elif action == 'rejected':
+                    meeting.status = 'rejected'
+                elif action == 'counter_proposed':
+                    meeting.status = 'counter_proposed'
+                    meeting.proposed_time = counter_time
+                elif action == 'withdrawn':
+                    meeting.status = 'withdrawn'
+                meeting.save()
+        except ScheduleConflict as clash:
+            return clash.response()
         _audit_log(company_user, f'meeting_{action}', 'ScheduledMeeting', meeting.id, meeting.title)
 
         # Notify the invitee (project User) via in-app notification + email

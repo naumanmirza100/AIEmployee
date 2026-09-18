@@ -1,6 +1,14 @@
 """
-Middleware to automatically check and send follow-up emails on each request.
-Also runs a background thread that checks periodically regardless of requests.
+Middleware that starts a background thread which checks for and sends
+interview follow-up emails every CHECK_INTERVAL.
+
+Requests no longer trigger a check of their own. They used to start a new
+thread every 30 seconds whenever any request arrived — and the dashboards
+poll every 30 seconds — so an open browser tab alone started ~120 threads an
+hour. Each new thread opened its own database connection, and the database
+user is allowed only 500 new connections an hour. The background thread
+already runs the same check on the same interval, and keeps its connection
+between runs (`check_and_send_followup_emails` calls close_old_connections).
 """
 
 from django.utils import timezone
@@ -11,9 +19,6 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Track last check time to avoid checking on every request
-_last_check_time = None
-_check_lock = threading.Lock()
 CHECK_INTERVAL = timedelta(seconds=30)  # Check every 30 seconds (reduced for testing small intervals like 0.1 hours)
 
 # Background thread control
@@ -24,9 +29,8 @@ _background_thread_lock = threading.Lock()
 
 class AutoInterviewFollowupMiddleware:
     """
-    Middleware that automatically checks and sends follow-up emails.
-    Runs in background thread to avoid slowing down requests.
-    Also starts a background thread that runs checks periodically.
+    Starts (once per process) the background thread that sends follow-up
+    emails. Requests pass straight through.
     """
     
     def __init__(self, get_response):
@@ -80,39 +84,4 @@ class AutoInterviewFollowupMiddleware:
         _background_thread_running = False
     
     def __call__(self, request):
-        # Check if we should run the follow-up check
-        global _last_check_time
-        
-        with _check_lock:
-            now = timezone.now()
-            should_check = False
-            
-            if _last_check_time is None:
-                should_check = True
-            elif (now - _last_check_time) >= CHECK_INTERVAL:
-                should_check = True
-            
-            if should_check:
-                _last_check_time = now
-                # Run check in background thread
-                thread = threading.Thread(target=self._run_followup_check)
-                thread.daemon = True
-                thread.start()
-            # else:
-            #     time_since_last = (now - _last_check_time).total_seconds() if _last_check_time else 0
-            #     remaining = (CHECK_INTERVAL.total_seconds() - time_since_last) if _last_check_time else 0
-            #     print(f"⏳ [MIDDLEWARE] Waiting... ({remaining:.1f}s until next check)")
-        
-        response = self.get_response(request)
-        return response
-    
-    def _run_followup_check(self):
-        """Run the follow-up email check in background"""
-        try:
-            from recruitment_agent.tasks import check_and_send_followup_emails
-            logger.info(f"Middleware triggered follow-up check at {timezone.now()}")
-            stats = check_and_send_followup_emails()
-            logger.info(f"Auto follow-up check completed: {stats}")
-        except Exception as e:
-            logger.error(f"Error in auto follow-up check middleware: {str(e)}", exc_info=True)
-
+        return self.get_response(request)
