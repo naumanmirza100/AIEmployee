@@ -454,21 +454,44 @@ def schedule_meeting(request):
         if not scheduled_datetime:
             return JsonResponse({"error": "Invalid scheduled_at format"}, status=400)
         
-        meeting = FrontlineMeeting.objects.create(
-            title=title,
-            description=description,
-            organizer=request.user,
-            scheduled_at=scheduled_datetime,
-            duration_minutes=duration_minutes,
-            meeting_link=meeting_link,
-            location=location,
-        )
-        
-        # Add participants
-        if participant_ids:
-            participants = request.user.__class__.objects.filter(id__in=participant_ids)
-            meeting.participants.set(participants)
-        
+        # Same rules as the API: the company's employee logins only, and the
+        # slot must be free across the PM, HR and Frontline calendars.
+        from core.scheduling import ScheduleConflict, booking_guard, ensure_free
+        from core.tenancy import company_of_user, members_of
+        company = company_of_user(request.user)
+        if company is None:
+            return JsonResponse({"error": "Your account is not linked to a company."}, status=403)
+        if timezone.is_naive(scheduled_datetime):
+            scheduled_datetime = timezone.make_aware(scheduled_datetime)
+        try:
+            duration_minutes = max(5, min(24 * 60, int(duration_minutes or 60)))
+        except (TypeError, ValueError):
+            duration_minutes = 60
+        wanted = {int(x) for x in participant_ids if str(x).isdigit()}
+        participants = list(members_of(company).filter(pk__in=wanted))
+        if len(participants) != len(wanted):
+            return JsonResponse({"error": "Some participants are not employees of your company."},
+                                status=400)
+        people = [u.id for u in participants] + [request.user.id]
+        try:
+            with booking_guard(people):
+                ensure_free(people, scheduled_datetime, duration_minutes,
+                            viewer_source='frontline')
+                meeting = FrontlineMeeting.objects.create(
+                    title=title,
+                    description=description,
+                    company=company,
+                    organizer=request.user,
+                    scheduled_at=scheduled_datetime,
+                    duration_minutes=duration_minutes,
+                    meeting_link=meeting_link,
+                    location=location,
+                )
+                if participants:
+                    meeting.participants.set(participants)
+        except ScheduleConflict as clash:
+            return JsonResponse(clash.payload(), status=409)
+
         # Create notifications for participants
         for participant in meeting.participants.all():
             Notification.objects.create(

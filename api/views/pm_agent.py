@@ -39,7 +39,14 @@ from django.core.mail import send_mail
 from django.conf import settings as django_settings
 from core.models import CompanyUser
 from core.api_key_service import KeyServiceError
-from core.tenancy import AssigneeNotAllowed, resolve_member, scope_for_company_user
+from project_manager_agent import services as pm_services
+from core.tenancy import (
+    AssigneeNotAllowed, members_of, projects_for_company_user, resolve_member, scope_for_company_user,
+)
+from core.scheduling import (
+    ScheduleConflict, booking_guard, ensure_free, login_user_id_for_company_user, people_for,
+    zone_name,
+)
 
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 
@@ -98,9 +105,15 @@ def _audit_log(company_user, action, model_name='', object_id=None, object_title
 
 
 class PMLLMThrottle(SimpleRateThrottle):
-    """Rate limit for LLM-powered PM agent endpoints (30/hour per user)."""
+    """Rate limit for the PM agent's chat endpoints (Project Pilot, task
+    prioritization, Knowledge QA, meeting scheduler): one shared budget per
+    user, `pm_llm` in REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'].
+
+    The rate used to be pinned here as '30/hour', which silently overrode the
+    settings value; it is read from settings now (still 30/hour).
+    """
     scope = 'pm_llm'
-    rate = '30/hour'
+    rate = None
 
     def get_cache_key(self, request, view):
         if hasattr(request, 'user') and request.user:
@@ -121,35 +134,26 @@ class PMCRUDThrottle(PMLLMThrottle):
     rate = None
 
 
-def _get_project_owner(company_user):
-    """
-    Get a Django User to use as project owner for this company user.
-    Prefers a user created by this company user. Falls back to creating one.
-    """
-    from core.models import UserProfile
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
+class PMLLMToolThrottle(PMLLMThrottle):
+    """Rate limit for the PM agent's other AI tools (Gantt, subtasks, standup,
+    meeting notes, reports, …), which were not rate-limited at all (audit
+    GAP-3); every call is a paid model request.
 
-    # Try to find a user created by this company user
-    profile = UserProfile.objects.filter(
-        created_by_company_user=company_user
-    ).select_related('user').first()
-    if profile and profile.user:
-        return profile.user
+    Counted per endpoint, not shared: these are one-click tools, and a user
+    working heavily with one of them shouldn't be locked out of the rest, or
+    of the chat endpoints above. Rate: `pm_llm_tool` in settings.
+    """
+    scope = 'pm_llm_tool'
+    rate = None
 
-    # Fallback: find or create a user from the company user's email
-    user, created = User.objects.get_or_create(
-        username=f"cu_{company_user.id}_{company_user.email.split('@')[0]}",
-        defaults={
-            'email': company_user.email,
-            'first_name': company_user.full_name.split()[0] if company_user.full_name else '',
-            'last_name': ' '.join(company_user.full_name.split()[1:]) if company_user.full_name and len(company_user.full_name.split()) > 1 else '',
-        }
-    )
-    if created:
-        # Create a profile linking back to this company user
-        UserProfile.objects.get_or_create(user=user, defaults={'created_by_company_user': company_user})
-    return user
+    def get_cache_key(self, request, view):
+        key = super().get_cache_key(request, view)
+        # @api_view names its generated view class after the function.
+        return f'{key}_{type(view).__name__}' if key else key
+
+
+# Moved to the shared service; kept under this name for Project Pilot.
+_get_project_owner = pm_services.project_owner_for
 
 
 def _validate_positive_number(value, field_name, max_val=999999999):
@@ -1555,6 +1559,7 @@ def task_prioritization(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def generate_subtasks(request):
     """
     Subtask Generation Agent API - Only accessible to company users.
@@ -1745,6 +1750,7 @@ def generate_subtasks(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def timeline_gantt(request):
     """
     Timeline/Gantt Agent API - Only accessible to company users.
@@ -2634,6 +2640,7 @@ def _pm_coerce_chart_data(chart_data, chart_type: str, source_data: dict):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def pm_generate_graph(request):
     """Generate a chart from a natural language prompt using project/task aggregates."""
     try:
@@ -2961,182 +2968,14 @@ def delete_project_pilot_chat(request, chat_id):
 def create_project_manual(request):
     """
     Manually create a project - Only accessible to company users.
-    Body:
-      - name: str (required)
-      - description: str (optional)
-      - status: str (optional, default: 'planning')
-      - priority: str (optional, default: 'medium')
-      - project_type: str (optional, default: 'web_app')
-      - industry_id: int (optional)
-      - budget_min: decimal (optional)
-      - budget_max: decimal (optional)
-      - deadline: date (optional, format: YYYY-MM-DD). Legacy `end_date` is
-        accepted as an alias and mirrored to the same column.
-      - start_date: date (optional, format: YYYY-MM-DD)
+    Body: name (required), description, status, priority, project_type,
+    industry_id, budget_min, budget_max, deadline (legacy alias: end_date),
+    start_date, confirm_duplicate_name. Rules: project_manager_agent.services.
     """
-    company_user = request.user
-    company = company_user.company
-    
     try:
-        name = request.data.get('name', '').strip()
-        if not name:
-            return Response({
-                'status': 'error',
-                'message': 'Project name is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get optional fields
-        description = request.data.get('description', '').strip()
-        status_val = request.data.get('status', 'planning')
-        priority_val = request.data.get('priority', 'medium')
-        project_type = request.data.get('project_type', 'web_app')
-        industry_id = request.data.get('industry_id')
-        budget_min = request.data.get('budget_min')
-        budget_max = request.data.get('budget_max')
-        # `end_date` is the legacy alias for `deadline`. We accept either on the
-        # wire but normalise to a single value below.
-        deadline = request.data.get('deadline') or request.data.get('end_date')
-        start_date = request.data.get('start_date')
-        
-        # Validate status and priority
-        valid_statuses = ['planning', 'active', 'on_hold', 'completed', 'cancelled', 'draft', 'posted', 'in_progress', 'review']
-        valid_priorities = ['low', 'medium', 'high', 'urgent']
-        valid_project_types = ['website', 'mobile_app', 'web_app', 'ai_bot', 'integration', 'marketing', 'database', 'consulting', 'ai_system']
-        
-        if status_val not in valid_statuses:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if priority_val not in valid_priorities:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid priority. Must be one of: {", ".join(valid_priorities)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if project_type not in valid_project_types:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid project_type. Must be one of: {", ".join(valid_project_types)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get project owner from company user's project users
-        default_owner = _get_project_owner(company_user)
-        if not default_owner:
-            return Response({
-                'status': 'error',
-                'message': 'Could not determine project owner. Please create at least one project user first.'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        # Build project data
-        project_data = {
-            'name': name,
-            'description': description,
-            'company': company,
-            'created_by_company_user': company_user,
-            'owner': default_owner,
-            'status': status_val,
-            'priority': priority_val,
-            'project_type': project_type,
-        }
-        
-        # Add optional fields
-        if industry_id:
-            try:
-                from core.models import Industry
-                industry = Industry.objects.get(id=industry_id)
-                project_data['industry'] = industry
-            except Industry.DoesNotExist:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid industry_id'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if budget_min:
-            val, err = _validate_positive_number(budget_min, 'budget_min')
-            if err:
-                return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
-            project_data['budget_min'] = val
-
-        if budget_max:
-            val, err = _validate_positive_number(budget_max, 'budget_max')
-            if err:
-                return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
-            project_data['budget_max'] = val
-
-        # BUG-02: cross-field check. Max must be >= Min when both are given.
-        bmin = project_data.get('budget_min')
-        bmax = project_data.get('budget_max')
-        if bmin is not None and bmax is not None and bmax < bmin:
-            return Response({
-                'status': 'error',
-                'message': 'budget_max must be greater than or equal to budget_min.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # BUG-01: soft duplicate-name guard, scoped to this company user's
-        # projects. Client opts into the duplicate by re-sending with
-        # `confirm_duplicate_name: true` (frontend shows a confirm dialog).
-        confirm_duplicate = bool(request.data.get('confirm_duplicate_name'))
-        if not confirm_duplicate:
-            duplicate = Project.objects.filter(
-                created_by_company_user=company_user,
-                name__iexact=name,
-            ).first()
-            if duplicate:
-                return Response({
-                    'status': 'error',
-                    'code': 'duplicate_project_name',
-                    'message': (
-                        f'A project named "{duplicate.name}" already exists in '
-                        f'this workspace. Resubmit with confirm_duplicate_name=true '
-                        f'to create it anyway.'
-                    ),
-                    'data': {'existing_project_id': duplicate.id},
-                }, status=status.HTTP_409_CONFLICT)
-
-        # Parse dates
-        from datetime import datetime
-        if deadline:
-            try:
-                parsed_deadline = datetime.strptime(deadline, '%Y-%m-%d').date()
-                # Mirror to the legacy end_date column so existing readers still
-                # see the same value.
-                project_data['deadline'] = parsed_deadline
-                project_data['end_date'] = parsed_deadline
-            except ValueError:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid deadline format. Use YYYY-MM-DD'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-        if start_date:
-            try:
-                project_data['start_date'] = datetime.strptime(start_date, '%Y-%m-%d').date()
-            except ValueError:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid start_date format. Use YYYY-MM-DD'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Create project
-        project = Project.objects.create(**project_data)
-        _audit_log(company_user, 'project_created', 'Project', project.id, project.name)
-
-        return Response({
-            'status': 'success',
-            'message': 'Project created successfully',
-            'data': {
-                'id': project.id,
-                'name': project.name,
-                'description': project.description,
-                'status': project.status,
-                'priority': project.priority,
-                'project_type': project.project_type,
-                'created_at': project.created_at.isoformat(),
-            }
-        }, status=status.HTTP_201_CREATED)
-    
+        project = pm_services.create_project(pm_services.DashboardActor.from_request(request), request.data)
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except KeyServiceError:
         raise
     except Exception as e:
@@ -3146,6 +2985,20 @@ def create_project_manual(request):
             'message': 'Failed to create project',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'status': 'success',
+        'message': 'Project created successfully',
+        'data': {
+            'id': project.id,
+            'name': project.name,
+            'description': project.description,
+            'status': project.status,
+            'priority': project.priority,
+            'project_type': project.project_type,
+            'created_at': project.created_at.isoformat(),
+        }
+    }, status=status.HTTP_201_CREATED)
 
 
 @api_view(["DELETE"])
@@ -3167,181 +3020,14 @@ def delete_project_manual(request, project_id):
 def create_task_manual(request):
     """
     Manually create a task - Only accessible to company users.
-    Body:
-      - project_id: int (required)
-      - title: str (required)
-      - description: str (optional)
-      - status: str (optional, default: 'todo')
-      - priority: str (optional, default: 'medium')
-      - assignee_id: int (optional)
-      - due_date: datetime (optional, format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
-      - estimated_hours: float (optional)
+    Body: project_id and title (required), description, status, priority,
+    assignee_id, due_date (YYYY-MM-DD or ISO), estimated_hours, depends_on_ids.
+    Rules: project_manager_agent.services.
     """
-    company_user = request.user
-    
     try:
-        project_id = request.data.get('project_id')
-        if not project_id:
-            return Response({
-                'status': 'error',
-                'message': 'project_id is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Verify project belongs to company user
-        project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
-        
-        title = request.data.get('title', '').strip()
-        if not title:
-            return Response({
-                'status': 'error',
-                'message': 'Task title is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get optional fields
-        description = request.data.get('description', '').strip()
-        status_val = request.data.get('status', 'todo')
-        priority_val = request.data.get('priority', 'medium')
-        assignee_id = request.data.get('assignee_id')
-        due_date_str = request.data.get('due_date')
-        estimated_hours = request.data.get('estimated_hours')
-        
-        # Validate status and priority
-        valid_statuses = ['todo', 'in_progress', 'review', 'done', 'blocked']
-        valid_priorities = ['low', 'medium', 'high']
-        
-        if status_val not in valid_statuses:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if priority_val not in valid_priorities:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid priority. Must be one of: {", ".join(valid_priorities)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Build task data
-        task_data = {
-            'title': title,
-            'description': description,
-            'project': project,
-            'status': status_val,
-            'priority': priority_val,
-        }
-        
-        # Handle assignee — must belong to this company. This used to be a bare
-        # User.objects.get(id=...), so any user ID in the system was accepted.
-        if assignee_id:
-            try:
-                company, scope_cu = scope_for_company_user(company_user)
-                task_data['assignee'] = resolve_member(
-                    assignee_id, company=company, company_user=scope_cu)
-            except AssigneeNotAllowed as exc:
-                return Response({
-                    'status': 'error',
-                    'message': str(exc),
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Parse due date
-        if due_date_str:
-            try:
-                from django.utils import timezone
-                from datetime import datetime as dt_time
-                # Try parsing different formats
-                due_date = None
-                for fmt in ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%SZ']:
-                    try:
-                        due_date = datetime.strptime(due_date_str, fmt)
-                        if timezone.is_naive(due_date):
-                            due_date = timezone.make_aware(due_date)
-                        break
-                    except ValueError:
-                        continue
-                # If still None, try date only
-                if due_date is None:
-                    try:
-                        date_only = datetime.strptime(due_date_str.split('T')[0], '%Y-%m-%d').date()
-                        due_date = datetime.combine(date_only, dt_time(23, 59, 59))
-                        if timezone.is_naive(due_date):
-                            due_date = timezone.make_aware(due_date)
-                    except ValueError:
-                        pass
-                
-                if due_date:
-                    task_data['due_date'] = due_date
-            except Exception as e:
-                logger.warning(f"Failed to parse due_date: {e}")
-
-        # BUG-06: bound task due_date by the parent project's timeline.
-        # If the project has neither start_date nor deadline, no bounds
-        # apply (project is still in a planning-only state).
-        _dd = task_data.get('due_date')
-        if _dd is not None:
-            from django.utils import timezone as _tz
-            from datetime import datetime as _dt, time as _time
-            def _to_aware_dt(d):
-                if d is None:
-                    return None
-                if hasattr(d, 'hour'):
-                    return d if _tz.is_aware(d) else _tz.make_aware(d)
-                # DateField → treat as end-of-day (23:59:59) local
-                return _tz.make_aware(_dt.combine(d, _time(23, 59, 59)))
-            proj_start = _to_aware_dt(getattr(project, 'start_date', None))
-            proj_deadline = _to_aware_dt(project.effective_deadline)
-            if proj_start and _dd < proj_start:
-                return Response({
-                    'status': 'error',
-                    'code': 'task_before_project_start',
-                    'message': (
-                        f'Task due_date ({_dd.date().isoformat()}) is before the '
-                        f'project start date ({proj_start.date().isoformat()}). '
-                        f'Move the task later or shift the project start.'
-                    ),
-                }, status=status.HTTP_400_BAD_REQUEST)
-            if proj_deadline and _dd > proj_deadline:
-                return Response({
-                    'status': 'error',
-                    'code': 'task_after_project_deadline',
-                    'message': (
-                        f'Task due_date ({_dd.date().isoformat()}) is after the '
-                        f'project deadline ({proj_deadline.date().isoformat()}). '
-                        f'Move the task earlier or extend the project deadline first.'
-                    ),
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Handle estimated hours
-        if estimated_hours:
-            try:
-                task_data['estimated_hours'] = float(estimated_hours)
-            except (ValueError, TypeError):
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid estimated_hours value'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Create task
-        task = Task.objects.create(**task_data)
-        
-        return Response({
-            'status': 'success',
-            'message': 'Task created successfully',
-            'data': {
-                'id': task.id,
-                'title': task.title,
-                'description': task.description,
-                'status': task.status,
-                'priority': task.priority,
-                'project_id': project.id,
-                'project_name': project.name,
-                'assignee_id': task.assignee.id if task.assignee else None,
-                'due_date': task.due_date.isoformat() if task.due_date else None,
-                'deadline': task.due_date.isoformat() if task.due_date else None,
-                'estimated_hours': task.estimated_hours,
-                'created_at': task.created_at.isoformat(),
-            }
-        }, status=status.HTTP_201_CREATED)
-    
+        task = pm_services.create_task(pm_services.DashboardActor.from_request(request), request.data)
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except KeyServiceError:
         raise
     except Exception as e:
@@ -3351,6 +3037,25 @@ def create_task_manual(request):
             'message': 'Failed to create task',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'status': 'success',
+        'message': 'Task created successfully',
+        'data': {
+            'id': task.id,
+            'title': task.title,
+            'description': task.description,
+            'status': task.status,
+            'priority': task.priority,
+            'project_id': task.project_id,
+            'project_name': task.project.name,
+            'assignee_id': task.assignee_id,
+            'due_date': task.due_date.isoformat() if task.due_date else None,
+            'deadline': task.due_date.isoformat() if task.due_date else None,
+            'estimated_hours': task.estimated_hours,
+            'created_at': task.created_at.isoformat(),
+        }
+    }, status=status.HTTP_201_CREATED)
 
 
 @api_view(["GET"])
@@ -3371,8 +3076,11 @@ def get_available_users(request):
         if project_id:
             try:
                 project_id = int(project_id)
-                project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
-            except (ValueError, Project.DoesNotExist):
+            except ValueError:
+                project = None
+            else:
+                project = projects_for_company_user(company_user).filter(pk=project_id).first()
+            if project is None:
                 return Response({
                     'status': 'error',
                     'message': 'Invalid project_id'
@@ -3522,6 +3230,7 @@ def _extract_text_from_file(file):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def project_pilot_from_file(request):
     """
     Project Pilot Agent - upload endpoint (async).
@@ -3723,6 +3432,7 @@ def project_pilot_job_status(request, job_id):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def daily_standup(request):
     """Generate daily or weekly standup report for a project."""
     try:
@@ -3861,6 +3571,7 @@ def project_health_score(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def project_status_report(request):
     """Generate comprehensive project status report."""
     try:
@@ -3901,6 +3612,7 @@ def project_status_report(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def meeting_notes(request):
     """Process meeting notes and extract action items."""
     try:
@@ -3971,6 +3683,7 @@ def meeting_notes(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def workflow_suggest(request):
     """Suggest workflows and checklists for a project."""
     try:
@@ -4036,6 +3749,7 @@ def workflow_suggest(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def calendar_schedule(request):
     """Generate optimized task schedules and detect conflicts."""
     try:
@@ -4298,6 +4012,7 @@ def team_performance(request):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMLLMToolThrottle])
 def time_estimation(request):
     """Estimate task durations for a project.
 
@@ -4549,6 +4264,20 @@ def _serialize_meeting(meeting):
     }
 
 
+def _meeting_conflict_reply(clash):
+    """Chat reply for a booking refused because someone is already busy.
+
+    The scheduler chat renders `response` as markdown, so a clash is a normal
+    reply (HTTP 200, action "conflict") rather than an error.
+    """
+    return {
+        "action": "conflict",
+        "response": clash.markdown(),
+        "meeting": None,
+        "conflict": clash.payload()["data"],
+    }
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -4566,27 +4295,21 @@ def meeting_schedule(request):
         if not message:
             return Response({"status": "error", "message": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get project users (Django Users) belonging to this company user
-        from core.models import UserProfile
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-
-        logger.info(f"[MEETING] Fetching project users for company_user {company_user.id}")
-        created_profiles = UserProfile.objects.filter(
-            created_by_company_user=company_user,
-            user__is_active=True,
-        ).select_related('user')
-
+        # The company's employee logins — the same list the HR and Frontline
+        # schedulers invite from, so all three agents book the same people.
+        # (This used to be only the users this dashboard login had created.)
+        _co, _cu = scope_for_company_user(company_user)
+        tz_name = zone_name(request.data.get("timezone"))
         project_users_list = []
-        for profile in created_profiles:
-            user = profile.user
-            if getattr(user, "is_superuser", False):
-                continue
+        for user in (members_of(_co, company_user=_cu)
+                     .filter(is_superuser=False)
+                     .select_related('profile')
+                     .order_by('first_name', 'last_name', 'id')):
             project_users_list.append({
                 "id": user.id,
                 "full_name": user.get_full_name() or user.username,
                 "email": user.email or "",
-                "role": profile.role or "team_member",
+                "role": getattr(getattr(user, 'profile', None), 'role', None) or "team_member",
                 "username": user.username,
             })
 
@@ -4596,6 +4319,7 @@ def meeting_schedule(request):
         agent = AgentRegistry.get_agent("meeting_scheduler")
         agent.company_id = getattr(company_user, 'company_id', None)
         agent.agent_key_name = 'project_manager_agent'
+        agent.timezone_name = tz_name
         current_time = timezone.now().isoformat()
         result = agent.process(
             message=message,
@@ -4639,10 +4363,8 @@ def meeting_schedule(request):
             #      back-fill). "Past" = more than 5 minutes ago, so clock skew
             #      between client and server doesn't trip a legitimate
             #      "schedule for 30s from now" call.
-            #   2. Conflict detection — warn if any participant has another
-            #      accepted/pending meeting overlapping the new window. The
-            #      reschedule still proceeds (force-pattern is non-blocking)
-            #      but we surface the conflict in the response.
+            #   2. Clash check across the PM, HR and Frontline calendars — a
+            #      clash refuses the reschedule. `force` does not bypass it.
             force = str(request.data.get('force') or '').lower() in ('1', 'true', 'yes')
             past_threshold = timezone.now() - timedelta(minutes=5)
             if new_time < past_threshold and not force:
@@ -4654,26 +4376,17 @@ def meeting_schedule(request):
                     ),
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Conflict detection — same participants, overlapping window.
-            window_end = new_time + timedelta(minutes=int(meeting.duration_minutes or 30))
-            participant_user_ids = list(meeting.participants.values_list('user_id', flat=True))
-            conflict_qs = ScheduledMeeting.objects.exclude(pk=meeting.pk).filter(
-                status__in=['pending', 'accepted', 'partially_accepted', 'counter_proposed'],
-                proposed_time__lt=window_end,
-            ).filter(
-                Q(participants__user_id__in=participant_user_ids) | Q(invitee_id__in=participant_user_ids),
-            ).distinct()
-            conflict_warnings = []
-            for c in conflict_qs[:5]:  # cap to 5 for response size
-                c_end = c.proposed_time + timedelta(minutes=int(c.duration_minutes or 30))
-                if c_end > new_time:  # actual overlap
-                    conflict_warnings.append(
-                        f'"{c.title}" at {c.proposed_time.strftime("%Y-%m-%d %H:%M")}'
-                    )
-
             old_time = meeting.proposed_time.strftime("%A, %B %d at %I:%M %p") if meeting.proposed_time else "unknown"
-            meeting.proposed_time = new_time
-            meeting.save(update_fields=['proposed_time', 'updated_at'])
+            people = people_for('pm', meeting)
+            try:
+                with booking_guard(people):
+                    ensure_free(people, new_time, meeting.duration_minutes, tz_name=tz_name,
+                                exclude=[('pm', meeting.id)], viewer_source='pm')
+                    meeting.proposed_time = new_time
+                    meeting.save(update_fields=['proposed_time', 'updated_at'])
+            except ScheduleConflict as clash:
+                return Response({"status": "success", "data": _meeting_conflict_reply(clash)},
+                                status=status.HTTP_200_OK)
 
             new_time_display = new_time.strftime("%A, %B %d, %Y at %I:%M %p")
 
@@ -4697,19 +4410,12 @@ def meeting_schedule(request):
                 f"**Meeting Rescheduled!**\n\n**{meeting.title}** has been moved from "
                 f"{old_time} to **{new_time_display}**.\n\nAll participants have been notified."
             )
-            if conflict_warnings:
-                response_text += (
-                    "\n\n⚠️ Conflicts with existing meetings: "
-                    + "; ".join(conflict_warnings)
-                    + ". Reschedule still went through; review participant availability."
-                )
             return Response({
                 "status": "success",
                 "data": {
                     "action": "rescheduled",
                     "response": response_text,
                     "meeting": _serialize_meeting(meeting),
-                    "conflict_warnings": conflict_warnings,
                 }
             }, status=status.HTTP_200_OK)
 
@@ -4757,38 +4463,15 @@ def meeting_schedule(request):
                     "data": {"action": "parse_error", "response": "Could not parse the meeting time. Please try again.", "meeting": None}
                 }, status=status.HTTP_200_OK)
 
+            # The same person can come back twice from the LLM parse; one seat each.
+            invitee_users = list({u.id: u for u in invitee_users}.values())
             time_display = proposed_time.strftime("%A, %B %d, %Y at %I:%M %p")
             invitee_names = [u.get_full_name() or u.username for u in invitee_users]
-            duration = data.get("duration_minutes", 30)
+            try:
+                duration = max(5, min(24 * 60, int(data.get("duration_minutes") or 30)))
+            except (TypeError, ValueError):
+                duration = 30
             meeting_title = data.get("title") or (f"Meeting with {', '.join(invitee_names[:3])}" + (f" +{len(invitee_names)-3}" if len(invitee_names) > 3 else ""))
-
-            # ── Conflict detection ──
-            user_ids = [u.id for u in invitee_users]
-            conflicts = agent.check_conflicts(user_ids, proposed_time, duration)
-            if conflicts:
-                conflict_lines = []
-                for c in conflicts:
-                    conflict_lines.append(f"- **{c['user_name']}** has \"{c['conflicting_meeting']}\" on {c['conflicting_date']} at {c['conflicting_time']}")
-                conflict_str = "\n".join(conflict_lines)
-
-                # Suggest alternative slots
-                suggested_slots = agent.suggest_available_slots(user_ids, proposed_time.date(), duration)
-                slots_str = ""
-                if suggested_slots:
-                    slots_str = "\n\n**Available slots on that day:**\n" + "\n".join(f"- {s}" for s in suggested_slots)
-
-                return Response({
-                    "status": "success",
-                    "data": {
-                        "action": "conflict",
-                        "response": (
-                            f"**Schedule Conflict Detected!**\n\n{conflict_str}\n\n"
-                            f"The proposed time ({time_display}, {duration} min) overlaps with an existing meeting.{slots_str}\n\n"
-                            f"Please choose a different time."
-                        ),
-                        "meeting": None,
-                    }
-                }, status=status.HTTP_200_OK)
 
             # Recurrence info
             recurrence = data.get("recurrence", "none") or "none"
@@ -4798,71 +4481,74 @@ def meeting_schedule(request):
                     recurrence_end_date = datetime.strptime(data["recurrence_end_date"], "%Y-%m-%d").date()
                 except Exception:
                     pass
-
-            duration = data.get("duration_minutes", 30)
+            occurrence_dates = (agent.generate_occurrence_dates(proposed_time, recurrence, recurrence_end_date)
+                                if recurrence != 'none' else [])
 
             # Build agenda
             agenda = data.get("agenda") or []
             if agenda and not isinstance(agenda[0], dict):
                 agenda = [{"item": str(a), "done": False} for a in agenda]
 
-            # Create the parent meeting
-            meeting = ScheduledMeeting.objects.create(
-                organizer=company_user,
-                invitee=invitee_users[0],
-                title=meeting_title,
-                description=data.get("description") or "",
-                agenda=agenda if agenda else None,
-                proposed_time=proposed_time,
-                duration_minutes=duration,
-                status='pending',
-                recurrence=recurrence,
-                recurrence_end_date=recurrence_end_date,
-            )
+            # Everyone the series would occupy: the invitees, plus the organizer
+            # when their dashboard login is also an employee. The check covers
+            # the PM, HR and Frontline calendars and every occurrence; any clash
+            # refuses the whole booking.
+            organizer_login = login_user_id_for_company_user(company_user)
+            people = [u.id for u in invitee_users] + ([organizer_login] if organizer_login else [])
+            try:
+                with booking_guard(people):
+                    ensure_free(people, [proposed_time, *occurrence_dates], duration,
+                                tz_name=tz_name, viewer_source='pm')
 
-            _audit_log(company_user, 'meeting_scheduled', 'ScheduledMeeting', meeting.id, meeting.title,
-                      {'invitees': [u.username for u in invitee_users], 'time': time_display})
-
-            # Create participants for each invitee. Use get_or_create so a
-            # caller that passed the same user twice (e.g. NLP agent that
-            # matched on both "fatima noor" and "noor fatima" before the
-            # token-dedupe fix) doesn't blow up the whole request on the
-            # unique_together (meeting, user) constraint.
-            seen_user_ids = set()
-            for u in invitee_users:
-                if u.id in seen_user_ids:
-                    continue
-                seen_user_ids.add(u.id)
-                MeetingParticipant.objects.get_or_create(
-                    meeting=meeting, user=u, defaults={'status': 'pending'},
-                )
-
-            # Create initial response record
-            MeetingResponse.objects.create(
-                meeting=meeting, responded_by='organizer', action='proposed', proposed_time=proposed_time,
-            )
-
-            # Generate recurring occurrences
-            occurrences_created = 0
-            if recurrence != 'none':
-                occurrence_dates = agent.generate_occurrence_dates(proposed_time, recurrence, recurrence_end_date)
-                for occ_time in occurrence_dates:
-                    occ_meeting = ScheduledMeeting.objects.create(
+                    # Create the parent meeting
+                    meeting = ScheduledMeeting.objects.create(
                         organizer=company_user,
                         invitee=invitee_users[0],
                         title=meeting_title,
                         description=data.get("description") or "",
                         agenda=agenda if agenda else None,
-                        proposed_time=occ_time,
+                        proposed_time=proposed_time,
                         duration_minutes=duration,
+                        timezone_name=tz_name,
                         status='pending',
                         recurrence=recurrence,
                         recurrence_end_date=recurrence_end_date,
-                        parent_meeting=meeting,
                     )
                     for u in invitee_users:
-                        MeetingParticipant.objects.create(meeting=occ_meeting, user=u, status='pending')
-                    occurrences_created += 1
+                        MeetingParticipant.objects.create(meeting=meeting, user=u, status='pending')
+
+                    # Create initial response record
+                    MeetingResponse.objects.create(
+                        meeting=meeting, responded_by='organizer', action='proposed', proposed_time=proposed_time,
+                    )
+
+                    # Generate recurring occurrences
+                    occurrences_created = 0
+                    for occ_time in occurrence_dates:
+                        occ_meeting = ScheduledMeeting.objects.create(
+                            organizer=company_user,
+                            invitee=invitee_users[0],
+                            title=meeting_title,
+                            description=data.get("description") or "",
+                            agenda=agenda if agenda else None,
+                            proposed_time=occ_time,
+                            duration_minutes=duration,
+                            timezone_name=tz_name,
+                            status='pending',
+                            recurrence=recurrence,
+                            recurrence_end_date=recurrence_end_date,
+                            parent_meeting=meeting,
+                        )
+                        for u in invitee_users:
+                            MeetingParticipant.objects.create(meeting=occ_meeting, user=u, status='pending')
+                        occurrences_created += 1
+            except ScheduleConflict as clash:
+                return Response({"status": "success", "data": _meeting_conflict_reply(clash)},
+                                status=status.HTTP_200_OK)
+
+            _audit_log(company_user, 'meeting_scheduled', 'ScheduledMeeting', meeting.id, meeting.title,
+                      {'invitees': [u.username for u in invitee_users], 'time': time_display,
+                       'occurrences': occurrences_created})
 
             # Generate .ics calendar file
             try:
@@ -4990,26 +4676,40 @@ def meeting_respond(request):
         elif action == 'counter_proposed' and not counter_time_str:
             return Response({"status": "error", "message": "counter_time is required for counter proposals."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Create the response record
-        MeetingResponse.objects.create(
-            meeting=meeting,
-            responded_by='organizer',
-            action=action,
-            proposed_time=counter_time,
-            reason=reason,
-        )
+        # A counter-proposal moves the meeting, and accepting a meeting everyone
+        # had declined revives it; either way the time must be free for everyone
+        # it occupies — across the PM, HR and Frontline calendars.
+        makes_busy = action == 'counter_proposed' or (action == 'accepted' and meeting.status == 'rejected')
+        people = people_for('pm', meeting) if makes_busy else []
+        try:
+            with booking_guard(people):
+                if makes_busy:
+                    ensure_free(people, counter_time or meeting.proposed_time, meeting.duration_minutes,
+                                tz_name=zone_name(request.data.get("timezone"), meeting.timezone_name),
+                                exclude=[('pm', meeting.id)], viewer_source='pm')
 
-        # Update meeting status
-        if action == 'accepted':
-            meeting.status = 'accepted'
-        elif action == 'rejected':
-            meeting.status = 'rejected'
-        elif action == 'counter_proposed':
-            meeting.status = 'counter_proposed'
-            meeting.proposed_time = counter_time
-        elif action == 'withdrawn':
-            meeting.status = 'withdrawn'
-        meeting.save()
+                # Create the response record
+                MeetingResponse.objects.create(
+                    meeting=meeting,
+                    responded_by='organizer',
+                    action=action,
+                    proposed_time=counter_time,
+                    reason=reason,
+                )
+
+                # Update meeting status
+                if action == 'accepted':
+                    meeting.status = 'accepted'
+                elif action == 'rejected':
+                    meeting.status = 'rejected'
+                elif action == 'counter_proposed':
+                    meeting.status = 'counter_proposed'
+                    meeting.proposed_time = counter_time
+                elif action == 'withdrawn':
+                    meeting.status = 'withdrawn'
+                meeting.save()
+        except ScheduleConflict as clash:
+            return clash.response()
         _audit_log(company_user, f'meeting_{action}', 'ScheduledMeeting', meeting.id, meeting.title)
 
         # Notify the invitee (project User) via in-app notification + email

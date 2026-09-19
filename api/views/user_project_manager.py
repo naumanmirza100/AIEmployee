@@ -4,135 +4,56 @@ For users with project_manager role to manage projects and tasks
 """
 
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.contrib.auth.models import User
-from django.utils import timezone
-from django.db import models, transaction
+from django.http import Http404
+from django.db import models
 from datetime import datetime
 import logging
 
-from core.models import Project, Task, UserProfile, Company, TaskRecurrence
-from core.tenancy import AssigneeNotAllowed, company_of_user, resolve_member
+from api.authentication import EmployeeTokenAuthentication
+from core.models import Project, Task, TaskRecurrence
+from core.tenancy import company_of_user, members_of
+from project_manager_agent import services as pm_services
 from api.pagination import paginate
 from django.db.models import Prefetch, prefetch_related_objects
 
 logger = logging.getLogger(__name__)
 
+# Employee logins (auth.User) only, stated explicitly (audit DATA-3). These
+# views used to inherit DEFAULT_AUTHENTICATION_CLASSES; a dashboard login's
+# token now gets a clear error instead of "Invalid token.".
+EMPLOYEE_AUTH = [EmployeeTokenAuthentication, SessionAuthentication]
 
-def _serialize_task_brief(task):
+
+# Dependency helpers live in project_manager_agent.services.tasks now.
+_serialize_task_brief = pm_services.serialize_brief
+
+
+def _person_name(user):
+    if user is None:
+        return None
+    return user.get_full_name() if (user.first_name or user.last_name) else user.username
+
+
+def _project_payload(project):
     return {
-        'id': task.id,
-        'title': task.title,
-        'status': task.status,
+        'id': project.id,
+        'name': project.name,
+        'description': project.description,
+        'status': project.status,
+        'priority': project.priority,
+        'project_type': project.project_type,
+        'deadline': project.effective_deadline.isoformat() if project.effective_deadline else None,
+        'start_date': project.start_date.isoformat() if project.start_date else None,
     }
 
 
-def _get_blockers(task, dep_ids=None):
-    """
-    Return the list of dependency tasks that block this one
-    (i.e. depends_on entries whose status != 'done').
-    `dep_ids` lets the caller pass a candidate set instead of using task.depends_on.all().
-    """
-    if dep_ids is None:
-        deps = task.depends_on.all()
-    else:
-        deps = Task.objects.filter(id__in=list(dep_ids))
-    return [d for d in deps if d.status != 'done']
-
-
-def _dependency_creates_cycle(task_id, candidate_dep_ids):
-    """
-    Return True if marking `task_id` as depending on every id in
-    `candidate_dep_ids` would introduce a cycle. We walk
-    depends_on transitively from each candidate and see if we ever reach task_id.
-    Empty input is safe.
-    """
-    if not candidate_dep_ids:
-        return False
-    target = int(task_id)
-    visited = set()
-    stack = [int(c) for c in candidate_dep_ids if int(c) != target]
-    # Direct self-loop check
-    if any(int(c) == target for c in candidate_dep_ids):
-        return True
-    # Pre-fetch the dependency graph as a dict to avoid N queries per node
-    edges = {}
-    for tid, dep_id in Task.depends_on.through.objects.values_list('from_task_id', 'to_task_id'):
-        edges.setdefault(tid, set()).add(dep_id)
-    while stack:
-        node = stack.pop()
-        if node in visited:
-            continue
-        visited.add(node)
-        if node == target:
-            return True
-        for next_node in edges.get(node, ()):
-            if next_node not in visited:
-                stack.append(next_node)
-    return False
-
-
-def _validate_dependency_change(task, raw_dep_ids):
-    """
-    Validate a proposed full-replace dependency list for `task`.
-    Returns (cleaned_dep_ids: list[int], error: Response|None).
-    """
-    if not isinstance(raw_dep_ids, list):
-        return None, Response({
-            'status': 'error',
-            'message': 'depends_on_ids must be a list of task IDs.'
-        }, status=status.HTTP_400_BAD_REQUEST)
-
-    cleaned = []
-    seen = set()
-    for raw in raw_dep_ids:
-        try:
-            tid = int(raw)
-        except (TypeError, ValueError):
-            return None, Response({
-                'status': 'error',
-                'message': f'Invalid task id in depends_on_ids: {raw!r}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        if tid == task.id:
-            return None, Response({
-                'status': 'error',
-                'message': 'A task cannot depend on itself.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        if tid in seen:
-            continue
-        seen.add(tid)
-        cleaned.append(tid)
-
-    if cleaned:
-        found = list(Task.objects.filter(id__in=cleaned).values_list('id', 'project_id'))
-        found_ids = {tid for tid, _ in found}
-        missing = [t for t in cleaned if t not in found_ids]
-        if missing:
-            return None, Response({
-                'status': 'error',
-                'message': f'Dependency tasks not found: {missing}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        # Dependencies must live in the same project
-        out_of_project = [tid for tid, pid in found if pid != task.project_id]
-        if out_of_project:
-            return None, Response({
-                'status': 'error',
-                'message': f'Dependencies must be in the same project. Offending task IDs: {out_of_project}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        # Cycle check
-        if _dependency_creates_cycle(task.id, cleaned):
-            return None, Response({
-                'status': 'error',
-                'message': 'These dependencies would create a cycle.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-    return cleaned, None
-
-
 @api_view(['GET'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def get_project_manager_projects_tasks(request):
     """
@@ -222,123 +143,19 @@ def get_project_manager_projects_tasks(request):
 
 
 @api_view(['POST'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def create_project_manager_project(request):
     """
     Create a new project for a project manager
-    POST /api/user/project-manager/projects
+    POST /api/user/project-manager/projects/create
+    Rules (validation, duplicate names, audit): project_manager_agent.services.
     """
     try:
-        user = request.user
-        
-        # Check if user is a project manager
-        if not hasattr(user, 'profile') or user.profile.role != 'project_manager':
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. Project manager role required.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        # Get user's company from profile
-        user_profile = user.profile
-        company = user_profile.company
-        
-        if not company:
-            return Response({
-                'status': 'error',
-                'message': 'User is not associated with a company'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get project data
-        name = request.data.get('name', '').strip()
-        if not name:
-            return Response({
-                'status': 'error',
-                'message': 'Project name is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        description = request.data.get('description', '').strip()
-        status_val = request.data.get('status', 'planning')
-        priority_val = request.data.get('priority', 'medium')
-        project_type = request.data.get('project_type', 'web_app')
-        # `end_date` is the legacy alias for `deadline`; accept either on the
-        # wire and mirror to both DB columns so existing readers keep working.
-        deadline = request.data.get('deadline') or request.data.get('end_date')
-        start_date = request.data.get('start_date')
-        
-        # Validate status and priority
-        valid_statuses = ['planning', 'active', 'on_hold', 'completed', 'cancelled', 'draft', 'posted', 'in_progress', 'review']
-        valid_priorities = ['low', 'medium', 'high', 'urgent']
-        valid_project_types = ['website', 'mobile_app', 'web_app', 'ai_bot', 'integration', 'marketing', 'database', 'consulting', 'ai_system']
-        
-        if status_val not in valid_statuses:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if priority_val not in valid_priorities:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid priority. Must be one of: {", ".join(valid_priorities)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if project_type not in valid_project_types:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid project type. Must be one of: {", ".join(valid_project_types)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Parse dates
-        deadline_date = None
-        if deadline:
-            try:
-                deadline_date = datetime.strptime(deadline, '%Y-%m-%d').date()
-            except ValueError:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid deadline format. Use YYYY-MM-DD'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        start_date_obj = None
-        if start_date:
-            try:
-                start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
-            except ValueError:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid start_date format. Use YYYY-MM-DD'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Create project. Mirror deadline_date into the legacy end_date column.
-        project = Project.objects.create(
-            name=name,
-            description=description,
-            owner=user,
-            project_manager=user,
-            company=company,
-            status=status_val,
-            priority=priority_val,
-            project_type=project_type,
-            deadline=deadline_date,
-            start_date=start_date_obj,
-            end_date=deadline_date,
-        )
-        
-        return Response({
-            'status': 'success',
-            'message': 'Project created successfully',
-            'data': {
-                'id': project.id,
-                'name': project.name,
-                'description': project.description,
-                'status': project.status,
-                'priority': project.priority,
-                'project_type': project.project_type,
-                'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
-                'start_date': project.start_date.isoformat() if project.start_date else None,
-            }
-        }, status=status.HTTP_201_CREATED)
-    
+        actor = pm_services.EmployeeActor.from_request(request)
+        project = pm_services.create_project(actor, request.data)
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except Exception as e:
         logger.exception(f"Error in create_project_manager_project: {str(e)}")
         return Response({
@@ -347,161 +164,27 @@ def create_project_manager_project(request):
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    return Response({
+        'status': 'success',
+        'message': 'Project created successfully',
+        'data': _project_payload(project),
+    }, status=status.HTTP_201_CREATED)
+
 
 @api_view(['POST'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def create_project_manager_task(request):
     """
     Create a new task in a project (for project managers)
-    POST /api/user/project-manager/tasks
+    POST /api/user/project-manager/tasks/create
+    Rules (validation, dependencies, due-date bounds, audit): project_manager_agent.services.
     """
     try:
-        user = request.user
-        
-        # Check if user is a project manager
-        if not hasattr(user, 'profile') or user.profile.role != 'project_manager':
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. Project manager role required.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        # Get task data
-        project_id = request.data.get('project_id')
-        if not project_id:
-            return Response({
-                'status': 'error',
-                'message': 'project_id is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # L1 — tenant gate. The existing membership check below was role-based
-        # only (creator/owner/has-task); a user accidentally attached to a
-        # foreign-company project would have full access. Filter by company at
-        # the lookup so that path is closed even before the membership check runs.
-        user_company = getattr(getattr(user, 'profile', None), 'company', None)
-        project_qs = Project.objects.filter(id=project_id)
-        if user_company is not None:
-            project_qs = project_qs.filter(company=user_company)
-        project = project_qs.first()
-        if not project:
-            return Response({
-                'status': 'error',
-                'message': 'Project not found',
-            }, status=status.HTTP_404_NOT_FOUND)
-
-        # Check if user has access to this project (has at least one task assigned)
-        user_has_access = Task.objects.filter(project=project, assignee=user).exists()
-        if not user_has_access and project.project_manager != user and project.owner != user:
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. You must have at least one task in this project.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        title = request.data.get('title', '').strip()
-        if not title:
-            return Response({
-                'status': 'error',
-                'message': 'Task title is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        description = request.data.get('description', '').strip()
-        status_val = request.data.get('status', 'todo')
-        priority_val = request.data.get('priority', 'medium')
-        assignee_id = request.data.get('assignee_id')
-        due_date_str = request.data.get('due_date')
-        estimated_hours = request.data.get('estimated_hours')
-        
-        # Validate status and priority
-        valid_statuses = ['todo', 'in_progress', 'review', 'done', 'blocked']
-        valid_priorities = ['low', 'medium', 'high']
-        
-        if status_val not in valid_statuses:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if priority_val not in valid_priorities:
-            return Response({
-                'status': 'error',
-                'message': f'Invalid priority. Must be one of: {", ".join(valid_priorities)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Handle assignee - must be from the same company.
-        # The previous check allowed assignment whenever BOTH users lacked a
-        # `profile.company` — but most profiles link through
-        # `created_by_company_user` instead, so that branch fired for users in
-        # different tenants. Membership now comes from core.tenancy, which
-        # understands both links. Self-assignment stays allowed for users with
-        # no company at all.
-        assignee = None
-        if assignee_id:
-            try:
-                if int(assignee_id) == user.id:
-                    assignee = user
-                else:
-                    assignee = resolve_member(assignee_id, company=company_of_user(user))
-            except (AssigneeNotAllowed, TypeError, ValueError):
-                return Response({
-                    'status': 'error',
-                    'message': 'Assignee must be from the same company'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Parse due date
-        due_date = None
-        if due_date_str:
-            try:
-                # Try ISO format first
-                if 'T' in due_date_str:
-                    due_date = datetime.fromisoformat(due_date_str.replace('Z', '+00:00'))
-                else:
-                    due_date = datetime.strptime(due_date_str, '%Y-%m-%d')
-                    due_date = timezone.make_aware(due_date)
-            except ValueError:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid due_date format. Use YYYY-MM-DD or ISO format'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Create task
-        task = Task.objects.create(
-            title=title,
-            description=description,
-            project=project,
-            assignee=assignee,
-            status=status_val,
-            priority=priority_val,
-            due_date=due_date,
-            estimated_hours=estimated_hours,
-        )
-
-        # Optional initial dependencies (T-F1)
-        depends_on_ids = request.data.get('depends_on_ids')
-        if depends_on_ids is not None:
-            cleaned, dep_error = _validate_dependency_change(task, depends_on_ids)
-            if dep_error is not None:
-                # Roll back the task we just created so the validation failure isn't
-                # silently swallowed
-                task.delete()
-                return dep_error
-            if cleaned:
-                task.depends_on.set(cleaned)
-
-        return Response({
-            'status': 'success',
-            'message': 'Task created successfully',
-            'data': {
-                'id': task.id,
-                'title': task.title,
-                'description': task.description,
-                'status': task.status,
-                'priority': task.priority,
-                'assignee_id': task.assignee.id if task.assignee else None,
-                'assignee_name': task.assignee.get_full_name() if task.assignee and (task.assignee.first_name or task.assignee.last_name) else (task.assignee.username if task.assignee else None),
-                'due_date': task.due_date.isoformat() if task.due_date else None,
-                'depends_on_ids': list(task.depends_on.values_list('id', flat=True)),
-            }
-        }, status=status.HTTP_201_CREATED)
-    
+        actor = pm_services.EmployeeActor.from_request(request)
+        task = pm_services.create_task(actor, request.data)
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except Exception as e:
         logger.exception(f"Error in create_project_manager_task: {str(e)}")
         return Response({
@@ -510,8 +193,25 @@ def create_project_manager_task(request):
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    return Response({
+        'status': 'success',
+        'message': 'Task created successfully',
+        'data': {
+            'id': task.id,
+            'title': task.title,
+            'description': task.description,
+            'status': task.status,
+            'priority': task.priority,
+            'assignee_id': task.assignee_id,
+            'assignee_name': _person_name(task.assignee),
+            'due_date': task.due_date.isoformat() if task.due_date else None,
+            'depends_on_ids': list(task.depends_on.values_list('id', flat=True)),
+        }
+    }, status=status.HTTP_201_CREATED)
+
 
 @api_view(['GET'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def get_company_users_for_pm(request):
     """
@@ -528,31 +228,33 @@ def get_company_users_for_pm(request):
                 'message': 'Access denied. Project manager role required.'
             }, status=status.HTTP_403_FORBIDDEN)
         
-        # Get user's company
-        user_profile = user.profile
-        company = user_profile.company
-        
+        company = company_of_user(user)
+
         if not company:
             return Response({
                 'status': 'error',
                 'message': 'User is not associated with a company'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get all users from the same company
-        company_user_profiles, pagination = paginate(
+
+        # The company's active employee logins, through either profile link —
+        # the same rule the assignment endpoints enforce (core.tenancy). This
+        # listed `profile.company` matches only, so colleagues linked through
+        # their creating dashboard login were missing, and deactivated users
+        # were offered even though assigning them is refused.
+        members, pagination = paginate(
             request,
-            UserProfile.objects.filter(company=company).select_related('user').order_by('id'),
+            members_of(company).select_related('profile').order_by('id'),
             default_limit=500, max_limit=1000,
         )
-        
+
         users_data = []
-        for profile in company_user_profiles:
+        for member in members:
             users_data.append({
-                'id': profile.user.id,
-                'email': profile.user.email,
-                'username': profile.user.username,
-                'full_name': profile.user.get_full_name() or profile.user.username,
-                'role': profile.role,
+                'id': member.id,
+                'email': member.email,
+                'username': member.username,
+                'full_name': member.get_full_name() or member.username,
+                'role': getattr(getattr(member, 'profile', None), 'role', None),
             })
         
         return Response({
@@ -571,6 +273,7 @@ def get_company_users_for_pm(request):
 
 
 @api_view(['GET'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def get_project_manager_projects(request):
     """
@@ -635,126 +338,19 @@ def get_project_manager_projects(request):
 
 
 @api_view(['PUT', 'PATCH'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def update_project_manager_project(request, project_id):
     """
     Update a project (for project managers)
     PUT/PATCH /api/user/project-manager/projects/{project_id}/update
+    Rules: project_manager_agent.services.
     """
     try:
-        user = request.user
-        
-        # Check if user is a project manager
-        if not hasattr(user, 'profile') or user.profile.role != 'project_manager':
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. Project manager role required.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        # L1 — tenant gate. Same belt-and-suspenders as create_project_manager_task:
-        # filter the lookup by company so a stray cross-tenant project_id can't
-        # reach the role-based membership check below.
-        user_company = getattr(getattr(user, 'profile', None), 'company', None)
-        project_qs = Project.objects.filter(id=project_id)
-        if user_company is not None:
-            project_qs = project_qs.filter(company=user_company)
-        project = project_qs.first()
-        if not project:
-            return Response({
-                'status': 'error',
-                'message': 'Project not found',
-            }, status=status.HTTP_404_NOT_FOUND)
-
-        # Check if user has access
-        user_has_access = (
-            project.project_manager == user or
-            project.owner == user or
-            Task.objects.filter(project=project, assignee=user).exists()
-        )
-
-        if not user_has_access:
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. You do not have permission to update this project.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        data = request.data.copy()
-        
-        # Update allowed fields
-        if 'name' in data:
-            project.name = data['name']
-        if 'description' in data:
-            project.description = data.get('description', '')
-        if 'status' in data:
-            # Validate status
-            valid_statuses = [choice[0] for choice in Project.STATUS_CHOICES]
-            if data['status'] in valid_statuses:
-                project.status = data['status']
-        if 'priority' in data:
-            # Validate priority
-            valid_priorities = [choice[0] for choice in Project.PRIORITY_CHOICES]
-            if data['priority'] in valid_priorities:
-                project.priority = data['priority']
-        if 'project_type' in data:
-            # Validate project_type
-            valid_types = [choice[0] for choice in Project.PROJECT_TYPE_CHOICES]
-            if data['project_type'] in valid_types:
-                project.project_type = data['project_type']
-        # `end_date` (legacy alias for deadline) is accepted on the wire but
-        # treated as the same field. Whichever key the caller sends is mirrored
-        # to both DB columns so existing readers keep working.
-        if 'deadline' in data or 'end_date' in data:
-            deadline_str = data.get('deadline')
-            if deadline_str is None:
-                deadline_str = data.get('end_date')
-            if deadline_str:
-                try:
-                    parsed = datetime.strptime(deadline_str, '%Y-%m-%d').date()
-                    project.deadline = parsed
-                    project.end_date = parsed
-                except ValueError:
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid deadline format. Use YYYY-MM-DD'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                project.deadline = None
-                project.end_date = None
-        if 'start_date' in data:
-            start_date_str = data.get('start_date')
-            if start_date_str:
-                try:
-                    project.start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-                except ValueError:
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid start_date format. Use YYYY-MM-DD'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                project.start_date = None
-
-        project.save()
-        
-        return Response({
-            'status': 'success',
-            'message': 'Project updated successfully',
-            'data': {
-                'id': project.id,
-                'name': project.name,
-                'description': project.description,
-                'status': project.status,
-                'priority': project.priority,
-                'project_type': project.project_type,
-                'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
-                'start_date': project.start_date.isoformat() if project.start_date else None,
-            }
-        }, status=status.HTTP_200_OK)
-
-    except Project.DoesNotExist:
-        return Response({
-            'status': 'error',
-            'message': 'Project not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+        actor = pm_services.EmployeeActor.from_request(request)
+        project, _ = pm_services.update_project(actor, project_id, request.data)
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except Exception as e:
         logger.exception(f"Error updating project: {str(e)}")
         return Response({
@@ -763,154 +359,27 @@ def update_project_manager_project(request, project_id):
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    return Response({
+        'status': 'success',
+        'message': 'Project updated successfully',
+        'data': _project_payload(project),
+    }, status=status.HTTP_200_OK)
+
 
 @api_view(['PUT', 'PATCH'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def update_project_manager_task(request, task_id):
     """
     Update a task (for project managers)
     PUT/PATCH /api/user/project-manager/tasks/{task_id}/update
+    Rules: project_manager_agent.services.
     """
     try:
-        user = request.user
-        
-        # Check if user is a project manager
-        if not hasattr(user, 'profile') or user.profile.role != 'project_manager':
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. Project manager role required.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        # Get task and verify it belongs to a project the user has access to
-        task = get_object_or_404(Task, id=task_id)
-        project = task.project
-        
-        # Get user's company
-        user_company = None
-        if hasattr(user, 'profile') and user.profile.company:
-            user_company = user.profile.company
-        
-        # Check if user has access to this project
-        # Project managers can edit tasks in projects they manage or own, OR if they're in the same company
-        user_has_access = (
-            project.project_manager == user or 
-            project.owner == user or 
-            Task.objects.filter(project=project, assignee=user).exists() or
-            (user_company and project.company == user_company)
-        )
-        
-        if not user_has_access:
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. You do not have permission to update this task.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        data = request.data.copy()
-        
-        # Update allowed fields
-        if 'title' in data:
-            task.title = data['title']
-        if 'description' in data:
-            task.description = data.get('description', '')
-        if 'priority' in data:
-            # Validate priority
-            valid_priorities = [choice[0] for choice in Task.PRIORITY_CHOICES]
-            if data['priority'] in valid_priorities:
-                task.priority = data['priority']
-        if 'status' in data:
-            # Validate status
-            valid_statuses = [choice[0] for choice in Task.STATUS_CHOICES]
-            if data['status'] in valid_statuses:
-                desired = data['status']
-                # T-F1 — block transitions to in_progress/done when prerequisites are
-                # not yet done. Caller can pass force=true to override.
-                force = str(data.get('force', '')).lower() in ('1', 'true', 'yes')
-                if desired in ('in_progress', 'done') and not force:
-                    blockers = _get_blockers(task)
-                    if blockers:
-                        return Response({
-                            'status': 'error',
-                            'message': f'Cannot move task to {desired}: blocked by incomplete dependencies.',
-                            'blocked_by': [_serialize_task_brief(b) for b in blockers],
-                            'hint': 'Pass force=true to override, or complete the blocking tasks first.',
-                        }, status=status.HTTP_409_CONFLICT)
-                task.status = desired
-        if 'assignee_id' in data:
-            # Update assignee - must be from the same company
-            assignee_id = data.get('assignee_id')
-            # Handle string 'none', empty string, or None
-            if assignee_id in [None, '', 'none', 'null']:
-                task.assignee = None
-            else:
-                try:
-                    # Convert to int if it's a string
-                    if isinstance(assignee_id, str):
-                        assignee_id = int(assignee_id)
-                    
-                    # Unchanged assignee: keep it. Otherwise verify membership
-                    # through core.tenancy (see the create path for why the old
-                    # both-have-no-company rule was unsafe).
-                    if task.assignee_id == assignee_id:
-                        pass
-                    elif assignee_id == user.id:
-                        task.assignee = user
-                    else:
-                        task.assignee = resolve_member(
-                            assignee_id, company=company_of_user(user))
-                except (AssigneeNotAllowed, ValueError, TypeError) as e:
-                    logger.warning(f"Rejected assignee_id {assignee_id}: {e}")
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid assignee. User must be from the same company.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-        if 'due_date' in data:
-            due_date_str = data.get('due_date')
-            if due_date_str:
-                try:
-                    if 'T' in due_date_str:
-                        task.due_date = datetime.fromisoformat(due_date_str.replace('Z', '+00:00'))
-                    else:
-                        due_date = datetime.strptime(due_date_str, '%Y-%m-%d')
-                        task.due_date = timezone.make_aware(due_date)
-                except ValueError:
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid due_date format. Use YYYY-MM-DD or ISO format'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                task.due_date = None
-        
-        task.save()
-
-        # Optional dependency replacement (T-F1)
-        if 'depends_on_ids' in data:
-            cleaned, dep_error = _validate_dependency_change(task, data['depends_on_ids'])
-            if dep_error is not None:
-                return dep_error
-            task.depends_on.set(cleaned)
-
-        return Response({
-            'status': 'success',
-            'message': 'Task updated successfully',
-            'data': {
-                'id': task.id,
-                'title': task.title,
-                'description': task.description,
-                'priority': task.priority,
-                'status': task.status,
-                'assignee_id': task.assignee.id if task.assignee else None,
-                'assignee_name': task.assignee.get_full_name() if task.assignee and (task.assignee.first_name or task.assignee.last_name) else (task.assignee.username if task.assignee else None),
-                'assignee_email': task.assignee.email if task.assignee else None,
-                'due_date': task.due_date.isoformat() if task.due_date else None,
-                'depends_on_ids': list(task.depends_on.values_list('id', flat=True)),
-            }
-        }, status=status.HTTP_200_OK)
-    
-    except Task.DoesNotExist:
-        return Response({
-            'status': 'error',
-            'message': 'Task not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+        actor = pm_services.EmployeeActor.from_request(request)
+        task, _ = pm_services.update_task(actor, task_id, request.data)
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except Exception as e:
         logger.exception(f"Error updating task: {str(e)}")
         return Response({
@@ -919,228 +388,44 @@ def update_project_manager_task(request, task_id):
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    return Response({
+        'status': 'success',
+        'message': 'Task updated successfully',
+        'data': {
+            'id': task.id,
+            'title': task.title,
+            'description': task.description,
+            'priority': task.priority,
+            'status': task.status,
+            'assignee_id': task.assignee_id,
+            'assignee_name': _person_name(task.assignee),
+            'assignee_email': task.assignee.email if task.assignee else None,
+            'due_date': task.due_date.isoformat() if task.due_date else None,
+            'depends_on_ids': list(task.depends_on.values_list('id', flat=True)),
+        }
+    }, status=status.HTTP_200_OK)
+
 
 BULK_TASK_UPDATE_MAX = 500
 
 
 @api_view(['POST'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def bulk_update_project_manager_tasks(request):
     """
     Bulk update tasks for a project manager.
     POST /api/user/project-manager/tasks/bulk-update
 
-    Body: {
-        "ids": [1, 2, 3, ...],
-        "status"?: "todo"|"in_progress"|"review"|"done"|"blocked",
-        "priority"?: "low"|"medium"|"high",
-        "assignee_id"?: <user_id> | null | "none",
-        "due_date"?: "YYYY-MM-DD" | ISO datetime | null
-    }
+    Body: {"ids": [...], "status"?, "priority"?, "assignee_id"?, "due_date"?, "force"?}
     Returns: { updated: [ids], skipped: [{id, reason}], not_found: [ids] }
+    Rules: project_manager_agent.services.bulk_update_tasks.
     """
     try:
-        user = request.user
-
-        if not hasattr(user, 'profile') or user.profile.role != 'project_manager':
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. Project manager role required.'
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        data = request.data or {}
-        ids = data.get('ids') or []
-        if not isinstance(ids, list) or not ids:
-            return Response({
-                'status': 'error',
-                'message': 'ids must be a non-empty list of task IDs'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if len(ids) > BULK_TASK_UPDATE_MAX:
-            return Response({
-                'status': 'error',
-                'message': f'Too many tasks. Limit is {BULK_TASK_UPDATE_MAX} per request.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Normalise IDs to ints, drop garbage
-        normalized_ids = []
-        for raw in ids:
-            try:
-                normalized_ids.append(int(raw))
-            except (TypeError, ValueError):
-                continue
-        if not normalized_ids:
-            return Response({
-                'status': 'error',
-                'message': 'No valid task IDs provided'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        # At least one updatable field must be supplied
-        supplied_fields = [k for k in ('status', 'priority', 'assignee_id', 'due_date') if k in data]
-        if not supplied_fields:
-            return Response({
-                'status': 'error',
-                'message': 'No fields to update. Provide status, priority, assignee_id, or due_date.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        bulk_force = str(data.get('force', '')).lower() in ('1', 'true', 'yes')
-
-        # Validate the shared update values once
-        new_status = None
-        if 'status' in data:
-            valid_statuses = [c[0] for c in Task.STATUS_CHOICES]
-            if data['status'] not in valid_statuses:
-                return Response({
-                    'status': 'error',
-                    'message': f"Invalid status. Allowed: {valid_statuses}"
-                }, status=status.HTTP_400_BAD_REQUEST)
-            new_status = data['status']
-
-        new_priority = None
-        if 'priority' in data:
-            valid_priorities = [c[0] for c in Task.PRIORITY_CHOICES]
-            if data['priority'] not in valid_priorities:
-                return Response({
-                    'status': 'error',
-                    'message': f"Invalid priority. Allowed: {valid_priorities}"
-                }, status=status.HTTP_400_BAD_REQUEST)
-            new_priority = data['priority']
-
-        # Resolve assignee once (None means "unassign", missing key means "leave alone")
-        assignee_change = ('assignee_id' in data)
-        new_assignee = None
-        if assignee_change:
-            raw_assignee = data.get('assignee_id')
-            if raw_assignee in [None, '', 'none', 'null']:
-                new_assignee = None
-            else:
-                # Membership via core.tenancy. The old pre-validation below
-                # allowed assignment whenever neither user had profile.company —
-                # the common case, since most profiles link via
-                # created_by_company_user — letting bulk updates assign tasks
-                # to users in other companies.
-                try:
-                    if int(raw_assignee) == user.id:
-                        new_assignee = user
-                    else:
-                        new_assignee = resolve_member(
-                            raw_assignee, company=company_of_user(user))
-                except (AssigneeNotAllowed, ValueError, TypeError):
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid assignee. User must be from the same company.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-        # Parse due_date once
-        due_date_change = ('due_date' in data)
-        new_due_date = None
-        if due_date_change:
-            due_date_str = data.get('due_date')
-            if due_date_str in [None, '']:
-                new_due_date = None
-            else:
-                try:
-                    if 'T' in str(due_date_str):
-                        new_due_date = datetime.fromisoformat(str(due_date_str).replace('Z', '+00:00'))
-                    else:
-                        parsed = datetime.strptime(str(due_date_str), '%Y-%m-%d')
-                        new_due_date = timezone.make_aware(parsed)
-                except ValueError:
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid due_date format. Use YYYY-MM-DD or ISO format.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-        user_company = None
-        if hasattr(user, 'profile') and user.profile.company:
-            user_company = user.profile.company
-
-        tasks_qs = Task.objects.filter(id__in=normalized_ids).select_related('project', 'assignee')
-        found_by_id = {t.id: t for t in tasks_qs}
-        not_found = [tid for tid in normalized_ids if tid not in found_by_id]
-
-        updated = []
-        skipped = []
-
-        # One transaction for the batch, a savepoint per task. The endpoint's
-        # contract is per-item (updated / skipped / not_found), so a single bad
-        # task must not roll back the others — hence the savepoint. But a crash
-        # partway used to leave some tasks changed and return a 500 with no
-        # `updated` list, so the client couldn't tell what had happened; the
-        # outer transaction makes that case a clean no-op instead.
-        with transaction.atomic():
-            for tid in normalized_ids:
-                task = found_by_id.get(tid)
-                if task is None:
-                    continue
-                project = task.project
-
-                # Access check — same as single-task update
-                has_access = (
-                    project.project_manager_id == user.id
-                    or project.owner_id == user.id
-                    or Task.objects.filter(project=project, assignee=user).exists()
-                    or (user_company and project.company_id == user_company.id)
-                )
-                if not has_access:
-                    skipped.append({'id': tid, 'reason': 'access_denied'})
-                    continue
-
-                try:
-                    with transaction.atomic():  # savepoint per task
-                        update_fields = []
-                        if new_status is not None and task.status != new_status:
-                            # T-F1 — honour blockers on transitions to in_progress/done
-                            if new_status in ('in_progress', 'done') and not bulk_force:
-                                blockers = _get_blockers(task)
-                                if blockers:
-                                    skipped.append({
-                                        'id': tid,
-                                        'reason': 'blocked_by_dependencies',
-                                        'blocked_by': [b.id for b in blockers],
-                                    })
-                                    continue
-                            task.status = new_status
-                            update_fields.append('status')
-                        if new_priority is not None and task.priority != new_priority:
-                            task.priority = new_priority
-                            update_fields.append('priority')
-                        if assignee_change:
-                            if (task.assignee_id or None) != (new_assignee.id if new_assignee else None):
-                                task.assignee = new_assignee
-                                update_fields.append('assignee')
-                        if due_date_change:
-                            if task.due_date != new_due_date:
-                                task.due_date = new_due_date
-                                update_fields.append('due_date')
-
-                        if update_fields:
-                            task.save(update_fields=update_fields + ['updated_at'])
-                            updated.append(tid)
-                        else:
-                            skipped.append({'id': tid, 'reason': 'no_change'})
-                except Exception as exc:
-                    logger.exception(f"Bulk task update failed for task {tid}: {exc}")
-                    skipped.append({'id': tid, 'reason': 'save_failed'})
-
-        logger.info(
-            f"[BULK TASK UPDATE] user={user.id} requested={len(normalized_ids)} "
-            f"updated={len(updated)} skipped={len(skipped)} not_found={len(not_found)}"
-        )
-
-        return Response({
-            'status': 'success',
-            'updated': updated,
-            'skipped': skipped,
-            'not_found': not_found,
-            'summary': {
-                'requested': len(normalized_ids),
-                'updated': len(updated),
-                'skipped': len(skipped),
-                'not_found': len(not_found),
-            }
-        }, status=status.HTTP_200_OK)
-
+        actor = pm_services.EmployeeActor.from_request(request)
+        result = pm_services.bulk_update_tasks(actor, request.data or {})
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except Exception as e:
         logger.exception(f"Error in bulk task update: {str(e)}")
         return Response({
@@ -1149,76 +434,58 @@ def bulk_update_project_manager_tasks(request):
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    logger.info(
+        f"[BULK TASK UPDATE] user={request.user.id} requested={result['requested']} "
+        f"updated={len(result['updated'])} skipped={len(result['skipped'])} "
+        f"not_found={len(result['not_found'])}"
+    )
+    return Response({
+        'status': 'success',
+        'updated': result['updated'],
+        'skipped': result['skipped'],
+        'not_found': result['not_found'],
+        'summary': {
+            'requested': result['requested'],
+            'updated': len(result['updated']),
+            'skipped': len(result['skipped']),
+            'not_found': len(result['not_found']),
+        }
+    }, status=status.HTTP_200_OK)
+
 
 @api_view(['PUT', 'PATCH'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def set_project_manager_task_dependencies(request, task_id):
     """
-    Replace the full dependency set for a task.
+    Replace a task's dependency list.
     PUT/PATCH /api/user/project-manager/tasks/{task_id}/dependencies
     Body: { "depends_on_ids": [<task_id>, ...] }
     """
     try:
-        user = request.user
-        if not hasattr(user, 'profile') or user.profile.role != 'project_manager':
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. Project manager role required.'
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        task = get_object_or_404(Task, id=task_id)
-        project = task.project
-
-        user_company = getattr(getattr(user, 'profile', None), 'company', None)
-        has_access = (
-            project.project_manager_id == user.id
-            or project.owner_id == user.id
-            or Task.objects.filter(project=project, assignee=user).exists()
-            or (user_company and project.company_id == user_company.id)
-        )
-        if not has_access:
-            return Response({
-                'status': 'error',
-                'message': 'Access denied. You do not have permission to modify this task.'
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        raw_ids = request.data.get('depends_on_ids')
-        if raw_ids is None:
-            return Response({
-                'status': 'error',
-                'message': 'depends_on_ids is required (pass [] to clear).'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        cleaned, dep_error = _validate_dependency_change(task, raw_ids)
-        if dep_error is not None:
-            return dep_error
-
-        task.depends_on.set(cleaned)
-
-        deps = list(task.depends_on.all())
-        return Response({
-            'status': 'success',
-            'message': 'Dependencies updated.',
-            'data': {
-                'id': task.id,
-                'depends_on_ids': [d.id for d in deps],
-                'depends_on': [_serialize_task_brief(d) for d in deps],
-                'blocked_by': [_serialize_task_brief(d) for d in deps if d.status != 'done'],
-            }
-        }, status=status.HTTP_200_OK)
-
-    except Task.DoesNotExist:
-        return Response({
-            'status': 'error',
-            'message': 'Task not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+        actor = pm_services.EmployeeActor.from_request(request)
+        task = pm_services.set_dependencies(actor, task_id, request.data.get('depends_on_ids'))
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except Exception as e:
         logger.exception(f"Error setting task dependencies: {str(e)}")
         return Response({
             'status': 'error',
-            'message': 'Failed to update dependencies',
+            'message': 'Failed to update task dependencies',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    deps = list(task.depends_on.all())
+    return Response({
+        'status': 'success',
+        'message': 'Dependencies updated.',
+        'data': {
+            'id': task.id,
+            'depends_on_ids': [d.id for d in deps],
+            'depends_on': [_serialize_task_brief(d) for d in deps],
+            'blocked_by': [_serialize_task_brief(d) for d in deps if d.status != 'done'],
+        }
+    }, status=status.HTTP_200_OK)
 
 
 def _serialize_recurrence(rec):
@@ -1239,7 +506,7 @@ def _serialize_recurrence(rec):
 
 
 def _task_access_check(user, task):
-    user_company = getattr(getattr(user, 'profile', None), 'company', None)
+    user_company = company_of_user(user)
     project = task.project
     if (project.project_manager_id == user.id
             or project.owner_id == user.id
@@ -1253,6 +520,7 @@ def _task_access_check(user, task):
 
 
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
+@authentication_classes(EMPLOYEE_AUTH)
 @permission_classes([IsAuthenticated])
 def project_manager_task_recurrence(request, task_id):
     """
@@ -1386,7 +654,7 @@ def project_manager_task_recurrence(request, task_id):
         )
         return Response({'status': 'success', 'data': _serialize_recurrence(rec)}, status=status.HTTP_200_OK)
 
-    except Task.DoesNotExist:
+    except (Task.DoesNotExist, Http404):
         return Response({'status': 'error', 'message': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         logger.exception(f"Error managing task recurrence: {str(e)}")

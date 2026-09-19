@@ -2,8 +2,32 @@
 Custom authentication for Company Users
 """
 from rest_framework import authentication
+from rest_framework.authentication import TokenAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from core.models import CompanyUser, CompanyUserToken, Company
+
+
+class EmployeeTokenAuthentication(TokenAuthentication):
+    """DRF token authentication for employee logins (auth.User).
+
+    The employee-facing PM API (/api/user/project-manager/) used to rely on
+    DEFAULT_AUTHENTICATION_CLASSES without saying so (audit item DATA-3). A
+    dashboard login's token (CompanyUserToken) is sent in the same
+    "Authorization: Token <key>" header, so it failed with a bare
+    "Invalid token." — which looked like an expired session, not a wrong login
+    type. This says what actually went wrong.
+    """
+
+    def authenticate_credentials(self, key):
+        try:
+            return super().authenticate_credentials(key)
+        except AuthenticationFailed:
+            if CompanyUserToken.objects.filter(key=key).exists():
+                raise AuthenticationFailed(
+                    'This is a company dashboard login. These endpoints are for employee '
+                    'logins; dashboard logins use /api/project-manager/ and /api/company/.'
+                )
+            raise
 
 
 class CompanyUserTokenAuthentication(authentication.BaseAuthentication):

@@ -21,7 +21,7 @@ the same Employee row; without a guard we'd loop. Reuses Frontline's
 import logging
 
 from django.contrib.auth.models import User
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -35,6 +35,28 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------
 # User → Employee auto-sync (via UserProfile.company)
 # --------------------------------------------------------------------------
+
+# Stand-in work email for a login with no email address. `Employee` is unique
+# on (company, work_email), so a second email-less login used to fail with a
+# duplicate '' and never get an Employee row, which left it invisible to HR,
+# including the meeting scheduler. `.invalid` is a reserved TLD: nothing is
+# ever delivered there.
+NO_EMAIL_DOMAIN = 'no-email.invalid'
+
+
+def placeholder_work_email(user) -> str:
+    return f'user{user.pk}@{NO_EMAIL_DOMAIN}'
+
+
+def company_for_profile(profile):
+    """The company a profile belongs to: set directly, or through the
+    dashboard login that created it (see core.tenancy.members_of)."""
+    if profile.company_id:
+        return profile.company
+    if profile.created_by_company_user_id:
+        return profile.created_by_company_user.company
+    return None
+
 
 def _ensure_employee_for_user(user: User, company) -> Employee:
     """Get-or-create the Employee row backing a (user, company). Idempotent."""
@@ -60,9 +82,10 @@ def _ensure_employee_for_user(user: User, company) -> Employee:
             emp.save(update_fields=list(set(dirty)))
         return emp
     # Avoid duplicating a manually-created contractor row with the same email.
-    existing_by_email = Employee.objects.filter(
+    # (Only for a real address — a blank one would match an unrelated row.)
+    existing_by_email = user.email and Employee.objects.filter(
         company=company,
-        work_email__iexact=(user.email or ''),
+        work_email__iexact=user.email,
         user__isnull=True,
     ).first()
     if existing_by_email:
@@ -75,7 +98,7 @@ def _ensure_employee_for_user(user: User, company) -> Employee:
         company=company,
         user=user,
         full_name=(user.get_full_name() or user.username or user.email)[:255],
-        work_email=(user.email or '').lower(),
+        work_email=(user.email or '').lower() or placeholder_work_email(user),
         employment_status='active',
     )
 
@@ -85,20 +108,26 @@ def userprofile_post_save(sender, instance: UserProfile, created, **kwargs):
     """When a UserProfile is saved, ensure the backing Employee row exists for
     that user under that profile's company. Best-effort — never breaks the
     triggering save."""
-    if not (instance.company_id and instance.user_id):
+    if not instance.user_id:
+        return
+    company = company_for_profile(instance)
+    if company is None:
         return
     if getattr(instance.user, 'is_superuser', False):
         return
     try:
-        _ensure_employee_for_user(instance.user, instance.company)
+        # Own savepoint: a failure here must not poison the caller's transaction.
+        with transaction.atomic():
+            _ensure_employee_for_user(instance.user, company)
     except Exception:
         logger.exception("Failed to sync Employee for UserProfile %s", instance.id)
 
 
 def backfill_employees_for_company(company_id: int) -> int:
     """One-shot helper used by ``list_employees`` to make sure every Django
-    ``User`` belonging to this company (via ``UserProfile.company``) has a
-    backing ``Employee`` row before we list them.
+    ``User`` belonging to this company (via ``UserProfile.company``, or the
+    dashboard login that created it) has a backing ``Employee`` row before we
+    list them.
 
     Returns the number of newly-created Employee rows.
     """
@@ -108,8 +137,10 @@ def backfill_employees_for_company(company_id: int) -> int:
     if not company:
         return 0
     created = 0
+    from django.db.models import Q
     profiles = (UserProfile.objects
-                .filter(company=company)
+                .filter(Q(company=company)
+                        | Q(company__isnull=True, created_by_company_user__company=company))
                 .select_related('user')
                 .exclude(user__is_superuser=True))
     for prof in profiles:
@@ -118,7 +149,8 @@ def backfill_employees_for_company(company_id: int) -> int:
         if Employee.objects.filter(user_id=prof.user_id).exists():
             continue
         try:
-            _ensure_employee_for_user(prof.user, company)
+            with transaction.atomic():
+                _ensure_employee_for_user(prof.user, company)
             created += 1
         except Exception:
             logger.exception("backfill: failed for UserProfile %s", prof.id)

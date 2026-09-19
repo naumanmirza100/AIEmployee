@@ -152,12 +152,25 @@ def _step_update_leave_balance(step, ctx, simulate):
 
 
 def _step_schedule_meeting(step, ctx, simulate):
-    from datetime import datetime
+    """Book an HR meeting for the workflow's employee.
+
+    Same rules as a booking made by hand: the employee needs an employee
+    login, and the slot must be free across the PM, HR and Frontline
+    calendars. A clash fails the step with the reason in its result.
+    """
+    from datetime import datetime, timezone as dt_timezone
+    from django.utils import timezone as dj_timezone
     from hr_agent.models import HRMeeting, Employee
+    from core.scheduling import ScheduleConflict, booking_guard, ensure_free, zone_name
+    from core.scheduling.identity import login_user_ids_for_employees, member_ids
+
     employee_id = step.get('employee_id') or ctx.get('employee_id')
     title = step.get('title') or _render(step.get('title_template') or 'HR meeting', ctx)
     meeting_type = step.get('meeting_type') or 'one_on_one'
-    duration_minutes = int(step.get('duration_minutes') or 30)
+    try:
+        duration_minutes = max(5, min(480, int(step.get('duration_minutes') or 30)))
+    except (TypeError, ValueError):
+        duration_minutes = 30
     when = step.get('scheduled_at')
     organizer_id = step.get('organizer_id')
     company_id = ctx.get('company_id')
@@ -169,23 +182,46 @@ def _step_schedule_meeting(step, ctx, simulate):
         sched = datetime.fromisoformat(str(when).replace('Z', '+00:00'))
     except ValueError:
         return False, {'done': False, 'error': 'scheduled_at must be ISO-8601'}, None
+    if dj_timezone.is_naive(sched):
+        sched = dj_timezone.make_aware(sched, dt_timezone.utc)
     if simulate:
         return True, {'done': True, 'simulated': True, 'meeting_type': meeting_type,
                       'scheduled_at': sched.isoformat()}, None
-    organizer = Employee.objects.filter(pk=organizer_id).first() if organizer_id else None
+
+    organizer = (Employee.objects.filter(pk=organizer_id, company_id=company_id).first()
+                 if organizer_id else None)
+    emp = (Employee.objects.filter(pk=employee_id, company_id=company_id).first()
+           if employee_id else None)
+
+    seat_ids = [e.id for e in (emp, organizer) if e]
+    links = login_user_ids_for_employees(seat_ids)
+    members = member_ids(company_id, links.values())
+    if emp and links.get(emp.id) not in members:
+        return False, {'done': False,
+                       'error': f"{emp.full_name} has no login yet, so they can't be invited to meetings.",
+                       'employee_id': emp.id}, None
+    people = sorted(u for u in links.values() if u in members)
+
     visibility = ('private' if meeting_type in ('exit_interview', 'grievance_hearing',
                                                 'performance_review') else 'company')
-    m = HRMeeting.objects.create(
-        company_id=company_id,
-        title=title[:200], description=step.get('description') or '',
-        meeting_type=meeting_type, visibility=visibility, organizer=organizer,
-        scheduled_at=sched, duration_minutes=duration_minutes,
-        timezone_name=step.get('timezone_name') or 'UTC',
-    )
-    if employee_id:
-        emp = Employee.objects.filter(pk=employee_id, company_id=company_id).first()
-        if emp:
-            m.participants.add(emp)
+    tz_name = zone_name(step.get('timezone_name'))
+    try:
+        with booking_guard(people):
+            ensure_free(people, sched, duration_minutes, tz_name=tz_name,
+                        viewer_source='hr', reveal_private=True)
+            m = HRMeeting.objects.create(
+                company_id=company_id,
+                title=title[:200], description=step.get('description') or '',
+                meeting_type=meeting_type, visibility=visibility, organizer=organizer,
+                scheduled_at=sched, duration_minutes=duration_minutes,
+                timezone_name=tz_name,
+            )
+            if emp:
+                m.participants.add(emp)
+    except ScheduleConflict as clash:
+        return False, {'done': False, 'error': clash.text(),
+                       'conflicts': clash.payload()['data']['conflicts'],
+                       'suggested_slots': clash.payload()['data']['suggested_slots']}, None
     return True, {'done': True, 'meeting_id': m.id, 'scheduled_at': sched.isoformat()}, None
 
 

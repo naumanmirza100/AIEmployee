@@ -38,9 +38,6 @@
                     {% if user.is_superuser or user.is_staff %}
                     <li><a href="{% url 'select_role' %}">Switch Role</a></li>
                     {% endif %}
-                    {% if user.profile.is_project_manager %}
-                        <li><a href="{% url 'ai_agents_test' %}">AI Agents</a></li>
-                    {% endif %}
                     {% if user.profile.is_recruitment_agent %}
                         <li><a href="{% url 'recruitment_dashboard' %}">Recruitment</a></li>
                     {% endif %}

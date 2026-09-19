@@ -358,6 +358,63 @@ class Meeting(models.Model):
         return f"{self.title} - {self.scheduled_at}"
 
 
+class CalendarBlock(models.Model):
+    """One employee's busy time, whichever agent booked it.
+
+    The PM, HR and Frontline agents each keep meetings in their own tables and
+    used to check for clashes only in their own table, so two agents could book
+    the same person for the same slot. Every booked person now also gets a row
+    here, and all three agents check this one table before booking.
+
+    Rows are derived data: `core.scheduling.sync` rewrites a meeting's rows
+    whenever the meeting or its attendees change, and a nightly job rebuilds
+    them from the meeting tables. Never edit them by hand.
+
+    Only company members with a login (see `core.tenancy.members_of`) get rows.
+    """
+    SOURCE_CHOICES = [
+        ('pm', 'Project Manager'),
+        ('hr', 'HR'),
+        ('frontline', 'Frontline'),
+    ]
+    ROLE_CHOICES = [
+        ('organizer', 'Organizer'),
+        ('participant', 'Participant'),
+    ]
+
+    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='calendar_blocks')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='calendar_blocks')
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES)
+    source_id = models.PositiveBigIntegerField(help_text="Primary key of the meeting in the source agent's table.")
+    role = models.CharField(max_length=12, choices=ROLE_CHOICES, default='participant')
+    response = models.CharField(max_length=20, blank=True, default='',
+                                help_text='pending / accepted / counter_proposed / scheduled. '
+                                          'Shown in clash messages; every stored row counts as busy.')
+    title = models.CharField(max_length=255, blank=True, default='')
+    is_private = models.BooleanField(default=False,
+                                     help_text='Hide the title from other agents (HR exit interviews etc.).')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'core'
+        indexes = [
+            # Clash checks filter on user + "ends after the slot starts", which
+            # skips a person's past meetings without reading them.
+            models.Index(fields=['user', 'ends_at'], name='calblock_user_end_idx'),
+            models.Index(fields=['company', 'starts_at'], name='calblock_company_start_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['source', 'source_id', 'user'], name='calblock_unique'),
+            models.CheckConstraint(check=models.Q(ends_at__gt=models.F('starts_at')),
+                                   name='calblock_ends_after_start'),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} busy {self.starts_at:%Y-%m-%d %H:%M} ({self.source}#{self.source_id})"
+
+
 class ActionItem(models.Model):
     """Action items from meetings"""
     STATUS_CHOICES = [

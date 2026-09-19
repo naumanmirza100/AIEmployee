@@ -27,6 +27,11 @@ class CoreConfig(AppConfig):
         import core.signals  # noqa
         import core.checks   # noqa — registers the Stripe configuration checks
 
+        # Keep the shared busy-time table in step with the PM, HR and
+        # Frontline meeting tables.
+        from core.scheduling.sync import connect_signals
+        connect_signals()
+
         # NOTE: Stripe Product/Price sync deliberately does NOT run here.
         # ready() fires in every gunicorn worker, every celery worker and every
         # `manage.py` invocation — so syncing here meant concurrent workers racing
@@ -46,6 +51,12 @@ class CoreConfig(AppConfig):
 
         # Skip if runserver_with_celery already handles Celery
         if os.environ.get('CELERY_AUTO_STARTED'):
+            return
+
+        # Opt-out for developers who don't need background jobs locally. The
+        # worker and beat share the database user's 500-connections-an-hour
+        # limit with every other developer pointed at the same database.
+        if os.environ.get('CELERY_AUTOSTART', '').strip().lower() in ('0', 'false', 'no', 'off'):
             return
 
         # Django reloader runs ready() twice: once in the main process, once in
