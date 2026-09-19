@@ -9,8 +9,11 @@ passed in. The HTTP request returns 202 immediately; the thread does the work
 and stamps `processing_status`.
 
 The Celery `reindex_operations_document` task below only re-chunks + re-embeds
-an already-parsed document (no LLM, no per-company key), so it is safe to run in
-a worker and is used by the reindex management command.
+an already-parsed document (no LLM), so it is safe to run in a worker and is
+used by the reindex management command. Embedding resolves the company key from
+the database rather than the request — so it still needs no request context —
+and failing to resolve one is never fatal: the chunks are just stored without
+vectors.
 """
 import logging
 import threading
@@ -173,8 +176,10 @@ def reindex_document_in_background(document_id):
 
 def _reindex_summary_impl(summary_id):
     """Re-chunk + re-embed a summarised file from its stored `parsed_text`.
-    No LLM, no per-company key. Used by the reindex command's --summaries mode
-    and to backfill embeddings once a provider key is added."""
+    No LLM. Embedding may resolve the company's own key (see
+    `_chunk_embed_and_store`), but never blocks: a quota/key failure just
+    stores the chunks without vectors. Used by the reindex command's
+    --summaries mode and to backfill embeddings once a provider key is added."""
     from django.db import transaction
     from operations_agent.models import OperationsDocumentSummary, OperationsDocumentChunk
     from operations_agent.agents.document_processing_agent import (

@@ -42,10 +42,15 @@ flow = InstalledAppFlow.from_client_config(
     client_config,
     scopes=['https://www.googleapis.com/auth/calendar'],
 )
+# Google matches the redirect URI as an exact string, and run_local_server
+# defaults to a trailing slash ("http://localhost:8080/"). The Console entry is
+# registered without it, so pin the exact form here rather than relying on the
+# default — a mismatch shows up as "Error 400: redirect_uri_mismatch".
 creds = flow.run_local_server(
     port=8080,
     access_type='offline',
     prompt='consent',
+    redirect_uri_trailing_slash=False,
 )
 
 print("\n" + "="*60)

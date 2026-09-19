@@ -316,6 +316,38 @@ def _startup_print(*args, **kwargs):
     if os.environ.get('RUN_MAIN') == 'true':
         print(*args, **kwargs)
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# All three read from the environment so a deployed box can be locked down
+# without editing this file. The defaults keep local development working
+# exactly as before: DEBUG on, every host allowed.
+SECRET_KEY = os.getenv(
+    'SECRET_KEY',
+    'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45',
+)
+
+# Anything other than a literal "False" (case-insensitive) leaves DEBUG on, so
+# an unset or malformed value never silently disables error pages in dev.
+DEBUG = os.getenv('DEBUG', 'True').strip().lower() != 'false'
+
+# Comma-separated, e.g. ALLOWED_HOSTS=187.7.18.101,api.payperproject.com
+# Django rejects every request with 400 when DEBUG is off and the Host header
+# is not listed here, so set it on any box running DEBUG=False.
+ALLOWED_HOSTS = [
+    h.strip() for h in os.getenv('ALLOWED_HOSTS', '*').split(',') if h.strip()
+]
+
+# Browsers require the scheme here for POSTs from an HTTPS origin; without it
+# the frontend gets "CSRF verification failed" on every write once it is
+# served over HTTPS.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()
+]
+
+
+# --------------------
+# Applications
+# --------------------
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',

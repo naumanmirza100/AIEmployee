@@ -19,6 +19,37 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 1000       # ~1000 chars per chunk
 CHUNK_OVERLAP = 150     # overlap between chunks
 
+# The agent key Operations resolves against — matches the name used for its LLM
+# calls, so embeddings draw on the same BYOK/managed/platform key.
+OPERATIONS_AGENT_KEY = 'operations_agent'
+
+
+def build_embedding_service(company_id):
+    """Construct an EmbeddingService bound to this company, or None.
+
+    Embeddings historically resolved only from env keys, so a tenant with a
+    valid `operations_agent` key still indexed every chunk with no vector and
+    QA silently degraded to keyword-only retrieval — see
+    OPERATIONS_QA_DIAGNOSIS.md.
+
+    `company_id` support landed with the Frontline embedding work; until that
+    is merged everywhere, fall back to the no-argument form rather than raising
+    a TypeError that the callers' broad `except` would swallow into "no
+    embeddings at all". Returns None when the service cannot be imported.
+    """
+    try:
+        from core.Frontline_agent.embedding_service import EmbeddingService
+    except Exception:
+        return None
+    if company_id:
+        try:
+            return EmbeddingService(company_id=company_id,
+                                    agent_key_name=OPERATIONS_AGENT_KEY)
+        except TypeError:
+            logger.debug("EmbeddingService has no per-company support yet; "
+                         "falling back to env-keyed construction.")
+    return EmbeddingService()
+
 
 def _invalidate_operations_indexes(company_id, has_embeddings: bool) -> None:
     """After a doc goes live, rebuild the FAISS index and clear the answer cache
@@ -428,15 +459,18 @@ class DocumentProcessingAgent(MarketingBaseAgent):
             return 0, False, ''
 
         # Embedding is optional — the retriever falls back to keyword search
-        # when a chunk has no vector. Provider is env-keyed and shared across
-        # HR / Frontline / Operations.
+        # when a chunk has no vector. The provider prefers an env key but falls
+        # back to this company's own key (BYOK → managed → platform), the same
+        # resolution the LLM calls use. Without the tenant, a company with a
+        # perfectly good operations_agent key still indexed every chunk with no
+        # vector and QA silently degraded to keyword-only matching.
         embedding_service = None
         has_embeddings = False
         embed_model = ''
         try:
-            from core.Frontline_agent.embedding_service import EmbeddingService
-            embedding_service = EmbeddingService()
-            has_embeddings = embedding_service.is_available()
+            embedding_service = build_embedding_service(
+                getattr(doc, 'company_id', None))
+            has_embeddings = bool(embedding_service) and embedding_service.is_available()
             embed_model = getattr(embedding_service, 'embedding_model', '') or ''
         except Exception:
             logger.warning("Operations: embedding service unavailable; storing chunks without vectors")
