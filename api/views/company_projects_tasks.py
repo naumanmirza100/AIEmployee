@@ -6,14 +6,12 @@ For company users to edit projects and tasks
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
-from django.contrib.auth.models import User
 import logging
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
-from core.models import Project, Task, UserProfile
-from core.tenancy import AssigneeNotAllowed, resolve_member
+from core.tenancy import members_of
+from project_manager_agent import services as pm_services
 from api.pagination import paginate
 
 logger = logging.getLogger(__name__)
@@ -24,122 +22,15 @@ logger = logging.getLogger(__name__)
 @permission_classes([IsCompanyUserOnly])
 def update_company_project(request, project_id):
     """
-    Update a project created by the company user
+    Update a project of the caller's company.
     PUT/PATCH /api/company/projects/{project_id}/update
+    Rules (validation, scope, audit): project_manager_agent.services.
     """
     try:
-        company_user = request.user
-        
-        # Get project and verify it was created by this company user
-        project = get_object_or_404(
-            Project, 
-            id=project_id,
-            created_by_company_user=company_user
-        )
-        
-        data = request.data.copy()
-        
-        # Update allowed fields
-        if 'name' in data:
-            project.name = data['name']
-        if 'description' in data:
-            project.description = data.get('description', '')
-        if 'status' in data:
-            # Validate status
-            valid_statuses = [choice[0] for choice in Project.STATUS_CHOICES]
-            if data['status'] in valid_statuses:
-                project.status = data['status']
-        if 'priority' in data:
-            # Validate priority
-            valid_priorities = [choice[0] for choice in Project.PRIORITY_CHOICES]
-            if data['priority'] in valid_priorities:
-                project.priority = data['priority']
-        if 'project_type' in data:
-            # Validate project_type
-            valid_types = [choice[0] for choice in Project.PROJECT_TYPE_CHOICES]
-            if data['project_type'] in valid_types:
-                project.project_type = data['project_type']
-        # `end_date` is the legacy alias for `deadline`. Accept either, mirror
-        # writes to both DB columns, drop end_date from the response.
-        if 'deadline' in data or 'end_date' in data:
-            new_deadline = data.get('deadline')
-            if new_deadline is None:
-                new_deadline = data.get('end_date')
-            project.deadline = new_deadline if new_deadline else None
-            project.end_date = new_deadline if new_deadline else None
-        if 'start_date' in data:
-            project.start_date = data['start_date'] if data['start_date'] else None
-
-        # BUG-08: parity with Create — the update endpoint used to silently
-        # drop industry / budget fields, making them impossible to edit
-        # after creation. Also enforce BUG-02 rules (non-negative, Max >= Min).
-        if 'industry_id' in data:
-            iid = data.get('industry_id')
-            if iid in (None, '', 'none'):
-                project.industry = None
-            else:
-                try:
-                    from core.models import Industry
-                    project.industry = Industry.objects.get(id=int(iid))
-                except (ValueError, TypeError, Industry.DoesNotExist):
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid industry_id',
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-        def _parse_budget(raw, field):
-            if raw in (None, ''):
-                return None, None
-            try:
-                val = float(raw)
-            except (TypeError, ValueError):
-                return None, f'{field} must be a number.'
-            if val < 0:
-                return None, f'{field} must be non-negative.'
-            return val, None
-
-        if 'budget_min' in data:
-            val, err = _parse_budget(data.get('budget_min'), 'budget_min')
-            if err:
-                return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
-            project.budget_min = val
-        if 'budget_max' in data:
-            val, err = _parse_budget(data.get('budget_max'), 'budget_max')
-            if err:
-                return Response({'status': 'error', 'message': err}, status=status.HTTP_400_BAD_REQUEST)
-            project.budget_max = val
-        if project.budget_min is not None and project.budget_max is not None \
-                and project.budget_max < project.budget_min:
-            return Response({
-                'status': 'error',
-                'message': 'budget_max must be greater than or equal to budget_min.',
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        project.save()
-
-        return Response({
-            'status': 'success',
-            'message': 'Project updated successfully',
-            'data': {
-                'id': project.id,
-                'name': project.name,
-                'description': project.description,
-                'status': project.status,
-                'priority': project.priority,
-                'project_type': project.project_type,
-                'industry_id': project.industry_id,
-                'budget_min': float(project.budget_min) if project.budget_min is not None else None,
-                'budget_max': float(project.budget_max) if project.budget_max is not None else None,
-                'deadline': (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
-                'start_date': project.start_date.isoformat() if project.start_date else None,
-            }
-        }, status=status.HTTP_200_OK)
-    
-    except Project.DoesNotExist:
-        return Response({
-            'status': 'error',
-            'message': 'Project not found or you do not have permission to update it'
-        }, status=status.HTTP_404_NOT_FOUND)
+        project, _ = pm_services.update_project(
+            pm_services.DashboardActor.from_request(request), project_id, request.data)
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except Exception as e:
         logger.exception(f"Error updating project: {str(e)}")
         return Response({
@@ -148,111 +39,39 @@ def update_company_project(request, project_id):
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    return Response({
+        'status': 'success',
+        'message': 'Project updated successfully',
+        'data': {
+            'id': project.id,
+            'name': project.name,
+            'description': project.description,
+            'status': project.status,
+            'priority': project.priority,
+            'project_type': project.project_type,
+            'industry_id': project.industry_id,
+            'budget_min': float(project.budget_min) if project.budget_min is not None else None,
+            'budget_max': float(project.budget_max) if project.budget_max is not None else None,
+            'deadline': project.effective_deadline.isoformat() if project.effective_deadline else None,
+            'start_date': project.start_date.isoformat() if project.start_date else None,
+        }
+    }, status=status.HTTP_200_OK)
+
 
 @api_view(['PUT', 'PATCH'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def update_company_task(request, task_id):
     """
-    Update a task in a project created by the company user
+    Update a task in one of the caller's company's projects.
     PUT/PATCH /api/company/tasks/{task_id}/update
+    Rules (validation, dependencies, due-date bounds, audit): project_manager_agent.services.
     """
     try:
-        company_user = request.user
-        company = getattr(company_user, 'company', None)
-
-        # Get task and verify it belongs to a project at the SAME company.
-        # Previously this filtered by `project__created_by_company_user=company_user`,
-        # which 404'd whenever a colleague at the same company had created the
-        # project the task lives in. Scoping by company keeps the security
-        # boundary (other tenants are still locked out) but lets every
-        # CompanyUser in a company edit their colleagues' tasks.
-        task_qs_kwargs = {'id': task_id}
-        if company is not None:
-            task_qs_kwargs['project__company'] = company
-        else:
-            task_qs_kwargs['project__created_by_company_user'] = company_user
-        task = get_object_or_404(Task, **task_qs_kwargs)
-
-        data = request.data.copy()
-
-        # Update allowed fields
-        if 'title' in data:
-            task.title = data['title']
-        if 'description' in data:
-            task.description = data.get('description', '')
-        if 'priority' in data:
-            # Validate priority
-            valid_priorities = [choice[0] for choice in Task.PRIORITY_CHOICES]
-            if data['priority'] in valid_priorities:
-                task.priority = data['priority']
-        if 'status' in data:
-            # Validate status
-            valid_statuses = [choice[0] for choice in Task.STATUS_CHOICES]
-            if data['status'] in valid_statuses:
-                task.status = data['status']
-        if 'assignee_id' in data:
-            # Update assignee — same widening: any UserProfile inside the same
-            # company is OK, not just users this specific CompanyUser created.
-            # Also require the user to be active (deactivated users shouldn't
-            # be assignable; we already filter them out of the dropdown).
-            assignee_id = data.get('assignee_id')
-            if assignee_id:
-                # Single membership rule shared with every other assignee path —
-                # see core.tenancy. (This view already had it right; the others
-                # didn't, which is why it moved to one place.)
-                try:
-                    task.assignee = resolve_member(
-                        assignee_id, company=company, company_user=company_user)
-                except AssigneeNotAllowed:
-                    return Response({
-                        'status': 'error',
-                        'message': 'Invalid assignee. User must belong to your company and be active.'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                task.assignee = None
-        if 'due_date' in data:
-            # Parse explicitly so an unparseable string (e.g. "07/02/2026 05:00 AM")
-            # returns a clear 400 instead of bubbling into a generic 500.
-            raw_due = data['due_date']
-            if not raw_due:
-                task.due_date = None
-            else:
-                from django.utils.dateparse import parse_datetime, parse_date
-                parsed = parse_datetime(raw_due) or parse_date(raw_due)
-                if parsed is None:
-                    return Response({
-                        'status': 'error',
-                        'message': (
-                            'Invalid due date format. Send an ISO 8601 datetime '
-                            '(e.g. "2026-07-02T05:00:00Z") or a date (YYYY-MM-DD).'
-                        ),
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                task.due_date = parsed
-
-        task.save()
-        
-        return Response({
-            'status': 'success',
-            'message': 'Task updated successfully',
-            'data': {
-                'id': task.id,
-                'title': task.title,
-                'description': task.description,
-                'priority': task.priority,
-                'status': task.status,
-                'assignee_id': task.assignee.id if task.assignee else None,
-                'assignee_name': task.assignee.get_full_name() if task.assignee else None,
-                'assignee_email': task.assignee.email if task.assignee else None,
-                'due_date': task.due_date.isoformat() if task.due_date else None,
-            }
-        }, status=status.HTTP_200_OK)
-    
-    except Task.DoesNotExist:
-        return Response({
-            'status': 'error',
-            'message': 'Task not found or you do not have permission to update it'
-        }, status=status.HTTP_404_NOT_FOUND)
+        task, _ = pm_services.update_task(
+            pm_services.DashboardActor.from_request(request), task_id, request.data)
+    except pm_services.ServiceError as exc:
+        return exc.response()
     except Exception as e:
         logger.exception(f"Error updating task: {str(e)}")
         return Response({
@@ -260,6 +79,22 @@ def update_company_task(request, task_id):
             'message': 'Failed to update task',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'status': 'success',
+        'message': 'Task updated successfully',
+        'data': {
+            'id': task.id,
+            'title': task.title,
+            'description': task.description,
+            'priority': task.priority,
+            'status': task.status,
+            'assignee_id': task.assignee_id,
+            'assignee_name': task.assignee.get_full_name() if task.assignee else None,
+            'assignee_email': task.assignee.email if task.assignee else None,
+            'due_date': task.due_date.isoformat() if task.due_date else None,
+        }
+    }, status=status.HTTP_200_OK)
 
 
 @api_view(['DELETE'])
@@ -284,38 +119,31 @@ def delete_company_task(request, task_id):
 @permission_classes([IsCompanyUserOnly])
 def get_company_users_for_assignment(request):
     """
-    Get list of users created by the company user (for task assignment)
+    Users a task in this company can be assigned to
     GET /api/company/users/for-assignment
     """
     try:
         company_user = request.user
         company = getattr(company_user, 'company', None)
 
-        # Get all ACTIVE users in the same company (not just users this
-        # specific CompanyUser created). Previously this filtered by
-        # `created_by_company_user=company_user`, so the Assign-To dropdown
-        # was missing colleagues' users — and an attempt to assign them
-        # then failed in `update_company_task` with "Invalid assignee".
-        # Same security boundary: only users from this company, never
-        # another tenant's.
-        profile_qs = UserProfile.objects.filter(user__is_active=True)
-        if company is not None:
-            profile_qs = profile_qs.filter(created_by_company_user__company=company)
-        else:
-            profile_qs = profile_qs.filter(created_by_company_user=company_user)
-        user_profiles, pagination = paginate(
-            request, profile_qs.select_related('user').order_by('id'),
+        # Exactly the people assignment accepts (core.tenancy.members_of):
+        # active users of this company through either profile link. This used
+        # to match only the "created by a dashboard login" link, so employees
+        # whose profile names the company directly were missing from the list.
+        members, pagination = paginate(
+            request,
+            members_of(company, company_user=company_user).select_related('profile').order_by('id'),
             default_limit=500, max_limit=1000,
         )
 
         users_data = []
-        for profile in user_profiles:
+        for member in members:
             users_data.append({
-                'id': profile.user.id,
-                'email': profile.user.email,
-                'username': profile.user.username,
-                'full_name': profile.user.get_full_name() or profile.user.username,
-                'role': profile.role,
+                'id': member.id,
+                'email': member.email,
+                'username': member.username,
+                'full_name': member.get_full_name() or member.username,
+                'role': getattr(getattr(member, 'profile', None), 'role', None),
             })
         
         return Response({

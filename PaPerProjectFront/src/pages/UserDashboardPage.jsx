@@ -502,7 +502,24 @@ const UserDashboardPage = () => {
   const handleCreateProject = async (e) => {
     e.preventDefault();
     try {
-      const response = await userProjectManagerService.createProject(projectForm);
+      let response;
+      try {
+        response = await userProjectManagerService.createProject(projectForm);
+      } catch (postErr) {
+        // Same as the dashboard's ManualProjectCreation: a 409 with
+        // code=duplicate_project_name means a project with this name already
+        // exists in the company. Ask, then retry with the opt-in flag.
+        const isDup = postErr?.status === 409 && postErr?.data?.code === 'duplicate_project_name';
+        if (!isDup) throw postErr;
+        const proceed = window.confirm(
+          `${postErr.data?.message || postErr.message || 'A project with this name already exists.'}\n\nCreate it anyway?`
+        );
+        if (!proceed) return;
+        response = await userProjectManagerService.createProject({
+          ...projectForm,
+          confirm_duplicate_name: true,
+        });
+      }
       if (response.status === 'success') {
         toast({
           title: 'Success',
