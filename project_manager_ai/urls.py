@@ -5,10 +5,7 @@ from core.views import (
     project_list, project_create, project_detail, project_edit, project_delete,
     task_create, task_edit, my_tasks, update_task_status
 )
-from project_manager_agent.views import (
-    ai_agents_test, test_task_prioritization, test_knowledge_qa, test_project_pilot, test_timeline_gantt,
-    generate_subtasks, view_task_subtasks
-)
+from project_manager_agent.views import view_task_subtasks
 from marketing_agent import views_email_tracking
 from ai_sdr_agent.views_booking import book_meeting
 
@@ -33,14 +30,6 @@ urlpatterns = [
     path('tasks/<int:task_id>/edit/', task_edit, name='task_edit'),
     path('my-tasks/', my_tasks, name='my_tasks'),
     path('tasks/<int:task_id>/update-status/', update_task_status, name='update_task_status'),
-    
-    # AI Agents
-    path('ai-agents/', ai_agents_test, name='ai_agents_test'),
-    path('api/ai/task-prioritization/', test_task_prioritization, name='test_task_prioritization'),
-    path('api/ai/knowledge-qa/', test_knowledge_qa, name='test_knowledge_qa'),
-    path('api/ai/project-pilot/', test_project_pilot, name='test_project_pilot'),
-    path('api/ai/timeline-gantt/', test_timeline_gantt, name='test_timeline_gantt'),
-    path('api/ai/generate-subtasks/', generate_subtasks, name='generate_subtasks'),
     
     # Subtasks
     path('tasks/<int:task_id>/subtasks/', view_task_subtasks, name='view_task_subtasks'),

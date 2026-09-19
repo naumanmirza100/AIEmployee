@@ -90,38 +90,5 @@
         </a>
     </div>
     {% endif %}
-
-    <!-- AI Agents Link - Only for Project Managers -->
-    {% if user.is_superuser or user.is_staff %}
-        {% if selected_role == 'project_manager' %}
-        <div style="margin-top: 2rem; text-align: center;">
-            <div class="dashboard-card" style="background: var(--bg-primary); border: 2px solid var(--primary-color);">
-                <h3 style="color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
-                    <span style="color: var(--primary-color);">AI</span> Project Manager Dashboard
-                </h3>
-                <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
-                    Access powerful AI agents to help manage your projects, prioritize tasks, and get intelligent insights.
-                </p>
-                <a href="{% url 'ai_agents_test' %}" class="btn btn-primary" style="text-decoration: none; display: inline-block; font-weight: 600; width: auto; padding: 0.75rem 2rem;">
-                    Open AI Dashboard →
-                </a>
-            </div>
-        </div>
-        {% endif %}
-    {% elif user.profile and user.profile.role == 'project_manager' %}
-    <div style="margin-top: 2rem; text-align: center;">
-        <div class="dashboard-card" style="background: var(--bg-primary); border: 2px solid var(--primary-color);">
-            <h3 style="color: var(--text-primary); margin-bottom: 1rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
-                <span style="color: var(--primary-color);">AI</span> Project Manager Dashboard
-            </h3>
-            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
-                Access powerful AI agents to help manage your projects, prioritize tasks, and get intelligent insights.
-            </p>
-            <a href="{% url 'ai_agents_test' %}" class="btn btn-primary" style="text-decoration: none; display: inline-block; font-weight: 600; width: auto; padding: 0.75rem 2rem;">
-                Open AI Dashboard →
-            </a>
-        </div>
-    </div>
-    {% endif %}
 </div>
 {% endblock %}
