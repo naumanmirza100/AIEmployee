@@ -885,9 +885,19 @@ export const listHRScheduledNotifications = async () => {
 
 // ---------- Meetings (CRUD + scheduling chat) ----------
 /** Natural-language meeting scheduling. Body: `{message, chat_history?: [...]}` */
+// The organizer's timezone: free-time suggestions in clash warnings use their
+// working hours, and new meetings store it for reminders.
+const browserTimezone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+};
+
 export const hrMeetingSchedule = async (message, chatHistory = []) => {
   try {
-    const payload = { message };
+    const payload = { message, timezone: browserTimezone() };
     if (Array.isArray(chatHistory) && chatHistory.length > 0) {
       payload.chat_history = chatHistory;
     }
@@ -1023,9 +1033,19 @@ export const createHRMeeting = async (payload) => {
   }
 };
 
-export const checkHRMeetingAvailability = async (start, end) => {
+/**
+ * Is a slot free for these employees across the PM, HR and Frontline
+ * calendars? Returns { available, conflicts, suggested_slots, no_login }.
+ * Pass `excludeMeetingId` when checking a new time for an existing meeting.
+ */
+export const checkHRMeetingAvailability = async (
+  start, end, { participantIds = [], organizerId = null, excludeMeetingId = null } = {},
+) => {
   try {
-    const q = new URLSearchParams({ start, end });
+    const q = new URLSearchParams({ start, end, timezone: browserTimezone() });
+    if (participantIds.length) q.set('participant_ids', participantIds.join(','));
+    if (organizerId) q.set('organizer_id', organizerId);
+    if (excludeMeetingId) q.set('exclude_meeting_id', excludeMeetingId);
     const response = await companyApi.get(`/hr/meetings/availability?${q.toString()}`);
     return response;
   } catch (error) {

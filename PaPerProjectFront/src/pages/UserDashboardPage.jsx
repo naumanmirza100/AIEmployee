@@ -225,7 +225,9 @@ const UserDashboardPage = () => {
 
   useEffect(() => { if (activeTab === 'meetings') fetchMeetings(); }, [activeTab]);
 
-  const handleMeetingRespond = async (meetingId, action) => {
+  // Meetings come from the PM, HR and Frontline agents; each item says where
+  // its answers go (`respond_url`), since ids repeat across agents.
+  const handleMeetingRespond = async (meeting, action) => {
     setRespondLoading(true);
     try {
       const token = localStorage.getItem('auth_token');
@@ -233,7 +235,8 @@ const UserDashboardPage = () => {
       if (action === 'counter_proposed' && counterDate && counterTime) {
         counterTimeISO = new Date(`${counterDate}T${counterTime}`).toISOString();
       }
-      const res = await fetch(`${API_BASE_URL}/meetings/${meetingId}/respond`, {
+      const url = meeting.respond_url || `/meetings/${meeting.id}/respond`;
+      const res = await fetch(`${API_BASE_URL}${url}`, {
         method: 'POST',
         headers: { 'Authorization': `Token ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, reason: rejectReason, counter_time: counterTimeISO }),
@@ -499,7 +502,24 @@ const UserDashboardPage = () => {
   const handleCreateProject = async (e) => {
     e.preventDefault();
     try {
-      const response = await userProjectManagerService.createProject(projectForm);
+      let response;
+      try {
+        response = await userProjectManagerService.createProject(projectForm);
+      } catch (postErr) {
+        // Same as the dashboard's ManualProjectCreation: a 409 with
+        // code=duplicate_project_name means a project with this name already
+        // exists in the company. Ask, then retry with the opt-in flag.
+        const isDup = postErr?.status === 409 && postErr?.data?.code === 'duplicate_project_name';
+        if (!isDup) throw postErr;
+        const proceed = window.confirm(
+          `${postErr.data?.message || postErr.message || 'A project with this name already exists.'}\n\nCreate it anyway?`
+        );
+        if (!proceed) return;
+        response = await userProjectManagerService.createProject({
+          ...projectForm,
+          confirm_duplicate_name: true,
+        });
+      }
       if (response.status === 'success') {
         toast({
           title: 'Success',
@@ -1208,18 +1228,29 @@ const UserDashboardPage = () => {
                 counter_proposed: 'text-blue-400 bg-blue-500/20',
                 withdrawn: 'text-gray-400 bg-gray-500/20',
               };
-              const sc = statusColors[m.status] || statusColors.pending;
+              const sc = statusColors[m.status] || 'text-violet-300 bg-violet-500/20';
+              const mKey = `${m.source || 'pm'}-${m.id}`;
+              const canRespond = typeof m.can_respond === 'boolean'
+                ? m.can_respond
+                : (m.my_status === 'pending' || m.my_status === 'counter_proposed' || m.status === 'pending' || m.status === 'counter_proposed') && m.my_status !== 'accepted' && m.status !== 'withdrawn';
 
               return (
-                <Card key={m.id} className="bg-white/[0.02] border-white/10">
+                <Card key={mKey} className="bg-white/[0.02] border-white/10">
                   <CardContent className="p-4 space-y-3">
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="text-sm font-semibold text-white">{m.title}</h3>
-                        <p className="text-xs text-white/50 mt-0.5">From: {m.organizer_name} ({m.organizer_email})</p>
+                        <h3 className="text-sm font-semibold text-white">
+                          {m.title}
+                          {m.source_label && (
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-white/15 text-white/60 align-middle">{m.source_label}</span>
+                          )}
+                        </h3>
+                        <p className="text-xs text-white/50 mt-0.5">
+                          From: {m.organizer_name}{m.organizer_email ? ` (${m.organizer_email})` : ''}
+                        </p>
                       </div>
                       <span className={`text-xs px-2 py-1 rounded-full font-medium ${sc}`}>
-                        {m.status.replace('_', ' ')}
+                        {(m.status || '').replace(/_/g, ' ')}
                       </span>
                     </div>
 
@@ -1278,9 +1309,9 @@ const UserDashboardPage = () => {
                     )}
 
                     {/* Action buttons — use my_status instead of overall meeting status */}
-                    {(m.my_status === 'pending' || m.my_status === 'counter_proposed' || m.status === 'pending' || m.status === 'counter_proposed') && m.my_status !== 'accepted' && m.status !== 'withdrawn' && (
+                    {canRespond && (
                       <div className="pt-2 border-t border-white/5">
-                        {respondingTo === m.id ? (
+                        {respondingTo === mKey ? (
                           <div className="space-y-2 bg-white/[0.03] rounded-lg p-3">
                             <input
                               value={rejectReason}
@@ -1295,11 +1326,11 @@ const UserDashboardPage = () => {
                                 className="bg-transparent border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-violet-500/50" />
                             </div>
                             <div className="flex gap-2">
-                              <Button size="sm" onClick={() => handleMeetingRespond(m.id, 'rejected')} disabled={respondLoading}
+                              <Button size="sm" onClick={() => handleMeetingRespond(m, 'rejected')} disabled={respondLoading}
                                 className="bg-red-600 hover:bg-red-700 text-xs h-7">
                                 <XCircle className="h-3 w-3 mr-1" /> Reject
                               </Button>
-                              <Button size="sm" onClick={() => handleMeetingRespond(m.id, 'counter_proposed')} disabled={respondLoading || !counterDate || !counterTime}
+                              <Button size="sm" onClick={() => handleMeetingRespond(m, 'counter_proposed')} disabled={respondLoading || !counterDate || !counterTime}
                                 className="bg-blue-600 hover:bg-blue-700 text-xs h-7">
                                 <ArrowRightLeft className="h-3 w-3 mr-1" /> Suggest Time
                               </Button>
@@ -1308,11 +1339,11 @@ const UserDashboardPage = () => {
                           </div>
                         ) : (
                           <div className="flex gap-2">
-                            <Button size="sm" onClick={() => handleMeetingRespond(m.id, 'accepted')} disabled={respondLoading}
+                            <Button size="sm" onClick={() => handleMeetingRespond(m, 'accepted')} disabled={respondLoading}
                               className="bg-green-600 hover:bg-green-700 text-xs h-7">
                               <CheckCircle className="h-3 w-3 mr-1" /> Accept
                             </Button>
-                            <Button size="sm" onClick={() => setRespondingTo(m.id)} variant="outline"
+                            <Button size="sm" onClick={() => setRespondingTo(mKey)} variant="outline"
                               className="text-xs h-7 border-white/20 text-white/70 hover:bg-white/10">
                               Reject / Suggest Time
                             </Button>

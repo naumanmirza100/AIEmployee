@@ -20,6 +20,7 @@ from pathlib import Path
 
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -46,6 +47,11 @@ from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
 )
 from core.HR_agent.hr_agent import HRAgent
+from core.scheduling import (
+    ScheduleConflict, booking_guard, ensure_free, find_conflicts, people_for, suggest_slots,
+    zone_name,
+)
+from core.scheduling.identity import login_user_ids_for_employees, member_ids
 from core.api_key_service import KeyServiceError
 # Re-use Frontline's hardened helpers — file validation + broker probe.
 from Frontline_agent.document_processor import DocumentProcessor
@@ -2019,6 +2025,70 @@ def _seed_meeting_proposal(meeting, company_user):
                        meeting.id, exc_info=True)
 
 
+# ----- Shared calendar (clash checks across PM / HR / Frontline) ----------
+# Only employees with an employee login can be invited: accepting, declining
+# and suggesting a time all need one (decision 2026-09-17). Every booking or
+# time change is checked against the shared busy-time table and refused on a
+# clash. See core/scheduling.
+
+_HR_PRIVATE_TYPES = ('exit_interview', 'grievance_hearing', 'performance_review')
+_HR_BUSY_ANSWERS = ('pending', 'accepted', 'counter_proposed')
+
+
+def _hr_aware(dt):
+    if dt is not None and timezone.is_naive(dt):
+        from datetime import timezone as _dt_tz
+        return timezone.make_aware(dt, _dt_tz.utc)
+    return dt
+
+
+def _hr_duration(raw, default=30):
+    try:
+        return max(5, min(480, int(raw or default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _hr_invitable(company, employee_ids):
+    """Split employees into those who can be invited and those who can't.
+
+    Returns ``({employee_id: user_id}, [Employee without a login])``. The
+    first holds employees whose login is an active employee login of this
+    company.
+    """
+    ids = {int(e) for e in employee_ids if _is_int(e)}
+    if not ids:
+        return {}, []
+    links = login_user_ids_for_employees(ids)
+    members = member_ids(company.id, links.values())
+    logins = {emp_id: user_id for emp_id, user_id in links.items() if user_id in members}
+    missing = list(Employee.objects.filter(pk__in=ids - set(logins), company=company)
+                   .order_by('full_name'))
+    return logins, missing
+
+
+def _hr_no_login_message(employees):
+    names = [e.full_name or e.work_email for e in employees]
+    shown = ', '.join(names[:5]) + (f' and {len(names) - 5} more' if len(names) > 5 else '')
+    verb = 'has' if len(names) == 1 else 'have'
+    return (f"{shown} {verb} no login yet, so they can't be invited to meetings. "
+            "Create their account first.")
+
+
+def _hr_no_login_response(employees):
+    return Response({'status': 'error', 'code': 'no_login',
+                     'message': _hr_no_login_message(employees),
+                     'data': {'employee_ids': [e.id for e in employees]}},
+                    status=status.HTTP_400_BAD_REQUEST)
+
+
+def _hr_people(company, participant_employee_ids, organizer_employee_id=None):
+    """Employee logins a meeting with these attendees would occupy."""
+    ids = list(participant_employee_ids) + ([organizer_employee_id] if organizer_employee_id else [])
+    logins, _ = _hr_invitable(company, ids)
+    return sorted(set(logins.values()))
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2030,35 +2100,50 @@ def create_hr_meeting(request):
     if not sched_raw or not d.get('title'):
         return Response({'status': 'error', 'message': 'title and scheduled_at are required'},
                         status=status.HTTP_400_BAD_REQUEST)
-    try:
-        sched = datetime.fromisoformat(str(sched_raw).replace('Z', '+00:00'))
-    except ValueError:
+    sched = _hr_aware(_parse_iso_dt(sched_raw))
+    if sched is None:
         return Response({'status': 'error', 'message': 'scheduled_at must be ISO-8601'},
                         status=status.HTTP_400_BAD_REQUEST)
     meeting_type = d.get('meeting_type') or 'one_on_one'
     # Default visibility: private for sensitive types, company-visible otherwise.
-    default_visibility = 'private' if meeting_type in ('exit_interview', 'grievance_hearing',
-                                                       'performance_review') else 'company'
+    default_visibility = 'private' if meeting_type in _HR_PRIVATE_TYPES else 'company'
     visibility = d.get('visibility') or default_visibility
     organizer = None
     if d.get('organizer_id'):
         organizer = Employee.objects.filter(pk=d['organizer_id'], company=company).first()
-    m = HRMeeting.objects.create(
-        company=company,
-        title=str(d['title'])[:200],
-        description=d.get('description') or '',
-        meeting_type=meeting_type, visibility=visibility,
-        organizer=organizer,
-        scheduled_at=sched,
-        duration_minutes=int(d.get('duration_minutes') or 30),
-        timezone_name=d.get('timezone_name') or 'UTC',
-        meeting_link=d.get('meeting_link') or None,
-        location=d.get('location') or '',
-    )
-    if d.get('participant_ids'):
-        valid = Employee.objects.filter(pk__in=d['participant_ids'], company=company)
-        m.participants.set(valid)
-    _seed_meeting_proposal(m, request.user)
+    duration = _hr_duration(d.get('duration_minutes'))
+    tz_name = zone_name(d.get('timezone_name'))
+
+    raw_ids = d.get('participant_ids') or []
+    wanted = [int(x) for x in raw_ids if _is_int(x)] if isinstance(raw_ids, list) else []
+    participant_ids = list(Employee.objects.filter(pk__in=wanted, company=company)
+                           .values_list('id', flat=True))
+    _, no_login = _hr_invitable(company, participant_ids)
+    if no_login:
+        return _hr_no_login_response(no_login)
+
+    people = _hr_people(company, participant_ids, organizer.id if organizer else None)
+    try:
+        with booking_guard(people):
+            ensure_free(people, sched, duration, tz_name=tz_name, viewer_source='hr',
+                        reveal_private=_is_hr_admin(request.user))
+            m = HRMeeting.objects.create(
+                company=company,
+                title=str(d['title'])[:200],
+                description=d.get('description') or '',
+                meeting_type=meeting_type, visibility=visibility,
+                organizer=organizer,
+                scheduled_at=sched,
+                duration_minutes=duration,
+                timezone_name=tz_name,
+                meeting_link=d.get('meeting_link') or None,
+                location=d.get('location') or '',
+            )
+            if participant_ids:
+                m.participants.set(participant_ids)
+            _seed_meeting_proposal(m, request.user)
+    except ScheduleConflict as clash:
+        return clash.response()
     _write_audit_log(request.user, company, 'hr_meeting.create', 'HRMeeting', m.id,
                      before=None,
                      after={'title': m.title, 'meeting_type': m.meeting_type,
@@ -2066,7 +2151,7 @@ def create_hr_meeting(request):
                             'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
                             'duration_minutes': m.duration_minutes,
                             'organizer_id': m.organizer_id,
-                            'participant_count': m.participants.count()})
+                            'participant_count': len(participant_ids)})
     return Response({'status': 'success', 'data': {'id': m.id, 'title': m.title,
                                                    'visibility': m.visibility}},
                     status=status.HTTP_201_CREATED)
@@ -2077,28 +2162,52 @@ def create_hr_meeting(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def hr_meeting_availability(request):
-    """Cheap availability check — finds clashes against existing HRMeetings.
-    Returns `available: True` / `False` with a list of clashing meeting ids."""
+    """Is a slot free for these people, across the PM, HR and Frontline
+    calendars?
+
+    Query params: ``start`` (ISO-8601, required), ``end`` or
+    ``duration_minutes``, ``participant_ids`` (comma-separated employee ids),
+    ``organizer_id``, ``exclude_meeting_id`` (the meeting being edited),
+    ``timezone``.
+
+    Returns ``{available, conflicts: [...], clashes: [HR meeting ids],
+    suggested_slots: [...], no_login: [employee ids]}``.
+    """
     company = request.user.company
-    start = request.GET.get('start')
-    end = request.GET.get('end')
-    if not start or not end:
-        return Response({'status': 'error', 'message': 'start and end query params required'},
+    start = _hr_aware(_parse_iso_dt(request.GET.get('start')))
+    if start is None:
+        return Response({'status': 'error', 'message': 'start (ISO-8601) is required'},
                         status=status.HTTP_400_BAD_REQUEST)
-    try:
-        s = datetime.fromisoformat(start.replace('Z', '+00:00'))
-        e = datetime.fromisoformat(end.replace('Z', '+00:00'))
-    except ValueError:
-        return Response({'status': 'error', 'message': 'start/end must be ISO-8601'},
+    end = _hr_aware(_parse_iso_dt(request.GET.get('end')))
+    if end is not None and end <= start:
+        return Response({'status': 'error', 'message': 'end must be after start'},
                         status=status.HTTP_400_BAD_REQUEST)
-    clashes = HRMeeting.objects.filter(
-        company=company, status='scheduled',
-        scheduled_at__lt=e,
-    ).extra(where=["DATEADD(MINUTE, duration_minutes, scheduled_at) > %s"], params=[s])
-    # `extra(where=)` is MSSQL-specific syntax. If portability matters later,
-    # replace with a Python-side check after fetching candidate rows.
-    ids = list(clashes.values_list('id', flat=True))
-    return Response({'status': 'success', 'data': {'available': not ids, 'clashes': ids}})
+    duration = (int((end - start).total_seconds() // 60) if end is not None
+                else _hr_duration(request.GET.get('duration_minutes')))
+    end = start + timedelta(minutes=duration)
+    tz_name = zone_name(request.GET.get('timezone'))
+
+    raw = request.GET.get('participant_ids') or ''
+    emp_ids = [int(x) for x in raw.split(',') if x.strip().isdigit()]
+    organizer_id = request.GET.get('organizer_id')
+    _, no_login = _hr_invitable(company, emp_ids)
+    people = _hr_people(company, emp_ids, int(organizer_id) if _is_int(organizer_id) else None)
+    exclude_id = request.GET.get('exclude_meeting_id')
+    exclude = [('hr', int(exclude_id))] if _is_int(exclude_id) else []
+
+    is_admin = _is_hr_admin(request.user)
+    clashes = find_conflicts(people, start, end, exclude=exclude, viewer_source='hr',
+                             reveal_private=is_admin)
+    suggestions = (suggest_slots(people, start, duration, tz_name, exclude=exclude)
+                   if clashes else [])
+    return Response({'status': 'success', 'data': {
+        'available': not clashes,
+        'conflicts': [c.as_dict() for c in clashes],
+        'clashes': sorted({c.source_id for c in clashes if c.source == 'hr'}),
+        'suggested_slots': [dt.isoformat() for dt in suggestions],
+        'timezone': tz_name,
+        'no_login': [e.id for e in no_login],
+    }})
 
 
 # ============================================================================
@@ -3288,7 +3397,7 @@ def hr_meeting_schedule(request):
             # `scheduled_at` as bogus and ask for a real time.
             sched = None
             if _hr_message_has_time_reference(message):
-                sched = _parse_iso_dt(parsed.get('scheduled_at'))
+                sched = _hr_aware(_parse_iso_dt(parsed.get('scheduled_at')))
 
             # HR-BUG-07: correct the DATE portion when we can resolve it
             # deterministically from the user's message. The LLM has
@@ -3356,29 +3465,57 @@ def hr_meeting_schedule(request):
                     'action': 'user_not_found',
                 }})
 
+            # Only employees who can log in can be invited.
+            _, no_login = _hr_invitable(company, validated_ids)
+            if no_login:
+                return Response({'status': 'success', 'data': {
+                    'reply': _hr_no_login_message(no_login),
+                    'meeting': None,
+                    'parsed': parsed,
+                    'action': 'no_login',
+                    'unresolved': {'no_login': [
+                        {'id': e.id, 'full_name': e.full_name, 'work_email': e.work_email}
+                        for e in no_login
+                    ]},
+                }})
+
             mtype = (parsed.get('meeting_type') or 'one_on_one')
-            visibility = ('private'
-                          if mtype in ('exit_interview', 'grievance_hearing', 'performance_review')
-                          else 'company')
+            visibility = 'private' if mtype in _HR_PRIVATE_TYPES else 'company'
             organizer = None
             if organizer_id:
                 organizer = Employee.objects.filter(pk=organizer_id, company=company).first()
-            m = HRMeeting.objects.create(
-                company=company,
-                title=(parsed.get('title') or 'HR meeting')[:200],
-                description=(parsed.get('description') or '')[:5000],
-                meeting_type=mtype,
-                visibility=visibility,
-                organizer=organizer,
-                scheduled_at=sched,
-                duration_minutes=int(parsed.get('duration_minutes') or 30),
-                timezone_name=parsed.get('timezone_name') or 'UTC',
-                meeting_link=parsed.get('meeting_link') or None,
-                location=parsed.get('location') or '',
-            )
-            valid = Employee.objects.filter(pk__in=validated_ids, company=company)
-            m.participants.set(valid)
-            _seed_meeting_proposal(m, request.user)
+            duration = _hr_duration(parsed.get('duration_minutes'))
+            tz_name = zone_name(request.data.get('timezone'))
+            valid_ids = list(Employee.objects.filter(pk__in=validated_ids, company=company)
+                             .values_list('id', flat=True))
+            people = _hr_people(company, valid_ids, organizer.id if organizer else None)
+            try:
+                with booking_guard(people):
+                    ensure_free(people, sched, duration, tz_name=tz_name, viewer_source='hr',
+                                reveal_private=_is_hr_admin(company_user))
+                    m = HRMeeting.objects.create(
+                        company=company,
+                        title=(parsed.get('title') or 'HR meeting')[:200],
+                        description=(parsed.get('description') or '')[:5000],
+                        meeting_type=mtype,
+                        visibility=visibility,
+                        organizer=organizer,
+                        scheduled_at=sched,
+                        duration_minutes=duration,
+                        timezone_name=tz_name,
+                        meeting_link=parsed.get('meeting_link') or None,
+                        location=parsed.get('location') or '',
+                    )
+                    m.participants.set(valid_ids)
+                    _seed_meeting_proposal(m, request.user)
+            except ScheduleConflict as clash:
+                return Response({'status': 'success', 'data': {
+                    'reply': clash.markdown(),
+                    'meeting': None,
+                    'parsed': parsed,
+                    'action': 'conflict',
+                    'conflict': clash.payload()['data'],
+                }})
             meeting_payload = _serialize_hr_meeting(m)
 
             # Build a strong success reply so the frontend never has to guess.
@@ -3454,16 +3591,26 @@ def get_hr_meeting(request, meeting_id):
 @throttle_classes([HRCRUDThrottle])
 def update_hr_meeting(request, meeting_id):
     """Update title / description / scheduled_at / duration / participants /
-    notes / location / meeting_link / status."""
+    notes / location / meeting_link / status.
+
+    A change that could double-book someone (new time or length, added
+    attendees, a cancelled meeting brought back) is checked first and refused
+    on a clash, with nothing saved.
+    """
     m, err = _hr_meeting_or_404(request, meeting_id)
     if err:
         return err
+    company = request.user.company
     d = request.data or {}
     dirty = []
     before = {'title': m.title, 'status': m.status,
               'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
               'duration_minutes': m.duration_minutes,
               'visibility': m.visibility}
+    was_active = (m.status not in ('cancelled', 'completed')
+                  and m.response_status not in ('withdrawn', 'rejected'))
+    old_duration = m.duration_minutes
+    time_moved = False
     if 'title' in d:
         m.title = str(d['title'] or '')[:200]
         dirty.append('title')
@@ -3471,24 +3618,22 @@ def update_hr_meeting(request, meeting_id):
         m.description = str(d['description'] or '')[:5000]
         dirty.append('description')
     if 'scheduled_at' in d:
-        sched = _parse_iso_dt(d['scheduled_at'])
+        sched = _hr_aware(_parse_iso_dt(d['scheduled_at']))
         if sched is None:
             return Response({'status': 'error', 'message': 'scheduled_at must be ISO-8601'},
                             status=status.HTTP_400_BAD_REQUEST)
+        # The edit dialog always sends the time; only a real move counts.
         time_moved = m.scheduled_at != sched
-        m.scheduled_at = sched
-        dirty.append('scheduled_at')
-        # Reset reminder flags so updated meetings get fresh reminders.
-        m.reminder_24h_sent_at = None
-        m.reminder_15m_sent_at = None
-        dirty.extend(['reminder_24h_sent_at', 'reminder_15m_sent_at'])
         if time_moved:
-            # Everyone's accept/decline was against the OLD slot — clear it so
-            # the card doesn't show stale agreement on a time nobody saw.
-            m.participant_rows.all().update(
-                status='pending', counter_proposed_time=None, responded_at=None)
+            m.scheduled_at = sched
+            # Updated meetings get fresh reminders. Everyone's accept/decline
+            # was against the OLD slot, so it is cleared below too, or the
+            # card would show agreement on a time nobody saw.
+            m.reminder_24h_sent_at = None
+            m.reminder_15m_sent_at = None
             m.response_status = 'pending'
-            dirty.append('response_status')
+            dirty.extend(['scheduled_at', 'reminder_24h_sent_at', 'reminder_15m_sent_at',
+                          'response_status'])
     if 'duration_minutes' in d:
         try:
             m.duration_minutes = max(5, min(480, int(d['duration_minutes'])))
@@ -3514,25 +3659,59 @@ def update_hr_meeting(request, meeting_id):
     if 'visibility' in d and d['visibility'] in ('company', 'private'):
         m.visibility = d['visibility']
         dirty.append('visibility')
-    if dirty:
-        dirty.append('updated_at')
-        m.save(update_fields=list(set(dirty)))
-    participants_changed = False
-    if 'participant_ids' in d:
-        ids = d.get('participant_ids') or []
-        if isinstance(ids, list):
-            valid = Employee.objects.filter(pk__in=ids, company=request.user.company)
-            m.participants.set(valid)
-            participants_changed = True
+
+    answers = dict(m.participant_rows.values_list('employee_id', 'status'))
+    new_participant_ids = None
+    added = set()
+    if isinstance(d.get('participant_ids'), list):
+        wanted = [int(x) for x in d['participant_ids'] if _is_int(x)]
+        new_participant_ids = list(Employee.objects.filter(pk__in=wanted, company=company)
+                                   .values_list('id', flat=True))
+        added = set(new_participant_ids) - set(answers)
+        _, no_login = _hr_invitable(company, added)
+        if no_login:
+            return _hr_no_login_response(no_login)
+
+    is_active = (m.status not in ('cancelled', 'completed')
+                 and m.response_status not in ('withdrawn', 'rejected'))
+    needs_check = is_active and (time_moved or m.duration_minutes != old_duration
+                                 or not was_active or bool(added))
+    people = []
+    if needs_check:
+        final_ids = new_participant_ids if new_participant_ids is not None else list(answers)
+        # After a move everyone is asked again, so people who had declined
+        # become busy too.
+        busy_ids = [e for e in final_ids
+                    if time_moved or e not in answers or answers[e] in _HR_BUSY_ANSWERS]
+        people = _hr_people(company, busy_ids, m.organizer_id)
+
+    try:
+        with booking_guard(people):
+            if needs_check:
+                ensure_free(people, m.scheduled_at, m.duration_minutes, tz_name=m.timezone_name,
+                            exclude=[('hr', m.id)], viewer_source='hr',
+                            reveal_private=_is_hr_admin(request.user))
+            if time_moved:
+                m.participant_rows.all().update(
+                    status='pending', counter_proposed_time=None, responded_at=None)
+            if dirty:
+                dirty.append('updated_at')
+                m.save(update_fields=list(set(dirty)))
+            if new_participant_ids is not None:
+                m.participants.set(new_participant_ids)
+    except ScheduleConflict as clash:
+        return clash.response()
+
+    participants_changed = new_participant_ids is not None
     m.refresh_from_db()
     if dirty or participants_changed:
-        _write_audit_log(request.user, request.user.company, 'hr_meeting.update',
-                         'HRMeeting', m.id, before,
+        _write_audit_log(request.user, company, 'hr_meeting.update',
+                         'HRMeeting', m.id, before=before,
                          after={'title': m.title, 'status': m.status,
                                 'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
                                 'duration_minutes': m.duration_minutes,
                                 'visibility': m.visibility,
-                                'participant_count': m.participants.count() if participants_changed else None,
+                                'participant_count': len(new_participant_ids) if participants_changed else None,
                                 'fields_changed': sorted(set(dirty) - {'updated_at',
                                                                       'reminder_24h_sent_at',
                                                                       'reminder_15m_sent_at'})})
@@ -3596,7 +3775,8 @@ def _hr_viewer_employee(request):
 def _send_hr_meeting_email(recipients, subject, body):
     """Best-effort notification mail. Never raises — a dead SMTP box must not
     fail the response the user just recorded."""
-    recipients = [e for e in dict.fromkeys(recipients or []) if e]
+    recipients = [e for e in dict.fromkeys(recipients or [])
+                  if e and not e.lower().endswith('.invalid')]
     if not recipients:
         return
     try:
@@ -3646,9 +3826,84 @@ def respond_hr_meeting(request, meeting_id):
     m, err = _hr_meeting_or_404(request, meeting_id)
     if err:
         return err
+    return _hr_respond(
+        m,
+        data=request.data or {},
+        viewer_emp=_hr_viewer_employee(request),
+        is_hr=_is_hr_admin(request.user),
+        fallback_name=request.user.full_name or request.user.email or 'HR',
+        actor_cu=request.user,
+    )
 
-    company = request.user.company
-    d = request.data or {}
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@throttle_classes([HRCRUDThrottle])
+def respond_hr_meeting_as_employee(request, meeting_id):
+    """An invited employee answers an HR meeting from their own login.
+
+    POST /api/meetings/hr/<id>/respond — body ``{action, reason?, counter_time?}``
+    with action accepted / rejected / counter_proposed. Same rules as the HR
+    dashboard, including the clash check; employees answer only for their own
+    seat and never see other meetings' titles.
+    """
+    from core.tenancy import company_of_user
+
+    user = request.user
+    company = company_of_user(user)
+    employee = (Employee.objects.filter(user=user, company=company).first()
+                if company is not None else None)
+    m = (HRMeeting.objects.filter(pk=meeting_id, company=company).select_related('organizer').first()
+         if employee is not None else None)
+    if m is None or not m.participant_rows.filter(employee=employee).exists():
+        return Response({'status': 'error', 'message': 'Meeting not found.'},
+                        status=status.HTTP_404_NOT_FOUND)
+    data = {k: request.data.get(k) for k in ('action', 'reason', 'counter_time')}
+    if data['action'] == 'withdrawn':
+        return Response({'status': 'error', 'message': 'Only the organizer can withdraw a meeting.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    data['as_role'] = 'participant'
+    return _hr_respond(
+        m,
+        data=data,
+        viewer_emp=employee,
+        is_hr=False,
+        fallback_name=user.get_full_name() or user.username,
+        actor_cu=None,
+    )
+
+
+def _hr_people_made_busy(m, as_role, action, participant_row, counter_time, my_login):
+    """Who becomes busy, and when, because of this response.
+
+    ([], None) when the response can't create a new clash: declining,
+    withdrawing, or confirming a meeting that already held everyone's slot.
+    """
+    me = {my_login} if (as_role == 'participant' and my_login) else set()
+    if action == 'counter_proposed':
+        # The organizer's counter resets every answer to pending, so people
+        # who had declined become busy again; a participant's doesn't.
+        people = set(people_for('hr', m, include_declined=(as_role == 'organizer'))) | me
+        return sorted(people), counter_time
+    if action == 'accepted':
+        revived = m.response_status == 'rejected'
+        rejoined = as_role == 'participant' and participant_row.status == 'rejected'
+        if revived or rejoined:
+            return sorted(set(people_for('hr', m)) | me), m.scheduled_at
+    return [], None
+
+
+def _hr_respond(m, *, data, viewer_emp, is_hr, fallback_name, actor_cu):
+    """Record one response on an HR meeting and notify the other side.
+
+    Shared by the dashboard endpoint (dashboard logins) and the employee
+    endpoint (employee logins), so both follow the same rules, including the
+    clash check. ``is_hr`` lets the caller act on the organizer side and see
+    private meeting titles in clash messages; ``actor_cu`` is the dashboard
+    login for the audit log, or None for an employee login.
+    """
+    company = m.company
+    d = data
     action = str(d.get('action') or '').strip()
     reason = str(d.get('reason') or '').strip()[:2000]
 
@@ -3659,13 +3914,12 @@ def respond_hr_meeting(request, meeting_id):
             status=status.HTTP_400_BAD_REQUEST)
 
     # --- Who is acting, and in which seat? ---------------------------------
-    viewer_emp = _hr_viewer_employee(request)
     participant_row = None
     if viewer_emp:
         participant_row = HRMeetingParticipant.objects.filter(
             meeting=m, employee=viewer_emp).first()
     is_organizer = bool(viewer_emp and m.organizer_id == viewer_emp.id)
-    can_act_as_organizer = is_organizer or _is_hr_admin(request.user)
+    can_act_as_organizer = is_organizer or is_hr
     can_act_as_participant = participant_row is not None
 
     as_role = str(d.get('as_role') or '').strip().lower()
@@ -3701,14 +3955,10 @@ def respond_hr_meeting(request, meeting_id):
             return Response({'status': 'error',
                              'message': 'counter_time is required to suggest a new time.'},
                             status=status.HTTP_400_BAD_REQUEST)
-        counter_time = _parse_iso_dt(raw)
+        counter_time = _hr_aware(_parse_iso_dt(raw))
         if counter_time is None:
             return Response({'status': 'error', 'message': 'counter_time must be ISO-8601.'},
                             status=status.HTTP_400_BAD_REQUEST)
-        # `_parse_iso_dt` passes through naive datetimes when the payload has
-        # no offset; make it aware before comparing against `now()`.
-        if timezone.is_naive(counter_time):
-            counter_time = timezone.make_aware(counter_time)
         if counter_time <= timezone.now():
             return Response({'status': 'error',
                              'message': 'The suggested time must be in the future.'},
@@ -3717,66 +3967,78 @@ def respond_hr_meeting(request, meeting_id):
     before = {'status': m.status, 'response_status': m.response_status,
               'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None}
     now = timezone.now()
-    responder_name = (viewer_emp.full_name if viewer_emp
-                      else (request.user.full_name or request.user.email or 'HR'))
+    responder_name = viewer_emp.full_name if viewer_emp else fallback_name
+
+    my_login = None
+    if viewer_emp and viewer_emp.user_id and member_ids(company.id, [viewer_emp.user_id]):
+        my_login = viewer_emp.user_id
+    people, when = _hr_people_made_busy(m, as_role, action, participant_row, counter_time, my_login)
 
     # --- Apply --------------------------------------------------------------
-    if as_role == 'organizer':
-        meeting_fields = []
-        if action == 'accepted':
-            m.response_status = 'accepted'
-            # A participant's suggested time just won — reflect that on their
-            # chip rather than leaving it stuck on "counter_proposed".
-            m.participant_rows.filter(status='counter_proposed').update(
-                status='accepted', responded_at=now)
-        elif action == 'rejected':
-            m.response_status = 'rejected'
-            m.status = 'cancelled'
-            meeting_fields.append('status')
-        elif action == 'withdrawn':
-            m.response_status = 'withdrawn'
-            m.status = 'cancelled'
-            meeting_fields.append('status')
-        elif action == 'counter_proposed':
-            m.scheduled_at = counter_time
-            m.status = 'rescheduled'
-            m.response_status = 'counter_proposed'
-            # The time moved, so every prior answer is stale — reset the table
-            # and re-collect. Reminder flags reset too so the new slot gets its
-            # own 24h/15m nudges.
-            m.reminder_24h_sent_at = None
-            m.reminder_15m_sent_at = None
-            m.participant_rows.all().update(
-                status='pending', counter_proposed_time=None, responded_at=None)
-            meeting_fields.extend(['scheduled_at', 'status',
-                                   'reminder_24h_sent_at', 'reminder_15m_sent_at'])
-        m.save(update_fields=list(set(meeting_fields + ['response_status', 'updated_at'])))
-    else:
-        participant_row.status = action
-        participant_row.reason = reason
-        participant_row.responded_at = now
-        participant_row.counter_proposed_time = counter_time if action == 'counter_proposed' else None
-        participant_row.save(update_fields=['status', 'reason', 'responded_at',
-                                            'counter_proposed_time'])
-        if action == 'counter_proposed':
-            m.scheduled_at = counter_time
-            m.status = 'rescheduled'
-            m.reminder_24h_sent_at = None
-            m.reminder_15m_sent_at = None
-            m.save(update_fields=['scheduled_at', 'status', 'reminder_24h_sent_at',
-                                  'reminder_15m_sent_at', 'updated_at'])
-        m.refresh_from_db()
-        m.update_response_status()
+    try:
+        with booking_guard(people):
+            if people:
+                ensure_free(people, when, m.duration_minutes, tz_name=m.timezone_name,
+                            exclude=[('hr', m.id)], viewer_source='hr',
+                            reveal_private=is_hr, hide_titles=not is_hr)
+            if as_role == 'organizer':
+                meeting_fields = []
+                if action == 'accepted':
+                    m.response_status = 'accepted'
+                    # A participant's suggested time just won — reflect that on
+                    # their chip rather than leaving it stuck on "counter_proposed".
+                    m.participant_rows.filter(status='counter_proposed').update(
+                        status='accepted', responded_at=now)
+                elif action == 'rejected':
+                    m.response_status = 'rejected'
+                    m.status = 'cancelled'
+                    meeting_fields.append('status')
+                elif action == 'withdrawn':
+                    m.response_status = 'withdrawn'
+                    m.status = 'cancelled'
+                    meeting_fields.append('status')
+                elif action == 'counter_proposed':
+                    m.scheduled_at = counter_time
+                    m.status = 'rescheduled'
+                    m.response_status = 'counter_proposed'
+                    # The time moved, so every prior answer is stale — reset the
+                    # table and re-collect. Reminder flags reset too so the new
+                    # slot gets its own 24h/15m nudges.
+                    m.reminder_24h_sent_at = None
+                    m.reminder_15m_sent_at = None
+                    m.participant_rows.all().update(
+                        status='pending', counter_proposed_time=None, responded_at=None)
+                    meeting_fields.extend(['scheduled_at', 'status',
+                                           'reminder_24h_sent_at', 'reminder_15m_sent_at'])
+                m.save(update_fields=list(set(meeting_fields + ['response_status', 'updated_at'])))
+            else:
+                participant_row.status = action
+                participant_row.reason = reason
+                participant_row.responded_at = now
+                participant_row.counter_proposed_time = counter_time if action == 'counter_proposed' else None
+                participant_row.save(update_fields=['status', 'reason', 'responded_at',
+                                                    'counter_proposed_time'])
+                if action == 'counter_proposed':
+                    m.scheduled_at = counter_time
+                    m.status = 'rescheduled'
+                    m.reminder_24h_sent_at = None
+                    m.reminder_15m_sent_at = None
+                    m.save(update_fields=['scheduled_at', 'status', 'reminder_24h_sent_at',
+                                          'reminder_15m_sent_at', 'updated_at'])
+                m.refresh_from_db()
+                m.update_response_status()
 
-    HRMeetingResponse.objects.create(
-        meeting=m,
-        responder=viewer_emp,
-        responder_name=responder_name[:255],
-        responded_by=as_role,
-        action=action,
-        proposed_time=counter_time,
-        reason=reason,
-    )
+            HRMeetingResponse.objects.create(
+                meeting=m,
+                responder=viewer_emp,
+                responder_name=responder_name[:255],
+                responded_by=as_role,
+                action=action,
+                proposed_time=counter_time,
+                reason=reason,
+            )
+    except ScheduleConflict as clash:
+        return clash.response()
 
     # The organizer branch mutates participant rows with queryset `.update()`,
     # which leaves the in-memory objects (and any prefetch cache) stale — so
@@ -3787,9 +4049,9 @@ def respond_hr_meeting(request, meeting_id):
     verb = {'accepted': 'accepted', 'rejected': 'declined',
             'counter_proposed': 'suggested a new time for',
             'withdrawn': 'withdrawn'}[action]
-    when = _hr_meeting_when(m)
+    when_text = _hr_meeting_when(m)
     subject = f'Meeting {action.replace("_", " ")}: {m.title}'
-    body = f'{responder_name} has {verb} the meeting "{m.title}".\n\nWhen: {when}'
+    body = f'{responder_name} has {verb} the meeting "{m.title}".\n\nWhen: {when_text}'
     if reason:
         body += f'\nReason: {reason}'
     if as_role == 'organizer':
@@ -3800,11 +4062,12 @@ def respond_hr_meeting(request, meeting_id):
     _send_hr_meeting_email(recipients, subject, body)
 
     _write_audit_log(
-        request.user, company, f'hr_meeting.{action}', 'HRMeeting', m.id,
+        actor_cu, company, f'hr_meeting.{action}', 'HRMeeting', m.id,
         before=before,
         after={'status': m.status, 'response_status': m.response_status,
                'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
-               'as_role': as_role, 'reason': reason[:500]},
+               'as_role': as_role, 'reason': reason[:500],
+               'responder_employee_id': viewer_emp.id if viewer_emp else None},
     )
 
     return Response({'status': 'success', 'data': _serialize_hr_meeting(

@@ -8,6 +8,7 @@ from datetime import datetime
 import logging
 
 from core.models import Notification
+from core.scheduling import ScheduleConflict, booking_guard, ensure_free, people_for
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,24 @@ def mark_all_notifications_read(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _pm_people_made_busy(meeting, participant, action, counter_time=None):
+    """Who becomes busy, and when, because of an invitee's response.
+
+    Returns ([], None) when the response can't create a new clash — declining,
+    or accepting an invitation that already held the slot. Otherwise the
+    people to check before saving:
+      * a counter-proposal moves the meeting, so everyone it occupies, at the
+        new time;
+      * accepting after having declined, or reviving a meeting everyone had
+        declined, makes seats busy again at the current time.
+    """
+    if action == 'counter_proposed':
+        return sorted(set(people_for('pm', meeting)) | {participant.user_id}), counter_time
+    if action == 'accepted' and (participant.status == 'rejected' or meeting.status == 'rejected'):
+        return sorted(set(people_for('pm', meeting)) | {participant.user_id}), meeting.proposed_time
+    return [], None
+
+
 # ==================== MEETING RESPONSE (Project User) ====================
 
 @api_view(['POST'])
@@ -158,28 +177,37 @@ def meeting_respond(request, meeting_id):
             except Exception:
                 return Response({'status': 'error', 'message': 'Invalid counter_time format.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Create response record
-        MeetingResponse.objects.create(
-            meeting=meeting,
-            responded_by='invitee',
-            action=action,
-            proposed_time=counter_time,
-            reason=reason,
-        )
+        people, when = _pm_people_made_busy(meeting, participant, action, counter_time)
+        try:
+            with booking_guard(people):
+                if people:
+                    ensure_free(people, when, meeting.duration_minutes, tz_name=meeting.timezone_name,
+                                exclude=[('pm', meeting.id)], viewer_source='pm', hide_titles=True)
 
-        # Update this participant's status
-        participant.status = action
-        participant.reason = reason
-        participant.responded_at = timezone.now()
-        if action == 'counter_proposed':
-            participant.counter_proposed_time = counter_time
-        participant.save()
+                # Create response record
+                MeetingResponse.objects.create(
+                    meeting=meeting,
+                    responded_by='invitee',
+                    action=action,
+                    proposed_time=counter_time,
+                    reason=reason,
+                )
 
-        # Update overall meeting status based on all participants
-        if action == 'counter_proposed':
-            meeting.proposed_time = counter_time
-            meeting.save(update_fields=['proposed_time', 'updated_at'])
-        meeting.update_overall_status()
+                # Update this participant's status
+                participant.status = action
+                participant.reason = reason
+                participant.responded_at = timezone.now()
+                if action == 'counter_proposed':
+                    participant.counter_proposed_time = counter_time
+                participant.save()
+
+                # Update overall meeting status based on all participants
+                if action == 'counter_proposed':
+                    meeting.proposed_time = counter_time
+                    meeting.save(update_fields=['proposed_time', 'updated_at'])
+                meeting.update_overall_status()
+        except ScheduleConflict as clash:
+            return clash.response()
 
         # Notify the organizer (CompanyUser) via PMNotification
         from project_manager_agent.models import PMNotification
@@ -261,71 +289,208 @@ def meeting_respond(request, meeting_id):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _visible_email(address):
+    """Hide the stand-in addresses HR gives logins that have no email."""
+    return '' if (address or '').lower().endswith('.invalid') else (address or '')
+
+
+def _pm_meeting_items(user):
+    from project_manager_agent.models import ScheduledMeeting, MeetingParticipant
+    from django.db.models import Q
+
+    # Find meetings where user is a participant OR legacy invitee
+    participant_meeting_ids = MeetingParticipant.objects.filter(user=user).values_list('meeting_id', flat=True)
+    meetings = ScheduledMeeting.objects.filter(
+        Q(id__in=participant_meeting_ids) | Q(invitee=user)
+    ).distinct().select_related('organizer', 'invitee').prefetch_related('responses', 'participants__user').order_by('-created_at')[:50]
+
+    items = []
+    for m in meetings:
+        responses = []
+        for r in m.responses.all().order_by('created_at'):
+            if r.responded_by == 'organizer':
+                responder_name = m.organizer.full_name
+            else:
+                responder_name = m.invitee.get_full_name() or m.invitee.username if m.invitee else 'Invitee'
+            responses.append({
+                'id': r.id,
+                'responded_by': r.responded_by,
+                'responder_name': responder_name,
+                'action': r.action,
+                'proposed_time': r.proposed_time.isoformat() if r.proposed_time else None,
+                'reason': r.reason,
+                'created_at': r.created_at.isoformat(),
+            })
+
+        # Participants with per-user status
+        participants = []
+        my_status = 'pending'
+        for p in m.participants.all():
+            pname = p.user.get_full_name() or p.user.username
+            participants.append({
+                'user_id': p.user_id,
+                'name': pname,
+                'status': p.status,
+            })
+            if p.user_id == user.id:
+                my_status = p.status
+
+        can_respond = (m.status != 'withdrawn' and my_status != 'accepted'
+                       and (my_status in ('pending', 'counter_proposed')
+                            or m.status in ('pending', 'counter_proposed')))
+        items.append({
+            'id': m.id,
+            'source': 'pm',
+            'source_label': 'Project Manager',
+            'organizer_name': m.organizer.full_name,
+            'organizer_email': m.organizer.email,
+            'title': m.title,
+            'description': m.description,
+            'agenda': m.agenda or [],
+            'proposed_time': m.proposed_time.isoformat(),
+            'duration_minutes': m.duration_minutes,
+            'status': m.status,
+            'my_status': my_status,
+            'participants': participants,
+            'created_at': m.created_at.isoformat(),
+            'responses': responses,
+            'meeting_link': None,
+            'location': '',
+            'can_respond': can_respond,
+            'can_suggest_time': can_respond,
+            'respond_url': f'/meetings/{m.id}/respond',
+        })
+    return items
+
+
+def _hr_meeting_items(user):
+    from django.db.models import Q
+    from hr_agent.models import Employee, HRMeeting
+
+    employee = Employee.objects.filter(user=user).first()
+    if employee is None:
+        return []
+    meetings = (HRMeeting.objects
+                .filter(Q(participant_rows__employee=employee) | Q(organizer=employee),
+                        company_id=employee.company_id)
+                .distinct()
+                .select_related('organizer')
+                .prefetch_related('participant_rows__employee', 'responses')
+                .order_by('-created_at')[:50])
+
+    items = []
+    for m in meetings:
+        participants, my_row = [], None
+        for row in m.participant_rows.all():
+            participants.append({'user_id': row.employee.user_id, 'name': row.employee.full_name,
+                                 'status': row.status})
+            if row.employee_id == employee.id:
+                my_row = row
+        if m.status == 'cancelled' or m.response_status == 'withdrawn':
+            status_label = 'withdrawn'
+        elif m.status == 'completed':
+            status_label = 'completed'
+        else:
+            status_label = m.response_status
+        my_status = my_row.status if my_row else 'organizer'
+        can_respond = bool(my_row) and status_label not in ('withdrawn', 'completed') and my_status != 'accepted'
+        items.append({
+            'id': m.id,
+            'source': 'hr',
+            'source_label': 'HR',
+            'organizer_name': m.organizer.full_name if m.organizer_id else 'HR',
+            'organizer_email': _visible_email(m.organizer.work_email) if m.organizer_id else '',
+            'title': m.title,
+            'description': m.description,
+            'agenda': [],
+            'proposed_time': m.scheduled_at.isoformat() if m.scheduled_at else None,
+            'duration_minutes': m.duration_minutes,
+            'status': status_label,
+            'my_status': my_status,
+            'participants': participants,
+            'created_at': m.created_at.isoformat() if m.created_at else None,
+            'responses': [{
+                'id': r.id,
+                'responded_by': r.responded_by,
+                'responder_name': r.responder_name or 'HR',
+                'action': r.action,
+                'proposed_time': r.proposed_time.isoformat() if r.proposed_time else None,
+                'reason': r.reason,
+                'created_at': r.created_at.isoformat() if r.created_at else None,
+            } for r in m.responses.all()],
+            'meeting_link': m.meeting_link,
+            'location': m.location,
+            'can_respond': can_respond,
+            'can_suggest_time': can_respond,
+            'respond_url': f'/meetings/hr/{m.id}/respond' if my_row else None,
+        })
+    return items
+
+
+def _frontline_meeting_items(user):
+    from django.db.models import Q
+    from Frontline_agent.models import FrontlineMeeting
+
+    meetings = (FrontlineMeeting.objects
+                .filter(Q(participants=user) | Q(organizer=user))
+                .distinct()
+                .select_related('organizer')
+                .prefetch_related('participants')
+                .order_by('-created_at')[:50])
+    items = []
+    for m in meetings:
+        items.append({
+            'id': m.id,
+            'source': 'frontline',
+            'source_label': 'Frontline',
+            'organizer_name': m.organizer.get_full_name() or m.organizer.username,
+            'organizer_email': _visible_email(m.organizer.email),
+            'title': m.title,
+            'description': m.description,
+            'agenda': [],
+            'proposed_time': m.scheduled_at.isoformat() if m.scheduled_at else None,
+            'duration_minutes': m.duration_minutes,
+            # Frontline meetings have no accept/decline step.
+            'status': m.status,
+            'my_status': 'organizer' if m.organizer_id == user.id else 'scheduled',
+            'participants': [{'user_id': p.id, 'name': p.get_full_name() or p.username,
+                              'status': m.status} for p in m.participants.all()],
+            'created_at': m.created_at.isoformat() if m.created_at else None,
+            'responses': [],
+            'meeting_link': m.meeting_link,
+            'location': m.location,
+            'can_respond': False,
+            'can_suggest_time': False,
+            'respond_url': None,
+        })
+    return items
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def meeting_list_for_user(request):
-    """List all meetings where the current project user is a participant."""
+    """Every meeting the current employee is part of, from the Project
+    Manager, HR and Frontline agents.
+
+    Each item carries `source` ('pm' | 'hr' | 'frontline'); ids are only unique
+    within a source. `respond_url` (relative to /api) is where to send an
+    accept / reject / counter-proposal, and `can_respond` says whether the
+    employee may answer now. Frontline meetings are informational.
+    """
     try:
-        from project_manager_agent.models import ScheduledMeeting, MeetingParticipant
-
         user = request.user
-        # Find meetings where user is a participant OR legacy invitee
-        participant_meeting_ids = MeetingParticipant.objects.filter(user=user).values_list('meeting_id', flat=True)
-        from django.db.models import Q
-        meetings = ScheduledMeeting.objects.filter(
-            Q(id__in=participant_meeting_ids) | Q(invitee=user)
-        ).distinct().select_related('organizer', 'invitee').prefetch_related('responses', 'participants__user').order_by('-created_at')[:50]
-
-        data = []
-        for m in meetings:
-            responses = []
-            for r in m.responses.all().order_by('created_at'):
-                if r.responded_by == 'organizer':
-                    responder_name = m.organizer.full_name
-                else:
-                    responder_name = m.invitee.get_full_name() or m.invitee.username if m.invitee else 'Invitee'
-                responses.append({
-                    'id': r.id,
-                    'responded_by': r.responded_by,
-                    'responder_name': responder_name,
-                    'action': r.action,
-                    'proposed_time': r.proposed_time.isoformat() if r.proposed_time else None,
-                    'reason': r.reason,
-                    'created_at': r.created_at.isoformat(),
-                })
-
-            # Participants with per-user status
-            participants = []
-            my_status = 'pending'
-            for p in m.participants.all():
-                pname = p.user.get_full_name() or p.user.username
-                participants.append({
-                    'user_id': p.user_id,
-                    'name': pname,
-                    'status': p.status,
-                })
-                if p.user_id == user.id:
-                    my_status = p.status
-
-            data.append({
-                'id': m.id,
-                'organizer_name': m.organizer.full_name,
-                'organizer_email': m.organizer.email,
-                'title': m.title,
-                'description': m.description,
-                'agenda': m.agenda or [],
-                'proposed_time': m.proposed_time.isoformat(),
-                'duration_minutes': m.duration_minutes,
-                'status': m.status,
-                'my_status': my_status,
-                'participants': participants,
-                'created_at': m.created_at.isoformat(),
-                'responses': responses,
-            })
+        items = []
+        for collect in (_pm_meeting_items, _hr_meeting_items, _frontline_meeting_items):
+            try:
+                items += collect(user)
+            except Exception:
+                # One agent's failure mustn't hide the others' meetings.
+                logger.exception('meeting_list_for_user: %s failed', collect.__name__)
+        items.sort(key=lambda i: i.get('created_at') or '', reverse=True)
 
         return Response({
             'status': 'success',
-            'data': {'meetings': data, 'total': len(data)}
+            'data': {'meetings': items, 'total': len(items)}
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
@@ -479,14 +644,27 @@ def meeting_email_action(request, action, token):
             color='#10b981' if action == 'accepted' else '#9ca3af',
         )
 
-    participant.status = action
-    participant.responded_at = timezone.now()
-    participant.save(update_fields=['status', 'responded_at'])
+    people, when = _pm_people_made_busy(meeting, participant, action)
+    try:
+        with booking_guard(people):
+            if people:
+                ensure_free(people, when, meeting.duration_minutes, tz_name=meeting.timezone_name,
+                            exclude=[('pm', meeting.id)], viewer_source='pm', hide_titles=True,
+                            suggest=False)
+            participant.status = action
+            participant.responded_at = timezone.now()
+            participant.save(update_fields=['status', 'responded_at'])
 
-    MeetingResponse.objects.create(
-        meeting=meeting, responded_by='invitee', action=action, reason='',
-    )
-    meeting.update_overall_status()
+            MeetingResponse.objects.create(
+                meeting=meeting, responded_by='invitee', action=action, reason='',
+            )
+            meeting.update_overall_status()
+    except ScheduleConflict as clash:
+        return _render_email_action_page(
+            "Can't accept — time already taken",
+            f'{clash.text()} Please log in to your dashboard to suggest a different time.',
+            color='#ef4444',
+        )
 
     # Notify the organizer (in-app). Email-to-organizer follow-up isn't
     # essential here — they'll see status update next time they refresh.

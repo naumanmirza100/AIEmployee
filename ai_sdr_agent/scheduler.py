@@ -42,13 +42,19 @@ _lock = threading.Lock()
 
 def _close_db():
     """
-    Close the thread-local Django DB connection after every job.
-    APScheduler reuses threads from its pool; without this the connection
-    can go stale (timeout / OperationalError) between runs.
+    Drop this thread's Django DB connection after a job if it is broken or
+    older than CONN_MAX_AGE; otherwise keep it for the next run.
+
+    This used to close the connection unconditionally, which cost a new
+    database connection for every run of every job (~72 an hour per
+    scheduler). The database user is capped at 500 new connections an hour.
+    CONN_MAX_AGE is kept below the session wait_timeout, and
+    CONN_HEALTH_CHECKS re-checks a reused connection, so a connection kept
+    between runs can't go stale.
     """
     try:
-        from django.db import connection
-        connection.close()
+        from django.db import close_old_connections
+        close_old_connections()
     except Exception:
         pass
 
@@ -76,8 +82,6 @@ def _run_qualify_queue():
     except Exception as exc:
         logger.exception("SDR qualify_queue crashed: %s", exc)
     finally:
-        # Every other job wrapper in this module does this; without it the
-        # pooled thread keeps a stale connection between ticks.
         _close_db()
 
 

@@ -99,11 +99,7 @@
                 </div>
                 
                 <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);">
-                    <a href="{% url 'ai_agents_test' %}?project_id={{ project.id }}" class="btn btn-primary" 
-                       style="text-decoration: none; width: 100%; text-align: center; margin-bottom: 0.5rem;">
-                        Test AI Agents
-                    </a>
-                    <a href="{% url 'project_delete' project.id %}" 
+                    <a href="{% url 'project_delete' project.id %}"
                        style="color: var(--error-color); text-decoration: none; font-size: 0.9rem; display: block; text-align: center;">
                         Delete Project
                     </a>

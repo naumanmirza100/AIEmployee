@@ -36,6 +36,11 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from core.models import CompanyUser, Company
 from core.api_key_service import KeyServiceError
+from core.scheduling import (
+    ScheduleConflict, booking_guard, ensure_free, find_conflicts, login_user_id_for_company_user,
+    suggest_slots, zone_name,
+)
+from core.tenancy import members_of
 from Frontline_agent.models import (
     Document, Ticket, TicketNote, TicketMessage, TicketAttachment,
     KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
@@ -3791,6 +3796,63 @@ def _parse_iso_aware(raw):
         return None
 
 
+# ----- Shared calendar (clash checks across PM / HR / Frontline) ----------
+# Attendees are employee logins (decision 2026-09-17): the same people the PM
+# and HR schedulers invite. Every booking or time change is checked against the
+# shared busy-time table and refused on a clash. See core/scheduling.
+
+def _meeting_attendees(company, data):
+    """Resolve the attendee fields of a create/update payload.
+
+    ``participant_user_ids`` are employee logins and must belong to the
+    company. ``participant_company_user_ids`` (dashboard logins, the older
+    field) count only when the dashboard login maps to an employee login;
+    unknown or inactive dashboard logins are skipped, as before.
+
+    Returns ``(user_ids, names_that_cannot_be_invited)``.
+    """
+    user_ids, refused = set(), []
+    raw_users = [x for x in (data.get('participant_user_ids') or []) if str(x).strip()]
+    if raw_users:
+        wanted = {int(x) for x in raw_users if str(x).strip().isdigit()}
+        found = set(members_of(company).filter(pk__in=wanted).values_list('id', flat=True))
+        user_ids |= found
+        refused += [f'user #{x}' for x in raw_users
+                    if not str(x).strip().isdigit() or int(x) not in found]
+    for cuid in data.get('participant_company_user_ids') or []:
+        cu = CompanyUser.objects.filter(id=cuid, company=company, is_active=True).first()
+        if cu is None:
+            continue
+        login_id = login_user_id_for_company_user(cu)
+        if login_id:
+            user_ids.add(login_id)
+        else:
+            refused.append(cu.full_name or cu.email)
+    return sorted(user_ids), refused
+
+
+def _no_login_response(names):
+    shown = ', '.join(names[:5]) + (f' and {len(names) - 5} more' if len(names) > 5 else '')
+    return Response({
+        'status': 'error', 'code': 'no_login',
+        'message': (f"{shown} can't be invited: meetings are only for employees who can log in "
+                    "to your company."),
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
+def _organizer_for(company_user):
+    """(organizer User, is it an employee login?).
+
+    The organizer column needs a User. A dashboard login that is also an
+    employee is stored as that employee, and their own calendar is checked;
+    otherwise the old stand-in user is kept and not checked.
+    """
+    login_id = login_user_id_for_company_user(company_user)
+    if login_id:
+        return User.objects.get(pk=login_id), True
+    return _get_or_create_user_for_company_user(company_user), False
+
+
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -3841,7 +3903,7 @@ def create_meeting(request):
     try:
         company_user = request.user
         company = company_user.company
-        organizer = _get_or_create_user_for_company_user(company_user)
+        organizer, organizer_is_employee = _organizer_for(company_user)
         data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
 
         title = (data.get('title') or '').strip()
@@ -3865,32 +3927,32 @@ def create_meeting(request):
             meeting_link = clean
         elif auto_jitsi:
             meeting_link = _generate_jitsi_link()
-        tz_name = (data.get('timezone_name') or 'UTC').strip()[:64] or 'UTC'
+        tz_name = zone_name(data.get('timezone_name'))
 
-        m = FrontlineMeeting.objects.create(
-            title=title[:200],
-            description=data.get('description') or '',
-            company=company,
-            organizer=organizer,
-            scheduled_at=scheduled_at,
-            duration_minutes=duration_minutes,
-            timezone_name=tz_name,
-            meeting_link=meeting_link or None,
-            location=(data.get('location') or '')[:500],
-            status='scheduled',
-        )
-
-        # Participants: accept either company_user_ids (preferred) or participant_user_ids (raw User ids).
-        company_user_ids = data.get('participant_company_user_ids') or []
-        user_ids = list(data.get('participant_user_ids') or [])
-        if company_user_ids:
-            for cuid in company_user_ids:
-                cu = CompanyUser.objects.filter(id=cuid, company=company, is_active=True).first()
-                if cu:
-                    user_ids.append(_get_or_create_user_for_company_user(cu).id)
-        if user_ids:
-            from django.contrib.auth.models import User as _User
-            m.participants.set(_User.objects.filter(id__in=set(user_ids)))
+        attendees, refused = _meeting_attendees(company, data)
+        if refused:
+            return _no_login_response(refused)
+        people = attendees + ([organizer.id] if organizer_is_employee else [])
+        try:
+            with booking_guard(people):
+                ensure_free(people, scheduled_at, duration_minutes, tz_name=tz_name,
+                            viewer_source='frontline')
+                m = FrontlineMeeting.objects.create(
+                    title=title[:200],
+                    description=data.get('description') or '',
+                    company=company,
+                    organizer=organizer,
+                    scheduled_at=scheduled_at,
+                    duration_minutes=duration_minutes,
+                    timezone_name=tz_name,
+                    meeting_link=meeting_link or None,
+                    location=(data.get('location') or '')[:500],
+                    status='scheduled',
+                )
+                if attendees:
+                    m.participants.set(attendees)
+        except ScheduleConflict as clash:
+            return clash.response()
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)},
                         status=status.HTTP_201_CREATED)
@@ -3923,12 +3985,21 @@ def get_meeting(request, meeting_id):
 @permission_classes([IsCompanyUserOnly])
 def update_meeting(request, meeting_id):
     """Update meeting fields. Re-sending a reminder after edit is signalled by the
-    caller via clearing reminder_24h_sent_at / reminder_15m_sent_at."""
+    caller via clearing reminder_24h_sent_at / reminder_15m_sent_at.
+
+    A change that could double-book someone (new time or length, added
+    attendees, a finished or cancelled meeting brought back) is checked first
+    and refused on a clash, with nothing saved.
+    """
     try:
         m, err = _get_company_meeting_or_404(request, meeting_id)
         if err:
             return err
+        company = request.user.company
         data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
+        active_states = ('scheduled', 'rescheduled')
+        was_active = m.status in active_states
+        old_start, old_duration = m.scheduled_at, m.duration_minutes
 
         if 'title' in data:
             m.title = str(data['title'])[:200]
@@ -3939,17 +4010,18 @@ def update_meeting(request, meeting_id):
             if not dt:
                 return Response({'status': 'error', 'message': 'Invalid scheduled_at'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            m.scheduled_at = dt
-            # Schedule change → reset reminder flags so Celery will re-send.
-            m.reminder_24h_sent_at = None
-            m.reminder_15m_sent_at = None
+            if dt != m.scheduled_at:
+                m.scheduled_at = dt
+                # Schedule change → reset reminder flags so Celery will re-send.
+                m.reminder_24h_sent_at = None
+                m.reminder_15m_sent_at = None
         if 'duration_minutes' in data:
             try:
                 m.duration_minutes = max(5, min(24 * 60, int(data['duration_minutes'])))
             except (TypeError, ValueError):
                 pass
         if 'timezone_name' in data:
-            m.timezone_name = str(data['timezone_name'])[:64] or 'UTC'
+            m.timezone_name = zone_name(data['timezone_name'])
         if 'meeting_link' in data:
             raw = (str(data['meeting_link']) or '').strip()
             if raw:
@@ -3971,17 +4043,32 @@ def update_meeting(request, meeting_id):
         if 'transcript' in data:
             m.transcript = str(data['transcript'])
 
-        m.save()
+        current = set(m.participants.values_list('id', flat=True))
+        new_attendees = None
+        if 'participant_company_user_ids' in data or 'participant_user_ids' in data:
+            new_attendees, refused = _meeting_attendees(company, data)
+            if refused:
+                return _no_login_response(refused)
+        added = set(new_attendees or []) - current
 
-        if 'participant_company_user_ids' in data:
-            company = request.user.company
-            user_ids = []
-            for cuid in data['participant_company_user_ids']:
-                cu = CompanyUser.objects.filter(id=cuid, company=company, is_active=True).first()
-                if cu:
-                    user_ids.append(_get_or_create_user_for_company_user(cu).id)
-            from django.contrib.auth.models import User as _User
-            m.participants.set(_User.objects.filter(id__in=set(user_ids)))
+        needs_check = m.status in active_states and (
+            not was_active or m.scheduled_at != old_start
+            or m.duration_minutes != old_duration or bool(added))
+        people = []
+        if needs_check:
+            people = sorted(set(new_attendees if new_attendees is not None else current)
+                            | {m.organizer_id})
+
+        try:
+            with booking_guard(people):
+                if needs_check:
+                    ensure_free(people, m.scheduled_at, m.duration_minutes, tz_name=m.timezone_name,
+                                exclude=[('frontline', m.id)], viewer_source='frontline')
+                m.save()
+                if new_attendees is not None:
+                    m.participants.set(new_attendees)
+        except ScheduleConflict as clash:
+            return clash.response()
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)})
     except KeyServiceError:
@@ -4013,15 +4100,20 @@ def delete_meeting(request, meeting_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def check_meeting_availability(request):
-    """Check whether a candidate meeting slot conflicts with existing meetings for
-    any of the listed participants.
+    """Check whether a candidate meeting slot conflicts with existing meetings
+    for any of the listed people, across the PM, HR and Frontline calendars.
 
     Query params:
-      start             ISO-8601, required
-      duration_minutes  default 60
-      participant_company_user_ids   comma-separated company-user IDs
+      start                          ISO-8601, required
+      duration_minutes               default 60
+      participant_user_ids           comma-separated employee-login ids
+      participant_company_user_ids   comma-separated dashboard-login ids (older field)
+      exclude_meeting_id             the meeting being edited
+      timezone                       for suggested times
 
-    Returns: {available: bool, conflicts: [{meeting_id, user_id, scheduled_at, title}]}.
+    Returns: {available, conflicts: [{meeting_id, user_id, user_name, source,
+    source_label, scheduled_at, ends_at, duration_minutes, title}],
+    suggested_slots, no_login}.
     """
     try:
         company = request.user.company
@@ -4035,45 +4127,38 @@ def check_meeting_availability(request):
             duration = 60
         end = start + timedelta(minutes=duration)
 
-        cu_ids = [int(x) for x in (request.GET.get('participant_company_user_ids', '') or '').split(',') if x.strip().isdigit()]
-        user_ids = []
-        for cuid in cu_ids:
-            cu = CompanyUser.objects.filter(id=cuid, company=company, is_active=True).first()
-            if cu:
-                user_ids.append(_get_or_create_user_for_company_user(cu).id)
-        if not user_ids:
-            return Response({'status': 'success', 'data': {'available': True, 'conflicts': []}})
+        def _ids(name):
+            return [x for x in (request.GET.get(name, '') or '').split(',') if x.strip()]
 
-        # Find meetings in the same company that overlap [start, end) and involve any of the users
-        # (either as organizer or as participant).
-        from django.db.models import Q as _Q
-        candidates = FrontlineMeeting.objects.filter(
-            company=company,
-            status__in=['scheduled', 'rescheduled'],
-            scheduled_at__lt=end,
-        ).filter(_Q(organizer_id__in=user_ids) | _Q(participants__id__in=user_ids)).distinct()
+        people, refused = _meeting_attendees(company, {
+            'participant_user_ids': _ids('participant_user_ids'),
+            'participant_company_user_ids': [int(x) for x in _ids('participant_company_user_ids')
+                                             if x.strip().isdigit()],
+        })
+        exclude_id = request.GET.get('exclude_meeting_id', '')
+        exclude = [('frontline', int(exclude_id))] if exclude_id.isdigit() else []
+        tz_name = zone_name(request.GET.get('timezone'))
 
-        conflicts = []
-        for m in candidates:
-            m_end = m.scheduled_at + timedelta(minutes=(m.duration_minutes or 60))
-            if m_end > start:  # overlap
-                # Which user(s) clash?
-                involved = set()
-                if m.organizer_id in user_ids:
-                    involved.add(m.organizer_id)
-                involved.update(m.participants.filter(id__in=user_ids).values_list('id', flat=True))
-                for uid in involved:
-                    conflicts.append({
-                        'meeting_id': m.id,
-                        'user_id': uid,
-                        'scheduled_at': m.scheduled_at.isoformat(),
-                        'duration_minutes': m.duration_minutes,
-                        'title': m.title,
-                    })
+        clashes = find_conflicts(people, start, end, exclude=exclude, viewer_source='frontline')
+        conflicts = [{
+            'meeting_id': c.source_id,
+            'user_id': c.user_id,
+            'user_name': c.user_name,
+            'source': c.source,
+            'source_label': c.source_label,
+            'scheduled_at': c.starts_at.isoformat(),
+            'ends_at': c.ends_at.isoformat(),
+            'duration_minutes': int((c.ends_at - c.starts_at).total_seconds() // 60),
+            'title': c.title,
+        } for c in clashes]
+        suggestions = suggest_slots(people, start, duration, tz_name, exclude=exclude) if clashes else []
 
         return Response({'status': 'success', 'data': {
             'available': not conflicts,
             'conflicts': conflicts,
+            'suggested_slots': [dt.isoformat() for dt in suggestions],
+            'timezone': tz_name,
+            'no_login': refused,
         }})
     except KeyServiceError:
         raise

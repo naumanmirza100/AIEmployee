@@ -116,3 +116,21 @@ def expire_module_purchases():
         logger.debug('No legacy module purchases to expire.')
 
     return f'Expired {count} legacy purchase(s)'
+
+
+@shared_task(name='core.tasks.rebuild_calendar_blocks')
+def rebuild_calendar_blocks():
+    """Nightly repair of the shared busy-time table (`CalendarBlock`).
+
+    Meeting saves keep the table current through signals; this catches the
+    changes signals can't see (queryset `.update()`, a user deactivated or
+    moved between companies, an HR employee's login linked or unlinked).
+    Runs once a day via Celery Beat — one database connection, well inside
+    the host's hourly connection limit.
+    """
+    from core.scheduling.sync import rebuild
+
+    stats = rebuild()
+    total = sum(s['blocks'] for s in stats.values())
+    logger.info('rebuild_calendar_blocks: %s', stats)
+    return f'Rebuilt {total} calendar block(s)'

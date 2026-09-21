@@ -10,8 +10,10 @@ paying and cancellations never take effect.
 `manage.py check` runs in CI and on every `runserver`, so this is the earliest place
 the problem can be made visible.
 """
+import os
+
 from django.conf import settings
-from django.core.checks import Warning as CheckWarning, register
+from django.core.checks import Error as CheckError, Warning as CheckWarning, register
 
 PLACEHOLDERS = {
     'STRIPE_SECRET_KEY': 'sk_test_placeholder',
@@ -83,3 +85,59 @@ def check_stripe_configuration(app_configs, **kwargs):
         ))
 
     return issues
+
+
+@register('security')
+def check_encryption_keys(app_configs, **kwargs):
+    """Stored API keys (core/crypto_utils.py). A malformed key is an error so the
+    server refuses to start, rather than every agent failing with "no API key"."""
+    from cryptography.fernet import Fernet
+
+    issues = []
+    primary = (getattr(settings, 'FIELD_ENCRYPTION_KEY', '') or '').strip()
+    fallbacks = [k.strip() for k in
+                 (getattr(settings, 'FIELD_ENCRYPTION_KEY_FALLBACKS', '') or '').split(',') if k.strip()]
+
+    named = [('FIELD_ENCRYPTION_KEY', primary)] + [
+        (f'FIELD_ENCRYPTION_KEY_FALLBACKS entry {i + 1}', key) for i, key in enumerate(fallbacks)]
+    for name, key in named:
+        if not key:
+            continue
+        try:
+            Fernet(key.encode('utf-8'))
+        except (ValueError, TypeError):
+            issues.append(CheckError(
+                f'{name} is not a valid Fernet key.',
+                hint=('Generate one with: python -c "from cryptography.fernet import Fernet; '
+                      'print(Fernet.generate_key().decode())"'),
+                id='crypto.E001',
+            ))
+
+    if os.getenv('DJANGO_SECRET_KEY', '').strip() and not primary:
+        issues.append(CheckWarning(
+            'SECRET_KEY comes from DJANGO_SECRET_KEY, but FIELD_ENCRYPTION_KEY is not set.',
+            hint=('Stored API keys are encrypted with a key derived from SECRET_KEY, so any '
+                  'saved under the previous SECRET_KEY can no longer be read. Set '
+                  'FIELD_ENCRYPTION_KEY (see core/crypto_utils.py) and run '
+                  '`manage.py reencrypt_secrets`.'),
+            id='crypto.W001',
+        ))
+    return issues
+
+
+@register('security', deploy=True)
+def check_encryption_key_for_deploy(app_configs, **kwargs):
+    """`manage.py check --deploy` only: every command runs with DEBUG off, so
+    as a normal check this would print on every local migrate/shell."""
+    if (getattr(settings, 'FIELD_ENCRYPTION_KEY', '') or '').strip():
+        return []
+    if os.getenv('DJANGO_SECRET_KEY', '').strip():
+        return []  # crypto.W001 already says it, more urgently
+    return [CheckWarning(
+        'FIELD_ENCRYPTION_KEY is not set.',
+        hint=('Stored API keys are encrypted with a key derived from SECRET_KEY, so changing '
+              'SECRET_KEY would make them all unreadable. Set FIELD_ENCRYPTION_KEY (the same '
+              'value on every machine using this database) and run '
+              '`manage.py reencrypt_secrets`. See core/crypto_utils.py.'),
+        id='crypto.W002',
+    )]
