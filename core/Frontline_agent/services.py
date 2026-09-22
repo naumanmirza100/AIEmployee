@@ -512,17 +512,25 @@ class KnowledgeService:
         # ---- FAISS path ---------------------------------------------------
         if _vs.FAISS_AVAILABLE:
             _t_faiss = _time.time()
-            store = _vs.get_store(company_id)
+            # allow_build=False: never rebuild the index inside a request
+            # (FL-PERF-1). A stale index is served and a rebuild is queued.
+            store = _vs.get_store(company_id, allow_build=False)
             store_ready_ms = int((_time.time() - _t_faiss) * 1000)
             if store is not None:
                 self.last_retrieval_path += f'faiss(store_ready={store_ready_ms}ms)|'
                 # Candidate set = chunks whose parent document survived our filters.
                 _t = _time.time()
-                candidate_chunk_ids = set(all_chunks.values_list('id', flat=True))
+                # No candidate set is built here any more. It was
+                # `set(all_chunks.values_list('id', flat=True))` — every chunk
+                # id in the tenant, on every question, which is precisely what
+                # the index exists to avoid (FL-PERF-2). Tenant, visibility
+                # and scope filtering is applied to the bounded fetch below
+                # instead, via `document_id__in=doc_ids`, so the result set is
+                # identical. `k` is raised because that filtering now happens
+                # after the search rather than inside it.
                 self.last_retrieval_timing['faiss_candidates'] = int((_time.time() - _t) * 1000)
                 _t = _time.time()
-                hits = store.search(query_embedding, k=50,
-                                    candidate_chunk_ids=candidate_chunk_ids)
+                hits = store.search(query_embedding, k=200)
                 self.last_retrieval_timing['faiss_search'] = int((_time.time() - _t) * 1000)
                 if hits:
                     self.last_retrieval_path += f'hits={len(hits)}|'
@@ -537,7 +545,7 @@ class KnowledgeService:
                     _t = _time.time()
                     from Frontline_agent.models import DocumentChunk as _DC
                     chunk_qs = (_DC.objects
-                                .filter(id__in=hit_ids)
+                                .filter(id__in=hit_ids, document_id__in=doc_ids)
                                 .select_related('document')
                                 .only('id', 'document_id', 'chunk_text',
                                       'chunk_index', 'page_number',

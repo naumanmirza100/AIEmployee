@@ -30,6 +30,35 @@ def get_recipient_preferences(company_id, recipient_email):
             .first())
 
 
+def preferences_for_recipients(pairs):
+    """Batch version of `get_recipient_preferences`.
+
+    `pairs` is an iterable of (company_id, recipient_email). Returns a dict
+    keyed by (company_id, lowercased email). One query for a whole batch
+    instead of one per row — the notification job ran this per notification,
+    200 times a tick (FL-PERF-5).
+    """
+    from django.db.models import Q
+    from Frontline_agent.models import FrontlineNotificationPreferences
+
+    wanted = {(cid, (email or '').strip().lower())
+              for cid, email in pairs if cid and (email or '').strip()}
+    if not wanted:
+        return {}
+
+    query = Q()
+    for company_id, email in wanted:
+        query |= Q(company_user__company_id=company_id, company_user__email__iexact=email)
+
+    found = {}
+    rows = (FrontlineNotificationPreferences.objects
+            .filter(query).select_related('company_user'))
+    for row in rows:
+        key = (row.company_user.company_id, (row.company_user.email or '').strip().lower())
+        found.setdefault(key, row)
+    return found
+
+
 def _parse_hhmm(raw, fallback):
     """Parse 'HH:MM' into a time(); return `fallback` on any error."""
     try:

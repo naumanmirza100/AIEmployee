@@ -32,6 +32,32 @@ class HubSpotError(Exception):
         self.retriable = retriable
 
 
+def encrypt_access_token(raw: str) -> str:
+    """Encrypt a Private App token for storage on `Company.hubspot_config`.
+
+    The token reads and writes the tenant's entire CRM, so it is encrypted at
+    rest like every other stored credential (`core/crypto_utils.py`). It used
+    to sit in the JSON column in clear text, readable from any backup or
+    database console (FL-SEC-5).
+    """
+    from core.crypto_utils import encrypt_secret
+    raw = (raw or '').strip()
+    return encrypt_secret(raw) if raw else ''
+
+
+def decrypt_access_token(stored: str) -> str:
+    """Read a stored token, transparently handling rows written before
+    encryption existed. Those hold the raw `pat-...` value; core migration
+    0104 rewrites them, and this keeps them working until it runs."""
+    stored = (stored or '').strip()
+    if not stored:
+        return ''
+    if stored.startswith(('pat-', 'Bearer ')):
+        return stored
+    from core.crypto_utils import decrypt_secret
+    return decrypt_secret(stored)
+
+
 class HubSpotClient:
     """Thin wrapper over the five calls we need today.
 

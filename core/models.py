@@ -817,6 +817,18 @@ class CompanyUser(models.Model):
     reset_otp = models.CharField(max_length=6, null=True, blank=True)
     reset_otp_expires = models.DateTimeField(null=True, blank=True)
 
+    # The employee-login row (auth.User) this dashboard login acts as. Several
+    # agents store auth.User FKs — ticket.created_by, task assignees — so a
+    # dashboard login needs one. The link is explicit because matching on the
+    # email address is ambiguous: `unique_together` below allows the same
+    # address in two different companies, and resolving by email collapsed both
+    # onto a single auth.User, so every query scoped by created_by/assigned_to
+    # spanned both tenants (FL-SEC-3 in MDS/FRONTLINE_AGENT_AUDIT.md).
+    login_user = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='company_logins',
+    )
+
     class Meta:
         unique_together = ['company', 'email']
         ordering = ['-created_at']

@@ -100,6 +100,12 @@ class ModuleAccessMiddleware:
         if not path.startswith('/api/'):
             return None
         rest = path[len('/api/'):]
+        # Strip an API version segment first. `/api/v1/frontline/...` mirrors
+        # `/api/frontline/...` (see the alias loop in api/urls.py), and without
+        # this the prefix read as "v1", matched nothing, and the whole mirrored
+        # surface went ungated — a lapsed subscription came back by adding
+        # "v1/" to the URL.
+        rest = re.sub(r'^v\d+/', '', rest)
         prefix = rest.split('/', 1)[0]
         module_name = PREFIX_TO_MODULE.get(prefix)
         if not module_name:
