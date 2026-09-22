@@ -60,6 +60,33 @@ class IsCompanyUser(permissions.BasePermission):
         return False
 
 
+class IsCompanyAdmin(permissions.BasePermission):
+    """A dashboard login allowed to change credentials or delete things.
+
+    `CompanyUser.role` has twelve values, but only two mean "runs the account".
+    Everything else — including `company_user`, which is what self-registration
+    assigns — keeps the day-to-day surface but not the stored CRM token, the
+    CSV export of every ticket, the audit log, or deletes.
+
+    Core migration 0103 promotes each company's earliest login to `admin`, so
+    existing accounts keep the access they have today; registration gives the
+    first login of a new company `admin` as well.
+    """
+
+    ADMIN_ROLES = ('owner', 'admin')
+
+    def has_permission(self, request, view):
+        user = getattr(request, 'user', None)
+        if not user:
+            return False
+        from core.models import CompanyUser
+        if isinstance(user, CompanyUser):
+            return bool(user.is_active and user.role in self.ADMIN_ROLES)
+        # Django staff keep access so admin tooling and support scripts work.
+        return bool(getattr(user, 'is_authenticated', False)
+                    and (getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)))
+
+
 class IsCompanyUserOnly(permissions.BasePermission):
     """Allow access only to authenticated CompanyUser instances (logged in through company login)."""
     

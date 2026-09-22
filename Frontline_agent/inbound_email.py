@@ -193,8 +193,10 @@ def verify_signature(provider: str, request) -> bool:
       `FRONTLINE_INBOUND_SHARED_SECRET`.
     - mailgun: HMAC-SHA256 over (timestamp + token) using
       `MAILGUN_SIGNING_KEY`.
-    - generic: always True only when `DEBUG=True`; otherwise must match
-      `FRONTLINE_INBOUND_SHARED_SECRET` on the `X-Frontline-Signature` header.
+    - generic: must match `FRONTLINE_INBOUND_SHARED_SECRET` on the
+      `X-Frontline-Signature` header. With no secret configured it accepts
+      nothing, unless `DEBUG` **and** `FRONTLINE_INBOUND_ALLOW_UNSIGNED` are
+      both on (local testing only).
     """
     provider = (provider or '').lower()
     if provider == 'sendgrid':
@@ -202,11 +204,16 @@ def verify_signature(provider: str, request) -> bool:
     if provider == 'mailgun':
         return _verify_mailgun_signature(request)
     if provider == 'generic':
-        if getattr(settings, 'DEBUG', False):
-            return True
         expected = getattr(settings, 'FRONTLINE_INBOUND_SHARED_SECRET', '') or ''
         got = request.META.get('HTTP_X_FRONTLINE_SIGNATURE', '')
-        return bool(expected) and hmac.compare_digest(expected, got)
+        if expected:
+            return hmac.compare_digest(expected, got)
+        # No secret configured. DEBUG alone used to be enough to accept
+        # anything, which turned one stray DJANGO_DEBUG=1 on a server into
+        # "anyone can inject tickets into any tenant". Now the bypass also has
+        # to be asked for explicitly.
+        return bool(getattr(settings, 'DEBUG', False)
+                    and getattr(settings, 'FRONTLINE_INBOUND_ALLOW_UNSIGNED', False))
     return False
 
 

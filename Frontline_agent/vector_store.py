@@ -87,9 +87,37 @@ def _paths(company_id: int) -> tuple[Path, Path, Path]:
 # Public API
 # --------------------------------------------------------------------------
 
-def get_store(company_id: int) -> Optional['FaissVectorStore']:
+_REBUILD_REQUESTED: dict[int, float] = {}
+_REBUILD_COOLDOWN_SECONDS = 60
+
+
+def _request_rebuild(company_id: int) -> None:
+    """Queue a background rebuild, at most once a minute per company."""
+    import time as _time
+    now = _time.time()
+    last = _REBUILD_REQUESTED.get(company_id, 0)
+    if now - last < _REBUILD_COOLDOWN_SECONDS:
+        return
+    _REBUILD_REQUESTED[company_id] = now
+    try:
+        from Frontline_agent.tasks import rebuild_vector_index
+        rebuild_vector_index.delay(company_id)
+    except Exception:
+        logger.exception("Could not queue vector index rebuild for company %s", company_id)
+
+
+def get_store(company_id: int, *, allow_build: bool = True) -> Optional['FaissVectorStore']:
     """Return a ready-to-search store for ``company_id`` or None if FAISS is
-    unavailable or the company has no indexable chunks yet."""
+    unavailable or the company has no indexable chunks yet.
+
+    `allow_build=False` is for request paths. Building the index streams every
+    `DocumentChunk.embedding` for the tenant — JSON text, tens of KB a row —
+    into the process that asks for it, so a question asked after any document
+    upload used to pay for the whole rebuild inline, and on a big knowledge
+    base the server killed the query at its statement timeout and the visitor
+    got the friendly fallback instead of an answer (FL-PERF-1). With
+    `allow_build=False` a stale index is served and a rebuild is queued.
+    """
     if not FAISS_AVAILABLE:
         return None
     if not company_id:
@@ -99,6 +127,14 @@ def get_store(company_id: int) -> Optional['FaissVectorStore']:
         if store is not None and not store.needs_rebuild():
             return store
         store = FaissVectorStore(company_id)
+        if store.needs_rebuild() and not allow_build:
+            _request_rebuild(company_id)
+            # Serve the previous index if there is one; slightly stale results
+            # for a few seconds beat a multi-second (or failed) request.
+            if store.has_index_on_disk() and store._load_from_disk():
+                _CACHE[company_id] = store
+                return store
+            return None
         if not store.ensure_ready():
             return None
         _CACHE[company_id] = store
@@ -147,9 +183,13 @@ class FaissVectorStore:
 
     # ---- lifecycle -----------------------------------------------------
 
+    def has_index_on_disk(self) -> bool:
+        """True when a previously built index exists, stale or not."""
+        return self.faiss_path.exists() and self.meta_path.exists()
+
     def needs_rebuild(self) -> bool:
         """True if either the on-disk index is missing or the dirty flag is set."""
-        if not self.faiss_path.exists() or not self.meta_path.exists():
+        if not self.has_index_on_disk():
             return True
         if self.dirty_path.exists():
             return True

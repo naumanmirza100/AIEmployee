@@ -2,6 +2,20 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 
+# The enum values, duplicated at module scope because a nested `Meta` class
+# cannot see the outer class's attributes and the check constraints below need
+# them. Keep these in step with the matching *_CHOICES lists.
+#
+# `choices` alone is enforced only by `full_clean()`, which none of the write
+# paths call — so any writer that skipped `_validate_ticket_transition` could
+# store whatever it liked (FL-DATA-17). These constraints make the database
+# the backstop.
+TICKET_STATUS_VALUES = ('new', 'open', 'in_progress', 'resolved', 'closed', 'auto_resolved')
+TICKET_PRIORITY_VALUES = ('low', 'medium', 'high', 'urgent')
+TICKET_CATEGORY_VALUES = ('technical', 'billing', 'account', 'feature_request', 'bug',
+                          'knowledge_gap', 'other')
+TICKET_HANDOFF_STATUS_VALUES = ('none', 'pending', 'accepted', 'resolved')
+
 
 class Ticket(models.Model):
     """Support ticket model for ticket triage and auto-resolution"""
@@ -123,6 +137,40 @@ class Ticket(models.Model):
             models.Index(fields=['snoozed_until']),
             models.Index(fields=['contact', 'created_at']),
             models.Index(fields=['handoff_status', 'handoff_requested_at']),
+            # Company-leading, matching how the views actually query: every
+            # tenant-scoped list filters on company first and then sorts. The
+            # handoff index above is cross-tenant, so one tenant's queue walked
+            # every tenant's pending hand-offs (FL-PERF-12).
+            models.Index(fields=['company', '-created_at'], name='fl_ticket_company_created'),
+            models.Index(fields=['company', 'created_by', '-created_at'],
+                         name='fl_ticket_company_creator'),
+            models.Index(fields=['company', 'handoff_status', '-handoff_requested_at'],
+                         name='fl_ticket_company_handoff'),
+            models.Index(fields=['company', 'category', '-created_at'],
+                         name='fl_ticket_company_category'),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(status__in=TICKET_STATUS_VALUES),
+                name='fl_ticket_status_valid',
+            ),
+            models.CheckConstraint(
+                check=models.Q(priority__in=TICKET_PRIORITY_VALUES),
+                name='fl_ticket_priority_valid',
+            ),
+            models.CheckConstraint(
+                check=models.Q(category__in=TICKET_CATEGORY_VALUES),
+                name='fl_ticket_category_valid',
+            ),
+            models.CheckConstraint(
+                check=models.Q(handoff_status__in=TICKET_HANDOFF_STATUS_VALUES),
+                name='fl_ticket_handoff_status_valid',
+            ),
+            models.CheckConstraint(
+                check=(models.Q(sla_paused_accumulated_seconds__isnull=True)
+                       | models.Q(sla_paused_accumulated_seconds__gte=0)),
+                name='fl_ticket_paused_seconds_non_negative',
+            ),
         ]
 
     def __str__(self):
@@ -223,6 +271,19 @@ class TicketMessage(models.Model):
             models.Index(fields=['direction', 'channel']),
             models.Index(fields=['message_id']),
             models.Index(fields=['in_reply_to']),
+        ]
+        constraints = [
+            # One row per Message-ID per ticket. The application checks this
+            # before creating a ticket from inbound mail, but a provider
+            # redelivering while the first copy is still in flight would slip
+            # past that check — only the database can decide the race
+            # (FL-DATA-8). Blank ids are exempt: outbound drafts and older
+            # rows have none.
+            models.UniqueConstraint(
+                fields=['ticket', 'message_id'],
+                condition=~models.Q(message_id=''),
+                name='fl_ticketmessage_unique_message_id_per_ticket',
+            ),
         ]
 
     def __str__(self):
@@ -720,6 +781,9 @@ class Document(models.Model):
             models.Index(fields=['file_hash']),
             models.Index(fields=['processing_status']),
             models.Index(fields=['superseded_by']),
+            # list_documents filters by company and orders by -created_at
+            # (FL-PERF-12).
+            models.Index(fields=['company', '-created_at'], name='fl_document_company_created'),
         ]
 
     def __str__(self):
@@ -1259,6 +1323,16 @@ class TicketSatisfaction(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['submitted_at']),
+        ]
+        constraints = [
+            # Only the submit view checked the range; nothing stopped another
+            # writer storing a 0 or a 9 (FL-DATA-17). Null is the un-submitted
+            # state and stays allowed.
+            models.CheckConstraint(
+                check=(models.Q(rating__isnull=True)
+                       | models.Q(rating__gte=1, rating__lte=5)),
+                name='fl_csat_rating_between_1_and_5',
+            ),
         ]
 
     def __str__(self):

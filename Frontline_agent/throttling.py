@@ -16,6 +16,16 @@ class FrontlineLLMThrottle(UserRateThrottle):
     scope = 'frontline_llm'
 
 
+class FrontlineStreamThrottle(UserRateThrottle):
+    """Tighter budget for streaming answers.
+
+    A streamed answer holds a worker for the whole generation, not just for a
+    request/response round trip, so unlimited concurrent streams are an
+    availability problem as well as a cost one.
+    """
+    scope = 'frontline_stream'
+
+
 class FrontlineUploadThrottle(UserRateThrottle):
     scope = 'frontline_upload'
 

@@ -169,13 +169,17 @@ def register_company_user(request):
                 'message': 'Email already registered for this company'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Create company user with company_user role by default
+        # The first login of a company is the person who set it up, so they get
+        # `admin` — otherwise nobody could ever reach the admin-only endpoints,
+        # since the product has no screen for changing a role. Later logins get
+        # the ordinary role.
+        is_first_login = not CompanyUser.objects.filter(company=company).exists()
         company_user = CompanyUser.objects.create(
             company=company,
             email=email,
             password_hash=make_password(password),
             full_name=full_name,
-            role='company_user',  # Default role for registered company users
+            role='admin' if is_first_login else 'company_user',
             is_active=True
         )
         

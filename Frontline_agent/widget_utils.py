@@ -6,7 +6,7 @@ without pulling in DRF decorators.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import date as _date, datetime, time, timedelta
 from typing import Any, Dict, Tuple
 
 from django.utils import timezone
@@ -56,6 +56,12 @@ DEFAULT_WIDGET_CONFIG: Dict[str, Any] = {
         'offline_message': "We're offline right now. Leave a message and we'll get back to you.",
     },
     'require_captcha': False,
+    # Ceiling on tickets the *public* widget may open for a tenant in an hour
+    # (hand-off requests and KB-gap tickets both count). The widget key is
+    # public by design — it sits in the <script> tag on the customer's own
+    # site — so without this, anyone who views source can turn unanswered
+    # questions into an unbounded stream of work items. 0 disables the cap.
+    'auto_ticket_max_per_hour': 50,
     'allowed_attachment_mime': [
         'image/png', 'image/jpeg', 'image/gif', 'image/webp',
         'application/pdf', 'text/plain',
@@ -206,11 +212,24 @@ def _deep_merge_defaults(override: Any, default: Any) -> Any:
     return out
 
 
+# Companies created from this date on get CAPTCHA required by default. It is
+# not flipped for everyone: an existing embed that doesn't send a token yet
+# would start failing the moment the default changed, which is a worse outcome
+# than the abuse it prevents. Existing tenants opt in from the widget settings
+# screen (FL-SEC-10).
+CAPTCHA_DEFAULT_ON_FROM = _date(2026, 9, 22)
+
+
 def resolved_widget_config(company) -> Dict[str, Any]:
     """Return the tenant's widget config merged over the defaults. Safe if the
     company row has no config saved yet."""
     saved = getattr(company, 'frontline_widget_config', None) or {}
-    return _deep_merge_defaults(saved, DEFAULT_WIDGET_CONFIG)
+    defaults = DEFAULT_WIDGET_CONFIG
+    created_at = getattr(company, 'created_at', None)
+    if ('require_captcha' not in saved and created_at
+            and created_at.date() >= CAPTCHA_DEFAULT_ON_FROM):
+        defaults = {**DEFAULT_WIDGET_CONFIG, 'require_captcha': True}
+    return _deep_merge_defaults(saved, defaults)
 
 
 def _parse_hhmm(raw, fallback):

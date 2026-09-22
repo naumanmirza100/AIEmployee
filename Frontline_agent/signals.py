@@ -4,6 +4,7 @@ Runs workflow triggers on ticket update (post_save) so any ticket update path fi
 Also mirrors Contact rows to HubSpot when the tenant has the integration enabled.
 """
 import logging
+from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -80,6 +81,12 @@ def mirror_contact_to_hubspot(sender, instance, created, **kwargs):
         if update_fields and set(update_fields).issubset(sync_cols):
             return
         from Frontline_agent.tasks import sync_contact_to_hubspot
-        sync_contact_to_hubspot.delay(instance.id)
+        # After COMMIT, not now: this receiver runs inside the atomic block in
+        # contacts.upsert_contact_from_email, so a free worker could pick the
+        # job up before the row existed, find nothing, and give up — leaving
+        # that contact silently unmirrored. If the block rolls back, the job
+        # never runs at all (FL-DATA-16).
+        contact_id = instance.id
+        transaction.on_commit(lambda: sync_contact_to_hubspot.delay(contact_id))
     except Exception as e:
         logger.exception("mirror_contact_to_hubspot dispatch failed: %s", e)

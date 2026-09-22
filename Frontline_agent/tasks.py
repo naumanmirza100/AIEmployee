@@ -6,6 +6,7 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 from celery import shared_task
+from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 
@@ -152,11 +153,18 @@ def process_document(self, document_id):
         document.embedding_model = embedding_service.embedding_model if has_embeddings else None
         document.save(update_fields=['processing_status', 'is_indexed', 'processed',
                                      'embedding_model', 'updated_at'])
-        # Invalidate the company's FAISS index so next query rebuilds from the new chunks.
+        # Invalidate the company's FAISS index, then rebuild it here rather
+        # than inside whoever asks the next question (FL-PERF-1).
         try:
             if has_embeddings and document.company_id:
                 from Frontline_agent.vector_store import mark_index_dirty
                 mark_index_dirty(document.company_id)
+                try:
+                    rebuild_vector_index.delay(document.company_id)
+                except Exception:
+                    # Broker down: the next question queues it instead, and
+                    # serves the previous index meanwhile.
+                    logger.exception("process_document: could not queue index rebuild")
         except Exception:
             logger.exception("process_document: failed to mark vector index dirty")
 
@@ -225,21 +233,52 @@ def send_weekly_analytics_digest():
 
     resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
 
+    # Three grouped queries for every company, instead of ten queries each.
+    # The old loop ran a .count() per priority, a full row fetch counted in
+    # Python, and a separate meetings count — 1.5 s per tenant on a 150 ms
+    # link, so a few hundred tenants took minutes inside one task (FL-PERF-8).
+    from django.db.models import Count, Q as _Q
+    resolved_list = list(resolved_statuses)
+    ticket_stats = {
+        row['company_id']: row
+        for row in Ticket.objects.filter(created_at__gte=window_start,
+                                         company__isnull=False)
+        .values('company_id')
+        .annotate(
+            total=Count('id'),
+            resolved=Count('id', filter=_Q(status__in=resolved_list)),
+            auto_resolved=Count('id', filter=_Q(auto_resolved=True)),
+            urgent=Count('id', filter=_Q(priority='urgent')),
+            high=Count('id', filter=_Q(priority='high')),
+            medium=Count('id', filter=_Q(priority='medium')),
+            low=Count('id', filter=_Q(priority='low')),
+            breached=Count('id', filter=(_Q(sla_due_at__isnull=False)
+                                         & _Q(sla_due_at__lt=now)
+                                         & ~_Q(status__in=resolved_list))),
+        )
+    }
+    meeting_counts = {
+        row['company_id']: row['n']
+        for row in FrontlineMeeting.objects.filter(created_at__gte=window_start)
+        .values('company_id').annotate(n=Count('id'))
+    }
+    recipients_by_company = {}
+    for company_id, email in (CompanyUser.objects
+                              .filter(is_active=True).exclude(email='')
+                              .values_list('company_id', 'email')):
+        recipients_by_company.setdefault(company_id, []).append(email)
+
     for company in Company.objects.filter(is_active=True):
-        tickets = Ticket.objects.filter(company=company, created_at__gte=window_start)
-        total = tickets.count()
+        stats = ticket_stats.get(company.id)
+        total = (stats or {}).get('total', 0)
         if total == 0:
             continue  # Skip quiet weeks — no digest is better than a "zero" email.
 
-        resolved = sum(1 for t in tickets.only('status') if t.status in resolved_statuses)
-        auto_resolved = tickets.filter(auto_resolved=True).count()
-        by_priority = {p: tickets.filter(priority=p).count() for p in ('urgent', 'high', 'medium', 'low')}
-        breached = tickets.filter(
-            sla_due_at__isnull=False, sla_due_at__lt=now,
-        ).exclude(status__in=list(resolved_statuses)).count()
-        meetings = FrontlineMeeting.objects.filter(
-            company=company, created_at__gte=window_start,
-        ).count()
+        resolved = stats['resolved']
+        auto_resolved = stats['auto_resolved']
+        by_priority = {p: stats[p] for p in ('urgent', 'high', 'medium', 'low')}
+        breached = stats['breached']
+        meetings = meeting_counts.get(company.id, 0)
 
         subject = f"Frontline weekly digest — {company.name}"
         body_lines = [
@@ -261,10 +300,7 @@ def send_weekly_analytics_digest():
         ]
         body = "\n".join(body_lines)
 
-        recipients = list(
-            CompanyUser.objects.filter(company=company, is_active=True)
-            .exclude(email='').values_list('email', flat=True)
-        )
+        recipients = recipients_by_company.get(company.id) or []
         if not recipients:
             continue
         try:
@@ -326,17 +362,21 @@ def send_meeting_reminders():
 
         recipients = _recipients(meeting)
         if not recipients:
-            return False
+            # Permanent for this meeting, not a transient failure — so the
+            # caller stamps it anyway. Leaving it unstamped kept the row in
+            # the window, to be re-fetched and re-serialised every 5 minutes
+            # for the next 24 hours (FL-PERF-9).
+            return 'no_recipients'
         try:
             send_mail(
                 subject=subject, message=body,
                 from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
                 recipient_list=recipients, fail_silently=False,
             )
-            return True
+            return 'sent'
         except Exception as exc:
             logger.warning("Meeting reminder send failed for meeting %s: %s", meeting.id, exc)
-            return False
+            return 'failed'
 
     # 24h reminder: fire whenever the meeting is <= 24h away AND > 15m away (so the
     # 15-minute reminder stage owns the final stretch) AND the 24h reminder hasn't
@@ -350,11 +390,12 @@ def send_meeting_reminders():
         scheduled_at__gt=r24_cutoff_lower,
         scheduled_at__lte=r24_cutoff_upper,
         reminder_24h_sent_at__isnull=True,
-    ):
-        if _send(m, '24 hours'):
+    ).select_related('organizer').prefetch_related('participants'):
+        outcome = _send(m, '24 hours')
+        if outcome in ('sent', 'no_recipients'):
             m.reminder_24h_sent_at = now
             m.save(update_fields=['reminder_24h_sent_at', 'updated_at'])
-            results['r24h_sent'] += 1
+            results['r24h_sent' if outcome == 'sent' else 'skipped'] += 1
         else:
             results['failed'] += 1
 
@@ -367,17 +408,33 @@ def send_meeting_reminders():
         scheduled_at__gte=now,
         scheduled_at__lte=r15_upper,
         reminder_15m_sent_at__isnull=True,
-    ):
-        if _send(m, '15 minutes'):
+    ).select_related('organizer').prefetch_related('participants'):
+        outcome = _send(m, '15 minutes')
+        if outcome in ('sent', 'no_recipients'):
             m.reminder_15m_sent_at = now
             m.save(update_fields=['reminder_15m_sent_at', 'updated_at'])
-            results['r15m_sent'] += 1
+            results['r15m_sent' if outcome == 'sent' else 'skipped'] += 1
         else:
             results['failed'] += 1
 
     if any(results[k] for k in ('r24h_sent', 'r15m_sent', 'failed')):
         logger.info("send_meeting_reminders: %s", results)
     return results
+
+
+@shared_task(name='Frontline_agent.tasks.rebuild_vector_index')
+def rebuild_vector_index(company_id):
+    """Rebuild a company's FAISS index off the request path (FL-PERF-1).
+
+    Queued by `vector_store._request_rebuild` when a question finds the index
+    dirty, and by `process_document` right after an upload so the rebuild
+    usually finishes before anyone asks.
+    """
+    from Frontline_agent import vector_store as _vs
+    if not _vs.FAISS_AVAILABLE:
+        return {'company_id': company_id, 'skipped': 'faiss_unavailable'}
+    store = _vs.get_store(company_id, allow_build=True)
+    return {'company_id': company_id, 'ready': store is not None}
 
 
 @shared_task(name='Frontline_agent.tasks.prune_expired_documents')
@@ -436,7 +493,12 @@ def wake_snoozed_tickets():
 
     now = timezone.now()
     qs = Ticket.objects.filter(snoozed_until__isnull=False, snoozed_until__lte=now)
-    count = qs.update(snoozed_until=None)
+    # Stamp `updated_at` by hand: QuerySet.update() skips auto_now, so a ticket
+    # that had been snoozed for 30 days woke up still carrying its pre-snooze
+    # timestamp — and auto_close_inactive_tickets, which selects on
+    # `updated_at`, closed it on the spot, exactly what that task's docstring
+    # promises won't happen (FL-DATA-13).
+    count = qs.update(snoozed_until=None, updated_at=now)
     if count:
         logger.info("Woke %d snoozed tickets", count)
     return {'woken': count}
@@ -489,20 +551,49 @@ def process_scheduled_notifications():
         _build_unsubscribe_url,
     )
     from Frontline_agent.notification_utils import (
-        get_recipient_preferences, in_quiet_hours, next_allowed_send_time,
+        preferences_for_recipients, in_quiet_hours, next_allowed_send_time,
     )
 
     from django.db.models import Q
 
     now = timezone.now()
+    # select_related: the loop reads `notif.template` and `notif.recipient_user`
+    # on every row, which was two extra queries each — 400 round trips on a
+    # full 200-row tick (FL-PERF-5).
     due = ScheduledNotification.objects.filter(
         status='pending', scheduled_at__lte=now,
-    ).filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now))
+    ).filter(
+        Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now)
+    ).select_related('template', 'recipient_user')
 
     processed = sent = deferred = failed = dead = 0
 
     # Guard: cap per-tick work to avoid a giant loop under backlog
-    for notif in due[:200]:
+    batch = list(due[:200])
+    # Everyone's quiet-hours preferences in one query rather than one per row.
+    prefs_by_key = preferences_for_recipients(
+        (n.company_id,
+         (n.recipient_email or '').strip() or getattr(n.recipient_user, 'email', '') or '')
+        for n in batch
+    )
+    for notif in batch:
+        # Claim the row before touching it. Nothing used to stop a second tick
+        # selecting the same pending rows — this task runs every 60 s with
+        # worker concurrency 4, and a full backlog takes longer than its own
+        # period — so the recipient got the same mail twice and `attempts` was
+        # written from a stale read (FL-DATA-7). Pushing `next_retry_at`
+        # forward removes the row from the due query for the length of the
+        # lease; if this worker dies, the lease expires and the row returns on
+        # its own, which a dedicated "sending" status would not do.
+        lease_until = timezone.now() + timedelta(minutes=5)
+        claimed = (ScheduledNotification.objects
+                   .filter(pk=notif.pk, status='pending')
+                   .filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now))
+                   .update(next_retry_at=lease_until))
+        if not claimed:
+            continue
+        notif.next_retry_at = lease_until
+
         processed += 1
         template = notif.template
         if not template:
@@ -519,7 +610,7 @@ def process_scheduled_notifications():
             continue
 
         # Quiet-hours: defer without consuming a retry attempt
-        prefs = get_recipient_preferences(notif.company_id, recipient_email)
+        prefs = prefs_by_key.get((notif.company_id, recipient_email.strip().lower()))
         if prefs and in_quiet_hours(prefs, now):
             notif.next_retry_at = next_allowed_send_time(prefs, now)
             notif.deferred_reason = 'quiet_hours'
@@ -630,27 +721,98 @@ def process_inbound_email(self, payload: dict):
             name=(payload.get('from_name') or '').strip(),
         )
 
-        if not ticket:
-            # New thread — create a ticket.
-            creator_user = _ensure_system_user()
-            ticket = Ticket.objects.create(
-                title=subject[:200],
-                description=(body_text or body_html_raw or '')[:10000],
-                status='new',
-                priority='medium',
-                company=company,
-                created_by=creator_user,
-                intent='email_inbound',
-                entities={'from_email': from_addr},
-                contact=contact,
-            )
-            if contact:
-                # Keep denormalized counters fresh after the insert.
-                link_ticket_to_contact(ticket, contact)
-            logger.info("Inbound email → new ticket %s for company %s", ticket.id, company.id)
+        # Idempotency. A provider that doesn't see our 202 in time redelivers,
+        # and CELERY_TASK_ACKS_LATE redelivers a task whose worker died. Thread
+        # matching keys on In-Reply-To / References, which a *new* thread does
+        # not have, so a redelivery used to create a second ticket and a second
+        # copy of the message (FL-DATA-8).
+        incoming_message_id = (payload.get('message_id') or '').strip()[:255]
+        if incoming_message_id and TicketMessage.objects.filter(
+                message_id=incoming_message_id, ticket__company=company).exists():
+            logger.info("process_inbound_email: already handled message_id=%s (company %s)",
+                        incoming_message_id, company.id)
+            return {'status': 'duplicate', 'message_id': incoming_message_id}
 
-        # Hand-off detection: any inbound message that asks for a human escalates
-        # the ticket. Cheap check, runs for both new threads and replies.
+        # The ticket and its first message commit together. They used to be
+        # separate statements, so a failed message insert left an orphan ticket
+        # behind and the retry created another one (FL-DATA-9).
+        with transaction.atomic():
+            if not ticket:
+                # New thread — create a ticket.
+                creator_user = _ensure_system_user()
+                ticket = Ticket.objects.create(
+                    title=subject[:200],
+                    description=(body_text or body_html_raw or '')[:10000],
+                    status='new',
+                    priority='medium',
+                    company=company,
+                    created_by=creator_user,
+                    intent='email_inbound',
+                    entities={'from_email': from_addr},
+                    contact=contact,
+                )
+                if contact:
+                    # Keep denormalized counters fresh after the insert.
+                    link_ticket_to_contact(ticket, contact)
+                logger.info("Inbound email → new ticket %s for company %s", ticket.id, company.id)
+            else:
+                # Reply on an existing thread — re-open + resume SLA if needed.
+                #
+                # This block used to hang off the hand-off `try/except/else`
+                # rather than off `if not ticket:`, so any error in hand-off
+                # detection skipped it entirely: the ticket was never reopened
+                # and `sla_paused_at` was never cleared, leaving its SLA clock
+                # paused for good and the ticket out of the queue (FL-DATA-10).
+                from Frontline_agent.ticket_state import (
+                    TERMINAL_STATUSES, apply_status_change, resume_sla,
+                )
+                changed_fields = []
+                if ticket.status in TERMINAL_STATUSES:
+                    changed_fields += apply_status_change(ticket, 'open')
+                if changed_fields:
+                    changed_fields.append('updated_at')
+                    ticket.save(update_fields=list(set(changed_fields)))
+                # Shared resume: credits the paused time *and* moves the
+                # deadline. This path used to credit the accumulator only, so
+                # the same event produced a different sla_due_at depending on
+                # whether a human or an email resumed the clock (FL-DATA-12).
+                resume_sla(ticket)
+                # If this pre-existing ticket had no contact (created before this
+                # feature), attach it now so the Customer-360 panel picks it up.
+                if contact and not ticket.contact_id:
+                    link_ticket_to_contact(ticket, contact)
+                elif contact:
+                    # Just refresh the denormalized last_seen_at / count
+                    from Frontline_agent.contacts import recompute_contact_stats
+                    recompute_contact_stats(contact)
+
+            # Create the inbound TicketMessage row, in the same transaction as
+            # the ticket above. message_id / in_reply_to are cut to 255, which
+            # is what the columns hold — the old [:998] overflowed them, and
+            # under MySQL strict mode that raised after the ticket had already
+            # been committed (FL-DATA-9).
+            msg = TicketMessage.objects.create(
+                ticket=ticket,
+                direction='inbound',
+                channel='email',
+                from_address=from_addr[:320],
+                from_name=(payload.get('from_name') or '')[:255],
+                to_addresses=payload.get('to_addresses') or [],
+                cc_addresses=payload.get('cc_addresses') or [],
+                subject=subject[:998],
+                body_text=body_text[:500000],
+                body_html=body_html[:500000],
+                message_id=incoming_message_id,
+                in_reply_to=(payload.get('in_reply_to') or '')[:255],
+                references=payload.get('references') or [],
+                raw_payload={'provider': payload.get('provider'), 'headers': payload.get('raw_headers') or {}},
+                is_auto_reply=bool(payload.get('is_auto_reply')),
+            )
+
+        # Hand-off detection: any inbound message that asks for a human
+        # escalates the ticket. Runs after the commit above, because it sends
+        # notifications — those must not fire for a transaction that then
+        # rolls back.
         try:
             from Frontline_agent.handoff import detect_handoff_request, trigger_handoff
             if detect_handoff_request(body_text or body_html_raw or subject):
@@ -661,50 +823,6 @@ def process_inbound_email(self, payload: dict):
                 )
         except Exception:
             logger.exception("inbound-email handoff detection failed")
-        else:
-            # Reply on an existing thread — re-open + resume SLA if needed.
-            changed_fields = []
-            if ticket.status in ('resolved', 'closed', 'auto_resolved'):
-                ticket.status = 'open'
-                ticket.resolved_at = None
-                changed_fields += ['status', 'resolved_at']
-            if ticket.sla_paused_at:
-                paused_delta = (timezone.now() - ticket.sla_paused_at).total_seconds()
-                ticket.sla_paused_accumulated_seconds = (
-                    (ticket.sla_paused_accumulated_seconds or 0) + int(paused_delta)
-                )
-                ticket.sla_paused_at = None
-                changed_fields += ['sla_paused_at', 'sla_paused_accumulated_seconds']
-            if changed_fields:
-                changed_fields.append('updated_at')
-                ticket.save(update_fields=list(set(changed_fields)))
-            # If this pre-existing ticket had no contact (created before this feature),
-            # attach it now so the Customer-360 panel picks it up.
-            if contact and not ticket.contact_id:
-                link_ticket_to_contact(ticket, contact)
-            elif contact:
-                # Just refresh the denormalized last_seen_at / count
-                from Frontline_agent.contacts import recompute_contact_stats
-                recompute_contact_stats(contact)
-
-        # Create the inbound TicketMessage row.
-        msg = TicketMessage.objects.create(
-            ticket=ticket,
-            direction='inbound',
-            channel='email',
-            from_address=from_addr[:320],
-            from_name=(payload.get('from_name') or '')[:255],
-            to_addresses=payload.get('to_addresses') or [],
-            cc_addresses=payload.get('cc_addresses') or [],
-            subject=subject[:998],
-            body_text=body_text[:500000],
-            body_html=body_html[:500000],
-            message_id=(payload.get('message_id') or '')[:998],
-            in_reply_to=(payload.get('in_reply_to') or '')[:998],
-            references=payload.get('references') or [],
-            raw_payload={'provider': payload.get('provider'), 'headers': payload.get('raw_headers') or {}},
-            is_auto_reply=bool(payload.get('is_auto_reply')),
-        )
 
         # Persist attachments.
         base_dir = Path(_s.MEDIA_ROOT) / 'frontline_ticket_attachments' / str(company.id) / str(ticket.id)
@@ -790,10 +908,19 @@ def resume_workflow_execution(self, execution_id: int):
     elapsed_active = float(snap.get('elapsed_active_seconds') or 0.0)
     context_data = dict(snap.get('context_data') or execution.context_data or {})
 
-    # Move back to in_progress while the resume runs so another scheduled
-    # resume can't pick the same row if Celery double-delivered.
+    # Claim the row: move it out of `paused` only if it is still `paused`.
+    # The status check above and this write are not atomic, and with
+    # CELERY_TASK_ACKS_LATE a resume whose worker died is delivered again — so
+    # two copies both read `paused` and both ran the remaining steps
+    # (FL-DATA-6). Rows affected is the only reliable signal here.
+    claimed = (FrontlineWorkflowExecution.objects
+               .filter(pk=execution.pk, status='paused')
+               .update(status='in_progress'))
+    if not claimed:
+        logger.info("resume_workflow_execution: execution %s already claimed, skipping",
+                    execution_id)
+        return {'status': 'noop', 'execution_id': execution_id, 'reason': 'already_claimed'}
     execution.status = 'in_progress'
-    execution.save(update_fields=['status'])
 
     try:
         success, result_data, err = _execute_workflow_steps(
@@ -874,7 +1001,8 @@ def sync_contact_to_hubspot(self, contact_id: int):
         return {'status': 'disabled', 'contact_id': contact_id}
 
     try:
-        client = HubSpotClient(access_token=cfg['access_token'])
+        from Frontline_agent.crm.hubspot import decrypt_access_token
+        client = HubSpotClient(access_token=decrypt_access_token(cfg['access_token']))
         hs_id = client.upsert_contact(
             email=contact.email,
             name=contact.name or '',
@@ -958,8 +1086,15 @@ def auto_close_inactive_tickets():
     for ticket in qs.iterator(chunk_size=200):
         old_status = ticket.status
         try:
-            ticket.status = 'closed'
-            ticket.save(update_fields=['status', 'updated_at'])
+            from Frontline_agent.ticket_state import apply_status_change, after_status_change
+            changed = apply_status_change(ticket, 'closed')
+            if not changed:
+                continue
+            ticket.save(update_fields=list(set(changed + ['updated_at'])))
+            # Terminal status: release the hand-off, which otherwise keeps the
+            # ticket in the queue forever, and seed the CSAT survey this path
+            # never created (FL-DATA-14, FL-DATA-15).
+            after_status_change(ticket)
         except Exception:
             logger.exception("auto_close_inactive_tickets: save failed for ticket %s", ticket.id)
             continue
@@ -1008,9 +1143,13 @@ def escalate_near_breach_tickets():
         sla_due_at__lte=deadline,
     ).exclude(
         status__in=['resolved', 'closed', 'auto_resolved'],
-    ).exclude(priority='urgent')
+    ).exclude(priority='urgent').select_related('created_by')  # trigger reads created_by
 
     escalated = 0
+    # Audit rows are collected and written in one go at the end: an INSERT per
+    # escalated ticket, on a task that runs every 5 minutes, was part of the
+    # ~8 queries each ticket cost (FL-PERF-13).
+    audit_rows = []
     for ticket in qs.iterator(chunk_size=200):
         old_priority = ticket.priority
         try:
@@ -1019,19 +1158,16 @@ def escalate_near_breach_tickets():
         except Exception:
             logger.exception("escalate_near_breach_tickets: save failed for ticket %s", ticket.id)
             continue
-        try:
-            FrontlineAuditLog.objects.create(
-                company_id=ticket.company_id, actor=None,
-                action='ticket.sla_escalate', target_type='ticket', target_id=ticket.id,
-                diff={
-                    'before': {'priority': old_priority},
-                    'after': {'priority': 'urgent',
-                              'sla_due_at': ticket.sla_due_at.isoformat() if ticket.sla_due_at else None,
-                              'window_minutes': window_minutes},
-                },
-            )
-        except Exception:
-            logger.exception("escalate_near_breach_tickets: audit log write failed for ticket %s", ticket.id)
+        audit_rows.append(FrontlineAuditLog(
+            company_id=ticket.company_id, actor=None,
+            action='ticket.sla_escalate', target_type='ticket', target_id=ticket.id,
+            diff={
+                'before': {'priority': old_priority},
+                'after': {'priority': 'urgent',
+                          'sla_due_at': ticket.sla_due_at.isoformat() if ticket.sla_due_at else None,
+                          'window_minutes': window_minutes},
+            },
+        ))
         # Fire the notification trigger so any template subscribed to
         # ``ticket_near_breach`` fans out (e.g. "Slack the on-call channel"
         # or "email the manager"). Best-effort; failure here doesn't undo
@@ -1042,6 +1178,12 @@ def escalate_near_breach_tickets():
         except Exception:
             logger.exception("escalate_near_breach_tickets: notification trigger failed for ticket %s", ticket.id)
         escalated += 1
+
+    if audit_rows:
+        try:
+            FrontlineAuditLog.objects.bulk_create(audit_rows, batch_size=200)
+        except Exception:
+            logger.exception("escalate_near_breach_tickets: audit log bulk write failed")
     if escalated:
         logger.info("escalate_near_breach_tickets: escalated %d tickets (window=%dm)", escalated, window_minutes)
     return {'escalated': escalated, 'window_minutes': window_minutes,

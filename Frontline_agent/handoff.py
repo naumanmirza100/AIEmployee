@@ -86,19 +86,40 @@ def trigger_handoff(ticket, reason: str, context: Optional[dict] = None) -> bool
 
 def accept_handoff(ticket, user) -> bool:
     """Agent claims the hand-off. Assigns the ticket to them and records the
-    acceptance timestamp. Returns True on state change."""
-    if not ticket or ticket.handoff_status not in ('pending',):
+    acceptance timestamp. Returns True on state change, False when someone
+    else already took it (the caller answers 409).
+
+    The claim is one conditional UPDATE, not a read-check-write. Two agents
+    clicking Accept in the same second both passed the in-memory check and
+    both wrote themselves in as owner: both got a success response and saw the
+    ticket in "mine", while the row kept only the last writer — so the
+    customer got two replies (FL-DATA-4). Rows affected is the only reliable
+    signal about who actually won.
+    """
+    from .models import Ticket
+
+    if not ticket or ticket.handoff_status != 'pending':
         return False
-    ticket.handoff_status = 'accepted'
-    ticket.handoff_accepted_at = timezone.now()
-    ticket.handoff_accepted_by = user
-    ticket.assigned_to = user
+
+    now = timezone.now()
+    updates = {
+        'handoff_status': 'accepted',
+        'handoff_accepted_at': now,
+        'handoff_accepted_by': user,
+        'assigned_to': user,
+        'updated_at': now,
+    }
     if ticket.status == 'new':
-        ticket.status = 'open'
-    ticket.save(update_fields=[
-        'handoff_status', 'handoff_accepted_at', 'handoff_accepted_by',
-        'assigned_to', 'status', 'updated_at',
-    ])
+        updates['status'] = 'open'
+
+    claimed = (Ticket.objects
+               .filter(pk=ticket.pk, handoff_status='pending')
+               .update(**updates))
+    if not claimed:
+        return False
+
+    for field, value in updates.items():
+        setattr(ticket, field, value)
     return True
 
 

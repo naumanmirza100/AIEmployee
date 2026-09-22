@@ -1330,6 +1330,9 @@ REST_FRAMEWORK = {
         'frontline_public': '200/hour',
         'frontline_widget_key': '1000/hour',
         'frontline_llm': '500/hour',
+        # Streaming holds a worker for the whole answer, so it gets less than
+        # the ordinary LLM budget rather than sharing it.
+        'frontline_stream': '100/hour',
         'frontline_upload': '200/hour',
         'frontline_crud': '1000/hour',
         # HR Support Agent throttles

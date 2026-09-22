@@ -1,11 +1,17 @@
 # Running the tests
 
 ```bash
-python manage.py test project_manager_agent --settings=project_manager_ai.settings_test
+python manage.py test project_manager_agent Frontline_agent --settings=project_manager_ai.settings_test
 ```
 
-95 tests, about 8 seconds. Run it before pushing anything that touches
-projects, tasks, subtasks or the PM API views.
+Two suites so far:
+
+| Suite | Covers |
+|---|---|
+| `project_manager_agent` | projects, tasks, subtasks and the three PM API families (95 tests, ~8 s) |
+| `Frontline_agent` | the findings in `MDS/FRONTLINE_AGENT_AUDIT.md`: tenancy, roles and gating, ticket state, concurrency claims, inbound mail, contact merge, query counts |
+
+Run them before pushing anything that touches those agents.
 
 Run one class or one test while you work on it:
 
@@ -46,6 +52,21 @@ Two consequences when you write a test:
 | `test_subtasks.py` | subtask CRUD, ordering, completion |
 | `test_scope.py` | the module-purchase gate, the two login kinds, assignable-user lists |
 | `test_wiring.py` | the audit trail, rate-limit wiring, pagination |
+
+`Frontline_agent/tests/`
+
+| File | Covers |
+|---|---|
+| `base.py` | two companies, an admin and a member dashboard login each |
+| `test_tenancy.py` | workflow steps, creator-scoped endpoints, ticket links, KB coverage |
+| `test_access.py` | the `/api/v1/` gate, admin-only endpoints, token encryption, throttle wiring, webhook signatures, SSRF validation |
+| `test_ticket_state.py` | `resolved_at`, SLA resume, snooze wake, CSAT surveys, hand-off release |
+| `test_concurrency.py` | the claim pattern: hand-off accept, workflow approval, notification sends |
+| `test_inbound_email.py` | idempotency, field sizes, the reply branch |
+| `test_contacts_and_queries.py` | contact merge, deferred CRM dispatch, query counts, pagination, the widget ticket cap |
+
+Every Frontline test names the FL-SEC / FL-DATA / FL-PERF item it guards, so a
+failure says what regressed rather than just what broke.
 
 Every test starts with **two companies**, because most of the bugs these
 tests exist to catch were one company reaching into another's data. When you
