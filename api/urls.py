@@ -883,6 +883,10 @@ urlpatterns = [
     # Audit log (HR-admin only)
     re_path(r'^hr/audit-log/?$', hr_agent.list_hr_audit_log, name='hr_audit_log'),  # GET
 
+    # Role administration — makes the CompanyUser role ladder reachable (HR-SEC-4)
+    re_path(r'^hr/company-users/?$', hr_agent.list_company_user_roles, name='hr_list_company_user_roles'),  # GET
+    re_path(r'^hr/company-users/(?P<company_user_id>\d+)/role/?$', hr_agent.set_company_user_role, name='hr_set_company_user_role'),  # PATCH/POST
+
     # -------------------------------------------------------------------------
     # CRM & System Sync Agent
     # -------------------------------------------------------------------------
