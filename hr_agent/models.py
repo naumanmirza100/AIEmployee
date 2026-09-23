@@ -147,10 +147,30 @@ class Employee(models.Model):
 # Leave management — balance + request
 # ============================================================================
 
+def leave_year_start(when=None):
+    """The `period_start` every leave balance is keyed on.
+
+    One convention, used by accrual, approval, withdrawal and manual
+    adjustment alike. They used to disagree — approvals wrote the row for
+    January 1st of the leave's year while accrual wrote the row with
+    `period_start=NULL`, and since the model is unique on
+    `(employee, leave_type, period_start)` those are *different rows*. Days
+    accrued therefore never met the days used, and a balance could show a full
+    entitlement and a full year of usage at the same time (HR-DATA-3).
+    """
+    from datetime import date as _date
+    from django.utils import timezone as _tz
+    when = when or _tz.now().date()
+    return _date(when.year, 1, 1)
+
+
 class LeaveBalance(models.Model):
-    """Per-(employee, leave_type) running balance. Updated by workflow steps
-    on approved LeaveRequest changes; queried by Knowledge Q&A when a customer
-    asks "how many vacation days do I have left?"."""
+    """Per-(employee, leave_type, leave year) running balance. Updated by
+    workflow steps on approved LeaveRequest changes; queried by Knowledge Q&A
+    when a customer asks "how many vacation days do I have left?".
+
+    Always key writes with `leave_year_start(...)` — see that function.
+    """
     LEAVE_TYPE_CHOICES = [
         ('vacation', 'Vacation / PTO'),
         ('sick', 'Sick'),
@@ -180,6 +200,42 @@ class LeaveBalance(models.Model):
 
     def __str__(self):
         return f"{self.employee_id}/{self.leave_type}: {self.remaining}"
+
+
+class LeaveAccrualRun(models.Model):
+    """One row per (policy, period) — the claim that makes accrual safe to
+    redeliver.
+
+    `accrue_leave_balances` used to gate on `policy.last_run_at`, which it
+    stamped *after* crediting everyone, with no transaction. Celery runs with
+    `acks_late`, so a worker killed mid-loop had the task redelivered, saw an
+    un-stamped policy, and credited everyone it had already credited a second
+    time — silently, and unrecoverably, since a balance is a stored number and
+    not a ledger (HR-DATA-1).
+
+    Creating this row first turns that into a unique-constraint collision.
+    """
+    policy = models.ForeignKey('LeaveAccrualPolicy', on_delete=models.CASCADE,
+                               related_name='runs')
+    period_key = models.CharField(
+        max_length=32,
+        help_text="The period this run credits: '2026-09' (monthly), "
+                  "'2026-W38' (biweekly) or '2026' (annual).")
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True,
+                                        help_text='Null means it started and never finished.')
+    employees_credited = models.IntegerField(default=0)
+
+    class Meta:
+        app_label = 'hr_agent'
+        ordering = ['-started_at']
+        constraints = [
+            models.UniqueConstraint(fields=['policy', 'period_key'],
+                                    name='hr_accrual_run_unique_period'),
+        ]
+
+    def __str__(self):
+        return f"accrual {self.policy_id}/{self.period_key}"
 
 
 class Holiday(models.Model):
