@@ -1338,6 +1338,9 @@ REST_FRAMEWORK = {
         # HR Support Agent throttles
         'hr_public': '200/hour',
         'hr_llm': '500/hour',
+        # Streaming holds a worker for the whole answer, so it gets less than
+        # the ordinary LLM budget rather than sharing it.
+        'hr_stream': '100/hour',
         'hr_upload': '200/hour',
         'hr_crud': '1000/hour',
         # AI Executive Meeting Assistant throttles

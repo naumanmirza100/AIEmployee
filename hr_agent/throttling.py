@@ -11,6 +11,16 @@ class HRPublicThrottle(AnonRateThrottle):
     scope = 'hr_public'
 
 
+class HRStreamThrottle(UserRateThrottle):
+    """Tighter budget for streamed answers.
+
+    A stream holds a worker for the whole generation, not just for a
+    request/response round trip, so unlimited concurrent streams are an
+    availability problem as well as a cost one (HR-GAP-2).
+    """
+    scope = 'hr_stream'
+
+
 class HRLLMThrottle(UserRateThrottle):
     """LLM-backed endpoints — Knowledge Q&A, summaries, draft replies."""
     scope = 'hr_llm'
