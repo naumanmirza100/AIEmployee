@@ -143,10 +143,20 @@ def backfill_employees_for_company(company_id: int) -> int:
                         | Q(company__isnull=True, created_by_company_user__company=company))
                 .select_related('user')
                 .exclude(user__is_superuser=True))
+
+    # One query for everyone who already has an Employee row, instead of an
+    # existence check per profile. This helper used to run on every
+    # `list_employees` GET, so that was a query per person on a hot read path
+    # (HR-PERF-1).
+    existing_user_ids = set(
+        Employee.objects.filter(user_id__isnull=False)
+        .values_list('user_id', flat=True)
+    )
+
     for prof in profiles:
         if not prof.user_id:
             continue
-        if Employee.objects.filter(user_id=prof.user_id).exists():
+        if prof.user_id in existing_user_ids:
             continue
         try:
             with transaction.atomic():
