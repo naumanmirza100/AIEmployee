@@ -1,15 +1,16 @@
 # Running the tests
 
 ```bash
-python manage.py test project_manager_agent Frontline_agent --settings=project_manager_ai.settings_test
+python manage.py test project_manager_agent Frontline_agent hr_agent --settings=project_manager_ai.settings_test
 ```
 
-Two suites so far:
+Three suites so far:
 
 | Suite | Covers |
 |---|---|
 | `project_manager_agent` | projects, tasks, subtasks and the three PM API families (95 tests, ~8 s) |
 | `Frontline_agent` | the findings in `MDS/FRONTLINE_AGENT_AUDIT.md`: tenancy, roles and gating, ticket state, concurrency claims, inbound mail, contact merge, query counts |
+| `hr_agent` | the findings in `MDS/HR_AGENT_AUDIT.md`: HR-admin boundaries, leave-list scoping, confidentiality rungs, the leave engine's balance arithmetic, accrual idempotency, query counts |
 
 Run them before pushing anything that touches those agents.
 
