@@ -243,33 +243,69 @@ class FaissVectorStore:
     def _build_from_db(self) -> bool:
         """Read the company's DocumentChunks and build the FAISS index from
         scratch. Returns False when nothing indexable exists (caller should
-        fall back to the JSON-scan path)."""
-        from Frontline_agent.models import DocumentChunk
+        fall back to the JSON-scan path).
 
-        qs = (DocumentChunk.objects
-              .filter(document__company_id=self.company_id)
-              .exclude(embedding__isnull=True)
-              .exclude(embedding='')
-              .values_list('id', 'embedding')
-              .iterator(chunk_size=2000))
+        Read in primary-key pages rather than one streaming query. The single
+        unbounded SELECT this used to run inherited `DocumentChunk.Meta`'s
+        `ordering = ['document', 'chunk_index']`, so the server sorted rows
+        that each carry a ~60 KB `embedding` TEXT column (3072 floats as JSON)
+        through an on-disk temp table. Against the remote database that ran
+        past the 120s `max_statement_time` and the rebuild raised
+        OperationalError(1969) every single time — so the index never got
+        rebuilt after an upload and questions were answered from a stale one.
+        Ordering by `id` walks the clustered primary key with no sort, and the
+        LIMIT keeps each statement short enough to finish comfortably.
+        """
+        from Frontline_agent.models import DocumentChunk, Document
+
+        # Resolve the tenant's documents up front so the per-page chunk query
+        # filters on a plain indexed column instead of re-joining Document.
+        doc_ids = list(
+            Document.objects
+            .filter(company_id=self.company_id)
+            .values_list('id', flat=True)
+        )
+        if not doc_ids:
+            logger.info("FAISS build skipped for company %s: no documents",
+                        self.company_id)
+            return False
+
+        page_size = int(getattr(settings, 'FRONTLINE_INDEX_BUILD_PAGE_SIZE', 250))
 
         vecs: List[List[float]] = []
         ids: List[int] = []
         dim = 0
-        for chunk_id, embedding in qs:
-            try:
-                emb = json.loads(embedding) if isinstance(embedding, str) else embedding
-                if not emb or not isinstance(emb, list):
+        last_id = 0
+        while True:
+            page = list(
+                DocumentChunk.objects
+                .filter(document_id__in=doc_ids, id__gt=last_id)
+                .exclude(embedding__isnull=True)
+                .exclude(embedding='')
+                .order_by('id')
+                .values_list('id', 'embedding')[:page_size]
+            )
+            if not page:
+                break
+            # Rows the filters rejected are never returned, so advancing past
+            # the last id we did see still steps over them.
+            last_id = page[-1][0]
+            for chunk_id, embedding in page:
+                try:
+                    emb = json.loads(embedding) if isinstance(embedding, str) else embedding
+                    if not emb or not isinstance(emb, list):
+                        continue
+                    if dim == 0:
+                        dim = len(emb)
+                    elif len(emb) != dim:
+                        # Skip dim-mismatched rows (model upgrade mid-flight) rather than crash.
+                        continue
+                    vecs.append(emb)
+                    ids.append(chunk_id)
+                except Exception:
                     continue
-                if dim == 0:
-                    dim = len(emb)
-                elif len(emb) != dim:
-                    # Skip dim-mismatched rows (model upgrade mid-flight) rather than crash.
-                    continue
-                vecs.append(emb)
-                ids.append(chunk_id)
-            except Exception:
-                continue
+            if len(page) < page_size:
+                break
 
         if not vecs:
             logger.info("FAISS build skipped for company %s: no embeddings found",
