@@ -362,7 +362,7 @@ const DocumentDetailPage = () => {
 
       {/* Tabbed Content */}
       <Tabs id="OPS-docdetail-tabs" data-testid="OPS-docdetail-tabs" value={detailTab} onValueChange={setDetailTab}>
-        <TabsList id="OPS-docdetail-tabs-list" data-testid="OPS-docdetail-tabs-list" className="h-10 p-1 rounded-xl w-full sm:w-auto justify-start gap-1 bg-[#1a1333] border border-[#3a295a]">
+        <TabsList id="OPS-docdetail-tabs-list" data-testid="OPS-docdetail-tabs-list" className="h-10 p-1 rounded-xl w-full sm:w-auto justify-start gap-1 bg-[var(--panel-1)] border border-[var(--line-2)]">
           {[
             { value: 'summary', label: 'Summary', icon: Sparkles },
             { value: 'entities', label: 'Entities', icon: Brain },

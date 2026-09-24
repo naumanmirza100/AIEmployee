@@ -128,7 +128,7 @@ const SavedPrompts = () => {
 
   return (
     <div className="space-y-4">
-      <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+      <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
         <CardHeader className="p-4 sm:p-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
@@ -210,7 +210,7 @@ const SavedPrompts = () => {
                   key={savedPrompt.id}
                   id={`REC-savedprompts-row-${savedPrompt.id}`}
                   data-testid={`REC-savedprompts-row-${savedPrompt.id}`}
-                  className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm"
+                  className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm"
                 >
                   <CardContent className="p-3 sm:p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -327,7 +327,7 @@ const SavedPrompts = () => {
         <Card
           id="REC-savedprompts-graph-panel"
           data-testid="REC-savedprompts-graph-panel"
-          className="border-white/10 bg-black/20 backdrop-blur-sm"
+          className="border-white/10 bg-pure-black/20 backdrop-blur-sm"
         >
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between mb-4">

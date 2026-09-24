@@ -203,7 +203,7 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
 
   return (
     <div className="space-y-6">
-      <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+      <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Target className="h-5 w-5 text-violet-400" />
@@ -312,7 +312,7 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
       />
 
       {result && (
-        <Card data-tour-pm-tp="results" className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card data-tour-pm-tp="results" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-1.5">Analysis Results <InfoHint {...PM_HINTS.pmTpResults} /></CardTitle>
           </CardHeader>

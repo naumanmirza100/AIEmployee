@@ -551,7 +551,7 @@ const DocumentAuthoring = () => {
     <div
       className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)]"
       style={{
-        background: 'linear-gradient(135deg, #1a1333 0%, #1a1333 45%, rgba(64,40,10,0.55) 100%)',
+        background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, rgba(64,40,10,0.55) 100%)',
       }}
     >
       <div className="flex w-full max-w-full relative" style={{ height: 'calc(100vh - 120px)', minHeight: 680 }}>
@@ -580,7 +580,7 @@ const DocumentAuthoring = () => {
                       <div className="group absolute right-full top-1/2 -translate-y-1/2 mr-1.5 flex items-center gap-1 z-30">
                         <span
                           className="whitespace-nowrap rounded-md px-2 py-1 text-[10px] font-semibold shadow-lg opacity-0 -translate-x-1 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0"
-                          style={{ backgroundColor: ACCENT, color: '#1a0e00' }}
+                          style={{ backgroundColor: ACCENT, color: 'var(--sfc-1a0e00)' }}
                         >
                           Want the tour? Click
                         </span>
@@ -617,7 +617,7 @@ const DocumentAuthoring = () => {
                 onClick={handleNewDocument}
                 size="sm"
                 className="text-xs h-8 w-full font-semibold"
-                style={{ backgroundColor: ACCENT, color: '#1a0e00', border: 'none' }}
+                style={{ backgroundColor: ACCENT, color: 'var(--sfc-1a0e00)', border: 'none' }}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" /> New document
               </Button>
@@ -928,7 +928,7 @@ const AuthoringOnboarding = ({ open, step, setStep, onClose }) => {
 
   const card = (
     <div className="w-[320px] max-w-[92vw] rounded-2xl border p-5 shadow-2xl"
-         style={{ background: '#140d26', borderColor: ACCENT_BORDER }}>
+         style={{ background: 'var(--sfc-140d26)', borderColor: ACCENT_BORDER }}>
       <div className="flex items-center gap-2.5 mb-2">
         <span className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0" style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}>
           <Icon className="h-4 w-4" style={{ color: ACCENT }} />
@@ -1155,7 +1155,7 @@ const CreateView = ({
             onClick={onGenerate}
             disabled={!prompt.trim() || generating}
             className="h-10 px-5 text-sm font-semibold disabled:opacity-50"
-            style={{ backgroundColor: ACCENT, color: '#1a0e00', border: 'none' }}
+            style={{ backgroundColor: ACCENT, color: 'var(--sfc-1a0e00)', border: 'none' }}
           >
             {generating ? (
               <>
@@ -1349,7 +1349,7 @@ const ViewView = ({
                 onClick={onSave}
                 size="sm"
                 className="h-8 text-xs font-semibold"
-                style={{ backgroundColor: ACCENT, color: '#1a0e00', border: 'none' }}
+                style={{ backgroundColor: ACCENT, color: 'var(--sfc-1a0e00)', border: 'none' }}
                 disabled={saving}
               >
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Save className="h-3.5 w-3.5 mr-1" />}

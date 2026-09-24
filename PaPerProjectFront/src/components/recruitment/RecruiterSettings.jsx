@@ -639,7 +639,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
             content switching. */}
 
         <TabsContent id="REC-settings-email-panel" data-testid="REC-settings-email-panel" value="email">
-          <Card id="REC-settings-email-card" data-testid="REC-settings-email-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-email-card" data-testid="REC-settings-email-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Email Settings</CardTitle>
               <CardDescription>
@@ -774,7 +774,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
         </TabsContent>
 
         <TabsContent id="REC-settings-interview-panel" data-testid="REC-settings-interview-panel" value="interview">
-          <Card id="REC-settings-interview-card" data-testid="REC-settings-interview-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-interview-card" data-testid="REC-settings-interview-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Interview Settings</CardTitle>
               <CardDescription>
@@ -844,7 +844,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                         <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
                       </button>
                       {jobSearchOpen && (
-                        <div id="REC-settings-job-select-dropdown" data-testid="REC-settings-job-select-dropdown" className="absolute z-50 mt-1 w-full bg-[#1a1a2e] border border-white/20 rounded-md shadow-xl overflow-hidden">
+                        <div id="REC-settings-job-select-dropdown" data-testid="REC-settings-job-select-dropdown" className="absolute z-50 mt-1 w-full bg-[var(--sfc-1a1a2e)] border border-white/20 rounded-md shadow-xl overflow-hidden">
                           <div className="flex items-center border-b border-white/10 px-3">
                             <Search className="h-4 w-4 text-white/40 shrink-0" />
                             <input
@@ -1139,7 +1139,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                       onClick={handleUpdateTimeSlotAvailability}
                       disabled={saving}
                       variant="outline"
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600"
+                      className="bg-indigo-600 hover:bg-indigo-700 text-pure-white border-indigo-600"
                     >
                       <Lock className="h-4 w-4 mr-2" />
                       {saving ? 'Updating...' : 'Update Availability'}
@@ -1154,7 +1154,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                           id="REC-settings-calendar-prev-month-btn"
                           data-testid="REC-settings-calendar-prev-month-btn"
                           onClick={() => changeCalendarMonth(-1)}
-                          className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-600 hover:bg-indigo-600 border border-slate-500 text-white transition-colors"
+                          className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-600 hover:bg-indigo-600 border border-slate-500 text-pure-white transition-colors"
                         >
                           <ChevronLeft className="h-5 w-5" />
                         </button>
@@ -1165,7 +1165,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                           id="REC-settings-calendar-next-month-btn"
                           data-testid="REC-settings-calendar-next-month-btn"
                           onClick={() => changeCalendarMonth(1)}
-                          className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-600 hover:bg-indigo-600 border border-slate-500 text-white transition-colors"
+                          className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-600 hover:bg-indigo-600 border border-slate-500 text-pure-white transition-colors"
                         >
                           <ChevronRight className="h-5 w-5" />
                         </button>
@@ -1191,12 +1191,12 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                                 ? 'invisible' 
                                 : dateInfo.isInRange
                                   ? dateInfo.isStart
-                                    ? 'bg-indigo-600 text-white font-bold'
+                                    ? 'bg-indigo-600 text-pure-white font-bold'
                                     : dateInfo.isEnd
-                                      ? 'bg-indigo-500 text-white font-bold'
+                                      ? 'bg-indigo-500 text-pure-white font-bold'
                                       : 'bg-indigo-500/70 text-white font-bold'
                                   : dateInfo.isAvailable
-                                    ? 'bg-slate-600 text-white font-bold cursor-pointer hover:bg-indigo-600'
+                                    ? 'bg-slate-600 text-pure-white font-bold cursor-pointer hover:bg-indigo-600'
                                     : 'text-slate-500'
                               }
                             `}
@@ -1325,7 +1325,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
         </TabsContent>
 
         <TabsContent id="REC-settings-qualification-panel" data-testid="REC-settings-qualification-panel" value="qualification">
-          <Card id="REC-settings-qualification-card" data-testid="REC-settings-qualification-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card id="REC-settings-qualification-card" data-testid="REC-settings-qualification-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
             <CardHeader>
               <CardTitle>Qualification Settings</CardTitle>
               <CardDescription>

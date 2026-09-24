@@ -333,7 +333,7 @@ const AgenticAiResourcePage = () => {
                                 viewport={{ once: true }}
                                 transition={{ duration: 0.8 }}
                             >
-                                <div className="bg-gradient-to-r from-primary/90 to-purple-600 rounded-2xl p-8 md:p-12 text-center text-white shadow-2xl relative overflow-hidden">
+                                <div className="bg-gradient-to-r from-primary/90 to-purple-600 rounded-2xl p-8 md:p-12 text-center text-pure-white shadow-2xl relative overflow-hidden">
                                     <h2 className="text-3xl md:text-4xl font-bold mb-4">Ready to Deploy Agentic AI?</h2>
                                     <p className="max-w-2xl mx-auto text-lg text-primary-foreground/90 mb-8">
                                         Turn theory into practice. Our experts can help you design, build, and deploy a custom AI agent tailored to solve your most complex business challenges.

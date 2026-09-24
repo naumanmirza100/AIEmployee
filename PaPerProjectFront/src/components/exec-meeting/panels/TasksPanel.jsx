@@ -59,7 +59,7 @@ export const TasksPanel = ({
             </HoverTip>
           )}
           <HoverTip tip="Add a new task">
-            <Button size="sm" onClick={() => setShowTaskDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
+            <Button size="sm" onClick={() => setShowTaskDialog(true)} style={{ background: 'linear-gradient(90deg, hsl(var(--brand-accent)) 0%, hsl(var(--brand-600)) 100%)' }} className="text-pure-white border-0 hover:opacity-90">
               <Plus className="h-4 w-4 mr-1" /> Add Task
             </Button>
           </HoverTip>
@@ -197,7 +197,7 @@ export const TasksPanel = ({
         return (
           <Dialog open={!!t} onOpenChange={open => { if (!open) setExpandedTaskId(null); }}>
             <DialogContent
-              className="max-w-lg w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
+              className="max-w-lg w-full bg-[var(--sfc-0d0b1f)] border-white/10 text-white p-0 gap-0"
               style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
             >
               {t && (

@@ -3,15 +3,149 @@
     @tailwind utilities;
     
     @layer base {
+      /* Light is the default theme; `.dark` on <html> switches to the dark one.
+         These two blocks used to hold identical near-black values, so the app
+         was dark-only and the tokens did nothing. */
       :root {
+        --background: 0 0% 100%;
+        --foreground: 240 10% 8%;
+        --card: 0 0% 100%;
+        --card-foreground: 240 10% 8%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 240 10% 8%;
+        /* #427CF5 — the light-mode brand blue. Dark mode keeps the violet
+           (#7C3AED) below, so buttons are blue on white and violet on black. */
+        --primary: 220.6 90% 61%;
+        --primary-foreground: 0 0% 100%;
+        --brand-600: 220.6 90% 61%;
+        /* Lighter half of the brand gradients (was the fixed hsl(var(--brand-accent))). */
+        --brand-accent: 214 100% 71%;
+        --secondary: 240 5% 96%;
+        --secondary-foreground: 240 10% 12%;
+        --muted: 240 5% 96%;
+        --muted-foreground: 240 4% 40%;
+        --accent: 240 5% 94%;
+        --accent-foreground: 240 10% 12%;
+        --destructive: 0 72% 46%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 240 6% 88%;
+        --input: 240 6% 88%;
+        --ring: 220.6 90% 61%;
+        --radius: 0.5rem;
+
+        /* Surfaces that were written as white-with-opacity for a dark page —
+           `bg-white/5`, `border-white/10`, `text-white/70`. Components use
+           these via the `surface-*` helpers below so one rule flips them for
+           both themes instead of every file needing a `dark:` variant. */
+        --surface-raised: 240 5% 97%;
+        --surface-overlay: 240 6% 92%;
+        --surface-contrast: 240 10% 8%;
+        /* What Tailwind's `white` resolves to. The agent dashboards were
+           written for a dark page, so ~4,000 classes say `text-white`,
+           `bg-white/5`, `border-white/10`. Pointing `white` at this token
+           flips all of them at once: near-black here, actually white in the
+           `.dark` block. Anything that must stay white on a coloured button
+           uses `pure-white` instead. */
+        --surface-invert: 240 10% 8%;
+        /* What Tailwind's `black` resolves to. `bg-black/20` and `bg-black/30`
+           are inset panels and input fills on the dark pages; a mid grey keeps
+           them a subtle tint on a light page instead of muddy charcoal. Modal
+           scrims use `pure-black` so they stay genuinely dark in both themes. */
+        --surface-base: 240 9% 62%;
+
+        /* Panel, border and soft-text colours the dashboards hardcode as hex
+           inside inline styles. Dark mode keeps the original values; light
+           mode gets the same role in a light tint, so `var(--panel-1)` means
+           "the main panel" rather than "#1a1333". */
+        --panel-1: #f6f4fb;
+        --panel-2: #faf9fd;
+        --panel-3: #f2f2f6;
+        --panel-4: #f4f4fa;
+        --line-1: #e7e1f2;
+        --line-2: #dcd3ec;
+        --line-3: #e5e0ef;
+        --text-soft: #2e2545;
+
+        /* Auto-derived from the dark panel hexes the dashboards hardcode in
+           inline styles. Each keeps its original value under `.dark`; the light
+           value here is the same hue lifted into a near-white tint. */
+        --sfc-0d0b1f: #f6f5f9;
+        --sfc-0f0a1f: #f6f5f9;
+        --sfc-0d0d1a: #f6f6f9;
+        --sfc-0e0e14: #f8f8f9;
+        --sfc-111118: #f7f7f8;
+        --sfc-0d0820: #f6f6f9;
+        --sfc-1a1030: #f3f2f7;
+        --sfc-231845: #efedf4;
+        --sfc-1a0a35: #f4f2f7;
+        --sfc-1e1535: #f2f1f6;
+        --sfc-020308: #fafbfc;
+        --sfc-07030f: #faf9fb;
+        --sfc-080b1a: #f6f7fa;
+        --sfc-0f0a20: #f6f5f9;
+        --sfc-0a0a1a: #f6f6fa;
+        --sfc-0a1929: #f4f6f8;
+        --sfc-0f0f23: #f4f4f8;
+        --sfc-1a1028: #f5f3f7;
+        --sfc-1c1030: #f4f2f7;
+        --sfc-1e1035: #f3f1f7;
+        --sfc-241638: #f2f0f5;
+        --sfc-0a0616: #f8f7fa;
+        --sfc-0e0820: #f7f6f9;
+        --sfc-12121a: #f6f6f8;
+        --sfc-1e3a5f: #e8ecf1;
+        --sfc-090c14: #f8f8fa;
+        --sfc-0b0716: #f8f7fa;
+        --sfc-0b0817: #f8f7fa;
+        --sfc-0c0816: #f8f7fa;
+        --sfc-0c0820: #f6f6f9;
+        --sfc-0d0b1a: #f7f6f9;
+        --sfc-0f1022: #f5f5f8;
+        --sfc-100a20: #f6f5f9;
+        --sfc-100b1e: #f6f6f9;
+        --sfc-140d26: #f5f4f8;
+        --sfc-160b2e: #f4f3f8;
+        --sfc-16162a: #f3f3f6;
+        --sfc-181030: #f3f2f7;
+        --sfc-1e1e38: #f0f0f4;
+        --sfc-14082a: #f6f4f8;
+        --sfc-0a1020: #f5f6f9;
+        --sfc-140830: #f4f3f8;
+        --sfc-0d1020: #f5f6f9;
+        --sfc-0a1628: #f4f6f8;
+        --sfc-120d24: #f5f4f8;
+        --sfc-07050f: #f9f9fb;
+        --sfc-14082c: #f5f4f8;
+        --sfc-160b28: #f6f4f8;
+        --sfc-1a0a2e: #f5f3f8;
+        --sfc-1a0e00: #fbf9f8;
+        --sfc-1a1a2e: #f2f2f5;
+        --sfc-1e0f38: #f3f1f6;
+
+        /* The dashboards paint these two gradients through inline styles, which
+           no `dark:` class can reach — so they are variables the inline style
+           can point at instead of a hardcoded colour string. */
+        --app-page-bg: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--secondary)) 50%, hsl(var(--background)) 100%);
+        --app-hero-bg: linear-gradient(90deg, hsl(var(--secondary)) 0%, hsl(var(--secondary)) 55%, hsl(var(--brand-600) / 0.10) 85%, hsl(var(--brand-600) / 0.16) 100%);
+
+        /* Tells the browser to render native controls, scrollbars and form
+           widgets in the matching scheme. */
+        color-scheme: light;
+      }
+
+      .dark {
         --background: 0 0% 3.9%;
         --foreground: 0 0% 98%;
         --card: 0 0% 3.9%;
         --card-foreground: 0 0% 98%;
         --popover: 0 0% 3.9%;
         --popover-foreground: 0 0% 98%;
+        /* #7C3AED — unchanged. */
         --primary: 262.1 83.3% 57.8%;
         --primary-foreground: 210 40% 98%;
+        --brand-600: 262.1 83.3% 57.8%;
+        /* hsl(var(--brand-accent)) — unchanged. */
+        --brand-accent: 270 100% 63%;
         --secondary: 0 0% 14.9%;
         --secondary-foreground: 0 0% 98%;
         --muted: 0 0% 14.9%;
@@ -24,30 +158,123 @@
         --input: 0 0% 14.9%;
         --ring: 262.1 83.3% 57.8%;
         --radius: 0.5rem;
+
+        --surface-raised: 0 0% 100%;
+        --surface-overlay: 0 0% 100%;
+        --surface-contrast: 0 0% 100%;
+        --surface-invert: 0 0% 100%;
+        --surface-base: 0 0% 0%;
+
+        --panel-1: #1a1333;
+        --panel-2: #120d22;
+        --panel-3: #0a0a0f;
+        --panel-4: #161630;
+        --line-1: #2d1f4a;
+        --line-2: #3a295a;
+        --line-3: #2d2342;
+        --text-soft: #e2d9f3;
+
+        --sfc-0d0b1f: #0d0b1f;
+        --sfc-0f0a1f: #0f0a1f;
+        --sfc-0d0d1a: #0d0d1a;
+        --sfc-0e0e14: #0e0e14;
+        --sfc-111118: #111118;
+        --sfc-0d0820: #0d0820;
+        --sfc-1a1030: #1a1030;
+        --sfc-231845: #231845;
+        --sfc-1a0a35: #1a0a35;
+        --sfc-1e1535: #1e1535;
+        --sfc-020308: #020308;
+        --sfc-07030f: #07030f;
+        --sfc-080b1a: #080b1a;
+        --sfc-0f0a20: #0f0a20;
+        --sfc-0a0a1a: #0a0a1a;
+        --sfc-0a1929: #0a1929;
+        --sfc-0f0f23: #0f0f23;
+        --sfc-1a1028: #1a1028;
+        --sfc-1c1030: #1c1030;
+        --sfc-1e1035: #1e1035;
+        --sfc-241638: #241638;
+        --sfc-0a0616: #0a0616;
+        --sfc-0e0820: #0e0820;
+        --sfc-12121a: #12121a;
+        --sfc-1e3a5f: #1e3a5f;
+        --sfc-090c14: #090c14;
+        --sfc-0b0716: #0b0716;
+        --sfc-0b0817: #0b0817;
+        --sfc-0c0816: #0c0816;
+        --sfc-0c0820: #0c0820;
+        --sfc-0d0b1a: #0d0b1a;
+        --sfc-0f1022: #0f1022;
+        --sfc-100a20: #100a20;
+        --sfc-100b1e: #100b1e;
+        --sfc-140d26: #140d26;
+        --sfc-160b2e: #160b2e;
+        --sfc-16162a: #16162a;
+        --sfc-181030: #181030;
+        --sfc-1e1e38: #1e1e38;
+        --sfc-14082a: #14082a;
+        --sfc-0a1020: #0a1020;
+        --sfc-140830: #140830;
+        --sfc-0d1020: #0d1020;
+        --sfc-0a1628: #0a1628;
+        --sfc-120d24: #120d24;
+        --sfc-07050f: #07050f;
+        --sfc-14082c: #14082c;
+        --sfc-160b28: #160b28;
+        --sfc-1a0a2e: #1a0a2e;
+        --sfc-1a0e00: #1a0e00;
+        --sfc-1a1a2e: #1a1a2e;
+        --sfc-1e0f38: #1e0f38;
+
+        --app-page-bg: linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%);
+        --app-hero-bg: linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%);
+
+        color-scheme: dark;
       }
-    
-      .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 262.1 83.3% 57.8%;
-        --primary-foreground: 210 40% 98%;
-        --secondary: 0 0%14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 262.1 83.3% 57.8%;
-        --radius: 0.5rem;
+    }
+
+    @layer components {
+      /* Drop-in replacements for the `white/opacity` pattern this codebase
+         uses everywhere. In dark mode they resolve to the same white washes as
+         before; in light mode they become subtle greys instead of invisible
+         white-on-white. */
+      .surface-1 { background-color: hsl(var(--surface-raised) / 0.7); }
+      .surface-2 { background-color: hsl(var(--surface-overlay) / 0.6); }
+      .surface-hover:hover { background-color: hsl(var(--surface-overlay) / 0.8); }
+      .surface-border { border-color: hsl(var(--surface-contrast) / 0.10); }
+      .surface-text { color: hsl(var(--surface-contrast) / 0.75); }
+      .surface-text-dim { color: hsl(var(--surface-contrast) / 0.50); }
+
+      /* The dashboard chrome used hardcoded gradients in inline styles, which
+         no theme class can reach. These keep the dark gradients exactly as
+         they were and give light mode a plain equivalent. */
+      .app-header-surface {
+        background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--secondary)) 100%);
       }
+      .dark .app-header-surface {
+        background: linear-gradient(180deg, #0a0a14 0%, #0d0b1a 40%, #110e1f 100%);
+      }
+
+      .app-panel-surface {
+        background: hsl(var(--popover));
+      }
+      .dark .app-panel-surface {
+        background: linear-gradient(180deg, #0d0b1a 0%, #1a0a2e 100%);
+      }
+
+      .app-sidebar-surface {
+        background: linear-gradient(180deg, hsl(var(--secondary)) 0%, hsl(var(--background)) 100%);
+      }
+      .dark .app-sidebar-surface {
+        background: linear-gradient(180deg, #0d0b1a 0%, #110e1f 100%);
+      }
+
+      /* Full-page background behind every agent dashboard, and the banner
+         strip at the top of each one. Available as classes for JSX that can
+         take one; the inline styles use the variables directly. */
+      .app-page-surface { background: var(--app-page-bg); }
+      .app-hero-surface { background: var(--app-hero-bg); }
     }
     
     @layer base {

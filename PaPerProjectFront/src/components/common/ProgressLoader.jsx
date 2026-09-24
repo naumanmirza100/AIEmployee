@@ -67,7 +67,7 @@ const ProgressLoader = ({
 
   return (
     <div
-      className="rounded-xl border border-white/[0.06] p-5 space-y-4"
+      className="rounded-xl border border-border p-5 space-y-4"
       style={{ background: 'rgba(0,0,0,0.25)' }}
       aria-live="polite"
       aria-busy="true"
@@ -81,17 +81,17 @@ const ProgressLoader = ({
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-white">{title}</div>
-          <div className="text-xs text-white/55">
+          <div className="text-xs text-muted-foreground">
             {sortedPhases[currentPhaseIdx]?.label || 'Working…'}
           </div>
         </div>
-        <div className="text-xs font-mono text-white/55 tabular-nums">
+        <div className="text-xs font-mono text-muted-foreground tabular-nums">
           {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
         </div>
       </div>
 
       {/* Indeterminate bar — pure CSS keyframe animation, no fake percentage */}
-      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/[0.05]">
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
         <div className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-gradient-to-r from-amber-500/40 via-amber-400 to-amber-500/40 animate-[progress-slide_1.6s_ease-in-out_infinite]" />
       </div>
 
@@ -105,13 +105,13 @@ const ProgressLoader = ({
               <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full shrink-0 ${
                 passed ? 'bg-emerald-500/15 text-emerald-400'
                        : active ? 'bg-amber-500/15 text-amber-400'
-                                : 'bg-white/[0.04] text-white/30'
+                                : 'bg-muted text-muted-foreground'
               }`}>
                 {passed ? '✓' : active ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : '•'}
               </span>
-              <span className={passed ? 'text-white/55 line-through decoration-white/20'
-                                       : active ? 'text-white/80'
-                                                : 'text-white/40'}>
+              <span className={passed ? 'text-muted-foreground line-through decoration-muted-foreground/40'
+                                       : active ? 'text-foreground'
+                                                : 'text-muted-foreground'}>
                 {p.label}
               </span>
             </li>
@@ -120,7 +120,7 @@ const ProgressLoader = ({
       </ol>
 
       {typicalSeconds > 0 && (
-        <div className="text-[11px] text-white/40">
+        <div className="text-[11px] text-muted-foreground">
           {isOverdue
             ? `Taking longer than usual (typically ~${typicalSeconds}s). Larger projects can take 2–3 minutes — please keep this tab open.`
             : `This typically takes ~${typicalSeconds} seconds. Larger projects can take a couple of minutes.`}
@@ -131,7 +131,7 @@ const ProgressLoader = ({
         <button
           type="button"
           onClick={onCancel}
-          className="text-[11px] text-white/40 hover:text-white/70 underline underline-offset-2"
+          className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2"
         >
           Cancel
         </button>

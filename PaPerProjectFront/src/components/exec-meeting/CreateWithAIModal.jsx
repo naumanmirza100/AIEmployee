@@ -176,7 +176,7 @@ export const CreateWithAIModal = ({ open, onClose, mode = 'meeting', onParsed, i
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       {/* Widen + lay out side-by-side when the View-all panel is open. */}
-      <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-4xl' : 'max-w-xl'}`}>
+      <DialogContent className={`bg-[var(--sfc-0d0b1f)] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-4xl' : 'max-w-xl'}`}>
         <div className="flex gap-4 items-stretch">
           <div className="min-w-0 flex-1">
             <DialogHeader>
@@ -221,7 +221,7 @@ export const CreateWithAIModal = ({ open, onClose, mode = 'meeting', onParsed, i
                     first letter (and everyone on a bare "@"). */}
                 {mention && mentionResults.length > 0 && (
                   // ~4 rows tall (each row ≈ 50px); more than 4 matches scroll.
-                  <div className="absolute left-2 right-2 top-full -mt-1 z-50 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl max-h-[200px] overflow-y-auto custom-scrollbar">
+                  <div className="absolute left-2 right-2 top-full -mt-1 z-50 rounded-xl border border-white/10 bg-[var(--panel-1)] shadow-xl max-h-[200px] overflow-y-auto custom-scrollbar">
                     {mentionResults.map((u) => (
                       <button key={mKey(u)} type="button" onClick={() => pickMention(u)}
                         className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
@@ -272,7 +272,7 @@ export const CreateWithAIModal = ({ open, onClose, mode = 'meeting', onParsed, i
           <Button
             onClick={handleGenerate}
             disabled={loading || !prompt.trim()}
-            className="bg-gradient-to-r from-violet-500 to-fuchsia-600 hover:from-violet-400 hover:to-fuchsia-500 text-white font-semibold"
+            className="bg-gradient-to-r from-violet-500 to-fuchsia-600 hover:from-violet-400 hover:to-fuchsia-500 text-pure-white font-semibold"
           >
             {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
             {loading ? 'Generating…' : 'Generate draft'}

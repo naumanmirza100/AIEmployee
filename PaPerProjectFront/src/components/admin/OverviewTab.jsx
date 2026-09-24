@@ -61,11 +61,11 @@ export const OverviewTab = ({ stats }) => (
         <div>
           <p className="text-xs text-white/40 uppercase tracking-wider mb-2">Free Platform Tokens</p>
           <div className="grid grid-cols-2 gap-3">
-            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+            <div className="p-4 bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg">
               <p className="text-xs text-white/40 uppercase mb-1">Included</p>
               <p className="text-xl font-bold text-white">{formatTokens(stats.total_included_tokens)}</p>
             </div>
-            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+            <div className="p-4 bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg">
               <p className="text-xs text-white/40 uppercase mb-1">Used</p>
               <p className="text-xl font-bold text-violet-300">{formatTokens(stats.total_used_tokens)}</p>
             </div>
@@ -75,18 +75,18 @@ export const OverviewTab = ({ stats }) => (
         <div>
           <p className="text-xs text-white/40 uppercase tracking-wider mb-2">Managed Key Tokens</p>
           <div className="grid grid-cols-2 gap-3">
-            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+            <div className="p-4 bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg">
               <p className="text-xs text-white/40 uppercase mb-1">Included</p>
               <p className="text-xl font-bold text-white">{formatTokens(stats.total_managed_included_tokens)}</p>
             </div>
-            <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+            <div className="p-4 bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg">
               <p className="text-xs text-white/40 uppercase mb-1">Used</p>
               <p className="text-xl font-bold text-emerald-300">{formatTokens(stats.total_managed_used_tokens)}</p>
             </div>
           </div>
         </div>
         {/* BYOK info */}
-        <div className="p-4 bg-[#1a1333] border border-[#2d2342] rounded-lg">
+        <div className="p-4 bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg">
           <p className="text-xs text-white/40 uppercase mb-1">BYOK (tracked, info only)</p>
           <p className="text-xl font-bold text-blue-300">{formatTokens(stats.total_byok_info_tokens)}</p>
         </div>
@@ -96,7 +96,7 @@ export const OverviewTab = ({ stats }) => (
             <p className="text-xs text-white/40 uppercase mb-2">By Provider</p>
             <div className="flex flex-wrap gap-2">
               {Object.entries(stats.provider_totals).map(([provider, tokens]) => (
-                <div key={provider} className="p-3 bg-[#1a1333] border border-[#2d2342] rounded-lg text-center hover:border-violet-500/30 transition-colors min-w-[110px]">
+                <div key={provider} className="p-3 bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg text-center hover:border-violet-500/30 transition-colors min-w-[110px]">
                   <div className="flex items-center justify-center mb-1.5">
                     <ProviderLogo provider={provider} size={24} />
                   </div>

@@ -218,7 +218,7 @@ export default function HRNotificationsTab() {
   return (
     <div className="space-y-6">
       {/* TEMPLATES */}
-      <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+      <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2">
@@ -304,7 +304,7 @@ export default function HRNotificationsTab() {
       </Card>
 
       {/* SCHEDULED QUEUE */}
-      <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+      <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <CardTitle>Scheduled queue</CardTitle>

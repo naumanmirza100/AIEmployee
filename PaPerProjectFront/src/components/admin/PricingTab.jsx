@@ -69,7 +69,7 @@ const PricingRow = ({ row, onSave, saving }) => {
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
             <Input
               type="number" step="0.01"
-              className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
+              className="bg-[var(--panel-1)] border-[var(--line-2)] text-white pl-6"
               value={draft.monthly_flat_usd}
               onChange={(e) => setDraft({ ...draft, monthly_flat_usd: e.target.value })}
             />
@@ -84,7 +84,7 @@ const PricingRow = ({ row, onSave, saving }) => {
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
             <Input
               type="number" step="0.01"
-              className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
+              className="bg-[var(--panel-1)] border-[var(--line-2)] text-white pl-6"
               value={draft.service_charge_usd}
               onChange={(e) => setDraft({ ...draft, service_charge_usd: e.target.value })}
             />
@@ -97,7 +97,7 @@ const PricingRow = ({ row, onSave, saving }) => {
           <div className="relative mt-1">
             <Input
               type="number" min="0" max="100" step="1"
-              className="bg-[#1a1333] border-[#3a295a] text-white pr-7"
+              className="bg-[var(--panel-1)] border-[var(--line-2)] text-white pr-7"
               value={draft.monthly_discount_pct}
               onChange={(e) => {
                 const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
@@ -116,7 +116,7 @@ const PricingRow = ({ row, onSave, saving }) => {
           <div className="relative mt-1">
             <Input
               type="number" min="0" max="100" step="1"
-              className="bg-[#1a1333] border-[#3a295a] text-white pr-7"
+              className="bg-[var(--panel-1)] border-[var(--line-2)] text-white pr-7"
               value={draft.yearly_discount_pct}
               onChange={(e) => {
                 const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
@@ -136,7 +136,7 @@ const PricingRow = ({ row, onSave, saving }) => {
           </Label>
           <Input
             type="number"
-            className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+            className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"
             value={draft.managed_key_tokens}
             onChange={(e) => setDraft({ ...draft, managed_key_tokens: e.target.value })}
           />
@@ -146,7 +146,7 @@ const PricingRow = ({ row, onSave, saving }) => {
           <Label className="text-white/60 text-xs">Free Platform Tokens <span className="text-white/30">— included with agent purchase</span></Label>
           <Input
             type="number"
-            className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+            className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"
             value={draft.free_tokens_on_purchase}
             onChange={(e) => setDraft({ ...draft, free_tokens_on_purchase: e.target.value })}
           />
@@ -180,7 +180,7 @@ const PricingRow = ({ row, onSave, saving }) => {
         <Button
           size="sm"
           disabled={!dirty || saving}
-          className="bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-40"
+          className="bg-violet-600 hover:bg-violet-700 text-pure-white disabled:opacity-40"
           onClick={() => onSave(row.agent_name, draft)}
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}

@@ -152,7 +152,7 @@ const JobApplicationPage = () => {
 
   if (jobLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#020308' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--sfc-020308)' }}>
         <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
       </div>
     );
@@ -161,7 +161,7 @@ const JobApplicationPage = () => {
   if (jobError) {
     const isNotYetOpen = jobError.code === 'NOT_YET_OPEN';
     return (
-      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'linear-gradient(135deg, #020308 0%, #0a1628 100%)' }}>
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'linear-gradient(135deg, var(--sfc-020308) 0%, var(--sfc-0a1628) 100%)' }}>
         <div
           className="w-full max-w-md rounded-2xl p-8 text-center"
           style={{
@@ -192,7 +192,7 @@ const JobApplicationPage = () => {
 
   if (submitted) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: '#020308' }}>
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--sfc-020308)' }}>
         <div
           className="w-full max-w-md rounded-2xl p-8 text-center space-y-5"
           style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(52,211,153,0.25)' }}
@@ -237,7 +237,7 @@ const JobApplicationPage = () => {
     }`;
 
   return (
-    <div className="min-h-screen py-10 px-4" style={{ background: 'linear-gradient(135deg, #020308 0%, #0a1628 100%)' }}>
+    <div className="min-h-screen py-10 px-4" style={{ background: 'linear-gradient(135deg, var(--sfc-020308) 0%, var(--sfc-0a1628) 100%)' }}>
       <div className="mx-auto max-w-2xl">
 
         {/* Job header card */}
@@ -465,7 +465,7 @@ const JobApplicationPage = () => {
               type="submit"
               disabled={submitting}
               className="w-full rounded-lg py-3 text-sm font-semibold text-white transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: submitting ? 'rgba(124,58,237,0.5)' : 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}
+              style={{ background: submitting ? 'hsl(var(--brand-600) / 0.5)' : 'linear-gradient(90deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)' }}
             >
               {submitting ? (
                 <span className="flex items-center justify-center gap-2">

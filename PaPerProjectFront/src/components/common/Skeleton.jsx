@@ -3,7 +3,7 @@
  * Usage: <Skeleton.ChatList />, <Skeleton.MeetingCard />, <Skeleton.Line />
  */
 
-const shimmer = 'animate-pulse bg-white/[0.06] rounded';
+const shimmer = 'animate-pulse bg-muted rounded';
 
 function Line({ className = '', width = 'w-full' }) {
   return <div className={`h-3 ${shimmer} ${width} ${className}`} />;
@@ -26,7 +26,7 @@ function ChatList({ count = 5 }) {
   return (
     <div className="space-y-2 p-2">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="rounded-lg border border-white/5 overflow-hidden">
+        <div key={i} className="rounded-lg border border-border overflow-hidden">
           <ChatListItem />
         </div>
       ))}
@@ -36,7 +36,7 @@ function ChatList({ count = 5 }) {
 
 function MeetingCard() {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+    <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3">
       <div className="flex items-start justify-between">
         <div className="space-y-2 flex-1">
           <Line width="w-48" className="h-4" />
@@ -64,7 +64,7 @@ function MeetingList({ count = 3 }) {
 
 function TaskCard() {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-2">
+    <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-2">
       <Line width="w-56" className="h-4" />
       <Line width="w-full" className="h-2" />
       <div className="flex gap-2 pt-1">
@@ -90,7 +90,7 @@ function StatsGrid({ count = 4 }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="rounded-xl border border-white/10 bg-white/[0.02] p-5 space-y-2">
+        <div key={i} className="rounded-xl border border-border bg-muted/40 p-5 space-y-2">
           <Circle size="h-8 w-8" />
           <Line width="w-12" className="h-6" />
           <Line width="w-20" className="h-2" />

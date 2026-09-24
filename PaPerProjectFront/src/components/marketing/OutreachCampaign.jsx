@@ -930,7 +930,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
   };
 
   return (
-    <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+    <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
       <CardHeader>
         <CardTitle className="text-white flex items-center gap-2.5">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 ring-1 ring-violet-400/30">
@@ -1062,7 +1062,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                 <HoverTip tip="AI fills in the campaign details from what you entered above">
                   <Button
                     type="button"
-                    className="bg-violet-600 hover:bg-violet-700 text-white border-0"
+                    className="bg-violet-600 hover:bg-violet-700 text-pure-white border-0"
                     onClick={handleAutoFill}
                     disabled={autoFilling || (campaignSelectRequired && !campaignId)}
                   >
@@ -1177,7 +1177,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
                         setAiPreviewMode('preview');
                         setAiPreviewOpen(true);
                       }}
-                      className="gap-1.5 bg-violet-600 hover:bg-violet-700 text-white border-0 shadow-md shadow-violet-600/20"
+                      className="gap-1.5 bg-violet-600 hover:bg-violet-700 text-pure-white border-0 shadow-md shadow-violet-600/20"
                     >
                       <Eye className="h-4 w-4" /> View in card form
                     </Button>
@@ -1213,7 +1213,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
               <HoverTip tip="click to create a new draft campaign record with the design suggestions pre-filled">
               <Button
                 type="button"
-                className="bg-violet-600 hover:bg-violet-700 text-white border-0"
+                className="bg-violet-600 hover:bg-violet-700 text-pure-white border-0"
                 onClick={() => useDesignForAction('create_multi_channel')}
               >
                 Create Campaign
@@ -1222,7 +1222,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
             </div>
           ) : fieldsRevealed ? (
             <div className="flex justify-end">
-              <Button type="submit" className="bg-violet-600 hover:bg-violet-700 text-white border-0" disabled={loading}>
+              <Button type="submit" className="bg-violet-600 hover:bg-violet-700 text-pure-white border-0" disabled={loading}>
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1494,7 +1494,7 @@ const OutreachCampaign = ({ onCampaignCreated }) => {
             <Button
               onClick={handleQuickGenerate}
               disabled={autoFilling}
-              className="bg-violet-600 hover:bg-violet-700 text-white border-0"
+              className="bg-violet-600 hover:bg-violet-700 text-pure-white border-0"
             >
               {autoFilling ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
               Generate with AI

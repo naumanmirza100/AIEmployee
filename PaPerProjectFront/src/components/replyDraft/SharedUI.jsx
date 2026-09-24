@@ -5,7 +5,7 @@ export const Avatar = ({ name, email, size = 'md' }) => {
   const dim = size === 'lg' ? 'h-11 w-11 text-sm' : size === 'sm' ? 'h-8 w-8 text-[11px]' : 'h-10 w-10 text-xs';
   const palette = paletteFor(email || name || '');
   return (
-    <div className={`${dim} shrink-0 rounded-full bg-gradient-to-br ${palette} flex items-center justify-center font-bold text-white shadow-md ring-1 ring-white/10`}>
+    <div className={`${dim} shrink-0 rounded-full bg-gradient-to-br ${palette} flex items-center justify-center font-bold text-pure-white shadow-md ring-1 ring-white/10`}>
       {initialsOf(name, email)}
     </div>
   );
@@ -94,7 +94,7 @@ export const FolderTile = ({ icon: Icon, label, count, subtitle, accent = 'cyan'
     <button
       type="button"
       onClick={onClick}
-      className={`w-full text-left rounded-2xl bg-gradient-to-br ${a.glow} bg-black/40 border border-white/10 backdrop-blur-sm p-5 flex items-start gap-4 transition ${a.ring} hover:bg-white/[0.04]`}
+      className={`w-full text-left rounded-2xl bg-gradient-to-br ${a.glow} bg-pure-black/40 border border-white/10 backdrop-blur-sm p-5 flex items-start gap-4 transition ${a.ring} hover:bg-white/[0.04]`}
     >
       <div className="h-12 w-12 rounded-xl bg-black/40 border border-white/10 flex items-center justify-center shrink-0">
         <Icon className={`h-6 w-6 ${a.icon}`} />

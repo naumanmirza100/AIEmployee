@@ -138,7 +138,7 @@ export const EmailActivityChart = ({ active = true, variant = 'modal', days, ref
   // The dashboard sits on the dark agent shell, so it gets the glass-card
   // treatment. The modal keeps the theme-token border it always had.
   const wrapCls = isDash
-    ? 'rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm p-4 space-y-3'
+    ? 'rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm p-4 space-y-3'
     : 'rounded-lg border p-4 space-y-3';
   const titleCls = isDash ? 'text-sm font-semibold text-white' : 'text-sm font-semibold';
   const iconCls = isDash ? 'h-4 w-4 text-cyan-300' : 'h-4 w-4 text-primary';

@@ -65,10 +65,10 @@ const AgentBreadcrumb = ({ navItems = [], activeSection }) => {
   }
 
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-white/45 mb-4 flex-wrap">
+    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-muted-foreground mb-4 flex-wrap">
       <button
         onClick={() => navigate('/company/dashboard')}
-        className="inline-flex items-center gap-1 hover:text-white/80 transition-colors"
+        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
         title="Dashboard"
       >
         <Home className="h-3.5 w-3.5" />
@@ -77,11 +77,11 @@ const AgentBreadcrumb = ({ navItems = [], activeSection }) => {
         const isLast = i === trail.length - 1;
         return (
           <span key={i} className="inline-flex items-center gap-1.5">
-            <ChevronRight className="h-3.5 w-3.5 text-white/25" />
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
             {isLast || !c.onClick ? (
-              <span className={isLast ? 'text-white/90 font-medium' : 'text-white/45'}>{c.label}</span>
+              <span className={isLast ? 'text-foreground font-medium' : 'text-muted-foreground'}>{c.label}</span>
             ) : (
-              <button onClick={c.onClick} className="hover:text-white/80 transition-colors">
+              <button onClick={c.onClick} className="hover:text-foreground transition-colors">
                 {c.label}
               </button>
             )}

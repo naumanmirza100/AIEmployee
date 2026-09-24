@@ -205,7 +205,7 @@ const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
-        background: 'linear-gradient(135deg,#0f0a1f 0%,#1a0a2e 100%)',
+        background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-1a0a2e) 100%)',
         border: '1px solid rgba(239,68,68,0.25)',
         borderRadius: 16, padding: 32, width: 400, maxWidth: '90vw',
         boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
@@ -557,8 +557,8 @@ const GoogleMeetCard = () => {
             </div>
             <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13, margin: '6px 0 0', maxWidth: 460, lineHeight: 1.5 }}>
               {connected
-                ? <>Connected as <span style={{ color: 'rgba(255,255,255,0.8)' }}>{status?.googleEmail || 'your Google account'}</span>. New meetings generate a <b style={{ color: '#e2d9f3' }}>Google Meet</b> link automatically.</>
-                : <>Connect your Google account so meeting invites use <b style={{ color: '#e2d9f3' }}>Google Meet</b> instead of the default <b style={{ color: '#e2d9f3' }}>Jitsi</b> link.</>}
+                ? <>Connected as <span style={{ color: 'rgba(255,255,255,0.8)' }}>{status?.googleEmail || 'your Google account'}</span>. New meetings generate a <b style={{ color: 'var(--text-soft)' }}>Google Meet</b> link automatically.</>
+                : <>Connect your Google account so meeting invites use <b style={{ color: 'var(--text-soft)' }}>Google Meet</b> instead of the default <b style={{ color: 'var(--text-soft)' }}>Jitsi</b> link.</>}
             </p>
           </div>
         </div>
@@ -574,7 +574,7 @@ const GoogleMeetCard = () => {
           ) : (
             <button onClick={handleConnect} disabled={busy || !configured}
               title={!configured ? 'Google integration is not configured on the server.' : ''}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: configured ? 'linear-gradient(90deg,#7c3aed,#a855f7)' : 'rgba(255,255,255,0.06)', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: (busy || !configured) ? 'default' : 'pointer', opacity: (busy || !configured) ? 0.5 : 1 }}>
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: configured ? 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)' : 'rgba(255,255,255,0.06)', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: (busy || !configured) ? 'default' : 'pointer', opacity: (busy || !configured) ? 0.5 : 1 }}>
               {busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Link2 size={14} />} Connect with Google
             </button>
           )}

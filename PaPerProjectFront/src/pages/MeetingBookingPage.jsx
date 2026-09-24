@@ -77,14 +77,14 @@ function Calendar({ selectedDay, onSelect }) {
         <button
           onClick={prevMonth}
           disabled={isCurrentMonth}
-          style={{ background: 'none', border: '1px solid #2d1f4a', borderRadius: 8, color: isCurrentMonth ? '#2d1f4a' : '#9ca3af', padding: '6px 12px', cursor: isCurrentMonth ? 'default' : 'pointer', fontSize: 16, lineHeight: 1 }}
+          style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, color: isCurrentMonth ? 'var(--line-1)' : '#9ca3af', padding: '6px 12px', cursor: isCurrentMonth ? 'default' : 'pointer', fontSize: 16, lineHeight: 1 }}
         >‹</button>
-        <span style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 15 }}>
+        <span style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 15 }}>
           {MONTH_NAMES[viewMonth]} {viewYear}
         </span>
         <button
           onClick={nextMonth}
-          style={{ background: 'none', border: '1px solid #2d1f4a', borderRadius: 8, color: '#9ca3af', padding: '6px 12px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+          style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, color: '#9ca3af', padding: '6px 12px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
         >›</button>
       </div>
 
@@ -111,7 +111,7 @@ function Calendar({ selectedDay, onSelect }) {
           let cursor = 'pointer';
 
           if (isPast) {
-            color  = '#2d1f4a';
+            color  = 'var(--line-1)';
             cursor = 'default';
           } else if (isActive) {
             bg     = 'linear-gradient(135deg,#a855f7,#6366f1)';
@@ -207,12 +207,12 @@ export default function MeetingBookingPage() {
 
   // ── Base styles ──
   const page = {
-    minHeight: '100vh', background: '#07030f',
+    minHeight: '100vh', background: 'var(--sfc-07030f)',
     display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
     padding: '32px 16px', fontFamily: 'system-ui,-apple-system,sans-serif',
   };
   const card = {
-    background: '#0e0820', border: '1px solid #1e1535', borderRadius: 18,
+    background: 'var(--sfc-0e0820)', border: '1px solid var(--sfc-1e1535)', borderRadius: 18,
     padding: '32px 32px 28px', maxWidth: 680, width: '100%',
     boxShadow: '0 12px 50px rgba(0,0,0,0.55)',
   };
@@ -226,7 +226,7 @@ export default function MeetingBookingPage() {
     cursor: 'pointer', fontSize: 13, fontWeight: active ? 700 : 500,
     textAlign: 'center', transition: 'all 0.12s',
     background: active ? 'linear-gradient(90deg,#a855f7,#6366f1)' : 'rgba(255,255,255,0.03)',
-    borderColor: active ? 'transparent' : '#2d1f4a',
+    borderColor: active ? 'transparent' : 'var(--line-1)',
     color: active ? '#fff' : '#c4b5d4',
   });
 
@@ -242,7 +242,7 @@ export default function MeetingBookingPage() {
     <div style={page}>
       <div style={{ ...card, textAlign: 'center', marginTop: 40 }}>
         <div style={{ fontSize: 52, marginBottom: 16 }}>🎉</div>
-        <h1 style={{ color: '#e2d9f3', fontWeight: 800, fontSize: 24, margin: '0 0 8px' }}>
+        <h1 style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 24, margin: '0 0 8px' }}>
           You're confirmed!
         </h1>
         <p style={{ color: '#9ca3af', fontSize: 14, margin: '0 0 20px' }}>
@@ -294,7 +294,7 @@ export default function MeetingBookingPage() {
     <div style={page}>
       <div style={{ ...card, textAlign: 'center', marginTop: 40 }}>
         <div style={{ fontSize: 44, marginBottom: 12 }}>😕</div>
-        <h1 style={{ color: '#e2d9f3', fontWeight: 800, fontSize: 20, margin: '0 0 8px' }}>
+        <h1 style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 20, margin: '0 0 8px' }}>
           Link unavailable
         </h1>
         <p style={{ color: '#6b7280', fontSize: 14 }}>{error}</p>
@@ -315,7 +315,7 @@ export default function MeetingBookingPage() {
             📅
           </div>
           <div>
-            <h1 style={{ color: '#e2d9f3', fontWeight: 800, fontSize: 20, margin: 0 }}>
+            <h1 style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 20, margin: 0 }}>
               {info.title}
             </h1>
             <p style={{ color: '#6b7280', fontSize: 12, margin: '3px 0 0' }}>
@@ -327,7 +327,7 @@ export default function MeetingBookingPage() {
         </div>
 
         <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.65, marginBottom: 28 }}>
-          Hi <strong style={{ color: '#e2d9f3' }}>{info.lead_first_name || info.lead_name}</strong>,
+          Hi <strong style={{ color: 'var(--text-soft)' }}>{info.lead_first_name || info.lead_name}</strong>,
           please pick a date and time below. Once you confirm, you'll receive a calendar invite.
         </p>
 
@@ -337,7 +337,7 @@ export default function MeetingBookingPage() {
           {/* Left: Calendar */}
           <div>
             <span style={sectionTitle}>Select a date</span>
-            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid #1e1535', borderRadius: 12, padding: '16px 14px' }}>
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--sfc-1e1535)', borderRadius: 12, padding: '16px 14px' }}>
               <Calendar
                 selectedDay={selectedDay}
                 onSelect={d => { setSelectedDay(d); setSelectedTime(null); }}
@@ -381,7 +381,7 @@ export default function MeetingBookingPage() {
           onClick={handleConfirm}
           style={{
             marginTop: 20, width: '100%', padding: '13px', borderRadius: 10, border: 'none',
-            background: canConfirm ? 'linear-gradient(90deg,#a855f7,#6366f1)' : '#1a1030',
+            background: canConfirm ? 'linear-gradient(90deg,#a855f7,#6366f1)' : 'var(--sfc-1a1030)',
             color: canConfirm ? '#fff' : '#3d2d60',
             fontWeight: 700, fontSize: 15,
             cursor: canConfirm ? 'pointer' : 'not-allowed',

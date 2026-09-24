@@ -33,7 +33,7 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pr
       {/* Dot + line */}
       <div className="flex flex-col items-center shrink-0">
         <div className={`w-3 h-3 rounded-full border-2 shadow-sm mt-1 ${dotColor}`} />
-        {!isLast && <div className="w-px flex-1 bg-[#2d2342] mt-1 mb-0" />}
+        {!isLast && <div className="w-px flex-1 bg-[var(--line-3)] mt-1 mb-0" />}
       </div>
 
       {/* Content */}
@@ -88,7 +88,7 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pr
           <div className="flex items-center gap-2 shrink-0">
             {!r._synthetic && r.status === 'pending' && (
               <>
-                <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2" onClick={() => onApprove(r)}>
+                <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700 text-pure-white text-xs px-2" onClick={() => onApprove(r)}>
                   <CheckCircle2 className="w-3 h-3 mr-1" />Approve
                 </Button>
                 <Button size="sm" variant="outline" className="h-7 border-violet-500/40 text-violet-300 hover:bg-violet-500/10 text-xs px-2" onClick={() => onEdit(r)}>
@@ -108,7 +108,7 @@ const TimelineEntry = ({ r, isLast, onApprove, onAssignKey, onReject, onEdit, pr
               </>
             )}
             {!r._synthetic && r.status === 'payment_received' && (
-              <Button size="sm" className="h-7 bg-violet-600 hover:bg-violet-700 text-white text-xs px-2" onClick={() => onAssignKey(r)}>
+              <Button size="sm" className="h-7 bg-violet-600 hover:bg-violet-700 text-pure-white text-xs px-2" onClick={() => onAssignKey(r)}>
                 <Key className="w-3 h-3 mr-1" />Assign Key
               </Button>
             )}
@@ -267,7 +267,7 @@ const RequestGroupCard = ({ group, keyEvents = [], onApprove, onAssignKey, onRej
 
       {/* Timeline */}
       {expanded && (
-        <div className="px-4 pb-2 pt-1 border-t border-[#2d2342]">
+        <div className="px-4 pb-2 pt-1 border-t border-[var(--line-3)]">
           {entries.map((r, i) => (
             <TimelineEntry
               key={r._syntheticId || r.id}
@@ -321,8 +321,8 @@ export const RequestsTab = ({ requests, keyEvents = [], onApprove, onAssignKey, 
     <div className="space-y-4">
       <div className="flex items-center gap-2 flex-wrap">
         <Select value={filter.status || 'all'} onValueChange={(v) => setFilter({ ...filter, status: v === 'all' ? '' : v })}>
-          <SelectTrigger className="w-48 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All statuses" /></SelectTrigger>
-          <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+          <SelectTrigger className="w-48 bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue placeholder="All statuses" /></SelectTrigger>
+          <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
             <SelectItem value="all">All statuses</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="payment_pending">Payment Required</SelectItem>
@@ -337,7 +337,7 @@ export const RequestsTab = ({ requests, keyEvents = [], onApprove, onAssignKey, 
           placeholder="Search company..."
           value={filter.search || ''}
           onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-          className="bg-[#1a1333] border-[#3a295a] text-white w-60 placeholder:text-white/30"
+          className="bg-[var(--panel-1)] border-[var(--line-2)] text-white w-60 placeholder:text-white/30"
         />
         <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />} Refresh

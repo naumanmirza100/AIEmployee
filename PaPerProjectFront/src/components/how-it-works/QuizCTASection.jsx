@@ -17,7 +17,7 @@ const QuizCTASection = () => {
           className="bg-card rounded-xl shadow-xl border p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-8"
         >
           <div className="flex-shrink-0">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary to-purple-600 text-white shadow-lg">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary to-purple-600 text-pure-white shadow-lg">
               <HelpCircle className="h-10 w-10" />
             </div>
           </div>

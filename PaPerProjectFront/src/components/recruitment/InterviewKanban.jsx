@@ -105,7 +105,7 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
       </DropdownMenuTrigger>
 
       <DropdownMenuContent
-        className="w-52 bg-[#0d0d1a] border-white/15 text-white z-50"
+        className="w-52 bg-[var(--sfc-0d0d1a)] border-white/15 text-white z-50"
         align="end"
         onClick={(e) => e.stopPropagation()}
       >
@@ -119,7 +119,7 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
             <RefreshCw className="h-3.5 w-3.5 text-white/50" />
             <span className="text-sm">Change Status</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="bg-[#0d0d1a] border-white/15 text-white w-44">
+          <DropdownMenuSubContent className="bg-[var(--sfc-0d0d1a)] border-white/15 text-white w-44">
             {STATUS_COLUMNS.map((col) => {
               const Icon = col.icon;
               const active = interview.status === col.id;
@@ -151,7 +151,7 @@ function CardMenu({ interview, onStatusChange, onOutcomeChange, onReschedule, on
             <span className="text-sm">Change Decision</span>
             {interview.status !== 'COMPLETED' && <Lock className="h-3 w-3 text-white/30 ml-auto" />}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="bg-[#0d0d1a] border-white/15 text-white w-52">
+          <DropdownMenuSubContent className="bg-[var(--sfc-0d0d1a)] border-white/15 text-white w-52">
             {interview.status !== 'COMPLETED' ? (
               <div className="px-3 py-2.5 space-y-1">
                 <div className="flex items-center gap-1.5 text-amber-400/80">
@@ -236,7 +236,7 @@ function KanbanCard({ interview, isDragOverlay, onStatusChange, onOutcomeChange,
         id={`REC-kanban-card-${interview.id}`}
         data-testid={`REC-kanban-card-${interview.id}`}
         className={`
-          rounded-xl border bg-black/40 backdrop-blur-sm p-3 space-y-2 select-none
+          rounded-xl border bg-pure-black/40 backdrop-blur-sm p-3 space-y-2 select-none
           transition-shadow duration-150
           ${isDragging    ? 'opacity-30 shadow-none border-white/5' : 'border-white/10 hover:border-white/25 hover:shadow-lg hover:shadow-black/40'}
           ${isDragOverlay ? 'shadow-2xl shadow-black/60 rotate-1 border-white/30 scale-105' : ''}

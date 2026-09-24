@@ -479,7 +479,7 @@ export default function HRMeetingScheduler() {
   return (
     <div
       className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
-      style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+      style={{ background: 'var(--app-hero-bg)' }}
     >
       <div className="flex w-full max-w-full relative max-h-[calc(100vh-200px)]">
         {/* SIDEBAR */}
@@ -490,7 +490,7 @@ export default function HRMeetingScheduler() {
           }`}
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
-            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, #0a0a0f 55%, #0a0a0f 100%)',
+            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
             backdropFilter: 'blur(12px)',
           }}
         >

@@ -158,7 +158,7 @@ function SubmissionModal({ item, onClose }) {
     >
       <div
         className="relative w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl overflow-hidden"
-        style={{ background:'#0f1022', border:'1px solid rgba(99,102,241,0.3)', boxShadow:'0 25px 60px rgba(0,0,0,0.6)' }}
+        style={{ background:'var(--sfc-0f1022)', border:'1px solid rgba(99,102,241,0.3)', boxShadow:'0 25px 60px rgba(0,0,0,0.6)' }}
       >
         {/* Modal header */}
         <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b shrink-0"
@@ -504,7 +504,7 @@ function EmailEntryPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background:'#080b1a' }}>
+    <div className="min-h-screen flex flex-col" style={{ background:'var(--sfc-080b1a)' }}>
 
       {/* Background glows */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -692,7 +692,7 @@ function PortalDashboard({ token }) {
 
   /* ── Loading ── */
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background:'#080b1a' }}>
+    <div className="min-h-screen flex items-center justify-center" style={{ background:'var(--sfc-080b1a)' }}>
       <div className="text-center space-y-4">
         <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center"
           style={{ background:'linear-gradient(135deg,#6366f1,#4f46e5)' }}>
@@ -705,7 +705,7 @@ function PortalDashboard({ token }) {
 
   /* ── Error ── */
   if (error) return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ background:'#080b1a' }}>
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background:'var(--sfc-080b1a)' }}>
       <div className="max-w-md w-full text-center space-y-5">
         <div className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center"
           style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)' }}>
@@ -739,7 +739,7 @@ function PortalDashboard({ token }) {
   };
 
   return (
-    <div className="min-h-screen" style={{ background:'#080b1a' }}>
+    <div className="min-h-screen" style={{ background:'var(--sfc-080b1a)' }}>
 
       {/* Background glows */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">

@@ -187,7 +187,7 @@ const CVRecords = () => {
       const displayPh = record.application_phone || p.phone || '—';
       return `<tr><td>${displayN}</td><td>${displayE}</td><td>${displayPh}</td><td>${record.job_description_title || '—'}</td><td>${score}</td><td>${decision}</td><td>${record.created_at ? new Date(record.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td></tr>`;
     }).join('');
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Candidates Report</title><style>body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:24px}h1{font-size:20px;margin-bottom:4px}.meta{color:#555;font-size:11px;margin-bottom:16px}table{width:100%;border-collapse:collapse}th{background:#1a0a2e;color:#fff;padding:8px 10px;text-align:left;font-size:11px}td{padding:7px 10px;border-bottom:1px solid #e5e7eb;vertical-align:top}tr:nth-child(even) td{background:#f9f7ff}</style></head><body><h1>Candidates Report</h1><div class="meta">Job: ${selectedJob?.title || 'All Jobs'} | Decision: ${decisionLabel} | Total: ${total} | Printed: ${new Date().toLocaleString()}</div><table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Job</th><th>Score</th><th>Decision</th><th>Date</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Candidates Report</title><style>body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:24px}h1{font-size:20px;margin-bottom:4px}.meta{color:#555;font-size:11px;margin-bottom:16px}table{width:100%;border-collapse:collapse}th{background:var(--sfc-1a0a2e);color:#fff;padding:8px 10px;text-align:left;font-size:11px}td{padding:7px 10px;border-bottom:1px solid #e5e7eb;vertical-align:top}tr:nth-child(even) td{background:#f9f7ff}</style></head><body><h1>Candidates Report</h1><div class="meta">Job: ${selectedJob?.title || 'All Jobs'} | Decision: ${decisionLabel} | Total: ${total} | Printed: ${new Date().toLocaleString()}</div><table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Job</th><th>Score</th><th>Decision</th><th>Date</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
     const win = window.open('', '_blank');
     win.document.write(html);
     win.document.close();
@@ -316,7 +316,7 @@ const CVRecords = () => {
       )}
 
       {total === 0 ? (
-        <Card id="REC-cvrecords-empty-state" data-testid="REC-cvrecords-empty-state" className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-cvrecords-empty-state" data-testid="REC-cvrecords-empty-state" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
             <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
             <p className="text-base sm:text-lg font-medium mb-2 text-white">No candidates yet</p>
@@ -383,7 +383,7 @@ const CVRecords = () => {
           </div>
 
           {/* Desktop Table View */}
-          <Card id="REC-cvrecords-table-wrapper" data-testid="REC-cvrecords-table-wrapper" className="hidden md:block border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card id="REC-cvrecords-table-wrapper" data-testid="REC-cvrecords-table-wrapper" className="hidden md:block border-white/10 bg-pure-black/20 backdrop-blur-sm">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -434,7 +434,7 @@ const CVRecords = () => {
           </Card>
 
           {/* Pagination */}
-          <Card className="md:border-t-0 md:rounded-t-none border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card className="md:border-t-0 md:rounded-t-none border-white/10 bg-pure-black/20 backdrop-blur-sm">
             <CardContent className="py-3 px-3 sm:px-4">
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">

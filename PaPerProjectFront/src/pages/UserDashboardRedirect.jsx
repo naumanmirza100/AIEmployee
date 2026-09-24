@@ -31,7 +31,7 @@ export default function UserDashboardRedirect() {
   }, [user, isAuthenticated, loading, isProjectManager, navigate]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: '#07030f' }}>
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--sfc-07030f)' }}>
       <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
     </div>
   );

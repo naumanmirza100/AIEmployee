@@ -211,7 +211,7 @@ export const DateTimePicker = ({ value, onChange, allowPast = false, disabled = 
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className="w-auto p-0 bg-[#0d0b1f] border-white/10"
+          className="w-auto p-0 bg-[var(--sfc-0d0b1f)] border-white/10"
           align="start"
           style={{ zIndex: 9999 }}
         >
@@ -236,7 +236,7 @@ export const DateTimePicker = ({ value, onChange, allowPast = false, disabled = 
               row: 'flex w-full mt-1',
               cell: 'h-9 w-9 text-center text-sm p-0 relative focus-within:relative focus-within:z-20',
               day: 'h-9 w-9 p-0 font-normal text-white/70 rounded hover:bg-violet-600/40 hover:text-white transition-colors',
-              day_selected: 'bg-violet-600 text-white hover:bg-violet-600 hover:text-white',
+              day_selected: 'bg-violet-600 text-pure-white hover:bg-violet-600 hover:text-pure-white',
               day_today: 'bg-white/10 text-white',
               day_outside: 'text-white/20',
               day_disabled: 'text-white/20 cursor-not-allowed',
@@ -295,7 +295,7 @@ export const DateOnlyPicker = ({ value, onChange, disableWeekends = false, disab
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-auto p-0 bg-[#0d0b1f] border-white/10"
+        className="w-auto p-0 bg-[var(--sfc-0d0b1f)] border-white/10"
         align="start"
         style={{ zIndex: 9999 }}
       >
@@ -320,7 +320,7 @@ export const DateOnlyPicker = ({ value, onChange, disableWeekends = false, disab
             row: 'flex w-full mt-1',
             cell: 'h-9 w-9 text-center text-sm p-0 relative focus-within:relative focus-within:z-20',
             day: 'h-9 w-9 p-0 font-normal text-white/70 rounded hover:bg-violet-600/40 hover:text-white transition-colors',
-            day_selected: 'bg-violet-600 text-white hover:bg-violet-600 hover:text-white',
+            day_selected: 'bg-violet-600 text-pure-white hover:bg-violet-600 hover:text-pure-white',
             day_today: 'bg-white/10 text-white',
             day_outside: 'text-white/20',
             day_disabled: 'text-white/20 cursor-not-allowed line-through',
@@ -405,12 +405,12 @@ export const AssigneeAvatars = ({ assignees, size = 'md' }) => {
   return (
     <span className="flex items-center -space-x-1.5 ml-1" title={list.map(a => a.full_name).join(', ')}>
       {shown.map(a => (
-        <span key={a.id} className={`${dim} rounded-full flex items-center justify-center font-semibold border border-[#0d0b1f] ${avatarColorFor(a.id)}`}>
+        <span key={a.id} className={`${dim} rounded-full flex items-center justify-center font-semibold border border-[var(--sfc-0d0b1f)] ${avatarColorFor(a.id)}`}>
           {a.full_name?.[0]?.toUpperCase() || '?'}
         </span>
       ))}
       {overflow > 0 && (
-        <span className={`${dim} rounded-full flex items-center justify-center font-semibold border border-[#0d0b1f] bg-white/10 text-white/60`}>
+        <span className={`${dim} rounded-full flex items-center justify-center font-semibold border border-[var(--sfc-0d0b1f)] bg-white/10 text-white/60`}>
           +{overflow}
         </span>
       )}
@@ -532,7 +532,7 @@ export const FilterDatePicker = ({ value, onChange, placeholder = 'Any date' }) 
             {selected && !isNaN(selected) ? format(selected, 'dd MMM yyyy') : placeholder}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0 bg-[#0d0b1f] border-white/10" align="start" style={{ zIndex: 9999 }}>
+        <PopoverContent className="w-auto p-0 bg-[var(--sfc-0d0b1f)] border-white/10" align="start" style={{ zIndex: 9999 }}>
           <Calendar
             mode="single"
             selected={selected && !isNaN(selected) ? selected : undefined}
@@ -550,7 +550,7 @@ export const FilterDatePicker = ({ value, onChange, placeholder = 'Any date' }) 
               row: 'flex w-full mt-1',
               cell: 'h-9 w-9 text-center text-sm p-0 relative focus-within:relative focus-within:z-20',
               day: 'h-9 w-9 p-0 font-normal text-white/70 rounded hover:bg-violet-600/40 hover:text-white transition-colors',
-              day_selected: 'bg-violet-600 text-white hover:bg-violet-600 hover:text-white',
+              day_selected: 'bg-violet-600 text-pure-white hover:bg-violet-600 hover:text-pure-white',
               day_today: 'bg-white/10 text-white', day_outside: 'text-white/20',
             }}
           />
@@ -615,7 +615,7 @@ export const FilterBar = ({
           <SlidersHorizontal className="h-3.5 w-3.5 text-violet-400 flex-shrink-0" />
           <SelectValue placeholder={sel.placeholder} />
         </SelectTrigger>
-        <SelectContent className="bg-[#1a1333] border-white/10 text-white">
+        <SelectContent className="bg-[var(--panel-1)] border-white/10 text-white">
           <SelectItem value="all">{sel.allLabel || sel.placeholder || 'All'}</SelectItem>
           {sel.options.map(o => (
             <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -704,7 +704,7 @@ export const Pagination = ({ meta, onChange, itemLabel = 'item' }) => {
             type="button"
             onClick={() => onChange(p)}
             className={`${btn} ${p === page
-              ? 'bg-violet-600 text-white shadow-[0_0_8px_0_rgba(162,89,255,0.5)]'
+              ? 'bg-violet-600 text-pure-white shadow-[0_0_8px_0_rgba(162,89,255,0.5)]'
               : 'text-white/60 hover:bg-white/10 hover:text-white'}`}
           >
             {p}

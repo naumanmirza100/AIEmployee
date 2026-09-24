@@ -28,7 +28,7 @@ const DecisionChip = ({ decision }) => {
   );
 };
 
-const ScoreRing = ({ score, label, color = '#7c3aed' }) => {
+const ScoreRing = ({ score, label, color = 'hsl(var(--brand-600))' }) => {
   if (score == null) return null;
   const r = 32, circ = 2 * Math.PI * r;
   const offset = circ - (score / 100) * circ;
@@ -156,9 +156,9 @@ const CandidateDetailPage = () => {
   .decision{display:inline-block;padding:4px 14px;border-radius:99px;font-size:12px;font-weight:700;color:#fff;background:${decisionColor};margin-bottom:16px}
   .scores{display:flex;gap:24px;margin-bottom:20px}
   .score-box{border:1px solid #e5e7eb;border-radius:10px;padding:10px 18px;text-align:center}
-  .score-box .num{font-size:22px;font-weight:700;color:#7c3aed}
+  .score-box .num{font-size:22px;font-weight:700;color:hsl(var(--brand-600))}
   .score-box .lbl{font-size:11px;color:#9ca3af;margin-top:2px}
-  h2{font-size:14px;font-weight:700;color:#374151;border-bottom:2px solid #7c3aed;padding-bottom:4px;margin:20px 0 10px}
+  h2{font-size:14px;font-weight:700;color:#374151;border-bottom:2px solid hsl(var(--brand-600));padding-bottom:4px;margin:20px 0 10px}
   p{color:#4b5563;line-height:1.6;margin-bottom:8px}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
   .chip{padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600}
@@ -230,7 +230,7 @@ const CandidateDetailPage = () => {
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center"
-      style={{ background: 'linear-gradient(135deg, #0a0a1a 0%, #0d1020 100%)' }}>
+      style={{ background: 'linear-gradient(135deg, var(--sfc-0a0a1a) 0%, var(--sfc-0d1020) 100%)' }}>
       <div className="flex flex-col items-center gap-3">
         <Loader2 className="h-9 w-9 animate-spin text-violet-400" />
         <p className="text-sm text-white/40">Loading candidate profile...</p>
@@ -240,7 +240,7 @@ const CandidateDetailPage = () => {
 
   if (error || !detail) return (
     <div className="min-h-screen flex items-center justify-center"
-      style={{ background: 'linear-gradient(135deg, #0a0a1a 0%, #0d1020 100%)' }}>
+      style={{ background: 'linear-gradient(135deg, var(--sfc-0a0a1a) 0%, var(--sfc-0d1020) 100%)' }}>
       <div className="text-center space-y-4">
         <AlertCircle className="h-12 w-12 mx-auto text-red-400" />
         <p className="text-white/60">{error || 'Candidate not found.'}</p>
@@ -292,7 +292,7 @@ const CandidateDetailPage = () => {
   };
 
   return (
-    <div className="min-h-full rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #0a0a1a 0%, #0d1020 100%)' }}>
+    <div className="min-h-full rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, var(--sfc-0a0a1a) 0%, var(--sfc-0d1020) 100%)' }}>
 
       {/* ── Top bar ── */}
       <div className="sticky top-0 z-20 px-6 py-3 flex items-center justify-between gap-3 border-b border-white/6 backdrop-blur-md"
@@ -314,14 +314,14 @@ const CandidateDetailPage = () => {
 
         {/* ── Hero card ── */}
         <div className="rounded-2xl overflow-hidden"
-          style={{ background: 'linear-gradient(135deg, rgba(124,58,237,0.15) 0%, rgba(96,165,250,0.08) 100%)', border: '1px solid rgba(167,139,250,0.2)' }}>
+          style={{ background: 'linear-gradient(135deg, hsl(var(--brand-600) / 0.15) 0%, rgba(96,165,250,0.08) 100%)', border: '1px solid rgba(167,139,250,0.2)' }}>
           <div className="p-6 sm:p-8">
             <div className="flex flex-col lg:flex-row lg:items-start gap-6">
 
               {/* Avatar + name */}
               <div className="flex items-start gap-4 flex-1 min-w-0">
                 <div className="shrink-0 w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white"
-                  style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a259ff 100%)' }}>
+                  style={{ background: 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)' }}>
                   {(displayName || '?')[0].toUpperCase()}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -374,7 +374,7 @@ const CandidateDetailPage = () => {
 
               {/* Score rings */}
               <div className="flex gap-6 shrink-0 self-start lg:self-auto">
-                <ScoreRing score={detail.role_fit_score}          label="Role Fit"   color="#7c3aed" />
+                <ScoreRing score={detail.role_fit_score}          label="Role Fit"   color="hsl(var(--brand-600))" />
                 <ScoreRing score={detail.qualification_confidence} label="Confidence" color="#60a5fa" />
               </div>
             </div>
@@ -389,7 +389,7 @@ const CandidateDetailPage = () => {
                 {tab.label}
                 {activeTab === tab.id && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
-                    style={{ background: 'linear-gradient(90deg, #7c3aed, #a259ff)' }} />
+                    style={{ background: 'linear-gradient(90deg, hsl(var(--brand-600)), hsl(var(--brand-accent)))' }} />
                 )}
               </button>
             ))}

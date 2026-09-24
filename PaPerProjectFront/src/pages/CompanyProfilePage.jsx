@@ -12,7 +12,7 @@ import {
   User as UserIcon, Plug, CalendarCheck, CheckCircle2, ExternalLink,
 } from 'lucide-react';
 
-const ACCENT = '#a259ff';
+const ACCENT = 'hsl(var(--brand-accent))';
 
 // One labelled detail field. Read mode shows the value; edit mode swaps in an input.
 const Field = ({ icon: Icon, label, name, value, editing, onChange, placeholder, textarea, locked, href }) => (
@@ -116,7 +116,7 @@ const CompanyProfilePage = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center"
-           style={{ background: 'radial-gradient(1200px 600px at 20% -10%, rgba(124,58,237,0.15), transparent), #07050f' }}>
+           style={{ background: 'radial-gradient(1200px 600px at 20% -10%, hsl(var(--brand-600) / 0.15), transparent), var(--sfc-07050f)' }}>
         <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
       </div>
     );
@@ -138,7 +138,7 @@ const CompanyProfilePage = () => {
     <>
       <Helmet><title>Company Profile | Pay Per Project</title></Helmet>
       <div className="min-h-screen"
-           style={{ background: 'radial-gradient(1100px 550px at 18% -12%, rgba(124,58,237,0.16), transparent 60%), radial-gradient(900px 500px at 100% 0%, rgba(37,99,235,0.10), transparent 55%), #07050f' }}>
+           style={{ background: 'radial-gradient(1100px 550px at 18% -12%, hsl(var(--brand-600) / 0.16), transparent 60%), radial-gradient(900px 500px at 100% 0%, rgba(37,99,235,0.10), transparent 55%), var(--sfc-07050f)' }}>
         <div className="mx-auto max-w-5xl px-4 sm:px-6 py-6 sm:py-8">
 
           <button onClick={() => navigate('/company/dashboard')}
@@ -148,14 +148,14 @@ const CompanyProfilePage = () => {
 
           {/* ── Identity banner ── */}
           <div className="relative overflow-hidden rounded-3xl border border-white/[0.08] p-6 sm:p-8"
-               style={{ background: 'linear-gradient(120deg, rgba(124,58,237,0.16), rgba(79,70,229,0.06) 45%, rgba(255,255,255,0.02))' }}>
+               style={{ background: 'linear-gradient(120deg, hsl(var(--brand-600) / 0.16), rgba(79,70,229,0.06) 45%, rgba(255,255,255,0.02))' }}>
             {/* soft grid texture */}
             <div className="pointer-events-none absolute inset-0 opacity-[0.15]"
                  style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.35) 1px, transparent 1px)', backgroundSize: '44px 44px', maskImage: 'radial-gradient(circle at 30% 20%, black, transparent 70%)' }} />
             <div className="relative flex flex-col sm:flex-row sm:items-center gap-5">
               {/* Monogram */}
               <div className="h-20 w-20 sm:h-24 sm:w-24 rounded-2xl flex items-center justify-center text-white font-extrabold text-4xl select-none shrink-0"
-                   style={{ background: 'linear-gradient(135deg, #7c3aed, #a259ff)', boxShadow: '0 12px 40px -8px rgba(124,58,237,0.6)' }}>
+                   style={{ background: 'linear-gradient(135deg, hsl(var(--brand-600)), hsl(var(--brand-accent)))', boxShadow: '0 12px 40px -8px hsl(var(--brand-600) / 0.6)' }}>
                 {(c.name || 'C').charAt(0).toUpperCase()}
               </div>
 
@@ -178,7 +178,7 @@ const CompanyProfilePage = () => {
                 <div className="shrink-0">
                   {!editing ? (
                     <Button onClick={startEdit} className="border-0 text-white"
-                            style={{ background: 'linear-gradient(90deg,#7c3aed,#4f46e5)' }}>
+                            style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#4f46e5)' }}>
                       <Pencil className="h-4 w-4 mr-2" /> Edit
                     </Button>
                   ) : (
@@ -187,7 +187,7 @@ const CompanyProfilePage = () => {
                         <X className="h-4 w-4 mr-2" /> Cancel
                       </Button>
                       <Button onClick={save} disabled={saving} className="border-0 text-white"
-                              style={{ background: 'linear-gradient(90deg,#7c3aed,#4f46e5)' }}>
+                              style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#4f46e5)' }}>
                         {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />} Save
                       </Button>
                     </div>
@@ -204,7 +204,7 @@ const CompanyProfilePage = () => {
                 { icon: ShieldCheck, label: 'Role', value: (u.role || 'admin'), cap: true },
                 { icon: CalendarDays, label: 'Member since', value: memberSince || '—' },
               ].map((s, i) => (
-                <div key={i} className="bg-[#0b0817] px-4 py-3">
+                <div key={i} className="bg-[var(--sfc-0b0817)] px-4 py-3">
                   <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35">
                     <s.icon className="h-3 w-3" /> {s.label}
                   </div>
@@ -215,14 +215,14 @@ const CompanyProfilePage = () => {
           </div>
 
           {/* ── Tabs ── */}
-          <div className="mt-6 mb-5 flex gap-1 p-1 rounded-xl w-fit border border-white/[0.08]" style={{ background: '#100b1e' }}>
+          <div className="mt-6 mb-5 flex gap-1 p-1 rounded-xl w-fit border border-white/[0.08]" style={{ background: 'var(--sfc-100b1e)' }}>
             {tabs.map((t) => {
               const on = activeTab === t.value;
               return (
                 <button key={t.value} onClick={() => navigate(t.to)}
                         className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all"
                         style={on
-                          ? { background: 'linear-gradient(90deg,#a259ff,#7c3aed)', color: '#fff', boxShadow: '0 6px 20px -6px rgba(124,58,237,0.7)' }
+                          ? { background: 'linear-gradient(90deg,hsl(var(--brand-accent)),hsl(var(--brand-600)))', color: '#fff', boxShadow: '0 6px 20px -6px hsl(var(--brand-600) / 0.7)' }
                           : { color: 'rgba(255,255,255,0.55)' }}>
                   <t.icon className="h-4 w-4" /> {t.label}
                 </button>
@@ -360,7 +360,7 @@ const IntegrationsTab = () => {
           ) : (
             <Button size="sm" onClick={handleConnect} disabled={working || !gcal.configured}
                     className="rounded-full font-semibold border-0 shrink-0"
-                    style={{ background: ACCENT, color: '#160b28' }}>
+                    style={{ background: ACCENT, color: 'var(--sfc-160b28)' }}>
               {working ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Connect'}
             </Button>
           )}

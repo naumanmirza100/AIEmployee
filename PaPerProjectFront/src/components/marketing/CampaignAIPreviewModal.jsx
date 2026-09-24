@@ -102,7 +102,7 @@ export const CampaignAIPreviewModal = ({
       >
         {/* Gradient header — pr-12 keeps the Preview/Edit toggle clear of the
             dialog's own close ✕ in the top-right corner. */}
-        <div className="px-6 py-5 pr-12 bg-gradient-to-r from-violet-600/90 to-fuchsia-600/90 text-white">
+        <div className="px-6 py-5 pr-12 bg-gradient-to-r from-violet-600/90 to-fuchsia-600/90 text-pure-white">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/80">
@@ -155,7 +155,7 @@ export const CampaignAIPreviewModal = ({
                       type="button"
                       onClick={onRegenerateAI}
                       disabled={regenerating}
-                      className="gap-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-white border-0"
+                      className="gap-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-pure-white border-0"
                     >
                       {regenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       {regenerating ? 'Regenerating…' : 'Regenerate with AI'}
@@ -287,7 +287,7 @@ export const CampaignAIPreviewModal = ({
               <Button
                 onClick={onRegenerate}
                 disabled={creating}
-                className="gap-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-white border-0"
+                className="gap-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-pure-white border-0"
                 title="Edit the details here, then regenerate"
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
@@ -309,7 +309,7 @@ export const CampaignAIPreviewModal = ({
             <Button
               onClick={onCreate}
               disabled={creating || regenerating}
-              className="bg-violet-600 hover:bg-violet-700 text-white border-0"
+              className="bg-violet-600 hover:bg-violet-700 text-pure-white border-0"
             >
               {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-2" />}
               Create campaign

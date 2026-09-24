@@ -76,7 +76,7 @@ const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
-        background: 'linear-gradient(135deg,#0f0a1f 0%,#1a0a2e 100%)',
+        background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-1a0a2e) 100%)',
         border: '1px solid rgba(239,68,68,0.25)',
         borderRadius: 16, padding: 32, width: 400, maxWidth: '90vw',
         boxShadow: '0 24px 64px rgba(0,0,0,0.5)',

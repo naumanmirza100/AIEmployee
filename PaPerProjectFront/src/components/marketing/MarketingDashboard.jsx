@@ -713,7 +713,7 @@ const MarketingDashboard = () => {
   return (
     <div
       className="w-full rounded-2xl max-w-full border border-white/[0.06] p-0 overflow-hidden"
-      style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+      style={{ background: 'var(--app-hero-bg)' }}
     >
     <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
       {/* Chart rendering helper */}
@@ -893,7 +893,7 @@ const MarketingDashboard = () => {
       {/* Header row — Marketing title + replay-tour button */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <Megaphone className="h-5 w-5 text-[#a259ff]" />
+          <Megaphone className="h-5 w-5 text-[hsl(var(--brand-accent))]" />
           <h2 className="text-lg font-semibold text-white">Marketing Agent</h2>
         </div>
         <div className="flex items-center gap-2">
@@ -913,15 +913,15 @@ const MarketingDashboard = () => {
               onClick={handleReplayTour}
               data-tour-mkt="replay"
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition ${spotlightTour ? 'mkt-spotlight' : ''}`}
-              style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)', boxShadow: '0 0 8px 0 #a259ff55' }}
+              style={{ background: 'linear-gradient(90deg, hsl(var(--brand-accent)) 0%, hsl(var(--brand-600)) 100%)', boxShadow: '0 0 8px 0 hsl(var(--brand-accent) / 0.33)' }}
             >
               <GraduationCap className="h-3.5 w-3.5" />
               Take the Tour
             </button>
             {spotlightTooltip && (
-              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-[#a259ff]/50 bg-[#1a1030] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-[hsl(var(--brand-accent)/0.5)] bg-[var(--sfc-1a1030)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
                 👋 Take the tour anytime from here
-                <span className="absolute -top-1 right-6 h-2 w-2 bg-[#1a1030] border-t border-l border-[#a259ff]/50 rotate-45" />
+                <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--sfc-1a1030)] border-t border-l border-[hsl(var(--brand-accent)/0.5)] rotate-45" />
               </div>
             )}
             <style>{`
@@ -1014,7 +1014,7 @@ const MarketingDashboard = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+              <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                 <CardHeader>
                   <div className="flex flex-row items-center justify-between">
                     <CardTitle className="text-white">Marketing Overview</CardTitle>
@@ -1247,7 +1247,7 @@ const MarketingDashboard = () => {
 
         <TabsContent value="email" data-tour-mkt="page-email" className="space-y-4">
           <div className="relative flex gap-4">
-            <Card className={`border-white/10 bg-black/20 backdrop-blur-sm ${selectedAccount ? 'flex-1 min-w-0' : 'w-full'}`}>
+            <Card className={`border-white/10 bg-pure-black/20 backdrop-blur-sm ${selectedAccount ? 'flex-1 min-w-0' : 'w-full'}`}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div>
                   <CardTitle className="text-white">Email accounts</CardTitle>
@@ -1351,7 +1351,7 @@ const MarketingDashboard = () => {
 
             {/* Right-side account details sidebar */}
             {selectedAccount && (
-              <div className="w-[380px] shrink-0 flex flex-col rounded-lg border border-white/10 bg-black/20 backdrop-blur-sm shadow-sm overflow-hidden">
+              <div className="w-[380px] shrink-0 flex flex-col rounded-lg border border-white/10 bg-pure-black/20 backdrop-blur-sm shadow-sm overflow-hidden">
                 <div className="flex items-center justify-between p-4 border-b border-white/10 bg-white/[0.03]">
                   <h3 className="font-semibold text-base text-white">Account details</h3>
                   <Button variant="ghost" size="icon" onClick={() => setSelectedAccount(null)} aria-label="Close">
@@ -1936,7 +1936,7 @@ const MarketingDashboard = () => {
                     open={!!viewingGraphId && (viewingGraphLoading || !!viewingGraphResult)}
                     onOpenChange={(o) => { if (!o) { setViewingGraphId(null); setViewingGraphResult(null); } }}
                   >
-                    <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar bg-[#0d0b1f] border-white/10 text-white">
+                    <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto no-scrollbar bg-[var(--sfc-0d0b1f)] border-white/10 text-white">
                       <DialogHeader>
                         <DialogTitle className="flex items-center gap-2.5">
                           <span className="p-2 rounded-lg bg-primary/10 border border-primary/20">

@@ -28,7 +28,7 @@ function StatCard({ icon: Icon, label, value, sub, color, trend: t }) {
   return (
     <div style={{
       background: 'linear-gradient(135deg,rgba(15,10,31,0.95),rgba(20,8,40,0.95))',
-      border: '1px solid #2d1f4a', borderRadius: 12, padding: '18px 20px',
+      border: '1px solid var(--line-1)', borderRadius: 12, padding: '18px 20px',
       display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 140,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -45,7 +45,7 @@ function StatCard({ icon: Icon, label, value, sub, color, trend: t }) {
           </div>
         )}
       </div>
-      <div style={{ fontSize: 30, fontWeight: 700, color: '#e2d9f3', lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-soft)', lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 12, color: '#6b7280' }}>{label}</div>
       {sub && <div style={{ fontSize: 11, color: '#4b5563' }}>{sub}</div>}
     </div>
@@ -61,7 +61,7 @@ function FunnelBar({ stages }) {
         <div key={i}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
             <span style={{ fontSize: 12, color: '#9ca3af' }}>{s.stage}</span>
-            <span style={{ fontSize: 12, color: '#e2d9f3', fontWeight: 600 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600 }}>
               {s.count} <span style={{ color: '#4b5563', fontWeight: 400 }}>({pct(s.count, max)}%)</span>
             </span>
           </div>
@@ -188,16 +188,16 @@ export default function SDRAnalyticsTab() {
 
   const card = {
     background: 'linear-gradient(135deg,rgba(15,10,31,0.95),rgba(20,8,40,0.95))',
-    border: '1px solid #2d1f4a', borderRadius: 12, padding: '20px 22px',
+    border: '1px solid var(--line-1)', borderRadius: 12, padding: '20px 22px',
   };
 
   const sectionTitle = (t) => (
-    <div style={{ fontSize: 13, fontWeight: 700, color: '#e2d9f3', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t}</div>
+    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-soft)', marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t}</div>
   );
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300 }}>
-      <Loader2 size={28} style={{ color: '#7c3aed' }} className="animate-spin" />
+      <Loader2 size={28} style={{ color: 'hsl(var(--brand-600))' }} className="animate-spin" />
     </div>
   );
 
@@ -237,11 +237,11 @@ export default function SDRAnalyticsTab() {
 
       {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#e2d9f3' }}>Analytics & Pipeline</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-soft)' }}>Analytics & Pipeline</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={load} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
-            borderRadius: 8, border: '1px solid #2d1f4a', background: 'transparent',
+            borderRadius: 8, border: '1px solid var(--line-1)', background: 'transparent',
             color: '#9ca3af', fontSize: 12, cursor: 'pointer',
           }}>
             <RefreshCw size={13} /> Refresh
@@ -249,7 +249,7 @@ export default function SDRAnalyticsTab() {
           <button onClick={handleSendSummary} disabled={sending} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
             borderRadius: 8, border: 'none',
-            background: 'linear-gradient(90deg,#7c3aed,#a855f7)',
+            background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)',
             color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
           }}>
             {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
@@ -325,14 +325,14 @@ export default function SDRAnalyticsTab() {
               <thead>
                 <tr>
                   {['Campaign', 'Emails', 'Replies', 'Meetings', 'Reply %'].map(h => (
-                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Campaign' ? 'left' : 'center', color: '#4b5563', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #1e0f38' }}>{h}</th>
+                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Campaign' ? 'left' : 'center', color: '#4b5563', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--sfc-1e0f38)' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {m.campaign_rows.map((row, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
-                    <td style={{ padding: '10px 10px', fontSize: 12, color: '#e2d9f3', fontWeight: 500 }}>{row.name}</td>
+                    <td style={{ padding: '10px 10px', fontSize: 12, color: 'var(--text-soft)', fontWeight: 500 }}>{row.name}</td>
                     <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: '#9ca3af' }}>{row.emails_sent}</td>
                     <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: '#9ca3af' }}>{row.replies}</td>
                     <td style={{ padding: '10px 10px', textAlign: 'center' }}>
@@ -375,7 +375,7 @@ export default function SDRAnalyticsTab() {
                     <Icon size={13} style={{ color, flexShrink: 0 }} />
                     <span style={{ fontSize: 12, color: '#9ca3af', width: 36 }}>{label}</span>
                     <MiniBar value={count} max={total} color={color} />
-                    <span style={{ fontSize: 12, color: '#e2d9f3', fontWeight: 600, minWidth: 24, textAlign: 'right' }}>{count}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600, minWidth: 24, textAlign: 'right' }}>{count}</span>
                   </div>
                 );
               })}
@@ -395,7 +395,7 @@ export default function SDRAnalyticsTab() {
                     <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 11, color: '#9ca3af', width: 80, flexShrink: 0 }}>{cfg.label}</span>
                       <MiniBar value={count} max={totalSentiment} color={cfg.color} />
-                      <span style={{ fontSize: 12, color: '#e2d9f3', fontWeight: 600, minWidth: 20, textAlign: 'right' }}>{count}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600, minWidth: 20, textAlign: 'right' }}>{count}</span>
                     </div>
                   );
                 })
@@ -416,7 +416,7 @@ export default function SDRAnalyticsTab() {
                     <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 11, color: '#9ca3af', width: 70, flexShrink: 0 }}>{cfg.label}</span>
                       <MiniBar value={count} max={totalSource} color={cfg.color} />
-                      <span style={{ fontSize: 12, color: '#e2d9f3', fontWeight: 600, minWidth: 20, textAlign: 'right' }}>{count}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600, minWidth: 20, textAlign: 'right' }}>{count}</span>
                     </div>
                   );
                 })

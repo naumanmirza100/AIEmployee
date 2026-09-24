@@ -3776,7 +3776,7 @@ const FrontlineDashboard = () => {
 
     <div
       className="flex-1 min-w-0 w-full rounded-2xl border border-white/[0.06] p-0"
-      style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+      style={{ background: 'var(--app-hero-bg)' }}
     >
     <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
       {/* Take the Tour + Hints toggle */}
@@ -3793,9 +3793,9 @@ const FrontlineDashboard = () => {
           Take the Tour
         </button>
         {spotlightTooltip && (
-          <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-amber-400/40 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap flt-spotlight-tip">
+          <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-amber-400/40 bg-[var(--panel-4)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap flt-spotlight-tip">
             👋 Take the tour anytime from here
-            <span className="absolute -top-1 right-6 h-2 w-2 bg-[#161630] border-t border-l border-amber-400/40 rotate-45" />
+            <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--panel-4)] border-t border-l border-amber-400/40 rotate-45" />
           </div>
         )}
       </div>
@@ -3892,7 +3892,7 @@ const FrontlineDashboard = () => {
         <div className="lg:hidden w-full mb-4">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="w-full justify-between h-11 border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white">
+              <Button variant="outline" className="w-full justify-between h-11 border-[var(--line-2)] bg-[var(--panel-1)] text-white/80 hover:bg-[var(--sfc-231845)] hover:text-white">
                 <div className="flex items-center gap-2 min-w-0">
                   <currentTab.icon className="h-4 w-4 shrink-0 text-violet-400" />
                   <span className="font-medium truncate">{currentTab.label}</span>
@@ -3900,7 +3900,7 @@ const FrontlineDashboard = () => {
                 <Menu className="h-5 w-5 text-white/40 shrink-0" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[#3a295a] bg-[#161630]">
+            <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[var(--line-2)] bg-[var(--panel-4)]">
               {FRONTLINE_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
                 const isActive = item.value === activeTab;
                 const ItemIcon = item.icon;
@@ -3928,8 +3928,8 @@ const FrontlineDashboard = () => {
             Mobile users continue using the hamburger dropdown above. */}
         <div data-tour="tabs" className="hidden">
           <TabsList
-            className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
-            style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+            className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[var(--panel-1)] border border-[var(--line-2)]"
+            style={{ boxShadow: '0 2px 12px 0 hsl(var(--brand-accent) / 0.04)' }}
           >
             {FRONTLINE_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
               const TabIcon = item.icon;
@@ -3956,7 +3956,7 @@ const FrontlineDashboard = () => {
                     : {
                         background: 'rgba(60, 30, 90, 0.22)',
                         color: '#cfc6e6',
-                        border: '1.5px solid #2d2342',
+                        border: '1.5px solid var(--line-3)',
                         boxShadow: 'none',
                       }
                   }
@@ -3966,7 +3966,7 @@ const FrontlineDashboard = () => {
                   {showBadge && (
                     <span
                       title="Tour available — hover to launch or click 'Tour this tab' inside"
-                      className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[#1a1333]"
+                      className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[var(--panel-1)]"
                       style={{ animation: 'fltDotPulse 2s ease-in-out infinite' }}
                     />
                   )}
@@ -4388,7 +4388,7 @@ const FrontlineDashboard = () => {
             className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
             style={{
               background:
-                'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+                'var(--app-hero-bg)',
             }}
           >
             <div className="flex w-full max-w-full relative">
@@ -4399,7 +4399,7 @@ const FrontlineDashboard = () => {
                 }`}
                 style={{
                   minWidth: showChatHistory ? '16rem' : '0',
-                  background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, #0a0a0f 55%, #0a0a0f 100%)',
+                  background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
                   borderRight: '1.5px solid rgba(255,255,255,0.10)',
                   boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
                   borderTopLeftRadius: 16,
@@ -4605,13 +4605,13 @@ const FrontlineDashboard = () => {
                         width: '7px',
                         height: '48px',
                         borderRadius: '8px',
-                        background: 'linear-gradient(to bottom, #a259ff 0%, #6a1b9a 60%, #18122B 100%)',
+                        background: 'linear-gradient(to bottom, hsl(var(--brand-accent)) 0%, #6a1b9a 60%, #18122B 100%)',
                         marginLeft: '24px',
                         marginRight: '18px',
-                        boxShadow: '0 0 8px 2px #a259ff44',
+                        boxShadow: '0 0 8px 2px hsl(var(--brand-accent) / 0.27)',
                       }}
                     />
-                    <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(124, 58, 237, 0.15)' }}>
+                    <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
                       <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
                     </div>
                     <div className="min-w-0">
@@ -4619,7 +4619,7 @@ const FrontlineDashboard = () => {
                         Knowledge Q&A
                         <span
                           className="text-[10px] rounded-full px-2.5 py-0.5 font-medium"
-                          style={{ background: 'rgba(124, 58, 237, 0.15)', color: '#a78bfa' }}
+                          style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}
                         >
                           AI-Powered
                         </span>
@@ -4912,7 +4912,7 @@ const FrontlineDashboard = () => {
                     onSubmit={handleAskQuestion}
                     className="shrink-0"
                     style={{
-                      background: '#0a0a0f',
+                      background: 'var(--panel-3)',
                       borderTop: '1px solid rgba(255,255,255,0.08)',
                     }}
                   >
@@ -5081,7 +5081,7 @@ const FrontlineDashboard = () => {
                           disabled={answering}
                           className="min-h-[60px] resize-none flex-1"
                           style={{
-                            background: '#0e0e14',
+                            background: 'var(--sfc-0e0e14)',
                             border: '1px solid rgba(255, 255, 255, 0.1)',
                             color: '#e2e2f0',
                           }}
@@ -5195,7 +5195,7 @@ const FrontlineDashboard = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       <div>
                         <Label className="text-xs">Primary colour</Label>
-                        <Input placeholder="#7c3aed"
+                        <Input placeholder="hsl(var(--brand-600))"
                           value={widgetTheme.primary_color}
                           onChange={(e) => setWidgetTheme((s) => ({ ...s, primary_color: e.target.value }))} />
                       </div>

@@ -26,7 +26,7 @@ const buildPrintHTML = (records, jobs, jobFilter, decisionFilter, total) => {
     const bg = idx % 2 === 0 ? '#ffffff' : '#f9f6ff';
 
     return `<tr style="background:${bg};border-bottom:1px solid #ede9fe;">
-      <td style="padding:9px 10px;font-weight:700;color:#7c3aed;text-align:center;">${record.rank ?? idx + 1}</td>
+      <td style="padding:9px 10px;font-weight:700;color:hsl(var(--brand-600));text-align:center;">${record.rank ?? idx + 1}</td>
       <td style="padding:9px 10px;">
         <div style="font-weight:600;color:#1a0a2e;">${fmt(p.name || record.file_name)}</div>
         ${p.email ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">${p.email}</div>` : ''}
@@ -36,7 +36,7 @@ const buildPrintHTML = (records, jobs, jobFilter, decisionFilter, total) => {
       <td style="padding:9px 10px;text-align:center;">
         <span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;color:#fff;background:${dColor};">${dLabel}</span>
       </td>
-      <td style="padding:9px 10px;text-align:center;font-weight:700;color:#7c3aed;">${score}</td>
+      <td style="padding:9px 10px;text-align:center;font-weight:700;color:hsl(var(--brand-600));">${score}</td>
       <td style="padding:9px 10px;color:#6b7280;font-size:11px;">${date}</td>
     </tr>`;
   }).join('');
@@ -51,14 +51,14 @@ const buildPrintHTML = (records, jobs, jobFilter, decisionFilter, total) => {
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:#111;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
     .wrapper{padding:30px 36px}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:14px;border-bottom:3px solid #7c3aed;margin-bottom:18px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:14px;border-bottom:3px solid hsl(var(--brand-600));margin-bottom:18px}
     .header h1{font-size:22px;font-weight:700;color:#1a0a2e}
     .header .sub{font-size:11px;color:#6b7280;margin-top:3px}
     .badge-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
     .badge{background:#f5f0ff;border:1px solid #ddd6fe;border-radius:6px;padding:3px 11px;font-size:11px;color:#4c1d95}
-    .badge strong{color:#7c3aed}
+    .badge strong{color:hsl(var(--brand-600))}
     table{width:100%;border-collapse:collapse;font-size:11.5px}
-    thead tr{background:#1a0a2e}
+    thead tr{background:var(--sfc-1a0a2e)}
     thead th{padding:10px 10px;color:#fff;font-weight:600;text-align:left;white-space:nowrap}
     thead th.center{text-align:center}
     tfoot tr{background:#f5f0ff}
@@ -79,7 +79,7 @@ const buildPrintHTML = (records, jobs, jobFilter, decisionFilter, total) => {
       <div class="sub">Generated: ${new Date().toLocaleString()}</div>
     </div>
     <div style="text-align:right">
-      <div style="font-size:14px;font-weight:700;color:#7c3aed;">AI Recruitment System</div>
+      <div style="font-size:14px;font-weight:700;color:hsl(var(--brand-600));">AI Recruitment System</div>
       <div style="font-size:11px;color:#6b7280;margin-top:3px;">Confidential Document</div>
     </div>
   </div>
@@ -131,7 +131,7 @@ const CandidatePrintView = ({ open, onClose, records, jobs, jobFilter, decisionF
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl w-full bg-[#0d0b1a] border border-white/10 text-white p-0 overflow-hidden">
+      <DialogContent className="max-w-5xl w-full bg-[var(--sfc-0d0b1a)] border border-white/10 text-white p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-white/10 flex flex-row items-center justify-between">
           <div>
             <DialogTitle className="text-lg font-semibold text-white">Print Preview</DialogTitle>
@@ -152,7 +152,7 @@ const CandidatePrintView = ({ open, onClose, records, jobs, jobFilter, decisionF
           <div className="bg-white rounded-lg overflow-hidden text-[#111] shadow-sm">
 
             {/* Header */}
-            <div className="flex justify-between items-start px-6 py-5" style={{ borderBottom: '3px solid #7c3aed' }}>
+            <div className="flex justify-between items-start px-6 py-5" style={{ borderBottom: '3px solid hsl(var(--brand-600))' }}>
               <div>
                 <h2 className="text-xl font-bold text-[#1a0a2e]">Candidates Report</h2>
                 <p className="text-xs text-gray-500 mt-1">Generated: {new Date().toLocaleString()}</p>
@@ -179,7 +179,7 @@ const CandidatePrintView = ({ open, onClose, records, jobs, jobFilter, decisionF
             {/* Table */}
             <table className="w-full" style={{ borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
-                <tr style={{ background: '#1a0a2e', color: '#fff' }}>
+                <tr style={{ background: 'var(--sfc-1a0a2e)', color: '#fff' }}>
                   <th style={{ padding: '10px 10px', textAlign: 'center', width: 40 }}>#</th>
                   <th style={{ padding: '10px 10px', textAlign: 'left' }}>Name / Email</th>
                   <th style={{ padding: '10px 10px', textAlign: 'left' }}>Phone</th>
@@ -200,7 +200,7 @@ const CandidatePrintView = ({ open, onClose, records, jobs, jobFilter, decisionF
                   const date = fmtDate(record.created_at);
                   return (
                     <tr key={record.id} style={{ background: idx % 2 === 0 ? '#fff' : '#f9f6ff', borderBottom: '1px solid #ede9fe' }}>
-                      <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: '#7c3aed' }}>{record.rank ?? idx + 1}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: 'hsl(var(--brand-600))' }}>{record.rank ?? idx + 1}</td>
                       <td style={{ padding: '9px 10px' }}>
                         <div style={{ fontWeight: 600, color: '#1a0a2e' }}>{fmt(p.name || record.file_name)}</div>
                         {p.email && <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{p.email}</div>}
@@ -210,7 +210,7 @@ const CandidatePrintView = ({ open, onClose, records, jobs, jobFilter, decisionF
                       <td style={{ padding: '9px 10px', textAlign: 'center' }}>
                         <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 999, fontSize: 10, fontWeight: 700, color: '#fff', background: dColor }}>{dLabel}</span>
                       </td>
-                      <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: '#7c3aed' }}>{score}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: 'hsl(var(--brand-600))' }}>{score}</td>
                       <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 11 }}>{date}</td>
                     </tr>
                   );

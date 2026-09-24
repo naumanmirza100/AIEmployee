@@ -10,9 +10,9 @@ import { AlertTriangle, CheckCircle2, Clock, CreditCard, DollarSign, Inbox, Key,
  * metadata and formatters, so they are centralised here rather than duplicated.
  */
 
-export const GRADIENT_BG = 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)';
-export const CARD_CLASS = 'bg-[#120d22] border border-[#2d2342]';
-export const ROW_CLASS = 'bg-[#0f0a20] border border-[#2d2342] hover:border-violet-500/30 transition-colors';
+export const GRADIENT_BG = 'var(--app-page-bg)';
+export const CARD_CLASS = 'bg-[var(--panel-2)] border border-[var(--line-3)]';
+export const ROW_CLASS = 'bg-[var(--sfc-0f0a20)] border border-[var(--line-3)] hover:border-violet-500/30 transition-colors';
 
 
 export const ProviderLogo = ({ provider, size = 20 }) => {

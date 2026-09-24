@@ -152,9 +152,9 @@ export default function HomeView() {
             <GraduationCap className="h-3.5 w-3.5 mr-1.5" /> Take the Tour
           </Button>
           {tourTooltip && (
-            <div className="absolute -bottom-11 right-0 z-10 rounded-md border border-violet-400/40 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+            <div className="absolute -bottom-11 right-0 z-10 rounded-md border border-violet-400/40 bg-[var(--panel-4)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
               👋 New here? Take a quick tour
-              <span className="absolute -top-1 right-6 h-2 w-2 bg-[#161630] border-t border-l border-violet-400/40 rotate-45" />
+              <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--panel-4)] border-t border-l border-violet-400/40 rotate-45" />
             </div>
           )}
         </div>

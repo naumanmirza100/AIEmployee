@@ -26,7 +26,7 @@ const HowItWorksModal = ({
   subtitle,
   steps = [],
   primaryLabel = 'Got it',
-  accent = '#a259ff',
+  accent = 'hsl(var(--brand-accent))',
 }) => {
   // How many steps are currently revealed (drives the staggered animation).
   const [revealed, setRevealed] = useState(0);
@@ -128,19 +128,19 @@ const HowItWorksModal = ({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="fixed z-[9999] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(1040px,calc(100vw-32px))] max-h-[calc(100vh-32px)] overflow-y-auto rounded-2xl border border-[#3a295a] bg-[#161630] shadow-2xl"
+        className="fixed z-[9999] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(1040px,calc(100vw-32px))] max-h-[calc(100vh-32px)] overflow-y-auto rounded-2xl border border-border bg-popover shadow-2xl"
       >
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="absolute top-3 right-3 z-10 p-1.5 rounded-md text-white/50 hover:text-white hover:bg-white/10 transition"
+          className="absolute top-3 right-3 z-10 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition"
         >
           <X className="h-4 w-4" />
         </button>
 
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 border-b border-white/10">
+        <div className="px-6 pt-6 pb-4 border-b border-border">
           <div className="flex items-center gap-2.5">
             <div
               className="h-9 w-9 rounded-lg flex items-center justify-center shrink-0"
@@ -149,8 +149,8 @@ const HowItWorksModal = ({
               <Sparkles className="h-4 w-4" style={{ color: accent }} />
             </div>
             <div className="min-w-0 pr-6">
-              <h2 className="text-lg font-bold text-white leading-tight">{title}</h2>
-              {subtitle && <p className="text-xs text-white/50 mt-0.5">{subtitle}</p>}
+              <h2 className="text-lg font-bold text-foreground leading-tight">{title}</h2>
+              {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
             </div>
           </div>
         </div>
@@ -182,7 +182,7 @@ const HowItWorksModal = ({
                     <div
                       className="relative h-14 w-14 rounded-2xl flex items-center justify-center mb-3"
                       style={{
-                        background: `linear-gradient(135deg, ${accent} 0%, #7c3aed 100%)`,
+                        background: `linear-gradient(135deg, ${accent} 0%, hsl(var(--brand-600)) 100%)`,
                         boxShadow: isShown ? `0 0 18px 0 ${accent}66` : 'none',
                         transition: 'box-shadow 500ms ease-out',
                       }}
@@ -192,27 +192,27 @@ const HowItWorksModal = ({
                         : <span className="text-lg font-bold text-white">{i + 1}</span>}
                       {/* Step number badge */}
                       <span
-                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-[#161630] border border-white/20 text-white text-[11px] font-bold flex items-center justify-center"
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-popover border border-border text-foreground text-[11px] font-bold flex items-center justify-center"
                       >
                         {i + 1}
                       </span>
                     </div>
                     {/* Fixed title height (room for 2 lines) so every body starts
                         on the same baseline — keeps the row visually even. */}
-                    <h3 className="text-sm font-semibold text-white leading-snug min-h-[40px] flex items-center justify-center">
+                    <h3 className="text-sm font-semibold text-foreground leading-snug min-h-[40px] flex items-center justify-center">
                       {step.title}
                     </h3>
-                    <p className="text-[12px] text-white/55 leading-relaxed mt-1">{step.body}</p>
+                    <p className="text-[12px] text-muted-foreground leading-relaxed mt-1">{step.body}</p>
                   </div>
 
                   {/* Connector to the next node — a line that grows in */}
                   {i < steps.length - 1 && (
                     <div className="hidden md:flex items-start pt-[26px] w-8 shrink-0">
-                      <div className="relative h-0.5 w-full rounded-full bg-white/10 overflow-hidden">
+                      <div className="relative h-0.5 w-full rounded-full bg-muted overflow-hidden">
                         <div
                           className="absolute inset-y-0 left-0 rounded-full"
                           style={{
-                            background: `linear-gradient(90deg, ${accent}, #7c3aed)`,
+                            background: `linear-gradient(90deg, ${accent}, hsl(var(--brand-600)))`,
                             width: connectorShown ? '100%' : '0%',
                             transition: 'width 450ms ease-out',
                           }}
@@ -227,19 +227,19 @@ const HowItWorksModal = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-white/10 flex items-center justify-between gap-3">
+        <div className="px-6 py-4 border-t border-border flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="text-xs text-white/45 hover:text-white/75 transition"
+              className="text-xs text-muted-foreground hover:text-foreground transition"
             >
               Skip
             </button>
             <button
               type="button"
               onClick={runSequence}
-              className="inline-flex items-center gap-1.5 text-xs text-white/45 hover:text-white/75 transition"
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition"
               title="Replay the animation"
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -251,7 +251,7 @@ const HowItWorksModal = ({
             onClick={onClose}
             className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg text-white transition"
             style={{
-              background: `linear-gradient(90deg, ${accent} 0%, #7c3aed 100%)`,
+              background: `linear-gradient(90deg, ${accent} 0%, hsl(var(--brand-600)) 100%)`,
               boxShadow: `0 0 12px 0 ${accent}55`,
               // Subtle pulse until the animation finishes, so users don't click away early.
               opacity: allRevealed ? 1 : 0.85,

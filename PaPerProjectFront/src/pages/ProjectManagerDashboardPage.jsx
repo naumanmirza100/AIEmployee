@@ -444,7 +444,7 @@ const ProjectManagerDashboardPage = () => {
       <div
         className="min-h-screen"
         style={{
-          background: 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)',
+          background: 'var(--app-page-bg)',
         }}
       >
         {/* Header */}
@@ -487,7 +487,7 @@ const ProjectManagerDashboardPage = () => {
           <div
             data-tour-pm="tabs"
             className="w-full rounded-2xl border border-white/[0.06] p-0"
-            style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+            style={{ background: 'var(--app-hero-bg)' }}
           >
           <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
           {/* Top bar: Hints toggle + Take the Tour */}
@@ -504,9 +504,9 @@ const ProjectManagerDashboardPage = () => {
               Take the Tour
             </button>
             {spotlightTooltip && (
-              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-cyan-400/40 bg-[#0a1929] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-cyan-400/40 bg-[var(--sfc-0a1929)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
                 👋 Take the tour anytime from here
-                <span className="absolute -top-1 right-6 h-2 w-2 bg-[#0a1929] border-t border-l border-cyan-400/40 rotate-45" />
+                <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--sfc-0a1929)] border-t border-l border-cyan-400/40 rotate-45" />
               </div>
             )}
           </div>
@@ -618,7 +618,7 @@ const ProjectManagerDashboardPage = () => {
                 <div className="lg:hidden w-full mb-4">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between h-11 border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white">
+                      <Button variant="outline" className="w-full justify-between h-11 border-[var(--line-2)] bg-[var(--panel-1)] text-white/80 hover:bg-[var(--sfc-231845)] hover:text-white">
                         <div className="flex items-center gap-2 min-w-0">
                           <CurrentTabIcon className="h-4 w-4 shrink-0 text-violet-400" />
                           <span className="font-medium truncate">{currentTab.label}</span>
@@ -626,7 +626,7 @@ const ProjectManagerDashboardPage = () => {
                         <Menu className="h-5 w-5 text-white/40 shrink-0" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[#3a295a] bg-[#161630]">
+                    <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[var(--line-2)] bg-[var(--panel-4)]">
                       {PM_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
                         const isActive = item.value === activeTab;
                         const ItemIcon = item.icon;

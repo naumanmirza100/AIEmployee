@@ -622,7 +622,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
         </div>
       ) : jobs.length === 0 ? (
-        <Card id="REC-jobs-empty-state" data-testid="REC-jobs-empty-state" className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-jobs-empty-state" data-testid="REC-jobs-empty-state" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
           <CardContent className="py-12 text-center">
             <Briefcase className="h-12 w-12 mx-auto text-white/40 mb-4" />
             {search || statusFilter || typeFilter ? (
@@ -660,7 +660,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
               key={job.id}
               id={`REC-jobs-row-${job.id}`}
               data-testid={`REC-jobs-row-${job.id}`}
-              className={`border-white/10 bg-black/20 backdrop-blur-sm ${selectedJobIds.has(job.id) ? 'ring-1 ring-primary/60' : ''}`}
+              className={`border-white/10 bg-pure-black/20 backdrop-blur-sm ${selectedJobIds.has(job.id) ? 'ring-1 ring-primary/60' : ''}`}
             >
               <CardHeader>
                 <div className="flex justify-between items-start">
@@ -877,12 +877,12 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         >
           <div
             className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl"
-            style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', border: '1px solid rgba(96,165,250,0.25)' }}
+            style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', border: '1px solid rgba(96,165,250,0.25)' }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-6 pt-6 pb-4"
-              style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
               <div className="flex items-center gap-3">
                 <div className="shrink-0 rounded-xl p-2.5" style={{ background: 'rgba(96,165,250,0.15)' }}>
                   <Users className="h-5 w-5 text-blue-400" />
@@ -1049,11 +1049,11 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
         >
           <div
             className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl"
-            style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', border: '1px solid rgba(167,139,250,0.2)' }}
+            style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', border: '1px solid rgba(167,139,250,0.2)' }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-3 px-6 pt-6 pb-4" style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-3 px-6 pt-6 pb-4" style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
               <div className="flex items-start gap-3 flex-1 min-w-0">
                 <div className="shrink-0 rounded-xl p-2.5 mt-0.5" style={{ background: 'rgba(167,139,250,0.15)' }}>
                   <Briefcase className="h-5 w-5 text-violet-400" />
@@ -1139,7 +1139,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg font-medium text-white transition-all"
-                  style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}
+                  style={{ background: 'linear-gradient(90deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)' }}
                 >
                   <ExternalLink className="h-3.5 w-3.5" />View Form
                 </a>

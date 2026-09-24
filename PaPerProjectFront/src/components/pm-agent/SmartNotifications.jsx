@@ -84,7 +84,7 @@ export default function SmartNotifications() {
             <CardTitle className="text-lg text-violet-300 flex items-center gap-2">
               <Bell className="w-5 h-5" /> Smart Notifications
               {unreadCount > 0 && (
-                <span className="bg-red-500 text-white text-xs rounded-full px-2 py-0.5">{unreadCount}</span>
+                <span className="bg-red-500 text-pure-white text-xs rounded-full px-2 py-0.5">{unreadCount}</span>
               )}
             </CardTitle>
             {unreadCount > 0 && (

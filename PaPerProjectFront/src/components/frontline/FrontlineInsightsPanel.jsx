@@ -29,7 +29,7 @@ import frontlineAgentService from '@/services/frontlineAgentService';
 
 function TileShell({ icon: Icon, title, color, accent, isLoading, onRefresh, children, footer }) {
   return (
-    <Card className="border-white/10 bg-black/30 backdrop-blur-sm w-full min-w-0">
+    <Card className="border-white/10 bg-pure-black/30 backdrop-blur-sm w-full min-w-0">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-2 text-sm font-semibold">

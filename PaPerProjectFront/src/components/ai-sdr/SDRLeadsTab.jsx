@@ -247,12 +247,12 @@ async function exportToPdf(leads, filename = 'leads') {
 // --------------------------------------------------------------------------
 const cardStyle = {
   background: 'linear-gradient(135deg, rgba(15,10,31,0.95) 0%, rgba(20,8,40,0.95) 100%)',
-  border: '1px solid #2d1f4a', borderRadius: 12,
+  border: '1px solid var(--line-1)', borderRadius: 12,
 };
 
 const inputStyle = {
-  background: 'rgba(30,10,50,0.6)', border: '1px solid #2d1f4a',
-  borderRadius: 8, padding: '8px 12px', color: '#e2d9f3',
+  background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)',
+  borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
 
@@ -261,7 +261,7 @@ const pgBtn = (disabled, active = false) => ({
   borderRadius: 7, fontSize: 13, fontWeight: active ? 700 : 400, cursor: disabled ? 'not-allowed' : 'pointer',
   border: `1px solid ${active ? '#a855f7' : 'rgba(255,255,255,0.08)'}`,
   background: active ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)',
-  color: disabled ? '#2d1f4a' : active ? '#c084fc' : '#9ca3af',
+  color: disabled ? 'var(--line-1)' : active ? '#c084fc' : '#9ca3af',
   opacity: disabled ? 0.5 : 1, transition: 'all 0.15s', padding: '0 8px',
 });
 
@@ -289,7 +289,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
           display: 'flex', alignItems: 'center', gap: 7,
           padding: '7px 12px', borderRadius: 9, cursor: 'pointer',
           background: value ? `${selected?.color}15` : 'rgba(255,255,255,0.04)',
-          border: `1px solid ${value ? selected?.color + '60' : '#2d1f4a'}`,
+          border: `1px solid ${value ? selected?.color + '60' : 'var(--line-1)'}`,
           color: value ? selected?.color : '#9ca3af',
           fontSize: 13, fontWeight: value ? 600 : 400,
           transition: 'all 0.15s', whiteSpace: 'nowrap',
@@ -305,8 +305,8 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 50,
-          background: 'linear-gradient(135deg,#0f0a1f,#140830)',
-          border: '1px solid #2d1f4a', borderRadius: 11,
+          background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))',
+          border: '1px solid var(--line-1)', borderRadius: 11,
           boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
           minWidth: '100%', width: 'max-content', overflow: 'hidden',
         }}>
@@ -326,7 +326,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
                 onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
                 onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
               >
-                <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid #2d1f4a' }} />
+                <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid var(--line-1)' }} />
                 {opt.Icon && <opt.Icon size={13} style={{ color: opt.color, flexShrink: 0 }} />}
                 <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: isSel ? opt.color : opt.key ? '#d1d5db' : '#6b7280', fontWeight: isSel ? 600 : 400 }}>{opt.label}</span>
                 {isSel && <CheckCircle size={13} style={{ color: opt.color, flexShrink: 0 }} />}
@@ -389,7 +389,7 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage }) => {
         <ChevronDown size={11} style={{ color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
       </button>
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 60, background: 'linear-gradient(135deg,#0f0a1f,#140830)', border: '1px solid #2d1f4a', borderRadius: 11, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', minWidth: 190, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 60, background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))', border: '1px solid var(--line-1)', borderRadius: 11, boxShadow: '0 12px 32px rgba(0,0,0,0.5)', minWidth: 190, overflow: 'hidden' }}>
           {[
             { key: 'excel', Icon: FileSpreadsheet, label: 'Export as Excel (.xlsx)', color: '#10b981' },
             { key: 'pdf',   Icon: FileText,        label: 'Export as PDF',           color: '#f43f5e' },
@@ -464,7 +464,7 @@ const ICPProfilePanel = ({ onSaved }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Brain size={16} color="#a855f7" />
-          <span style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 14 }}>ICP Profile</span>
+          <span style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 14 }}>ICP Profile</span>
           {icp ? (
             <span style={{ color: '#10b981', fontSize: 12, padding: '2px 8px', borderRadius: 10, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>{icp.name}</span>
           ) : (
@@ -508,8 +508,8 @@ const ICPProfilePanel = ({ onSaved }) => {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button onClick={() => setOpen(false)} style={{ background: 'none', border: '1px solid #2d1f4a', borderRadius: 8, padding: '7px 16px', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
-            <button onClick={handleSave} disabled={saving} style={{ background: 'linear-gradient(90deg,#7c3aed,#a855f7)', border: 'none', borderRadius: 8, padding: '7px 20px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button onClick={() => setOpen(false)} style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '7px 16px', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', border: 'none', borderRadius: 8, padding: '7px 20px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {saving ? <Loader2 size={12} className="animate-spin" /> : null} Save ICP
             </button>
           </div>
@@ -532,7 +532,7 @@ const ScoreBar = ({ label, value, max, color, icon: Icon }) => {
           {Icon && <Icon size={11} style={{ color }} />}
           <span style={{ fontSize: 12, color: '#9ca3af' }}>{label}</span>
         </div>
-        <span style={{ fontSize: 12, color: '#e2d9f3', fontWeight: 600 }}>{value}/{max}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600 }}>{value}/{max}</span>
       </div>
       <div style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.06)' }}>
         <div style={{ height: '100%', borderRadius: 3, width: `${pct}%`, background: barColor, transition: 'width 0.4s ease' }} />
@@ -567,15 +567,15 @@ const LeadTableSkeleton = ({ rows = 8 }) => (
   <div style={{ padding: '8px 0' }}>
     <style>{`@keyframes sdrShimmer{0%{opacity:.45}50%{opacity:.9}100%{opacity:.45}}`}</style>
     {Array.from({ length: rows }).map((_, i) => (
-      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderBottom: '1px solid #160b2e' }}>
-        <div style={{ width: 16, height: 16, borderRadius: 4, background: '#241638', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderBottom: '1px solid var(--sfc-160b2e)' }}>
+        <div style={{ width: 16, height: 16, borderRadius: 4, background: 'var(--sfc-241638)', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
         <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ width: '55%', height: 11, borderRadius: 4, background: '#241638', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
-          <div style={{ width: '35%', height: 9, borderRadius: 4, background: '#1c1030', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06 + 0.1}s` }} />
+          <div style={{ width: '55%', height: 11, borderRadius: 4, background: 'var(--sfc-241638)', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+          <div style={{ width: '35%', height: 9, borderRadius: 4, background: 'var(--sfc-1c1030)', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06 + 0.1}s` }} />
         </div>
-        <div style={{ flex: 1, height: 10, borderRadius: 4, background: '#1c1030', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
-        <div style={{ width: 60, height: 20, borderRadius: 10, background: '#241638', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
-        <div style={{ width: 70, height: 10, borderRadius: 4, background: '#1c1030', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+        <div style={{ flex: 1, height: 10, borderRadius: 4, background: 'var(--sfc-1c1030)', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+        <div style={{ width: 60, height: 20, borderRadius: 10, background: 'var(--sfc-241638)', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
+        <div style={{ width: 70, height: 10, borderRadius: 4, background: 'var(--sfc-1c1030)', animation: 'sdrShimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.06}s` }} />
       </div>
     ))}
   </div>
@@ -954,8 +954,8 @@ const SDRLeadsTab = () => {
           <Button onClick={() => setShowAddModal(true)} style={{ background: 'linear-gradient(90deg,#f43f5e 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
             <Plus size={15} /> Add Lead
           </Button>
-          <div style={{ width: 1, height: 28, background: '#2d1f4a' }} />
-          <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,#7c3aed 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
+          <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
+          <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
             <Zap size={15} /> Generate Leads
           </Button>
           {stats.qualifying > 0 && (
@@ -969,8 +969,8 @@ const SDRLeadsTab = () => {
               Qualify now
             </Button>
           )}
-          <div style={{ width: 1, height: 28, background: '#2d1f4a' }} />
-          <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
+          <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Upload size={14} /> Import CSV
           </Button>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
@@ -984,11 +984,11 @@ const SDRLeadsTab = () => {
       {selectedIds.size > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 18px', borderRadius: 12, background: 'linear-gradient(90deg, rgba(168,85,247,0.08), rgba(99,102,241,0.08))', border: '1px solid rgba(168,85,247,0.3)' }}>
           <span style={{ color: '#c084fc', fontWeight: 700, fontSize: 14 }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''} selected</span>
-          <div style={{ width: 1, height: 20, background: '#2d1f4a' }} />
+          <div style={{ width: 1, height: 20, background: 'var(--line-1)' }} />
           <button onClick={() => setShowBulkDeleteConfirm(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', fontSize: 13, fontWeight: 600 }}>
             <Trash2 size={13} /> Delete {selectedIds.size} selected
           </button>
-          <button onClick={() => setSelectedIds(new Set())} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', background: 'none', border: '1px solid #2d1f4a', color: '#6b7280', fontSize: 13 }}>
+          <button onClick={() => setSelectedIds(new Set())} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', background: 'none', border: '1px solid var(--line-1)', color: '#6b7280', fontSize: 13 }}>
             <X size={12} /> Deselect all
           </button>
         </div>
@@ -1000,7 +1000,7 @@ const SDRLeadsTab = () => {
           <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
             <Search size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', pointerEvents: 'none' }} />
             <input value={searchRaw} onChange={e => setSearchRaw(e.target.value)} placeholder="Search name, company, email…"
-              style={{ ...inputStyle, paddingLeft: 34, paddingRight: searchRaw ? 32 : 12, border: '1px solid #2d1f4a', borderRadius: 9, fontSize: 13 }} />
+              style={{ ...inputStyle, paddingLeft: 34, paddingRight: searchRaw ? 32 : 12, border: '1px solid var(--line-1)', borderRadius: 9, fontSize: 13 }} />
             {searchRaw && (
               <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
                 <X size={13} />
@@ -1010,7 +1010,7 @@ const SDRLeadsTab = () => {
           {(() => {
             const totalActive = activeFiltersCount + (sortBy !== 'score_desc' ? 1 : 0);
             return (
-              <button onClick={() => setFiltersOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap', background: filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.5)' : '#2d1f4a'}`, color: filtersOpen || totalActive > 0 ? '#c084fc' : '#9ca3af', fontSize: 13, fontWeight: totalActive > 0 ? 600 : 400 }}>
+              <button onClick={() => setFiltersOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap', background: filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.5)' : 'var(--line-1)'}`, color: filtersOpen || totalActive > 0 ? '#c084fc' : '#9ca3af', fontSize: 13, fontWeight: totalActive > 0 ? 600 : 400 }}>
                 <SlidersHorizontal size={13} />
                 Filters
                 {totalActive > 0 && <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{totalActive}</span>}
@@ -1018,10 +1018,10 @@ const SDRLeadsTab = () => {
               </button>
             );
           })()}
-          <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} style={{ ...inputStyle, width: 'auto', padding: '7px 10px', fontSize: 13, border: '1px solid #2d1f4a', borderRadius: 9, cursor: 'pointer' }}>
+          <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} style={{ ...inputStyle, width: 'auto', padding: '7px 10px', fontSize: 13, border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer' }}>
             {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
           </select>
-          <button onClick={() => loadLeads()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid #2d1f4a', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
+          <button onClick={() => loadLeads()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
             <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           </button>
         </div>
@@ -1108,7 +1108,7 @@ const SDRLeadsTab = () => {
           {loading
             ? <span style={{ color: '#a78bfa' }}>Loading…</span>
             : <>
-                <span>Showing <strong style={{ color: '#e2d9f3' }}>{pagination.total_count === 0 ? 0 : ((pagination.page - 1) * pagination.page_size) + 1}–{Math.min(pagination.page * pagination.page_size, pagination.total_count)}</strong> of <strong style={{ color: '#e2d9f3' }}>{pagination.total_count.toLocaleString()}</strong> leads</span>
+                <span>Showing <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count === 0 ? 0 : ((pagination.page - 1) * pagination.page_size) + 1}–{Math.min(pagination.page * pagination.page_size, pagination.total_count)}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count.toLocaleString()}</strong> leads</span>
                 {(searchRaw || activeFiltersCount > 0) && <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: '#a78bfa', fontSize: 11 }}>filtered</span>}
               </>
           }
@@ -1124,7 +1124,7 @@ const SDRLeadsTab = () => {
             <div style={{ width: 64, height: 64, borderRadius: 16, margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}>
               <Users size={30} style={{ color: '#a855f7' }} />
             </div>
-            <p style={{ color: '#e2d9f3', fontWeight: 600, marginBottom: 6, fontSize: 15 }}>
+            <p style={{ color: 'var(--text-soft)', fontWeight: 600, marginBottom: 6, fontSize: 15 }}>
               {(search || activeFiltersCount > 0) ? 'No leads match your filters' : 'No leads yet'}
             </p>
             <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 20, maxWidth: 360, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
@@ -1133,18 +1133,18 @@ const SDRLeadsTab = () => {
                 : 'Generate leads from Apollo.io / Apify, import a CSV, or add one manually to get started.'}
             </p>
             {(search || activeFiltersCount > 0) ? (
-              <Button onClick={() => { setSearchRaw(''); setFilterTemp(''); setFilterStatus(''); setFilterSource(''); }} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>
+              <Button onClick={() => { setSearchRaw(''); setFilterTemp(''); setFilterStatus(''); setFilterSource(''); }} variant="outline" style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>
                 Clear filters
               </Button>
             ) : (
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-                <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,#7c3aed 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Zap size={15} /> Generate Leads
                 </Button>
-                <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Upload size={15} /> Import CSV
                 </Button>
-                <Button onClick={() => setShowAddModal(true)} variant="outline" style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => setShowAddModal(true)} variant="outline" style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Plus size={15} /> Add Lead
                 </Button>
               </div>
@@ -1153,7 +1153,7 @@ const SDRLeadsTab = () => {
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid #1e0f38' }}>
+              <tr style={{ borderBottom: '1px solid var(--sfc-1e0f38)' }}>
                 <th style={{ padding: '12px 14px', width: 40 }}>
                   <button onClick={toggleSelectAll} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}>
                     <CheckIcon checked={allSelected} indeterminate={someSelected} />
@@ -1184,7 +1184,7 @@ const SDRLeadsTab = () => {
                       </button>
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
-                      <div style={{ fontWeight: 600, color: '#e2d9f3', fontSize: 14 }}>{lead.full_name}</div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-soft)', fontSize: 14 }}>{lead.full_name}</div>
                       <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>{lead.company_name}</div>
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
@@ -1195,7 +1195,7 @@ const SDRLeadsTab = () => {
                         <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: '50%', background: `${SCORE_COLOR(lead.score)}18`, border: `2px solid ${SCORE_COLOR(lead.score)}55`, color: SCORE_COLOR(lead.score), fontWeight: 700, fontSize: 14 }}>
                           {lead.score}
                         </span>
-                      ) : <span style={{ color: '#2d1f4a', fontSize: 12 }}>—</span>}
+                      ) : <span style={{ color: 'var(--line-1)', fontSize: 12 }}>—</span>}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       {cat ? (
@@ -1229,7 +1229,7 @@ const SDRLeadsTab = () => {
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 8, fontSize: 11, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b' }}>
                           <AlertTriangle size={10} /> {(lead.data_quality_flags || []).length} flag{(lead.data_quality_flags || []).length > 1 ? 's' : ''}
                         </span>
-                      ) : <span style={{ color: '#2d1f4a', fontSize: 12 }}>—</span>}
+                      ) : <span style={{ color: 'var(--line-1)', fontSize: 12 }}>—</span>}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 11, background: 'rgba(255,255,255,0.05)', color: '#6b7280' }}>
@@ -1266,7 +1266,7 @@ const SDRLeadsTab = () => {
       {pagination.total_pages > 1 && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, ...cardStyle, padding: '12px 18px' }}>
           <span style={{ fontSize: 13, color: '#6b7280' }}>
-            Page <strong style={{ color: '#e2d9f3' }}>{pagination.page}</strong> of <strong style={{ color: '#e2d9f3' }}>{pagination.total_pages}</strong>
+            Page <strong style={{ color: 'var(--text-soft)' }}>{pagination.page}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_pages}</strong>
             <span style={{ color: '#4b5563', marginLeft: 8 }}>({pagination.total_count.toLocaleString()} total)</span>
           </span>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -1289,12 +1289,12 @@ const SDRLeadsTab = () => {
       {selectedLead && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', justifyContent: 'flex-end' }}>
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)' }} onClick={() => setSelectedLead(null)} />
-          <div style={{ position: 'relative', width: 520, maxWidth: '95vw', height: '100%', background: 'linear-gradient(160deg,#0f0a1f 0%,#14082a 100%)', borderLeft: '1px solid #2d1f4a', overflowY: 'auto', padding: 24 }}>
+          <div style={{ position: 'relative', width: 520, maxWidth: '95vw', height: '100%', background: 'linear-gradient(160deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', borderLeft: '1px solid var(--line-1)', overflowY: 'auto', padding: 24 }}>
 
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
               <div>
-                <h2 style={{ color: '#e2d9f3', fontSize: 18, fontWeight: 700, margin: 0 }}>{selectedLead.full_name}</h2>
+                <h2 style={{ color: 'var(--text-soft)', fontSize: 18, fontWeight: 700, margin: 0 }}>{selectedLead.full_name}</h2>
                 <p style={{ color: '#9ca3af', fontSize: 14, marginTop: 4 }}>
                   {selectedLead.job_title}{selectedLead.company_name ? ` @ ${selectedLead.company_name}` : ''}
                 </p>
@@ -1434,7 +1434,7 @@ const SDRLeadsTab = () => {
                 {selectedLead.phone && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Phone size={13} style={{ color: '#6b7280' }} />
-                    <span style={{ color: '#e2d9f3', fontSize: 13 }}>{selectedLead.phone}</span>
+                    <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.phone}</span>
                   </div>
                 )}
                 {selectedLead.linkedin_url && (
@@ -1452,9 +1452,9 @@ const SDRLeadsTab = () => {
             <div style={{ marginBottom: 20 }}>
               <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Company</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {selectedLead.company_industry && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Briefcase size={13} style={{ color: '#6b7280' }} /><span style={{ color: '#e2d9f3', fontSize: 13 }}>{selectedLead.company_industry}</span></div>}
-                {selectedLead.company_size && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Users size={13} style={{ color: '#6b7280' }} /><span style={{ color: '#e2d9f3', fontSize: 13 }}>{selectedLead.company_size.toLocaleString()} employees</span></div>}
-                {selectedLead.company_location && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><MapPin size={13} style={{ color: '#6b7280' }} /><span style={{ color: '#e2d9f3', fontSize: 13 }}>{selectedLead.company_location}</span></div>}
+                {selectedLead.company_industry && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Briefcase size={13} style={{ color: '#6b7280' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_industry}</span></div>}
+                {selectedLead.company_size && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Users size={13} style={{ color: '#6b7280' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_size.toLocaleString()} employees</span></div>}
+                {selectedLead.company_location && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><MapPin size={13} style={{ color: '#6b7280' }} /><span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{selectedLead.company_location}</span></div>}
                 {selectedLead.company_website && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Globe size={13} style={{ color: '#6b7280' }} /><a href={safeUrl(selectedLead.company_website)} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', fontSize: 13 }}>{selectedLead.company_website} <ExternalLink size={10} style={{ display: 'inline' }} /></a></div>}
               </div>
             </div>
@@ -1485,8 +1485,8 @@ const SDRLeadsTab = () => {
             )}
 
             {/* Actions */}
-            <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid #1e0f38' }}>
-              <Button onClick={() => handleQualifyOne(selectedLead)} disabled={qualifyingId === selectedLead.id} style={{ flex: 1, background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 8, paddingTop: 12, borderTop: '1px solid var(--sfc-1e0f38)' }}>
+              <Button onClick={() => handleQualifyOne(selectedLead)} disabled={qualifyingId === selectedLead.id} style={{ flex: 1, background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                 {qualifyingId === selectedLead.id ? <Loader2 size={13} className="animate-spin" /> : <Brain size={13} />}
                 {selectedLead.score != null ? 'Re-score with AI' : 'Score with AI'}
               </Button>
@@ -1500,18 +1500,18 @@ const SDRLeadsTab = () => {
 
       {/* Bulk Delete Dialog */}
       <Dialog open={showBulkDeleteConfirm} onOpenChange={setShowBulkDeleteConfirm}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 420 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420 }}>
           <DialogHeader>
             <DialogTitle style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Trash2 size={18} /> Confirm Delete
             </DialogTitle>
           </DialogHeader>
           <div style={{ padding: '8px 0', lineHeight: 1.6 }}>
-            <p style={{ color: '#e2d9f3', marginBottom: 8 }}>Delete <strong style={{ color: '#f87171' }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''}</strong>?</p>
+            <p style={{ color: 'var(--text-soft)', marginBottom: 8 }}>Delete <strong style={{ color: '#f87171' }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''}</strong>?</p>
             <p style={{ color: '#6b7280', fontSize: 13 }}>You can undo this from the notification right after.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBulkDeleteConfirm(false)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowBulkDeleteConfirm(false)} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleBulkDelete} disabled={bulkDeleting} style={{ background: 'linear-gradient(90deg,#dc2626,#f43f5e)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {bulkDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
               {bulkDeleting ? 'Deleting…' : `Delete ${selectedIds.size}`}
@@ -1522,20 +1522,20 @@ const SDRLeadsTab = () => {
 
       {/* Single Delete Confirmation Dialog */}
       <Dialog open={!!pendingDeleteLead} onOpenChange={(open) => { if (!open) setPendingDeleteLead(null); }}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 420 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 420 }}>
           <DialogHeader>
             <DialogTitle style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Trash2 size={18} /> Confirm Delete
             </DialogTitle>
           </DialogHeader>
           <div style={{ padding: '8px 0', lineHeight: 1.6 }}>
-            <p style={{ color: '#e2d9f3', marginBottom: 8 }}>
+            <p style={{ color: 'var(--text-soft)', marginBottom: 8 }}>
               Delete <strong style={{ color: '#f87171' }}>{pendingDeleteLead?.display_name || pendingDeleteLead?.full_name || 'this lead'}</strong>?
             </p>
             <p style={{ color: '#6b7280', fontSize: 13 }}>You can undo this from the notification right after.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingDeleteLead(null)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => setPendingDeleteLead(null)} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={confirmDelete} disabled={deletingSingle} style={{ background: 'linear-gradient(90deg,#dc2626,#f43f5e)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {deletingSingle ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
               {deletingSingle ? 'Deleting…' : 'Delete'}
@@ -1546,9 +1546,9 @@ const SDRLeadsTab = () => {
 
       {/* CSV Import Preview Modal */}
       <Dialog open={!!csvImport} onOpenChange={(open) => { if (!open && !csvImporting) setCsvImport(null); }}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 760 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 760 }}>
           <DialogHeader>
-            <DialogTitle style={{ color: '#e2d9f3', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Upload size={18} color="#a855f7" /> Import leads from CSV
             </DialogTitle>
           </DialogHeader>
@@ -1556,12 +1556,12 @@ const SDRLeadsTab = () => {
           {csvImport && !csvImport.file && (
             <div style={{ padding: '4px 0' }}>
               <p style={{ fontSize: 13, color: '#c4b5d4', marginBottom: 12 }}>
-                Your CSV needs a <b style={{ color: '#e2d9f3' }}>header row</b>. Put the columns in this order
+                Your CSV needs a <b style={{ color: 'var(--text-soft)' }}>header row</b>. Put the columns in this order
                 (capitalisation and spacing don’t matter):
               </p>
 
               {/* Column guide */}
-              <div style={{ border: '1px solid #2d1f4a', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}>
+              <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}>
                 {[
                   { n: 1, col: 'Full Name',    req: true,  ex: 'Jane Doe' },
                   { n: 2, col: 'Email',        req: true,  ex: 'jane@acme.com' },
@@ -1575,7 +1575,7 @@ const SDRLeadsTab = () => {
                 ].map((r) => (
                   <div key={r.n} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
                     <span style={{ width: 22, height: 22, borderRadius: 6, background: 'rgba(168,85,247,0.15)', color: '#c084fc', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{r.n}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#e2d9f3', minWidth: 110 }}>{r.col}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-soft)', minWidth: 110 }}>{r.col}</span>
                     {r.req
                       ? <span style={{ fontSize: 10, fontWeight: 700, color: '#f87171', background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: 6, padding: '1px 7px' }}>Required</span>
                       : <span style={{ fontSize: 10, color: '#6b7280' }}>optional</span>}
@@ -1585,7 +1585,7 @@ const SDRLeadsTab = () => {
               </div>
 
               {/* Example line */}
-              <div style={{ background: '#0b0716', border: '1px solid #2d1f4a', borderRadius: 8, padding: '10px 12px', marginBottom: 14, overflowX: 'auto' }}>
+              <div style={{ background: 'var(--sfc-0b0716)', border: '1px solid var(--line-1)', borderRadius: 8, padding: '10px 12px', marginBottom: 14, overflowX: 'auto' }}>
                 <p style={{ fontSize: 10, color: '#6b7280', margin: '0 0 4px' }}>Example CSV</p>
                 <pre style={{ margin: 0, fontSize: 11, color: '#c4b5d4', fontFamily: 'monospace', whiteSpace: 'pre' }}>{`Full Name,Email,Job Title,Company,Industry,Employees,Location,Phone,LinkedIn URL
 Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://linkedin.com/in/jane`}</pre>
@@ -1614,12 +1614,12 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               </div>
 
               {/* Preview table (first 10) */}
-              <div style={{ border: '1px solid #2d1f4a', borderRadius: 10, overflow: 'hidden', maxHeight: 340, overflowY: 'auto' }}>
+              <div style={{ border: '1px solid var(--line-1)', borderRadius: 10, overflow: 'hidden', maxHeight: 340, overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead style={{ position: 'sticky', top: 0, background: '#1a1333' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: 'var(--panel-1)' }}>
                     <tr>
                       {csvImport.columns.map((c) => (
-                        <th key={c.key} style={{ textAlign: 'left', padding: '9px 12px', color: '#8b7bb5', fontWeight: 600, borderBottom: '1px solid #2d1f4a', whiteSpace: 'nowrap' }}>{c.label}</th>
+                        <th key={c.key} style={{ textAlign: 'left', padding: '9px 12px', color: '#8b7bb5', fontWeight: 600, borderBottom: '1px solid var(--line-1)', whiteSpace: 'nowrap' }}>{c.label}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1627,7 +1627,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                     {csvImport.rows.slice(0, 10).map((row, ri) => (
                       <tr key={ri} style={{ borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
                         {csvImport.columns.map((c) => (
-                          <td key={c.key} style={{ padding: '8px 12px', color: row[c.key] ? '#e2d9f3' : '#4b5563', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <td key={c.key} style={{ padding: '8px 12px', color: row[c.key] ? 'var(--text-soft)' : '#4b5563', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {row[c.key] || '—'}
                           </td>
                         ))}
@@ -1647,17 +1647,17 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           <DialogFooter>
             {csvImport && !csvImport.file ? (
               <>
-                <Button variant="outline" onClick={downloadCsvTemplate} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button variant="outline" onClick={downloadCsvTemplate} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Download size={14} /> Download template
                 </Button>
-                <Button onClick={() => fileInputRef.current?.click()} style={{ background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => fileInputRef.current?.click()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Upload size={14} /> Choose CSV file
                 </Button>
               </>
             ) : (
               <>
-                <Button variant="outline" onClick={() => setCsvImport(null)} disabled={csvImporting} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
-                <Button onClick={handleCsvConfirm} disabled={csvImporting || !csvImport?.total} style={{ background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button variant="outline" onClick={() => setCsvImport(null)} disabled={csvImporting} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+                <Button onClick={handleCsvConfirm} disabled={csvImporting || !csvImport?.total} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {csvImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                   {csvImporting ? 'Importing…' : `Import ${csvImport?.total || 0} leads`}
                 </Button>
@@ -1669,9 +1669,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
       {/* Add Lead Modal */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 560 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 560 }}>
           <DialogHeader>
-            <DialogTitle style={{ color: '#e2d9f3' }}>Add Lead Manually</DialogTitle>
+            <DialogTitle style={{ color: 'var(--text-soft)' }}>Add Lead Manually</DialogTitle>
           </DialogHeader>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '8px 0' }}>
             {[
@@ -1693,7 +1693,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             ))}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); }} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); }} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleAddLead} disabled={addingLead} style={{ background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {addingLead ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
               Add Lead
@@ -1704,9 +1704,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
       {/* Generate Leads Modal */}
       <Dialog open={showGenModal} onOpenChange={setShowGenModal}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 480 }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 480 }}>
           <DialogHeader>
-            <DialogTitle style={{ color: '#e2d9f3', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <DialogTitle style={{ color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Zap size={18} color="#a855f7" /> Generate Leads
             </DialogTitle>
           </DialogHeader>
@@ -1723,11 +1723,11 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                   <button key={s.key} onClick={() => setGenSource(s.key)} style={{
                     padding: '10px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
                     background: genSource === s.key ? `${s.color}22` : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${genSource === s.key ? s.color : '#2d1f4a'}`,
+                    border: `1px solid ${genSource === s.key ? s.color : 'var(--line-1)'}`,
                     transition: 'all 0.2s',
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 14 }}>{s.label}</span>
+                      <span style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 14 }}>{s.label}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {s.paid ? (
                           <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(234,179,8,0.15)', color: '#fcd34d' }}>PAID API</span>
@@ -1769,7 +1769,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             {icpProfiles.length > 1 && (
               <div>
                 <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 6 }}>ICP Profile</label>
-                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle, background: 'rgba(30,10,50,0.6)', border: '1px solid #2d1f4a' }}>
+                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle, background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)' }}>
                   {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active ? ' (Active)' : ''}</option>)}
                 </select>
               </div>
@@ -1795,23 +1795,23 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           {/* Fetch-from-Apify — import runs you generated in the Apify Console.
               Useful on the free Apify plan (can't RUN paid actors via API, but
               can read finished runs). */}
-          <div style={{ marginTop: 6, padding: '10px 12px', borderRadius: 10, background: 'rgba(124,58,237,0.06)', border: '1px solid #2d1f4a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ marginTop: 6, padding: '10px 12px', borderRadius: 10, background: 'hsl(var(--brand-600) / 0.06)', border: '1px solid var(--line-1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: '#e2d9f3' }}>Already generated in Apify?</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-soft)' }}>Already generated in Apify?</div>
               <div style={{ fontSize: 11.5, color: '#9ca3af' }}>Import leads from your finished Apify runs (works on the free plan).</div>
             </div>
             <button onClick={handleFetchApify} disabled={fetchingApify}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(168,85,247,0.35)', color: '#c4b5fd', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: fetchingApify ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'hsl(var(--brand-600) / 0.15)', border: '1px solid rgba(168,85,247,0.35)', color: '#c4b5fd', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: fetchingApify ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
               {fetchingApify ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
               {fetchingApify ? 'Fetching…' : 'Fetch from Apify'}
             </button>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleGenerate}
               disabled={generating || icpProfiles.length === 0 || (sdrKeyStatus.loaded && !sdrKeyStatus[genSource])}
-              style={{ background: 'linear-gradient(90deg,#7c3aed,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {generating ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               {generating ? 'Generating…' : `Generate ${genCount} Leads`}
             </Button>
@@ -1821,9 +1821,9 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
       {/* Setup Guide Modal */}
       <Dialog open={!!showSetupGuide} onOpenChange={() => setShowSetupGuide(null)}>
-        <DialogContent style={{ background: 'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)', border: '1px solid #2d1f4a', color: '#e2d9f3', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto' }}>
+        <DialogContent style={{ background: 'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)', border: '1px solid var(--line-1)', color: 'var(--text-soft)', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto' }}>
           <DialogHeader>
-            <DialogTitle style={{ color: '#e2d9f3' }}>
+            <DialogTitle style={{ color: 'var(--text-soft)' }}>
               {showSetupGuide === 'apify' ? '⚡ Connect Apify' : '🚀 Connect Apollo.io'}
             </DialogTitle>
           </DialogHeader>
@@ -1840,12 +1840,12 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                   { step: 4, title: 'Restart server & generate', code: 'python manage.py runserver' },
                 ].map(s => (
                   <div key={s.step} style={{ display: 'flex', gap: 12 }}>
-                    <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', border: '1px solid #7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a855f7', fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
+                    <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', border: '1px solid hsl(var(--brand-600))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a855f7', fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
+                      <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
                       {s.detail && <div style={{ color: '#9ca3af', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
                       {s.code && (
-                        <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid #1e1035', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                           <code style={{ color: '#a855f7', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
                           <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step ? '#4ade80' : '#6b7280' }}>
                             {copiedKey === s.step ? <CheckCircle size={13} /> : <Copy size={13} />}
@@ -1871,10 +1871,10 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                   <div key={s.step} style={{ display: 'flex', gap: 12 }}>
                     <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: 'rgba(59,130,246,0.2)', border: '1px solid #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa', fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
+                      <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
                       {s.detail && <div style={{ color: '#9ca3af', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
                       {s.code && (
-                        <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid #1e1035', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                           <code style={{ color: '#60a5fa', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
                           <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step + 10); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step + 10 ? '#4ade80' : '#6b7280' }}>
                             {copiedKey === s.step + 10 ? <CheckCircle size={13} /> : <Copy size={13} />}
@@ -1889,7 +1889,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           </div>
           <DialogFooter>
             <Button onClick={() => { setShowSetupGuide(null); setGenSource(showSetupGuide); }}
-              style={{ background: showSetupGuide === 'apify' ? 'linear-gradient(90deg,#7c3aed,#a855f7)' : 'linear-gradient(90deg,#1d4ed8,#3b82f6)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
+              style={{ background: showSetupGuide === 'apify' ? 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)' : 'linear-gradient(90deg,#1d4ed8,#3b82f6)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600 }}>
               Use {showSetupGuide === 'apify' ? 'Apify' : 'Apollo.io'}
             </Button>
           </DialogFooter>

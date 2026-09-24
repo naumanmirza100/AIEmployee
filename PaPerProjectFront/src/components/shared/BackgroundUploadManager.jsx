@@ -288,8 +288,8 @@ function BackgroundUploadWidget({ uploads, expanded, setExpanded, dismiss, dismi
   return createPortal(
     <div className="fixed bottom-4 right-4 z-[9999] flex flex-col items-end gap-2 pointer-events-none">
       {expanded && (
-        <div className="pointer-events-auto w-[340px] max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-[#12121a] shadow-2xl">
-          <div className="sticky top-0 flex items-center justify-between px-3 py-2 border-b border-white/10 bg-[#12121a]">
+        <div className="pointer-events-auto w-[340px] max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-[var(--sfc-12121a)] shadow-2xl">
+          <div className="sticky top-0 flex items-center justify-between px-3 py-2 border-b border-white/10 bg-[var(--sfc-12121a)]">
             <div className="text-xs font-semibold text-white/80">Document uploads</div>
             <div className="flex items-center gap-1">
               {items.some((u) => u.done) && (

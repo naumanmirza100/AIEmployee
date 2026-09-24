@@ -844,7 +844,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
                 </span>
                 <Link
                   to="/company/settings/api-keys"
-                  className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-700 px-3 py-1.5 font-semibold text-white hover:bg-amber-600 transition-colors"
+                  className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-700 px-3 py-1.5 font-semibold text-pure-white hover:bg-amber-600 transition-colors"
                 >
                   Add tokens / API key →
                 </Link>

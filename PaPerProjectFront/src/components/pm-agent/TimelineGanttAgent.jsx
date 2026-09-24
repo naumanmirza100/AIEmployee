@@ -132,7 +132,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
 
   return (
     <div className="space-y-6">
-      <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+      <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-violet-400" />
@@ -228,7 +228,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Task Status Distribution Pie Chart */}
               {charts.status_distribution && (
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.status_distribution.title}</CardTitle>
                   </CardHeader>
@@ -259,7 +259,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
 
               {/* Priority Distribution Bar Chart */}
               {charts.priority_distribution && (
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.priority_distribution.title}</CardTitle>
                   </CardHeader>
@@ -284,7 +284,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
 
               {/* Burndown Chart */}
               {charts.burndown && charts.burndown.data && charts.burndown.data.length > 0 && (
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.burndown.title}</CardTitle>
                   </CardHeader>
@@ -307,7 +307,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
 
               {/* Resource Utilization */}
               {charts.resource_utilization && charts.resource_utilization.data && charts.resource_utilization.data.length > 0 && (
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.resource_utilization.title}</CardTitle>
                   </CardHeader>
@@ -330,7 +330,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
 
               {/* Completion Rate Progress */}
               {charts.completion_rate && (
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.completion_rate.title}</CardTitle>
                   </CardHeader>
@@ -371,7 +371,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
 
               {/* Milestone Status Chart */}
               {charts.milestone_status && (
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader>
                     <CardTitle className="text-lg">{charts.milestone_status.title}</CardTitle>
                   </CardHeader>
@@ -404,7 +404,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
 
           {/* Unified Timeline Chart for create_timeline action */}
           {action === 'create_timeline' && result.data?.timeline && result.data.timeline.tasks && result.data.timeline.tasks.length > 0 && (
-            <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+            <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
               <CardHeader>
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div>
@@ -977,7 +977,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
 
           {/* Detailed Results Card - Hidden for create_timeline action */}
           {action !== 'create_timeline' && (
-            <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+            <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle>Timeline Results</CardTitle>
               </CardHeader>

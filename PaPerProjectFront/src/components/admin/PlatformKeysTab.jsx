@@ -66,11 +66,11 @@ const PlatformKeyRow = ({ row, onSave, onRevoke, saving, revoking }) => {
             placeholder={prefixInfo ? prefixInfo.prefixes[0] + '...' : 'sk-...'}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            className={`bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono ${prefixError ? 'border-red-500/60' : ''}`}
+            className={`bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1 font-mono ${prefixError ? 'border-red-500/60' : ''}`}
           />
         </div>
         <Button
-          className="bg-violet-600 hover:bg-violet-700 text-white"
+          className="bg-violet-600 hover:bg-violet-700 text-pure-white"
           disabled={saving || apiKey.length < 10 || !!prefixError}
           onClick={() => onSave(row.provider, apiKey, () => setApiKey(''))}
         >
@@ -91,12 +91,12 @@ const PlatformKeyRow = ({ row, onSave, onRevoke, saving, revoking }) => {
 // (Agent.default_provider), so this no longer needs to mirror the backend by hand.
 
 const AgentProviderReferenceTable = ({ agents = [] }) => (
-  <div className="bg-[#0f0a20] border border-[#2d2342] rounded-lg overflow-hidden">
-    <div className="px-4 py-2.5 border-b border-[#2d2342] flex items-center gap-2">
+  <div className="bg-[var(--sfc-0f0a20)] border border-[var(--line-3)] rounded-lg overflow-hidden">
+    <div className="px-4 py-2.5 border-b border-[var(--line-3)] flex items-center gap-2">
       <Key className="w-3.5 h-3.5 text-violet-300" />
       <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">Agent → Provider Mapping (Default / Free Tokens)</span>
     </div>
-    <div className="divide-y divide-[#2d2342]">
+    <div className="divide-y divide-[var(--line-3)]">
       {agents.map(row => (
         <div key={row.slug} className="flex items-center justify-between px-4 py-2 hover:bg-white/2 transition-colors">
           <div className="flex items-center gap-3">
@@ -117,7 +117,7 @@ const AgentProviderReferenceTable = ({ agents = [] }) => (
         </div>
       ))}
     </div>
-    <div className="px-4 py-2 bg-[#0c0820] border-t border-[#2d2342]">
+    <div className="px-4 py-2 bg-[var(--sfc-0c0820)] border-t border-[var(--line-3)]">
       <p className="text-[10px] text-white/30 leading-relaxed">
         <span className="text-white/50">Note:</span> Companies can override the default provider by adding a BYOK key with a different provider,
         or an admin can assign a managed key with any supported provider. The table above shows which platform key is consumed on the free-tokens path.

@@ -87,7 +87,7 @@ export default function HROrgChartTab({ onOpenEmployee }) {
   useEffect(() => { load(); }, []);
 
   return (
-    <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+    <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
       <CardHeader className="flex flex-row items-center justify-between gap-3">
         <div>
           <CardTitle className="flex items-center gap-2">

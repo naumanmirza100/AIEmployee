@@ -1041,7 +1041,7 @@ const ReplyDraftAgentPage = () => {
                   onClick={refreshAll}
                   disabled={refreshing}
                   aria-label="Refresh"
-                  className="h-9 w-9 p-0 shrink-0 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/20 disabled:opacity-60"
+                  className="h-9 w-9 p-0 shrink-0 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-pure-white shadow-lg shadow-cyan-500/20 disabled:opacity-60"
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                 </Button>
@@ -1119,7 +1119,7 @@ const ReplyDraftAgentPage = () => {
                   the dashboard is useful without leaving it. Each row opens
                   the message inside the Emails page. */}
               <div data-tour="rd-recent" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
+                <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                     <div className="flex items-center gap-2">
                       <Inbox className="h-4 w-4 text-cyan-300" />
@@ -1149,7 +1149,7 @@ const ReplyDraftAgentPage = () => {
                   )}
                 </div>
 
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
+                <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                     <div className="flex items-center gap-2">
                       <Edit3 className="h-4 w-4 text-fuchsia-300" />
@@ -1188,7 +1188,7 @@ const ReplyDraftAgentPage = () => {
           <div className="grid grid-cols-12 gap-4 items-stretch">
             {/* LEFT: List */}
             <div className="col-span-12 lg:col-span-5 xl:col-span-4">
-              <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-160px)]">
+              <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:h-[calc(100vh-160px)]">
                 {/* Tabs */}
                 <div data-tour="rd-tabs" className="p-1.5 border-b border-white/10 flex items-center">
                   <div className="flex-1 flex gap-1 min-w-0">
@@ -1369,7 +1369,7 @@ const ReplyDraftAgentPage = () => {
             {/* RIGHT: Detail + Composer */}
             <div className="col-span-12 lg:col-span-7 xl:col-span-8 space-y-4 pr-1 lg:h-[calc(100vh-160px)] lg:overflow-y-auto custom-scrollbar">
               {!selectedReply && !selectedDraft && (
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm min-h-[60vh] lg:min-h-0 lg:h-full flex items-center justify-center">
+                <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm min-h-[60vh] lg:min-h-0 lg:h-full flex items-center justify-center">
                   <div className="text-center max-w-md px-6">
                     <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-cyan-500/20 to-fuchsia-500/20 border border-white/10 flex items-center justify-center mb-5">
                       <MailOpen className="h-10 w-10 text-cyan-300" />
@@ -1398,7 +1398,7 @@ const ReplyDraftAgentPage = () => {
                 // Fixed-height layout (`lg:h-[calc(...)]`) is also dropped
                 // for compose so the composer underneath rises up to the
                 // top of the pane like a Gmail compose window.
-                <div className={`rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:flex-shrink-0 ${isComposeDraft ? '' : 'lg:h-[calc(100vh-160px)]'
+                <div className={`rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm overflow-hidden flex flex-col lg:flex-shrink-0 ${isComposeDraft ? '' : 'lg:h-[calc(100vh-160px)]'
                   }`}>
                   <div className={isComposeDraft ? 'p-4' : 'p-5 border-b border-white/10'}>
                     <div className="flex items-start justify-between gap-4 mb-4">
@@ -1548,7 +1548,7 @@ const ReplyDraftAgentPage = () => {
                       <HoverTip tip="Draft a reply to this email with AI">
                         <Button
                           onClick={() => setComposerOpen(true)}
-                          className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-white"
+                          className="bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-pure-white"
                         >
                           <CornerUpLeft className="h-4 w-4 mr-2" />
                           Reply
@@ -1569,7 +1569,7 @@ const ReplyDraftAgentPage = () => {
                   clicks the Reply button on the email viewer above.
                   Drafts open it automatically (see handleSelectDraft). */}
               {(selectedReply || selectedDraft) && selectedReply?.direction !== 'out' && composerOpen && (
-                <div className="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
+                <div className="rounded-2xl bg-pure-black/40 border border-white/10 backdrop-blur-sm overflow-hidden">
                   <div className="p-5 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-3">
                       <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-fuchsia-500/30 to-purple-600/30 border border-fuchsia-500/30 flex items-center justify-center">
@@ -1674,7 +1674,7 @@ const ReplyDraftAgentPage = () => {
                         <Button
                           onClick={handleGenerate}
                           disabled={busy}
-                          className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold shadow-lg shadow-cyan-500/20 h-11"
+                          className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-pure-white font-semibold shadow-lg shadow-cyan-500/20 h-11"
                         >
                           {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
                           {busy ? 'Drafting reply…' : 'Generate AI Draft'}
@@ -1825,7 +1825,7 @@ const ReplyDraftAgentPage = () => {
                                 <Button
                                   onClick={handleApproveAndSend}
                                   disabled={busy || !editedBody.trim() || !editedSubject.trim()}
-                                  className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-semibold shadow-lg shadow-emerald-500/20"
+                                  className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-pure-white font-semibold shadow-lg shadow-emerald-500/20"
                                 >
                                   {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
                                   Approve & Send

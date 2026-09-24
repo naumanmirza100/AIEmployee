@@ -83,14 +83,14 @@ const HoverTip = ({ tip, children, placement = 'top', delay = 120, className = '
           style={{ top: pos.top, left: pos.left }}
         >
           <div
-            className="relative w-max rounded-lg border border-[#3a295a] bg-[#161630] px-3 py-2 text-xs leading-snug text-white/85 shadow-xl"
+            className="relative w-max rounded-lg border border-border bg-popover px-3 py-2 text-xs leading-snug text-popover-foreground shadow-xl"
             style={{ maxWidth: TOOLTIP_W }}
           >
             {tip}
             {/* Arrow points at the trigger. When the bubble was nudged inward to
                 stay on-screen, arrowShift moves the arrow back over the trigger. */}
             <span
-              className={`absolute left-1/2 h-2 w-2 rotate-45 bg-[#161630] border-[#3a295a] ${
+              className={`absolute left-1/2 h-2 w-2 rotate-45 bg-popover border-border ${
                 pos.placement === 'bottom'
                   ? 'bottom-full border-t border-l'
                   : 'top-full border-b border-r'

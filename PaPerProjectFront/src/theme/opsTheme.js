@@ -30,7 +30,7 @@
 
 // ── Background ──────────────────────────────────────────────
 export const OPS_GRADIENT_BG =
-  'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)';
+  'var(--app-page-bg)';
 
 // ── Accent colors ───────────────────────────────────────────
 export const OPS_AMBER = '#f59e0b';
@@ -87,15 +87,15 @@ export const opsTabActiveStyle = {
 export const opsTabInactiveStyle = {
   background: 'rgba(60, 30, 90, 0.22)',
   color: '#cfc6e6',
-  border: '1.5px solid #2d2342',
+  border: '1.5px solid var(--line-3)',
   boxShadow: 'none',
 };
 
 export const opsTabListClass =
-  'inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]';
+  'inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[var(--panel-1)] border border-[var(--line-2)]';
 
 export const opsTabListStyle = {
-  boxShadow: '0 2px 12px 0 #a259ff0a',
+  boxShadow: '0 2px 12px 0 hsl(var(--brand-accent) / 0.04)',
 };
 
 // ── Page container (apply to the immediate child of DashboardNavbar) ──

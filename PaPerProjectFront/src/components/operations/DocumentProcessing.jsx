@@ -288,7 +288,7 @@ const DocumentProcessing = () => {
           className="h-10 rounded-xl border border-white/[0.08] text-xs text-white/70 pl-3 pr-8 shrink-0 cursor-pointer outline-none focus:border-amber-500/40 transition-colors"
           style={{ background: 'rgba(0,0,0,0.25)', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}>
           {[5, 10, 20, 30, 50].map(n => (
-            <option key={n} value={n} className="bg-[#1a1028] text-white">{n} rows</option>
+            <option key={n} value={n} className="bg-[var(--sfc-1a1028)] text-white">{n} rows</option>
           ))}
         </select>
         {/* View Toggle */}
@@ -592,7 +592,7 @@ const DocumentProcessing = () => {
 
       {/* ═══ Upload Dialog ═══ */}
       <Dialog open={showUpload} onOpenChange={setShowUpload}>
-        <DialogContent id="OPS-docprocessing-upload-dialog" data-testid="OPS-docprocessing-upload-dialog" className="sm:max-w-md border-white/[0.08] text-white" style={{ background: '#0c0816' }}>
+        <DialogContent id="OPS-docprocessing-upload-dialog" data-testid="OPS-docprocessing-upload-dialog" className="sm:max-w-md border-white/[0.08] text-white" style={{ background: 'var(--sfc-0c0816)' }}>
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Upload className="h-5 w-5 text-amber-500" />

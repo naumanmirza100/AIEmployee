@@ -1164,7 +1164,7 @@ const CompanyDashboardPage = () => {
       <div
         className="min-h-screen overflow-x-hidden"
         style={{
-          background: 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)',
+          background: 'var(--app-page-bg)',
         }}
       >
         {/* Header */}
@@ -1214,7 +1214,7 @@ const CompanyDashboardPage = () => {
                   <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
                 </div>
               ) : jobs.length === 0 ? (
-                <Card className="bg-[#120d22] border border-[#2d2342]">
+                <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                   <CardContent className="py-12 text-center">
                     <Briefcase className="h-12 w-12 mx-auto text-white/20 mb-4" />
                     <p className="text-lg font-medium mb-2 text-white">No jobs posted yet</p>
@@ -1226,7 +1226,7 @@ const CompanyDashboardPage = () => {
               ) : (
                 <div className="grid gap-4">
                   {jobs.map((job) => (
-                    <Card key={job.id} className="bg-[#120d22] border border-[#2d2342] hover:border-violet-500/30 transition-colors">
+                    <Card key={job.id} className="bg-[var(--panel-2)] border border-[var(--line-3)] hover:border-violet-500/30 transition-colors">
                       <CardHeader>
                         <div className="flex justify-between items-start">
                           <div>
@@ -1291,7 +1291,7 @@ const CompanyDashboardPage = () => {
                     value={projectSearch}
                     onChange={(e) => setProjectSearch(e.target.value)}
                     placeholder="Search projects or tasks…"
-                    className="pl-10 bg-[#120d22] border border-[#2d2342] text-white placeholder:text-white/30"
+                    className="pl-10 bg-[var(--panel-2)] border border-[var(--line-3)] text-white placeholder:text-white/30"
                   />
                 </div>
               )}
@@ -1300,7 +1300,7 @@ const CompanyDashboardPage = () => {
                   <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
                 </div>
               ) : projects.length === 0 ? (
-                <Card className="bg-[#120d22] border border-[#2d2342]">
+                <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                   <CardContent className="py-12 text-center">
                     <FolderKanban className="h-12 w-12 mx-auto text-white/20 mb-4" />
                     <p className="text-lg font-medium mb-2 text-white">No projects yet</p>
@@ -1330,7 +1330,7 @@ const CompanyDashboardPage = () => {
                         });
                     if (filtered.length === 0) {
                       return (
-                        <Card className="bg-[#120d22] border border-[#2d2342]">
+                        <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                           <CardContent className="py-10 text-center">
                             <Search className="h-8 w-8 mx-auto text-white/20 mb-3" />
                             <p className="text-sm text-white/55">
@@ -1343,7 +1343,7 @@ const CompanyDashboardPage = () => {
                     return filtered.map((project) => {
                     const isExpanded = expandedProjects.has(project.id);
                     return (
-                      <Card key={project.id} className="cursor-pointer bg-[#120d22] border border-[#2d2342] hover:border-violet-500/30 transition-colors">
+                      <Card key={project.id} className="cursor-pointer bg-[var(--panel-2)] border border-[var(--line-3)] hover:border-violet-500/30 transition-colors">
                         <CardHeader
                           onClick={() => toggleProject(project.id)}
                           className="pb-3"
@@ -1566,7 +1566,7 @@ const CompanyDashboardPage = () => {
                         <Button
                           onClick={handleProcessApplicants}
                           disabled={processingApplicants || !modulesLoaded}
-                          className="bg-violet-600 hover:bg-violet-700 text-white"
+                          className="bg-violet-600 hover:bg-violet-700 text-pure-white"
                         >
                           {processingApplicants ? (
                             <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Analysing...</>
@@ -1581,7 +1581,7 @@ const CompanyDashboardPage = () => {
                     </div>
                   </div>
                   {selectedJobApplications.length === 0 ? (
-                    <Card className="bg-[#120d22] border border-[#2d2342]">
+                    <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                       <CardContent className="py-12 text-center">
                         <Users className="h-12 w-12 mx-auto text-white/20 mb-4" />
                         <p className="text-lg font-medium text-white">No applications yet</p>
@@ -1592,7 +1592,7 @@ const CompanyDashboardPage = () => {
                     <div className="space-y-4">
                       <p className="text-sm text-white/40">{selectedJobApplications.length} application{selectedJobApplications.length !== 1 ? 's' : ''} received</p>
                       {selectedJobApplications.map((app) => (
-                        <Card key={app.id} className="bg-[#120d22] border border-[#2d2342]">
+                        <Card key={app.id} className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                           <CardHeader className="pb-3">
                             <div className="flex justify-between items-start gap-4">
                               <div className="flex-1 min-w-0">
@@ -1686,7 +1686,7 @@ const CompanyDashboardPage = () => {
                                   size="sm"
                                   onClick={() => handleUpdateStatus(app.id, s)}
                                   disabled={app.status === s}
-                                  className={`capitalize text-xs ${app.status === s ? 'bg-violet-600 text-white' : 'border-white/20 text-white/60 hover:text-white hover:bg-white/10 bg-transparent border'}`}
+                                  className={`capitalize text-xs ${app.status === s ? 'bg-violet-600 text-pure-white' : 'border-white/20 text-white/60 hover:text-pure-white hover:bg-white/10 bg-transparent border'}`}
                                 >
                                   {s}
                                 </Button>
@@ -1710,7 +1710,7 @@ const CompanyDashboardPage = () => {
                   )}
                 </div>
               ) : (
-                <Card className="bg-[#120d22] border border-[#2d2342]">
+                <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                   <CardContent className="py-12 text-center">
                     <Users className="h-12 w-12 mx-auto text-white/20 mb-4" />
                     <p className="text-lg font-medium text-white/50">Select a job to view applications</p>
@@ -1727,7 +1727,7 @@ const CompanyDashboardPage = () => {
                     value={usersSearch}
                     onChange={(e) => setUsersSearch(e.target.value)}
                     placeholder="Search users by name, email, or username…"
-                    className="pl-10 bg-[#120d22] border border-[#2d2342] text-white placeholder:text-white/30"
+                    className="pl-10 bg-[var(--panel-2)] border border-[var(--line-3)] text-white placeholder:text-white/30"
                   />
                 </div>
               )}
@@ -1736,7 +1736,7 @@ const CompanyDashboardPage = () => {
                   <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
                 </div>
               ) : users.length === 0 ? (
-                <Card className="bg-[#120d22] border border-[#2d2342]">
+                <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                   <CardContent className="py-12 text-center">
                     <UserCheck className="h-12 w-12 mx-auto text-white/20 mb-4" />
                     <p className="text-lg font-medium mb-2 text-white">No users yet</p>
@@ -1758,11 +1758,11 @@ const CompanyDashboardPage = () => {
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  <Card className="bg-[#120d22] border border-[#2d2342]">
+                  <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                     <CardContent className="p-0">
                       <Table>
                         <TableHeader>
-                          <TableRow className="bg-[#1a1333] border-b border-[#2d2342] hover:bg-[#1a1333]">
+                          <TableRow className="bg-[var(--panel-1)] border-b border-[var(--line-3)] hover:bg-[var(--panel-1)]">
                             <TableHead className="text-white/60 font-semibold">Name</TableHead>
                             <TableHead className="text-white/60 font-semibold">Email</TableHead>
                             <TableHead className="text-white/60 font-semibold">Role</TableHead>
@@ -1916,7 +1916,7 @@ const CompanyDashboardPage = () => {
                   value={allTasksSearch}
                   onChange={(e) => setAllTasksSearch(e.target.value)}
                   placeholder="Search tasks by title or description…"
-                  className="pl-10 bg-[#120d22] border border-[#2d2342] text-white placeholder:text-white/30"
+                  className="pl-10 bg-[var(--panel-2)] border border-[var(--line-3)] text-white placeholder:text-white/30"
                 />
               </div>
 
@@ -1973,7 +1973,7 @@ const CompanyDashboardPage = () => {
                   <Loader2 className="h-8 w-8 animate-spin" />
                 </div>
               ) : allUsersTasks.length === 0 ? (
-                <Card className="bg-[#120d22] border border-[#2d2342]">
+                <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                   <CardContent className="py-12 text-center">
                     <ListTodo className="h-12 w-12 mx-auto text-white/20 mb-4" />
                     <p className="text-lg font-medium mb-2 text-white">No tasks found</p>
@@ -1986,11 +1986,11 @@ const CompanyDashboardPage = () => {
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  <Card className="bg-[#120d22] border border-[#2d2342]">
+                  <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                     <CardContent className="p-0">
                       <Table>
                         <TableHeader>
-                          <TableRow className="bg-[#1a1333] border-b border-[#2d2342] hover:bg-[#1a1333]">
+                          <TableRow className="bg-[var(--panel-1)] border-b border-[var(--line-3)] hover:bg-[var(--panel-1)]">
                             <TableHead className="w-[250px] text-white/60 font-semibold">Task</TableHead>
                             <TableHead className="text-white/60 font-semibold">Description</TableHead>
                             <TableHead className="text-white/60 font-semibold">Assignee</TableHead>
@@ -2154,7 +2154,7 @@ const CompanyDashboardPage = () => {
 
             {purchasedModules.includes('frontline_agent') && (
               <TabsContent value="ticket-tasks" className="space-y-4">
-                <Card className="bg-[#120d22] border border-[#2d2342]">
+                <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-white">
                       <Ticket className="h-5 w-5 text-violet-400" />
@@ -2178,7 +2178,7 @@ const CompanyDashboardPage = () => {
                         {ticketTasks.map((task) => (
                           <div
                             key={task.id}
-                            className={`rounded-lg border p-4 ${task.status === 'resolved' || task.status === 'closed' ? 'bg-white/[0.02] border-white/[0.05] opacity-60' : 'bg-white/[0.04] border-[#2d2342]'}`}
+                            className={`rounded-lg border p-4 ${task.status === 'resolved' || task.status === 'closed' ? 'bg-white/[0.02] border-white/[0.05] opacity-60' : 'bg-white/[0.04] border-[var(--line-3)]'}`}
                           >
                             <div className="flex items-start justify-between gap-4">
                               <div className="flex-1 min-w-0">
@@ -2198,7 +2198,7 @@ const CompanyDashboardPage = () => {
                                   size="sm"
                                   onClick={() => handleCloseTicketTask(task.id)}
                                   disabled={resolvingTaskId === task.id}
-                                  className="bg-violet-600 hover:bg-violet-700 text-white shrink-0"
+                                  className="bg-violet-600 hover:bg-violet-700 text-pure-white shrink-0"
                                 >
                                   {resolvingTaskId === task.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
                                   Close
@@ -2215,7 +2215,7 @@ const CompanyDashboardPage = () => {
             )}
 
             <TabsContent value="ai-agents" className="space-y-4">
-              <Card className="bg-[#120d22] border border-[#2d2342]">
+              <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
                 <CardHeader>
                   <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div>
@@ -2243,7 +2243,7 @@ const CompanyDashboardPage = () => {
                       {allPurchases.length > 0 && (
                         <Button
                           onClick={() => navigate('/#ai-modules')}
-                          className="bg-violet-600 hover:bg-violet-700 text-white"
+                          className="bg-violet-600 hover:bg-violet-700 text-pure-white"
                         >
                           <Plus className="h-4 w-4 mr-2" />
                           Browse More Agents
@@ -2262,7 +2262,7 @@ const CompanyDashboardPage = () => {
                       </p>
                       <Button
                         onClick={() => navigate('/#ai-modules')}
-                        className="bg-violet-600 hover:bg-violet-700 text-white"
+                        className="bg-violet-600 hover:bg-violet-700 text-pure-white"
                       >
                         Browse AI Agents
                       </Button>
@@ -2438,7 +2438,7 @@ const CompanyDashboardPage = () => {
                                   <div className="relative border-l-2 border-white/10 ml-2 pl-4 space-y-3">
                                     {/* Purchase event */}
                                     <div className="relative">
-                                      <div className="absolute -left-[23px] top-1 w-3 h-3 rounded-full bg-green-500 border-2 border-[#120d22]"></div>
+                                      <div className="absolute -left-[23px] top-1 w-3 h-3 rounded-full bg-green-500 border-2 border-[var(--panel-2)]"></div>
                                       <p className="text-sm text-white/80 font-medium">Purchased</p>
                                       <p className="text-xs text-white/40">{formatDate(agent.purchased_at)}</p>
                                       {agent.purchased_by_name && (
@@ -2458,7 +2458,7 @@ const CompanyDashboardPage = () => {
                                     {/* Expiry event */}
                                     {agent.expires_at && (
                                       <div className="relative">
-                                        <div className={`absolute -left-[23px] top-1 w-3 h-3 rounded-full border-2 border-[#120d22] ${isExpired ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                                        <div className={`absolute -left-[23px] top-1 w-3 h-3 rounded-full border-2 border-[var(--panel-2)] ${isExpired ? 'bg-red-500' : 'bg-blue-500'}`}></div>
                                         <p className="text-sm text-white/80 font-medium">{isExpired ? 'Subscription Ended' : 'Expires'}</p>
                                         <p className="text-xs text-white/40">{formatDate(agent.expires_at)}</p>
                                         {agent.time_remaining && (
@@ -2473,7 +2473,7 @@ const CompanyDashboardPage = () => {
                                     {/* Cancelled / Deactivated event */}
                                     {agent.cancelled_at && (
                                       <div className="relative">
-                                        <div className="absolute -left-[23px] top-1 w-3 h-3 rounded-full bg-red-500 border-2 border-[#120d22]"></div>
+                                        <div className="absolute -left-[23px] top-1 w-3 h-3 rounded-full bg-red-500 border-2 border-[var(--panel-2)]"></div>
                                         <p className="text-sm text-white/80 font-medium">
                                           {isDeactivatedByAdmin ? 'Deactivated by Admin' : 'Cancelled'}
                                         </p>
@@ -2488,7 +2488,7 @@ const CompanyDashboardPage = () => {
 
                                     {/* Current status */}
                                     <div className="relative flex items-baseline gap-2">
-                                      <div className={`absolute -left-[23px] top-1 w-3 h-3 rounded-full border-2 border-[#120d22] ${
+                                      <div className={`absolute -left-[23px] top-1 w-3 h-3 rounded-full border-2 border-[var(--panel-2)] ${
                                         isActive ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-gray-500'
                                       }`}></div>
                                       <p className="text-sm text-white/80 font-medium">Current Status</p>
@@ -2528,7 +2528,7 @@ const CompanyDashboardPage = () => {
                                       <Button
                                         size="sm"
                                         className="w-full"
-                                        style={{ background: 'linear-gradient(90deg,#7c3aed,#4f46e5)', border: 'none' }}
+                                        style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#4f46e5)', border: 'none' }}
                                         onClick={() => navigate(({
                                           recruitment_agent:     '/recruitment/job-descriptions',
                                           marketing_agent:       '/marketing/dashboard',
@@ -2597,7 +2597,7 @@ const CompanyDashboardPage = () => {
                                 {canRepurchase && (
                                   <Button
                                     onClick={() => handlePurchaseAgain(agent.module_name)}
-                                    className="bg-violet-600 hover:bg-violet-700 text-white w-full"
+                                    className="bg-violet-600 hover:bg-violet-700 text-pure-white w-full"
                                     size="sm"
                                   >
                                     <RotateCcw className="h-4 w-4 mr-2" />

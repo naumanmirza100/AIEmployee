@@ -262,7 +262,7 @@ const IndustriesPage = () => {
 
       <section className="py-16 md:py-24 bg-background">
         <div className="container mx-auto px-4 md:px-6">
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.7 }} className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-2xl p-8 md:p-12 text-center text-white shadow-2xl">
+          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.5 }} transition={{ duration: 0.7 }} className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-2xl p-8 md:p-12 text-center text-pure-white shadow-2xl">
             <h2 className="text-3xl font-bold mb-4">{t('industries_cta_title', 'Ready to Start Your Industry-Specific Project?')}</h2>
             <p className="max-w-2xl mx-auto text-lg text-gray-300 mb-8">{t('industries_cta_subtitle', 'Bring your vision to life with a team that understands your world. Get a fixed-price quote today.')}</p>
             <Button asChild size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-lg px-8 py-6 rounded-full shadow-lg transition-transform hover:scale-105">

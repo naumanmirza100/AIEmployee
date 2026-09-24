@@ -134,7 +134,7 @@ export default function ProjectsListView({ projects = [], loading, onProjectCrea
           const priorityClass = PRIORITY_STYLES[project.priority] || PRIORITY_STYLES.medium;
           const taskCount = project.tasks_count ?? project.task_count ?? (project.tasks?.length || 0);
           return (
-            <Card key={project.id} className="bg-[#120d22] border border-[#2d2342] hover:border-cyan-400/30 transition-colors">
+            <Card key={project.id} className="bg-[var(--panel-2)] border border-[var(--line-3)] hover:border-cyan-400/30 transition-colors">
               <CardHeader onClick={() => toggle(project.id)} className="pb-3 cursor-pointer">
                 <div className="flex items-start gap-3">
                   <div className="mt-1 shrink-0">
@@ -221,7 +221,7 @@ export default function ProjectsListView({ projects = [], loading, onProjectCrea
 function NewProjectDialog({ open, onOpenChange, onProjectCreated }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-[#0d0b1f] border-white/10">
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-[var(--sfc-0d0b1f)] border-white/10">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <FolderKanban className="h-5 w-5 text-cyan-300" />

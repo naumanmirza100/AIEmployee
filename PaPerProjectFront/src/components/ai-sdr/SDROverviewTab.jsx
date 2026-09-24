@@ -47,12 +47,12 @@ const SOURCE_LABELS = {
 // ---------------------------------------------------------------------------
 const card = {
   background: 'linear-gradient(135deg,rgba(15,10,31,0.95) 0%,rgba(20,8,40,0.95) 100%)',
-  border: '1px solid #2d1f4a', borderRadius: 12,
+  border: '1px solid var(--line-1)', borderRadius: 12,
 };
 
 const inputStyle = {
-  background: 'rgba(30,10,50,0.6)', border: '1px solid #2d1f4a',
-  borderRadius: 8, padding: '8px 12px', color: '#e2d9f3',
+  background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)',
+  borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
 
@@ -77,7 +77,7 @@ function KPICard({ Icon, label, value, sub, color, trendData, onClick }) {
         transition: 'border-color 0.2s', flex: 1, minWidth: 150,
       }}
       onMouseEnter={e => onClick && (e.currentTarget.style.borderColor = color)}
-      onMouseLeave={e => onClick && (e.currentTarget.style.borderColor = '#2d1f4a')}
+      onMouseLeave={e => onClick && (e.currentTarget.style.borderColor = 'var(--line-1)')}
       onClick={onClick}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -86,7 +86,7 @@ function KPICard({ Icon, label, value, sub, color, trendData, onClick }) {
         </div>
         {T && <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: T.color }}><T.Icon size={11} /><span>{T.label}</span></div>}
       </div>
-      <div style={{ fontSize: 28, fontWeight: 700, color: '#e2d9f3', lineHeight: 1.1 }}>{value}</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-soft)', lineHeight: 1.1 }}>{value}</div>
       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{label}</div>
       {sub && <div style={{ fontSize: 11, color: '#4b5563', marginTop: 2 }}>{sub}</div>}
     </div>
@@ -142,20 +142,20 @@ function SetupGuideContent({ which, copiedKey, setCopiedKey }) {
         </span>
       </div>
       {which === 'apollo' && (
-        <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid #2d1f4a', color: '#9ca3af', fontSize: 12 }}>
-          💡 <strong style={{ color: '#e2d9f3' }}>Recommendation:</strong> Use <strong style={{ color: '#a855f7' }}>Apify</strong> for lead generation if you don't have a paid Apollo plan.
+        <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid var(--line-1)', color: '#9ca3af', fontSize: 12 }}>
+          💡 <strong style={{ color: 'var(--text-soft)' }}>Recommendation:</strong> Use <strong style={{ color: '#a855f7' }}>Apify</strong> for lead generation if you don't have a paid Apollo plan.
         </div>
       )}
       {steps.map(s => (
         <div key={s.step} style={{ display: 'flex', gap: 12 }}>
           <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: accentBg, border: `1px solid ${accent}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: accent, fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
           <div style={{ flex: 1 }}>
-            <div style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{s.title}</div>
+            <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{s.title}</div>
             <div style={{ color: '#9ca3af', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>
             {s.link && <a href={s.link} target="_blank" rel="noreferrer" style={{ color: accent, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}><ExternalLink size={11} />{s.linkLabel}</a>}
             {s.note && <div style={{ marginTop: 4, padding: '4px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', color: '#6b7280', fontSize: 11, fontFamily: 'monospace' }}>{s.note}</div>}
             {s.code && (
-              <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid #1e1035', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <code style={{ color: accent, fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
                 <button
                   onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step); setTimeout(() => setCopiedKey(null), 2000); }}
@@ -336,7 +336,7 @@ export default function SDROverviewTab() {
             style={{
               display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px',
               background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 9, color: '#e2d9f3', fontSize: 13, cursor: 'pointer', transition: 'all 0.2s',
+              borderRadius: 9, color: 'var(--text-soft)', fontSize: 13, cursor: 'pointer', transition: 'all 0.2s',
             }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = '#a78bfa'; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
@@ -355,7 +355,7 @@ export default function SDROverviewTab() {
                 display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px',
                 background: actionBusy === key ? `${color}22` : 'rgba(255,255,255,0.04)',
                 border: `1px solid ${actionBusy === key ? color : 'rgba(255,255,255,0.1)'}`,
-                borderRadius: 9, color: '#e2d9f3', fontSize: 13,
+                borderRadius: 9, color: 'var(--text-soft)', fontSize: 13,
                 cursor: actionBusy ? 'not-allowed' : 'pointer', transition: 'all 0.2s',
                 opacity: actionBusy && actionBusy !== key ? 0.5 : 1,
               }}
@@ -394,7 +394,7 @@ export default function SDROverviewTab() {
                     {lead.score ?? '—'}
                   </div>
                   <div style={{ flex:1,minWidth:0 }}>
-                    <div style={{ fontSize:13,fontWeight:600,color:'#e2d9f3',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{lead.full_name || '(No Name)'}</div>
+                    <div style={{ fontSize:13,fontWeight:600,color:'var(--text-soft)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{lead.full_name || '(No Name)'}</div>
                     <div style={{ fontSize:11,color:'#6b7280',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{[lead.job_title,lead.company_name].filter(Boolean).join(' · ') || lead.email}</div>
                   </div>
                   <div style={{ display:'flex',alignItems:'center',gap:6,flexShrink:0 }}>
@@ -425,7 +425,7 @@ export default function SDROverviewTab() {
                   <div key={i}>
                     <div style={{ display:'flex',justifyContent:'space-between',marginBottom:4 }}>
                       <span style={{ fontSize:12,color:'#9ca3af' }}>{s.stage}</span>
-                      <span style={{ fontSize:12,color:'#e2d9f3',fontWeight:600 }}>
+                      <span style={{ fontSize:12,color:'var(--text-soft)',fontWeight:600 }}>
                         {s.count}<span style={{ fontSize:10,color:'#4b5563',fontWeight:400 }}> ({pct(s.count,funnel[0]?.count??1)}%)</span>
                       </span>
                     </div>
@@ -484,7 +484,7 @@ export default function SDROverviewTab() {
                 {campaignRows.map(c => (
                   <div key={c.id} style={{ background:'rgba(255,255,255,0.03)',borderRadius:9,padding:'10px 12px',border:'1px solid rgba(255,255,255,0.06)' }}>
                     <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:7 }}>
-                      <span style={{ fontSize:13,fontWeight:600,color:'#e2d9f3',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'55%' }}>{c.name}</span>
+                      <span style={{ fontSize:13,fontWeight:600,color:'var(--text-soft)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'55%' }}>{c.name}</span>
                       <div style={{ display:'flex',gap:10,fontSize:11,color:'#6b7280' }}>
                         <span>{c.emails_sent} <span style={{ color:'#4b5563' }}>sent</span></span>
                         <span style={{ color:'#4ade80' }}>{c.replies} <span style={{ color:'#4b5563' }}>replies</span></span>
@@ -593,9 +593,9 @@ export default function SDROverviewTab() {
           GENERATE LEADS MODAL
           ================================================================ */}
       <Dialog open={showGenModal} onOpenChange={setShowGenModal}>
-        <DialogContent style={{ background:'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)',border:'1px solid #2d1f4a',color:'#e2d9f3',maxWidth:480 }}>
+        <DialogContent style={{ background:'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)',border:'1px solid var(--line-1)',color:'var(--text-soft)',maxWidth:480 }}>
           <DialogHeader>
-            <DialogTitle style={{ color:'#e2d9f3',display:'flex',alignItems:'center',gap:8 }}>
+            <DialogTitle style={{ color:'var(--text-soft)',display:'flex',alignItems:'center',gap:8 }}>
               <Zap size={18} color="#a855f7" /> Generate Leads Automatically
             </DialogTitle>
           </DialogHeader>
@@ -613,11 +613,11 @@ export default function SDROverviewTab() {
                   <button key={s.key} onClick={() => setGenSource(s.key)} style={{
                     flex:1, padding:'10px 14px', borderRadius:10, cursor:'pointer', textAlign:'left',
                     background: genSource===s.key ? `${s.color}22` : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${genSource===s.key ? s.color : '#2d1f4a'}`,
+                    border: `1px solid ${genSource===s.key ? s.color : 'var(--line-1)'}`,
                     transition:'all 0.2s',
                   }}>
                     <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center' }}>
-                      <span style={{ color:'#e2d9f3',fontWeight:600,fontSize:14 }}>{s.label}</span>
+                      <span style={{ color:'var(--text-soft)',fontWeight:600,fontSize:14 }}>{s.label}</span>
                       <div style={{ display:'flex',alignItems:'center',gap:5 }}>
                         <span style={{ fontSize:10,padding:'1px 6px',borderRadius:4,background:'rgba(234,179,8,0.15)',color:'#fcd34d' }}>PAID</span>
                         <span
@@ -647,9 +647,9 @@ export default function SDROverviewTab() {
               </div>
             )}
             {icpProfiles.length === 1 && (
-              <div style={{ padding:'8px 12px',borderRadius:8,background:'rgba(168,85,247,0.08)',border:'1px solid #2d1f4a' }}>
+              <div style={{ padding:'8px 12px',borderRadius:8,background:'rgba(168,85,247,0.08)',border:'1px solid var(--line-1)' }}>
                 <span style={{ color:'#9ca3af',fontSize:12 }}>ICP: </span>
-                <span style={{ color:'#e2d9f3',fontSize:13,fontWeight:600 }}>{icpProfiles[0].name}</span>
+                <span style={{ color:'var(--text-soft)',fontSize:13,fontWeight:600 }}>{icpProfiles[0].name}</span>
               </div>
             )}
             {icpProfiles.length === 0 && (
@@ -672,8 +672,8 @@ export default function SDROverviewTab() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border:'1px solid #2d1f4a',color:'#9ca3af',borderRadius:8 }}>Cancel</Button>
-            <Button onClick={handleGenerate} disabled={generating || icpProfiles.length === 0} style={{ background:'linear-gradient(90deg,#7c3aed,#a855f7)',color:'#fff',border:'none',borderRadius:8,fontWeight:600,display:'flex',alignItems:'center',gap:6 }}>
+            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border:'1px solid var(--line-1)',color:'#9ca3af',borderRadius:8 }}>Cancel</Button>
+            <Button onClick={handleGenerate} disabled={generating || icpProfiles.length === 0} style={{ background:'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)',color:'#fff',border:'none',borderRadius:8,fontWeight:600,display:'flex',alignItems:'center',gap:6 }}>
               {generating ? <Loader2 size={13} style={{ animation:'spin 1s linear infinite' }} /> : <Zap size={13} />}
               {generating ? 'Generating...' : `Generate ${genCount} Leads`}
             </Button>
@@ -685,9 +685,9 @@ export default function SDROverviewTab() {
           SETUP GUIDE MODAL
           ================================================================ */}
       <Dialog open={!!showSetupGuide} onOpenChange={() => setShowSetupGuide(null)}>
-        <DialogContent style={{ background:'linear-gradient(135deg,#0f0a1f 0%,#14082a 100%)',border:'1px solid #2d1f4a',color:'#e2d9f3',maxWidth:560,maxHeight:'85vh',overflowY:'auto' }}>
+        <DialogContent style={{ background:'linear-gradient(135deg,var(--sfc-0f0a1f) 0%,var(--sfc-14082a) 100%)',border:'1px solid var(--line-1)',color:'var(--text-soft)',maxWidth:560,maxHeight:'85vh',overflowY:'auto' }}>
           <DialogHeader>
-            <DialogTitle style={{ color:'#e2d9f3',display:'flex',alignItems:'center',gap:8 }}>
+            <DialogTitle style={{ color:'var(--text-soft)',display:'flex',alignItems:'center',gap:8 }}>
               {showSetupGuide === 'apify'
                 ? <><span style={{ fontSize:20 }}>⚡</span> How to Connect Apify</>
                 : <><span style={{ fontSize:20 }}>🚀</span> How to Connect Apollo.io</>}
@@ -701,7 +701,7 @@ export default function SDROverviewTab() {
           <DialogFooter>
             <Button
               onClick={() => { setGenSource(showSetupGuide); setShowSetupGuide(null); }}
-              style={{ background: showSetupGuide === 'apify' ? 'linear-gradient(90deg,#7c3aed,#a855f7)' : 'linear-gradient(90deg,#1d4ed8,#3b82f6)', color:'#fff',border:'none',borderRadius:8,fontWeight:600 }}
+              style={{ background: showSetupGuide === 'apify' ? 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)' : 'linear-gradient(90deg,#1d4ed8,#3b82f6)', color:'#fff',border:'none',borderRadius:8,fontWeight:600 }}
             >
               Got it — Use {showSetupGuide === 'apify' ? 'Apify' : 'Apollo.io'}
             </Button>

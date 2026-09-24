@@ -933,7 +933,7 @@ const ExecMeetingDashboard = () => {
               <Button
                 size="sm"
                 onClick={() => { setActiveTab('meetings'); setShowMeetingDialog(true); }}
-                className="bg-violet-500 hover:bg-violet-700 text-white font-semibold gap-1.5 h-8"
+                className="bg-violet-500 hover:bg-violet-700 text-pure-white font-semibold gap-1.5 h-8"
               >
                 <CalendarClock className="h-4 w-4" />
                 New Meeting
@@ -943,7 +943,7 @@ const ExecMeetingDashboard = () => {
               <Button
                 size="sm"
                 onClick={() => { setActiveTab('tasks'); setShowTaskDialog(true); }}
-                className="bg-sky-500 hover:bg-sky-700 text-white font-semibold gap-1.5 h-8"
+                className="bg-sky-500 hover:bg-sky-700 text-pure-white font-semibold gap-1.5 h-8"
               >
                 <ListChecks className="h-4 w-4" />
                 New Task
@@ -1249,7 +1249,7 @@ const ExecMeetingDashboard = () => {
       <div
         className="rounded-2xl p-4 sm:p-6"
         style={{
-          background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+          background: 'var(--app-hero-bg)',
           border: '1px solid rgba(162,89,255,0.13)',
           boxShadow: '0 0 40px 0 rgba(162,89,255,0.06)',
         }}
@@ -1257,7 +1257,7 @@ const ExecMeetingDashboard = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="rounded-xl p-2.5" style={{ background: 'linear-gradient(135deg, rgba(162,89,255,0.25), rgba(124,58,237,0.15))', boxShadow: '0 0 16px 0 rgba(162,89,255,0.2)' }}>
+            <div className="rounded-xl p-2.5" style={{ background: 'linear-gradient(135deg, rgba(162,89,255,0.25), hsl(var(--brand-600) / 0.15))', boxShadow: '0 0 16px 0 rgba(162,89,255,0.2)' }}>
               <CalendarClock className="h-6 w-6 text-violet-400" />
             </div>
             <div>
@@ -1291,9 +1291,9 @@ const ExecMeetingDashboard = () => {
                 </button>
               </HoverTip>
               {spotlightTooltip && (
-                <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-violet-400/40 bg-[#0d0b1f] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+                <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-violet-400/40 bg-[var(--sfc-0d0b1f)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
                   👋 Take the tour anytime from here
-                  <span className="absolute -top-1 right-6 h-2 w-2 bg-[#0d0b1f] border-t border-l border-violet-400/40 rotate-45" />
+                  <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--sfc-0d0b1f)] border-t border-l border-violet-400/40 rotate-45" />
                 </div>
               )}
               <style>{`
@@ -1404,7 +1404,7 @@ const ExecMeetingDashboard = () => {
 
       {/* Past tasks confirm dialog */}
       <Dialog open={showPastTasksConfirm} onOpenChange={open => { if (!open) setShowPastTasksConfirm(false); }}>
-        <DialogContent className="max-w-sm w-full bg-[#0d0b1f] border-white/10 text-white">
+        <DialogContent className="max-w-sm w-full bg-[var(--sfc-0d0b1f)] border-white/10 text-white">
           <div className="flex flex-col items-center gap-4 py-2">
             <div className="w-14 h-14 rounded-full bg-violet-500/10 flex items-center justify-center">
               <CalendarDays className="h-7 w-7 text-violet-400" />
@@ -1427,7 +1427,7 @@ const ExecMeetingDashboard = () => {
               </HoverTip>
               <HoverTip tip="Include all overdue / older tasks too" className="flex-1">
                 <Button
-                  className="w-full bg-violet-600 hover:bg-violet-700 text-white"
+                  className="w-full bg-violet-600 hover:bg-violet-700 text-pure-white"
                   onClick={() => { setIncludePastTasks(true); setShowPastTasksConfirm(false); }}
                 >
                   Yes, include all
@@ -1440,7 +1440,7 @@ const ExecMeetingDashboard = () => {
 
       {/* Task delete confirm dialog */}
       <Dialog open={!!confirmDeleteTaskId} onOpenChange={open => { if (!open) setConfirmDeleteTaskId(null); }}>
-        <DialogContent className="max-w-sm w-full bg-[#0d0b1f] border-white/10 text-white">
+        <DialogContent className="max-w-sm w-full bg-[var(--sfc-0d0b1f)] border-white/10 text-white">
           <div className="flex flex-col items-center gap-4 py-2">
             <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
               <Trash2 className="h-7 w-7 text-red-400" />
@@ -1462,7 +1462,7 @@ const ExecMeetingDashboard = () => {
               </Button>
               <HoverTip tip="Permanently delete this task" className="flex-1">
                 <Button
-                  className="w-full bg-red-500 hover:bg-red-600 text-white"
+                  className="w-full bg-red-500 hover:bg-red-600 text-pure-white"
                   disabled={!!deletingTaskId}
                   onClick={() => { deleteTask(confirmDeleteTaskId); setConfirmDeleteTaskId(null); }}
                 >
@@ -1481,7 +1481,7 @@ const ExecMeetingDashboard = () => {
       {/* Document viewer modal */}
       <Dialog open={!!viewDoc} onOpenChange={open => { if (!open) setViewDoc(null); }}>
         <DialogContent
-          className="max-w-3xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
+          className="max-w-3xl w-full bg-[var(--sfc-0d0b1f)] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
           {/* Header — pr-14 keeps the Download button clear of the dialog's

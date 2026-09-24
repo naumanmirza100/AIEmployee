@@ -189,7 +189,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
       {/* When the members panel is open the dialog widens and lays its
           content + the panel side by side (panel sits beside the dialog
           body, not on top of it). */}
-      <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-5xl' : 'max-w-3xl'}`}>
+      <DialogContent className={`bg-[var(--sfc-0d0b1f)] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-5xl' : 'max-w-3xl'}`}>
         <div className="flex gap-4 items-stretch">
           <div className="min-w-0 flex-1">
         <DialogHeader>
@@ -311,7 +311,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
                 className="bg-white/5 border-white/10 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed" />
               {searchLoading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
               {searchResults.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+                <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[var(--panel-1)] shadow-xl overflow-hidden">
                   {searchResults.map(u => (
                     <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => addUser(u)}
                       className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
@@ -395,7 +395,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
 // double-book on purpose or go back and pick another time.
 const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading }) => (
   <Dialog open={!!conflicts && conflicts.length > 0} onOpenChange={v => { if (!v) onCancel(); }}>
-    <DialogContent className="max-w-md bg-[#0d0b1f] border-white/10 text-white">
+    <DialogContent className="max-w-md bg-[var(--sfc-0d0b1f)] border-white/10 text-white">
       <DialogHeader>
         <DialogTitle className="text-amber-300">Time slot already booked</DialogTitle>
         <DialogDescription className="text-white/50">
@@ -418,7 +418,7 @@ const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading }) => (
       <DialogFooter>
         <Button variant="outline" onClick={onCancel} className="border-white/10 text-white/70">Pick another time</Button>
         <HoverTip tip="Book this slot despite the conflict">
-          <Button onClick={onConfirm} disabled={loading} className="bg-amber-600 hover:bg-amber-700 text-white border-0">
+          <Button onClick={onConfirm} disabled={loading} className="bg-amber-600 hover:bg-amber-700 text-pure-white border-0">
             {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Add anyway
           </Button>
@@ -543,7 +543,7 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl bg-[#0d0b1f] border-white/10 text-white">
+      <DialogContent className="max-w-3xl bg-[var(--sfc-0d0b1f)] border-white/10 text-white">
         <DialogHeader>
           <DialogTitle>Edit Meeting</DialogTitle>
           <DialogDescription className="text-white/50">Update meeting details. All participants will receive an email notification.</DialogDescription>
@@ -720,7 +720,7 @@ export const AssigneePicker = ({ assignees, onChange, onViewAll, viewingAll = fa
           />
           {searching && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-white/40" />}
           {results.length > 0 && (
-            <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl overflow-hidden">
+            <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[var(--panel-1)] shadow-xl overflow-hidden">
               {results.map(u => (
                 <button key={`${u.user_type || 'cu'}-${u.id}`} onClick={() => add(u)}
                   className="w-full flex items-center gap-3 px-3 py-2 hover:bg-violet-500/20 transition-colors text-left">
@@ -881,7 +881,7 @@ export const AddTaskDialog = ({ open, onClose, onCreated, parentTask, prefill = 
   return (
     <>
     <Dialog open={open} onOpenChange={v => { if (!v) reset(); onClose(); }}>
-      <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-3xl' : 'max-w-lg'}`}>
+      <DialogContent className={`bg-[var(--sfc-0d0b1f)] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-3xl' : 'max-w-lg'}`}>
         <div className="flex gap-4 items-stretch">
           <div className="min-w-0 flex-1">
         <DialogHeader>
@@ -1105,7 +1105,7 @@ export const TaskEditDialog = ({ task, onClose, onUpdated }) => {
   return (
     <>
     <Dialog open={!!task} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className={`bg-[#0d0b1f] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-3xl' : 'max-w-lg'}`}>
+      <DialogContent className={`bg-[var(--sfc-0d0b1f)] border-white/10 text-white transition-[max-width] ${showAllMembers ? 'max-w-3xl' : 'max-w-lg'}`}>
         <div className="flex gap-4 items-stretch">
           <div className="min-w-0 flex-1">
         <DialogHeader>

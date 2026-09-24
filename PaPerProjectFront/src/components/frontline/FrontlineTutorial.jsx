@@ -493,7 +493,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
       {/* Tooltip — bottom sheet on mobile, positioned tooltip on desktop */}
       <div
         ref={tooltipRef}
-        className={`fixed z-[10000] border border-[#3a295a] bg-[#161630] shadow-2xl ${
+        className={`fixed z-[10000] border border-[var(--line-2)] bg-[var(--panel-4)] shadow-2xl ${
           isMobile ? 'rounded-t-2xl' : 'rounded-xl'
         }`}
         style={
@@ -554,7 +554,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
               key={i}
               className="flex-1 h-1 rounded-full transition-colors"
               style={{
-                background: i === index ? '#f59e0b' : i < index ? '#a78bfa66' : '#3a295a',
+                background: i === index ? '#f59e0b' : i < index ? '#a78bfa66' : 'var(--line-2)',
               }}
             />
           ))}
@@ -591,7 +591,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
               <button
                 type="button"
                 onClick={handlePrev}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border border-[#3a295a] bg-[#1a1333] text-white/70 hover:bg-[#231845] hover:text-white transition"
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border border-[var(--line-2)] bg-[var(--panel-1)] text-white/70 hover:bg-[var(--sfc-231845)] hover:text-white transition"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
                 Back
@@ -632,7 +632,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
           <div
             role="alertdialog"
             aria-modal="true"
-            className="fixed z-[10002] rounded-xl border border-[#3a295a] bg-[#161630] shadow-2xl"
+            className="fixed z-[10002] rounded-xl border border-[var(--line-2)] bg-[var(--panel-4)] shadow-2xl"
             style={{
               top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
               width: 'min(400px, calc(100vw - 32px))', padding: '1.25rem 1.5rem',
@@ -651,7 +651,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
             </div>
             <div className="flex items-center justify-end gap-2 mt-4">
               <button type="button" onClick={handleRestart}
-                className="px-3.5 py-1.5 text-xs font-semibold rounded-md border border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white transition">
+                className="px-3.5 py-1.5 text-xs font-semibold rounded-md border border-[var(--line-2)] bg-[var(--panel-1)] text-white/80 hover:bg-[var(--sfc-231845)] hover:text-white transition">
                 Start over
               </button>
               <button type="button" onClick={handleResume} autoFocus
@@ -678,7 +678,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="flt-skip-title"
-            className="fixed z-[10002] rounded-xl border border-[#3a295a] bg-[#161630] shadow-2xl"
+            className="fixed z-[10002] rounded-xl border border-[var(--line-2)] bg-[var(--panel-4)] shadow-2xl"
             style={{
               top: '50%',
               left: '50%',
@@ -716,7 +716,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
                 type="button"
                 onClick={cancelSkip}
                 autoFocus
-                className="px-3.5 py-1.5 text-xs font-semibold rounded-md border border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white transition"
+                className="px-3.5 py-1.5 text-xs font-semibold rounded-md border border-[var(--line-2)] bg-[var(--panel-1)] text-white/80 hover:bg-[var(--sfc-231845)] hover:text-white transition"
               >
                 Continue tour
               </button>

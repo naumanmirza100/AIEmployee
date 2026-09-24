@@ -428,14 +428,14 @@ const Interviews = ({ onUpdate }) => {
             className="h-8 rounded-lg border border-white/15 bg-white/5 text-white text-xs px-2 pr-6 appearance-none cursor-pointer focus:outline-none focus:border-violet-500"
           >
             {[5, 10, 25, 100].map(n => (
-              <option key={n} value={n} className="bg-[#0d0d1a]">{n}</option>
+              <option key={n} value={n} className="bg-[var(--sfc-0d0d1a)]">{n}</option>
             ))}
           </select>
         </div>
       </div>
 
       {interviews.length === 0 ? (
-        <Card id="REC-interviews-empty-state" data-testid="REC-interviews-empty-state" className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-interviews-empty-state" data-testid="REC-interviews-empty-state" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
           <CardContent className="py-8 sm:py-12 text-center">
             <CalendarIcon className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-white/40 mb-4" />
             <p className="text-base sm:text-lg font-medium mb-2 text-white">No interviews yet</p>
@@ -455,7 +455,7 @@ const Interviews = ({ onUpdate }) => {
       ) : (
         <div id="REC-interviews-list" data-testid="REC-interviews-list" className="space-y-3 sm:space-y-4">
           {interviews.map((interview) => (
-            <Card key={interview.id} id={`REC-interviews-row-${interview.id}`} data-testid={`REC-interviews-row-${interview.id}`} className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm">
+            <Card key={interview.id} id={`REC-interviews-row-${interview.id}`} data-testid={`REC-interviews-row-${interview.id}`} className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm">
               <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-4">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 sm:gap-4">
                   <div className="min-w-0 flex-1">
@@ -549,7 +549,7 @@ const Interviews = ({ onUpdate }) => {
                             disabled={mlState.saving}
                           />
                           <button id={`REC-interviews-meeting-link-save-btn-${interview.id}`} data-testid={`REC-interviews-meeting-link-save-btn-${interview.id}`} onClick={() => saveMeetingLink(interview)} disabled={mlState.saving}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-3 py-1 text-xs font-medium text-white transition-colors whitespace-nowrap">
+                            className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-3 py-1 text-xs font-medium text-pure-white transition-colors whitespace-nowrap">
                             {mlState.saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
                             Save & Resend Email
                           </button>
@@ -617,7 +617,7 @@ const Interviews = ({ onUpdate }) => {
                         <MoreVertical className="h-4 w-4" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-52 bg-[#0d0d1a] border-white/15 text-white z-50" align="end">
+                    <DropdownMenuContent className="w-52 bg-[var(--sfc-0d0d1a)] border-white/15 text-white z-50" align="end">
 
                       {/* Change Status */}
                       <DropdownMenuSub>
@@ -625,7 +625,7 @@ const Interviews = ({ onUpdate }) => {
                           <RefreshCw className="h-3.5 w-3.5 text-white/50" />
                           <span className="text-sm">Change Status</span>
                         </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent className="bg-[#0d0d1a] border-white/15 text-white w-44">
+                        <DropdownMenuSubContent className="bg-[var(--sfc-0d0d1a)] border-white/15 text-white w-44">
                           {[
                             { v: 'PENDING',     label: 'Pending'     },
                             { v: 'SCHEDULED',   label: 'Scheduled'   },
@@ -659,7 +659,7 @@ const Interviews = ({ onUpdate }) => {
                           <span className="text-sm">Change Decision</span>
                           {interview.status !== 'COMPLETED' && <Lock className="h-3 w-3 text-white/30 ml-auto" />}
                         </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent className="bg-[#0d0d1a] border-white/15 text-white w-52">
+                        <DropdownMenuSubContent className="bg-[var(--sfc-0d0d1a)] border-white/15 text-white w-52">
                           {interview.status !== 'COMPLETED' ? (
                             <div className="px-3 py-2.5 space-y-1">
                               <div className="flex items-center gap-1.5 text-amber-400/80">
@@ -793,7 +793,7 @@ const Interviews = ({ onUpdate }) => {
           style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
           onClick={() => setFeedbackModal(null)}>
           <div className="w-full max-w-md rounded-2xl p-5 space-y-4"
-            style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', border: '1px solid rgba(167,139,250,0.25)' }}
+            style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', border: '1px solid rgba(167,139,250,0.25)' }}
             onClick={(e) => e.stopPropagation()}>
             <div>
               <h3 className="text-base font-bold text-white">Interview Feedback</h3>
@@ -803,7 +803,7 @@ const Interviews = ({ onUpdate }) => {
             {/* Decision banner — shown when opened from decision change */}
             {feedbackModal.pendingDecision && (
               <div className="flex items-start gap-2.5 rounded-lg px-3 py-2.5"
-                style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(167,139,250,0.3)' }}>
+                style={{ background: 'hsl(var(--brand-600) / 0.15)', border: '1px solid rgba(167,139,250,0.3)' }}>
                 <Award className="h-4 w-4 text-violet-400 shrink-0 mt-0.5" />
                 <div>
                   <p className="text-xs font-semibold text-violet-300">
@@ -854,7 +854,7 @@ const Interviews = ({ onUpdate }) => {
               </button>
               <button id="REC-interviews-feedback-save-btn" data-testid="REC-interviews-feedback-save-btn" onClick={handleFeedbackSubmit} disabled={feedbackSubmitting || !feedbackModal.rating}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50 flex items-center gap-2"
-                style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}>
+                style={{ background: 'linear-gradient(90deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)' }}>
                 {feedbackSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 Save Feedback
               </button>
@@ -869,7 +869,7 @@ const Interviews = ({ onUpdate }) => {
           style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
           onClick={() => setPendingChange(null)}>
           <div className="w-full max-w-sm rounded-2xl p-6"
-            style={{ background: 'linear-gradient(135deg, #0d0d1a 0%, #0a1020 100%)', border: '1px solid rgba(167,139,250,0.25)' }}
+            style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', border: '1px solid rgba(167,139,250,0.25)' }}
             onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-bold text-white mb-1">Confirm Change</h3>
             <p className="text-sm text-white/60 mb-1">
@@ -887,7 +887,7 @@ const Interviews = ({ onUpdate }) => {
               </button>
               <button id="REC-interviews-confirm-change-confirm-btn" data-testid="REC-interviews-confirm-change-confirm-btn" onClick={handleConfirmChange} disabled={!!updatingId}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
-                style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}>
+                style={{ background: 'linear-gradient(90deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)' }}>
                 {updatingId ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yes, Update'}
               </button>
             </div>

@@ -202,7 +202,7 @@ export const MeetingsPanel = ({
             </HoverTip>
           )}
           <HoverTip tip="Schedule a new meeting">
-            <Button size="sm" onClick={() => setShowMeetingDialog(true)} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
+            <Button size="sm" onClick={() => setShowMeetingDialog(true)} style={{ background: 'linear-gradient(90deg, hsl(var(--brand-accent)) 0%, hsl(var(--brand-600)) 100%)' }} className="text-pure-white border-0 hover:opacity-90">
               <Plus className="h-4 w-4 mr-1" /> Schedule
             </Button>
           </HoverTip>
@@ -303,7 +303,7 @@ export const MeetingsPanel = ({
       {/* ── Meeting detail card pop-up (details + People/Notes buttons) ── */}
       <Dialog open={!!openMeeting} onOpenChange={open => { if (!open) closeAll(); }}>
         <DialogContent
-          className="max-w-xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
+          className="max-w-xl w-full bg-[var(--sfc-0d0b1f)] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
           {openMeeting && (() => {
@@ -410,7 +410,7 @@ export const MeetingsPanel = ({
 
       {/* ── People modal ── */}
       <Dialog open={peopleOpen && !!openMeeting} onOpenChange={o => { if (!o) discardPeopleChanges(); else setPeopleOpen(true); }}>
-        <DialogContent className={`w-full bg-[#0d0b1f] border-white/10 text-white flex flex-col overflow-hidden transition-[max-width] duration-200 ${showAllMembers ? 'max-w-3xl h-[80vh]' : 'max-w-md max-h-[85vh]'}`}>
+        <DialogContent className={`w-full bg-[var(--sfc-0d0b1f)] border-white/10 text-white flex flex-col overflow-hidden transition-[max-width] duration-200 ${showAllMembers ? 'max-w-3xl h-[80vh]' : 'max-w-md max-h-[85vh]'}`}>
           {openMeeting && (() => {
             const m = openMeeting;
             const parts = draftParts;
@@ -470,7 +470,7 @@ export const MeetingsPanel = ({
                           <button
                             type="button"
                             onClick={() => toggleParticipantSel(p.user_id)}
-                            className={`h-4 w-4 shrink-0 rounded flex items-center justify-center border transition-colors ${checked ? 'bg-red-500 border-red-500 text-white' : 'border-white/25 hover:border-violet-400'}`}
+                            className={`h-4 w-4 shrink-0 rounded flex items-center justify-center border transition-colors ${checked ? 'bg-red-500 border-red-500 text-pure-white' : 'border-white/25 hover:border-violet-400'}`}
                             aria-label={checked ? 'Deselect' : 'Select'}
                           >
                             {checked && <Check className="h-3 w-3" />}
@@ -519,7 +519,7 @@ export const MeetingsPanel = ({
                       <span className="text-violet-300/60 text-[10px]">An email will be sent</span>
                       <button
                         onClick={() => { addParticipant(m.id, pendingUser); setPendingAddMap(prev => ({ ...prev, [m.id]: null })); setUserSearchQ(''); setUserSearchResults([]); }}
-                        className="px-2.5 py-1 rounded text-[11px] bg-violet-600 text-white hover:bg-violet-700 transition-colors font-medium">
+                        className="px-2.5 py-1 rounded text-[11px] bg-violet-600 text-pure-white hover:bg-violet-700 transition-colors font-medium">
                         Confirm
                       </button>
                       <button
@@ -543,7 +543,7 @@ export const MeetingsPanel = ({
                       <Loader2 className="absolute right-2 top-2 h-4 w-4 animate-spin text-white/40" />
                     )}
                     {userSearchResults.length > 0 && (
-                      <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[#1a1333] shadow-xl max-h-56 overflow-y-auto">
+                      <div className="absolute z-50 w-full mt-1 rounded-xl border border-white/10 bg-[var(--panel-1)] shadow-xl max-h-56 overflow-y-auto">
                         {userSearchResults.map(u => (
                           <button key={u.id}
                             onClick={() => { draftAddParticipant(u); setUserSearchResults([]); }}
@@ -608,7 +608,7 @@ export const MeetingsPanel = ({
                     : 'No changes'}
                 </p>
                 <Button size="sm" onClick={() => commitPeopleChanges(m.id)}
-                  className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5 shrink-0">
+                  className="bg-violet-600 hover:bg-violet-700 text-pure-white gap-1.5 shrink-0">
                   <Check className="h-4 w-4" />
                   {hasDraftChanges ? 'Save & send' : 'Done'}
                 </Button>
@@ -623,7 +623,7 @@ export const MeetingsPanel = ({
       <Dialog open={notesModalOpen && !!openMeeting} onOpenChange={setNotesModalOpen}>
         <DialogContent
           hideClose
-          className="max-w-2xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
+          className="max-w-2xl w-full bg-[var(--sfc-0d0b1f)] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
           {openMeeting && (() => {
@@ -712,7 +712,7 @@ export const MeetingsPanel = ({
                     />
                     <HoverTip tip="after adding a transcript, extract summary and action items with AI">
                       <Button size="sm" onClick={() => submitTranscript(m.id)} disabled={notesLoading}
-                        className="bg-violet-600 hover:bg-violet-700 text-white">
+                        className="bg-violet-600 hover:bg-violet-700 text-pure-white">
                         {notesLoading ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Processing…</> : <><FileText className="h-3.5 w-3.5 mr-1.5" />Generate Notes with AI</>}
                       </Button>
                     </HoverTip>
@@ -722,7 +722,7 @@ export const MeetingsPanel = ({
                 {/* Notes save as you go; this just closes the panel and goes back. */}
                 <div className="flex justify-end px-6 py-3 border-t border-white/10 flex-shrink-0">
                   <Button size="sm" onClick={() => setNotesModalOpen(false)}
-                    className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5">
+                    className="bg-violet-600 hover:bg-violet-700 text-pure-white gap-1.5">
                     <ChevronLeft className="h-4 w-4" /> Back
                   </Button>
                 </div>
