@@ -1,0 +1,28 @@
+name: Deploy to VPS
+
+# Runs whenever main is updated (direct push or a merged PR). Pulls the
+# latest code on the VPS and rebuilds the Docker stack — the same two
+# commands you'd run by hand:
+#   git pull && docker compose up --build -d
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {} # lets you trigger it manually from the Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/AIEmployee
+            git pull
+            docker compose up --build -d
+            docker image prune -f
