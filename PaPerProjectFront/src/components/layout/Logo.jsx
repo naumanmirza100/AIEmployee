@@ -4,8 +4,8 @@ import React from 'react';
  * Brand logo: the Pay Per Project icon image + wordmark.
  * The image lives in /public/logo.png so it is served from the site root.
  *
- * Wordmark style: "PAY PER" on top (white), "PROJECT" below in a
- * blue→purple gradient, uppercase and bold.
+ * Wordmark style: "PAY PER" on top in the theme's foreground colour (dark on
+ * light, white on dark), "PROJECT" below in a blue→purple gradient.
  *
  * Props:
  *  - className: extra classes for the wrapper
@@ -28,8 +28,8 @@ const Logo = ({
       />
       {showText && (
         <span className={`font-heading font-extrabold uppercase leading-[1.05] tracking-tight ${textSizeClassName}`}>
-          <span className="block text-white">
-            Pay <span className="text-white/70">Per</span>
+          <span className="block text-foreground">
+            Pay <span className="text-foreground/60">Per</span>
           </span>
           <span className="block bg-gradient-to-r from-blue-500 to-purple-600 bg-clip-text text-transparent">
             Project
