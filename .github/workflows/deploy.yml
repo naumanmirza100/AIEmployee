@@ -14,16 +14,53 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy over SSH
+      # The SSH handshake to the VPS is occasionally flaky (i/o timeout on
+      # port 22 with no rejection — just no response in time) even though
+      # sshd and the firewall are both fine; the next attempt usually goes
+      # through. Three identical attempts, each allowed to fail without
+      # failing the job, so a one-off network hiccup doesn't need a manual
+      # re-run — only if all three fail does the job actually fail.
+      - name: Deploy over SSH (attempt 1)
+        id: attempt1
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          # A full image rebuild on the VPS (no layer cache hit) can take
-          # several minutes on its own — the action's own default (10m) was
-          # timing out mid-build even though the deploy itself was still
-          # succeeding. Give it real headroom.
+          command_timeout: 30m
+          script: |
+            set -e
+            cd /opt/AIEmployee
+            git pull
+            docker compose up --build -d
+            docker image prune -f
+
+      - name: Deploy over SSH (attempt 2)
+        id: attempt2
+        if: steps.attempt1.outcome == 'failure'
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 30m
+          script: |
+            set -e
+            cd /opt/AIEmployee
+            git pull
+            docker compose up --build -d
+            docker image prune -f
+
+      - name: Deploy over SSH (attempt 3)
+        id: attempt3
+        if: steps.attempt1.outcome == 'failure' && steps.attempt2.outcome == 'failure'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 30m
           script: |
             set -e
