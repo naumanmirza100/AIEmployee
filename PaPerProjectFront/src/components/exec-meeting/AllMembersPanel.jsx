@@ -74,7 +74,7 @@ export const AllMembersPanel = ({ open, onClose, selected = [], onToggle, fullWi
     // Attached to the right edge of the dialog. It's a sibling of the dialog
     // content (rendered by the parent inside the same portal), sitting flush
     // against it rather than overlaying it.
-    <div className={`flex flex-col rounded-2xl border border-white/10 bg-[#0d0b1f] text-white overflow-hidden ${fullWidth ? 'w-full h-full max-h-full' : 'w-72 shrink-0 max-h-[80vh]'}`}>
+    <div className={`flex flex-col rounded-2xl border border-white/10 bg-[var(--sfc-0d0b1f)] text-white overflow-hidden ${fullWidth ? 'w-full h-full max-h-full' : 'w-72 shrink-0 max-h-[80vh]'}`}>
       {/* No close ✕ here — the panel is toggled from its parent ("View all
           members" / "Hide all members"), and its own ✕ used to overlap the host
           dialog's built-in close button. */}
@@ -135,7 +135,7 @@ export const AllMembersPanel = ({ open, onClose, selected = [], onToggle, fullWi
                 <span
                   className={`h-5 w-5 rounded-full flex items-center justify-center shrink-0 transition ${
                     isSelected
-                      ? 'bg-violet-500 text-white'
+                      ? 'bg-violet-500 text-pure-white'
                       : 'border border-white/20 text-transparent'
                   }`}
                 >

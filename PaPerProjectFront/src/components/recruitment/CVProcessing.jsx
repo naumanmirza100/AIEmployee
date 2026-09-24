@@ -271,7 +271,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
       className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
       style={{
         background:
-          'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+          'var(--app-hero-bg)',
       }}
     >
       <div className="p-4 md:p-6 lg:p-8 space-y-6 w-full max-w-full">
@@ -298,7 +298,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
         </div>
 
         {/* Upload Form Card */}
-        <Card id="REC-cvprocessing-upload-card" data-testid="REC-cvprocessing-upload-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-cvprocessing-upload-card" data-testid="REC-cvprocessing-upload-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
           <CardHeader className="p-4 sm:p-6">
             <CardTitle className="text-lg sm:text-xl text-white">Process CV Files</CardTitle>
             <CardDescription className="text-xs sm:text-sm text-white/60">
@@ -319,7 +319,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                   multiple
                   accept=".pdf,.doc,.docx"
                   onChange={handleFileChange}
-                  className="text-sm bg-black/30 border-white/20 text-white file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+                  className="text-sm bg-black/30 border-white/20 text-pure-white file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
                 />
               </div>
               {files.length > 0 && (
@@ -349,7 +349,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                   <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
                 </button>
                 {jobSearchOpen && (
-                  <div id="REC-cvprocessing-job-dropdown" data-testid="REC-cvprocessing-job-dropdown" className="absolute z-50 mt-1 w-full bg-[#1a1a2e] border border-white/20 rounded-md shadow-xl overflow-hidden">
+                  <div id="REC-cvprocessing-job-dropdown" data-testid="REC-cvprocessing-job-dropdown" className="absolute z-50 mt-1 w-full bg-[var(--sfc-1a1a2e)] border border-white/20 rounded-md shadow-xl overflow-hidden">
                     <div className="flex items-center border-b border-white/10 px-3">
                       <Search className="h-4 w-4 text-white/40 shrink-0" />
                       <input
@@ -506,7 +506,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
 
         {/* Results */}
         {results && results.results && (
-          <Card id="REC-cvprocessing-results-card" data-testid="REC-cvprocessing-results-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
+          <Card id="REC-cvprocessing-results-card" data-testid="REC-cvprocessing-results-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
             <CardHeader className="p-4 sm:p-6">
               <CardTitle className="text-lg sm:text-xl text-white">Processing Results</CardTitle>
               <CardDescription className="text-xs sm:text-sm text-white/60">

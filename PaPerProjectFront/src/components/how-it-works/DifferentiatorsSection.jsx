@@ -56,7 +56,7 @@ const DifferentiatorsSection = () => {
                     <feature.icon className="h-6 w-6 text-primary" />
                   </div>
                   {feature.badge && (
-                    <div className="text-xs font-bold uppercase tracking-wider text-white bg-primary px-3 py-1 rounded-full">
+                    <div className="text-xs font-bold uppercase tracking-wider text-pure-white bg-primary px-3 py-1 rounded-full">
                       {feature.badge}
                     </div>
                   )}

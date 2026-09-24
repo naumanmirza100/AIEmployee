@@ -860,7 +860,7 @@ import React from 'react';
     
             <section className="py-24">
               <div className="container mx-auto px-4">
-                <div className="bg-gradient-to-r from-gray-900 to-black rounded-2xl p-8 md:p-16 text-center text-white shadow-2xl relative overflow-hidden">
+                <div className="bg-gradient-to-r from-gray-900 to-black rounded-2xl p-8 md:p-16 text-center text-pure-white shadow-2xl relative overflow-hidden">
                     <div className="absolute inset-0 -z-10 opacity-10">
                         <img-replace alt="Abstract AI network visualization" className="w-full h-full object-cover" />
                     </div>

@@ -272,7 +272,7 @@ export default function ApplicationTrackerPage() {
   /* ── loading ── */
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0f0f23' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--sfc-0f0f23)' }}>
         <div className="text-center space-y-4">
           <Loader2 className="w-10 h-10 animate-spin text-indigo-400 mx-auto" />
           <p className="text-white/50 text-sm">Loading your application…</p>
@@ -284,10 +284,10 @@ export default function ApplicationTrackerPage() {
   /* ── error ── */
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: '#0f0f23' }}>
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--sfc-0f0f23)' }}>
         <div
           className="max-w-md w-full rounded-2xl p-8 text-center space-y-4"
-          style={{ background: '#1a1a2e', border: '1px solid rgba(239,68,68,0.2)' }}
+          style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid rgba(239,68,68,0.2)' }}
         >
           <div
             className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center"
@@ -310,7 +310,7 @@ export default function ApplicationTrackerPage() {
   const appDate = fmt(application.applied_at);
 
   return (
-    <div className="min-h-screen px-4 py-10 pb-20" style={{ background: '#0f0f23' }}>
+    <div className="min-h-screen px-4 py-10 pb-20" style={{ background: 'var(--sfc-0f0f23)' }}>
       <div className="max-w-lg mx-auto space-y-4">
 
         {/* ── Page header ── */}
@@ -328,7 +328,7 @@ export default function ApplicationTrackerPage() {
         {/* ── Candidate + Job card ── */}
         <div
           className="rounded-2xl p-5"
-          style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.07)' }}
+          style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid rgba(255,255,255,0.07)' }}
         >
           {/* Job header */}
           <div className="flex items-start gap-3 pb-4 border-b border-white/[0.06] mb-4">
@@ -388,7 +388,7 @@ export default function ApplicationTrackerPage() {
         {/* ── Timeline card ── */}
         <div
           className="rounded-2xl p-5"
-          style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.07)' }}
+          style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid rgba(255,255,255,0.07)' }}
         >
           <p className="text-xs font-bold text-white/30 uppercase tracking-wider mb-5">Application Journey</p>
           <Timeline steps={steps} />
@@ -398,7 +398,7 @@ export default function ApplicationTrackerPage() {
         {interview && (
           <div
             className="rounded-2xl p-5"
-            style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.07)' }}
+            style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid rgba(255,255,255,0.07)' }}
           >
             <InterviewCard interview={interview} backendBase={backendBase} />
           </div>

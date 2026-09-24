@@ -26,7 +26,7 @@ class ErrorBoundary extends React.Component {
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
             className="px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors"
-            style={{ background: 'rgba(124,58,237,0.7)' }}
+            style={{ background: 'hsl(var(--brand-600) / 0.7)' }}
           >
             Retry
           </button>

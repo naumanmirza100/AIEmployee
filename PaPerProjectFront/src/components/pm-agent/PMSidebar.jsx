@@ -45,7 +45,7 @@ export default function PMSidebar({
         collapsed ? 'w-[64px]' : 'w-[220px]'
       }`}
       style={{
-        background: 'linear-gradient(180deg, #0d0b1f 0%, #0f0a20 100%)',
+        background: 'linear-gradient(180deg, var(--sfc-0d0b1f) 0%, var(--sfc-0f0a20) 100%)',
         maxHeight: 'calc(100vh - 2rem)',
       }}
     >
@@ -157,7 +157,7 @@ function NavButton({ onClick, active, collapsed, icon: Icon, label, trailing }) 
   }, [collapsed]);
 
   const baseCls = active
-    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm'
+    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-pure-white shadow-sm'
     : 'text-white/60 hover:text-white hover:bg-white/[0.05]';
 
   return (
@@ -183,7 +183,7 @@ function NavButton({ onClick, active, collapsed, icon: Icon, label, trailing }) 
       {collapsed && hovering && (
         <div
           role="tooltip"
-          className="absolute left-full top-1/2 -translate-y-1/2 ml-2 z-30 pointer-events-none whitespace-nowrap rounded-md border border-white/10 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg"
+          className="absolute left-full top-1/2 -translate-y-1/2 ml-2 z-30 pointer-events-none whitespace-nowrap rounded-md border border-white/10 bg-[var(--panel-4)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg"
         >
           {label}
         </div>

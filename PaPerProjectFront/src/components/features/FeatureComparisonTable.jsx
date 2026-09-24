@@ -57,7 +57,7 @@ const FeatureComparisonTable = () => {
                 <TableHead className="py-5 px-6 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider w-1/2">
                   {t('feature_comparison_feature')}
                 </TableHead>
-                <TableHead className="py-5 px-6 text-center text-xs font-bold text-white uppercase tracking-wider w-1/4 bg-gradient-to-br from-primary to-purple-600">
+                <TableHead className="py-5 px-6 text-center text-xs font-bold text-pure-white uppercase tracking-wider w-1/4 bg-gradient-to-br from-primary to-purple-600">
                   {t('feature_comparison_ppp')}
                 </TableHead>
                 <TableHead className="py-5 px-6 text-center text-xs font-bold text-muted-foreground uppercase tracking-wider w-1/4">

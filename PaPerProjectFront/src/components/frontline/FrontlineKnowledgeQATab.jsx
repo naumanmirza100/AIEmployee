@@ -106,7 +106,7 @@ export default function FrontlineKnowledgeQATab(props) {
     <div
       className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
       style={{
-        background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+        background: 'var(--app-hero-bg)',
       }}
     >
       <div className="flex w-full max-w-full relative">
@@ -119,7 +119,7 @@ export default function FrontlineKnowledgeQATab(props) {
           }`}
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
-            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, #0a0a0f 55%, #0a0a0f 100%)',
+            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
             borderRight: '1.5px solid rgba(255,255,255,0.10)',
             boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
             borderTopLeftRadius: 16,
@@ -303,18 +303,18 @@ export default function FrontlineKnowledgeQATab(props) {
               <div
                 style={{
                   width: '7px', height: '48px', borderRadius: '8px',
-                  background: 'linear-gradient(to bottom, #a259ff 0%, #6a1b9a 60%, #18122B 100%)',
+                  background: 'linear-gradient(to bottom, hsl(var(--brand-accent)) 0%, #6a1b9a 60%, #18122B 100%)',
                   marginLeft: '24px', marginRight: '18px',
-                  boxShadow: '0 0 8px 2px #a259ff44',
+                  boxShadow: '0 0 8px 2px hsl(var(--brand-accent) / 0.27)',
                 }}
               />
-              <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(124, 58, 237, 0.15)' }}>
+              <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
                 <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
               </div>
               <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
                   Knowledge Q&A
-                  <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'rgba(124, 58, 237, 0.15)', color: '#a78bfa' }}>
+                  <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}>
                     AI-Powered
                   </span>
                 </CardTitle>
@@ -497,7 +497,7 @@ export default function FrontlineKnowledgeQATab(props) {
               data-tour-qa="input"
               onSubmit={onAskQuestion}
               className="shrink-0"
-              style={{ background: '#0a0a0f', borderTop: '1px solid rgba(255,255,255,0.08)' }}
+              style={{ background: 'var(--panel-3)', borderTop: '1px solid rgba(255,255,255,0.08)' }}
             >
               <div className="mx-4 my-4 space-y-3 rounded-2xl px-4 py-4" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="space-y-2" data-tour-qa="scope">
@@ -649,7 +649,7 @@ export default function FrontlineKnowledgeQATab(props) {
                     rows={2}
                     disabled={answering}
                     className="min-h-[60px] resize-none flex-1"
-                    style={{ background: '#0e0e14', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#e2e2f0' }}
+                    style={{ background: 'var(--sfc-0e0e14)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#e2e2f0' }}
                   />
                   <Button type="submit" disabled={answering} size="icon" className="h-[60px] w-12 shrink-0">
                     {answering ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}

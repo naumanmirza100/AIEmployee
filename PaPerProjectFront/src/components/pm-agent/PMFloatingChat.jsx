@@ -384,7 +384,7 @@ const PMFloatingChat = () => {
       {/* Modal */}
       {open && createPortal(
         <div
-          className="fixed z-[9990] rounded-2xl border border-[#1e3a5f] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
+          className="fixed z-[9990] rounded-2xl border border-[var(--sfc-1e3a5f)] bg-[var(--sfc-0e0e14)] shadow-2xl flex flex-col overflow-hidden"
           style={geomStyle}
         >
           <ResizeCorner handleProps={resizeHandleProps} />
@@ -440,7 +440,7 @@ const PMFloatingChat = () => {
           </div>
 
           {/* Mode switcher */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 bg-[#0a0a0f]">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 bg-[var(--panel-3)]">
             <div data-tour-pmfc="mode-switch" className="flex gap-1 rounded-lg border border-white/10 p-0.5 flex-1">
               {Object.entries(MODES).map(([key, m]) => {
                 const Icon = m.icon;
@@ -468,7 +468,7 @@ const PMFloatingChat = () => {
 
           {/* Body */}
           {showHistory ? (
-            <div className="flex-1 overflow-y-auto p-3 space-y-1.5" style={{ background: '#0a0a0f' }}>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5" style={{ background: 'var(--panel-3)' }}>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">
                   {currentMode.label} · Recent conversations
@@ -498,7 +498,7 @@ const PMFloatingChat = () => {
               ))}
             </div>
           ) : (
-            <div data-tour-pmfc="messages" className="flex-1 overflow-y-auto p-3 space-y-2.5" style={{ background: '#0a0a0f' }}>
+            <div data-tour-pmfc="messages" className="flex-1 overflow-y-auto p-3 space-y-2.5" style={{ background: 'var(--panel-3)' }}>
               {currentConv.messages.length === 0 ? (
                 <div className="text-white/60">
                   <div className="text-center py-4">
@@ -607,14 +607,14 @@ const PMFloatingChat = () => {
 
           {/* Input row */}
           {!showHistory && (
-            <div className="border-t border-white/10 relative" style={{ background: '#0e0e14' }}>
+            <div className="border-t border-white/10 relative" style={{ background: 'var(--sfc-0e0e14)' }}>
               {currentConv.messages.length >= 2 && (
                 <div className="px-3 pt-2">
                   <ContextIndicator count={Math.min(currentConv.messages.length, 6)} />
                 </div>
               )}
               {slashOpen && filteredCommands.length > 0 && (
-                <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[#1e3a5f] bg-[#0a1929] shadow-2xl overflow-hidden">
+                <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[var(--sfc-1e3a5f)] bg-[var(--sfc-0a1929)] shadow-2xl overflow-hidden">
                   <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-white/40 font-semibold">
                     Commands · ↑↓ Tab/Enter to insert
                   </div>
@@ -660,7 +660,7 @@ const PMFloatingChat = () => {
                   placeholder={currentMode.placeholder}
                   rows={1}
                   disabled={sending || uploading}
-                  className="flex-1 resize-none rounded-lg border border-white/10 bg-[#0a0a0f] text-white text-sm px-3 py-2 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-cyan-400/60 min-h-[38px] max-h-[110px]"
+                  className="flex-1 resize-none rounded-lg border border-white/10 bg-[var(--panel-3)] text-white text-sm px-3 py-2 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-cyan-400/60 min-h-[38px] max-h-[110px]"
                 />
                 <button
                   type="button" data-tour-pmfc="send" onClick={send}

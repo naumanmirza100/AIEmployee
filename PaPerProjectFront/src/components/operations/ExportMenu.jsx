@@ -89,7 +89,7 @@ const ExportMenu = ({
         id="OPS-exportmenu-content"
         data-testid="OPS-exportmenu-content"
         align="end"
-        className="bg-[#1a1333] border border-white/10 text-white/90 min-w-[200px]"
+        className="bg-[var(--panel-1)] border border-white/10 text-white/90 min-w-[200px]"
       >
         <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-white/50 font-semibold">
           Download as

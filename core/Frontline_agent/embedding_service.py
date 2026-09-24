@@ -24,6 +24,19 @@ if not NUMPY_AVAILABLE:
 _LOCAL_IMPORT_FAILED = None
 
 
+# The OpenAI SDK defaults to a 600s timeout with 2 retries, so a stalled
+# embeddings request can hold a question open for half an hour. The UI just
+# shows "Searching knowledge base..." the whole time. Bound it instead: a
+# query embedding that has not come back in this many seconds is not going to
+# save the request, and failing fast lets retrieval fall back to keyword search.
+def _embedding_timeout() -> float:
+    return float(getattr(settings, 'EMBEDDING_HTTP_TIMEOUT_SECONDS', 30.0))
+
+
+def _embedding_max_retries() -> int:
+    return int(getattr(settings, 'EMBEDDING_HTTP_MAX_RETRIES', 1))
+
+
 class EmbeddingService:
     """
     Service for generating and managing embeddings for semantic search.
@@ -182,7 +195,9 @@ class EmbeddingService:
             from openai import OpenAI
             self.client = OpenAI(
                 api_key=openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1"
+                base_url="https://openrouter.ai/api/v1",
+                timeout=_embedding_timeout(),
+                max_retries=_embedding_max_retries(),
             )
             
             # Use the model specified by user, or default to DeepSeek model via OpenRouter
@@ -253,7 +268,9 @@ class EmbeddingService:
             from openai import OpenAI
             self.client = OpenAI(
                 api_key=deepseek_api_key,
-                base_url="https://api.deepseek.com/v1"
+                base_url="https://api.deepseek.com/v1",
+                timeout=_embedding_timeout(),
+                max_retries=_embedding_max_retries(),
             )
             
             # Use the model specified by user, or default to DeepSeek's embedding model
@@ -321,7 +338,9 @@ class EmbeddingService:
             from openai import OpenAI
             self.client = OpenAI(
                 api_key=groq_api_key,
-                base_url="https://api.groq.com/openai/v1"
+                base_url="https://api.groq.com/openai/v1",
+                timeout=_embedding_timeout(),
+                max_retries=_embedding_max_retries(),
             )
             
             # Note: Groq doesn't natively support embeddings API.
@@ -396,7 +415,11 @@ class EmbeddingService:
                 return False
 
             from openai import OpenAI
-            self.client = OpenAI(api_key=openai_api_key)
+            self.client = OpenAI(
+                api_key=openai_api_key,
+                timeout=_embedding_timeout(),
+                max_retries=_embedding_max_retries(),
+            )
             self.embedding_model = getattr(settings, 'OPENAI_EMBEDDING_MODEL', 'text-embedding-3-large')
             return True
             

@@ -634,7 +634,7 @@ const CareersPage = ({ scrollToJobs = false }) => {
               exit={{ scale: 0.92, opacity: 0, y: 16 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
               className="w-full max-w-md rounded-2xl p-8 relative"
-              style={{ background: '#1a1a2e', border: '1px solid rgba(99,102,241,0.25)' }}
+              style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid rgba(99,102,241,0.25)' }}
               onClick={e => e.stopPropagation()}
             >
               {/* Close */}

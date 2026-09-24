@@ -273,7 +273,7 @@ export const ComposeModal = ({ open, onClose, onSent }) => {
           height (auto-grows on resize). DialogContent is capped at 85vh
           with internal scroll so a busy compose with lots of attachments
           stays inside the viewport. */}
-      <DialogContent className="max-w-2xl bg-[#0d0b1f] border border-white/10 text-white p-4 max-h-[85vh] flex flex-col gap-2">
+      <DialogContent className="max-w-2xl bg-[var(--sfc-0d0b1f)] border border-white/10 text-white p-4 max-h-[85vh] flex flex-col gap-2">
         <DialogHeader className="space-y-0">
           <DialogTitle className="flex items-center gap-2 text-white text-sm font-semibold">
             <PenSquare className="h-4 w-4 text-fuchsia-300" />
@@ -467,7 +467,7 @@ export const ComposeModal = ({ open, onClose, onSent }) => {
             type="button"
             onClick={handleSend}
             disabled={!canSend}
-            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-semibold shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-pure-white font-semibold shadow-lg shadow-emerald-500/20 disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
             {busy ? 'Sending…' : 'Send'}

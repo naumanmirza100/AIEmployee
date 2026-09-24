@@ -157,7 +157,7 @@ const InfoHint = ({ title, body, className = '' }) => {
         <div
           ref={popRef}
           role="dialog"
-          className="fixed z-[10000] rounded-xl border border-[#3a295a] bg-[#161630] shadow-2xl px-4 py-3"
+          className="fixed z-[10000] rounded-xl border border-[var(--line-2)] bg-[var(--panel-4)] shadow-2xl px-4 py-3"
           style={{
             top: pos.top,
             left: pos.left,

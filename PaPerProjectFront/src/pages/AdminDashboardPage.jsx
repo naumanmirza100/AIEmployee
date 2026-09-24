@@ -1800,7 +1800,7 @@ const AdminDashboardPage = () => {
         {/* Agent Detail Modal */}
         {selectedAgent && (
           <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
+            className="fixed inset-0 bg-pure-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
             onClick={() => setSelectedAgent(null)}
           >
             <motion.div
@@ -1970,7 +1970,7 @@ const AdminDashboardPage = () => {
         {/* Confirm Activate Expired Agent Modal */}
         {confirmActivateAgent && (
           <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            className="fixed inset-0 bg-pure-black/50 flex items-center justify-center p-4 z-50"
             onClick={() => setConfirmActivateAgent(null)}
           >
             <motion.div
@@ -2032,7 +2032,7 @@ const AdminDashboardPage = () => {
         {/* Deactivate Agent Dialog — keep or delete history */}
         {deactivateDialog.open && (
           <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            className="fixed inset-0 bg-pure-black/50 flex items-center justify-center p-4 z-50"
             onClick={() => setDeactivateDialog(d => ({ ...d, open: false }))}
           >
             <motion.div
@@ -2139,7 +2139,7 @@ const AdminDashboardPage = () => {
         {/* Message Detail Modal/Dialog */}
         {selectedMessage && (
           <div 
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
+            className="fixed inset-0 bg-pure-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
             onClick={() => setSelectedMessage(null)}
           >
             <motion.div
@@ -2224,7 +2224,7 @@ const AdminDashboardPage = () => {
         {/* Prediction Detail Modal/Dialog */}
         {selectedPrediction && (
           <div 
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
+            className="fixed inset-0 bg-pure-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
             onClick={() => setSelectedPrediction(null)}
           >
             <motion.div
@@ -2332,7 +2332,7 @@ const AdminDashboardPage = () => {
         {/* Application Detail Modal/Dialog */}
         {selectedApplication && (
           <div 
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
+            className="fixed inset-0 bg-pure-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
             onClick={() => setSelectedApplication(null)}
           >
             <motion.div
@@ -2446,7 +2446,7 @@ const AdminDashboardPage = () => {
         {/* Create Company Modal */}
         {showCreateCompanyModal && (
           <div 
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-[100] overflow-y-auto"
+            className="fixed inset-0 bg-pure-black/50 flex items-center justify-center p-3 sm:p-4 z-[100] overflow-y-auto"
             onClick={() => {
               setShowCreateCompanyModal(false);
             }}
@@ -2563,7 +2563,7 @@ const AdminDashboardPage = () => {
         {/* Company Details Modal */}
         {selectedCompany && (
           <div 
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
+            className="fixed inset-0 bg-pure-black/50 flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto"
             onClick={() => setSelectedCompany(null)}
           >
             <motion.div

@@ -5,6 +5,7 @@ import { Layers, Menu, X, BrainCircuit, ChevronDown, Wrench, ArrowRight, Briefca
 import { Button } from '@/components/ui/button';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
+import ThemeToggle from '@/components/common/ThemeToggle';
 import Logo from '@/components/layout/Logo';
 import { getCompanyUser, logoutCompany } from '@/services/companyAuthService';
 import { cn } from '@/lib/utils';
@@ -314,9 +315,11 @@ const Header = () => {
               </Link>
             </Button>
             <LanguageSwitcher />
+            <ThemeToggle />
           </div>
           <div className="md:hidden flex items-center gap-2">
             <LanguageSwitcher />
+            <ThemeToggle />
             <button onClick={() => setIsOpen(!isOpen)} className="text-foreground">
               {isOpen ? <X size={28} /> : <Menu size={28} />}
             </button>

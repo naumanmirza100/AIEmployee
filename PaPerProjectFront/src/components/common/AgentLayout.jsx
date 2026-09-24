@@ -101,7 +101,7 @@ const AgentLayout = () => {
   // Auth still resolving, or redirected away.
   if (!authChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#07030f' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--sfc-07030f)' }}>
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
@@ -163,7 +163,7 @@ const AgentLayout = () => {
       <Helmet><title>{meta.title} | Pay Per Project</title></Helmet>
       <div
         className="min-h-screen"
-        style={{ background: 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)' }}
+        style={{ background: 'var(--app-page-bg)' }}
       >
         <DashboardNavbar
           icon={meta.icon}

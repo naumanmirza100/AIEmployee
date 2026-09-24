@@ -66,7 +66,7 @@ const pgBtn = (disabled, active = false) => ({
   cursor: disabled ? 'not-allowed' : 'pointer',
   border: `1px solid ${active ? '#a855f7' : 'rgba(255,255,255,0.08)'}`,
   background: active ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)',
-  color: disabled ? '#2d1f4a' : active ? '#c084fc' : '#9ca3af',
+  color: disabled ? 'var(--line-1)' : active ? '#c084fc' : '#9ca3af',
   opacity: disabled ? 0.5 : 1, transition: 'all 0.15s', padding: '0 8px',
 });
 
@@ -96,7 +96,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
           minWidth: fullWidth ? 'auto' : 130,
           width: fullWidth ? '100%' : 'auto',
           background: value ? `${selected?.color}15` : 'rgba(255,255,255,0.04)',
-          border: `1px solid ${value ? selected?.color + '60' : '#2d1f4a'}`,
+          border: `1px solid ${value ? selected?.color + '60' : 'var(--line-1)'}`,
           color: value ? selected?.color : '#9ca3af',
           fontSize: 13, fontWeight: value ? 600 : 400, transition: 'all 0.15s',
         }}
@@ -109,8 +109,8 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 50,
-          background: 'linear-gradient(135deg,#0f0a1f,#140830)',
-          border: '1px solid #2d1f4a', borderRadius: 11,
+          background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))',
+          border: '1px solid var(--line-1)', borderRadius: 11,
           boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
           minWidth: '100%', width: 'max-content', overflow: 'hidden',
           animation: 'fadeDown 0.12s ease',
@@ -129,7 +129,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
                 onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
                 onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
               >
-                <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid #2d1f4a' }} />
+                <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid var(--line-1)' }} />
                 {opt.Icon && <opt.Icon size={13} style={{ color: opt.color, flexShrink: 0 }} />}
                 <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: isSel ? opt.color : opt.key ? '#d1d5db' : '#6b7280', fontWeight: isSel ? 600 : 400 }}>
                   {opt.label}
@@ -187,7 +187,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
           )}
         </div>
         <button onClick={onRegenerate} disabled={loading}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: '1px solid #2d1f4a', color: '#6b7280', borderRadius: 6, padding: '3px 9px', fontSize: 11, cursor: 'pointer' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: '1px solid var(--line-1)', color: '#6b7280', borderRadius: 6, padding: '3px 9px', fontSize: 11, cursor: 'pointer' }}>
           {loading ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />} Refresh
         </button>
       </div>
@@ -195,7 +195,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
       {notes.key_insight && (
         <div style={{ background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.18)', borderRadius: 8, padding: '8px 12px' }}>
           <span style={{ color: '#fbbf24', fontSize: 11, fontWeight: 700 }}>KEY INSIGHT  </span>
-          <span style={{ color: '#e2d9f3', fontSize: 13 }}>{notes.key_insight}</span>
+          <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{notes.key_insight}</span>
         </div>
       )}
 
@@ -264,13 +264,13 @@ function PrepNotesModal({ meeting, onClose, onNotesUpdated }) {
       onClick={onClose}
     >
       <div
-        style={{ background: '#0e0820', border: '1px solid #2d1f4a', borderRadius: 16, padding: '28px 32px', maxWidth: 700, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+        style={{ background: 'var(--sfc-0e0820)', border: '1px solid var(--line-1)', borderRadius: 16, padding: '28px 32px', maxWidth: 700, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
         onClick={e => e.stopPropagation()}
       >
         {/* Modal header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div>
-            <div style={{ color: '#e2d9f3', fontWeight: 800, fontSize: 16 }}>AI Prep Notes</div>
+            <div style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 16 }}>AI Prep Notes</div>
             <div style={{ color: '#4b5563', fontSize: 12, marginTop: 2 }}>{meeting.lead_name} · {meeting.lead_company || 'Unknown company'}</div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 4 }}>
@@ -301,12 +301,12 @@ function SearchFieldDropdown({ value, onChange, fields }) {
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
       <button type="button" onClick={() => setOpen(v => !v)}
-        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 7px 12px', background: 'rgba(168,85,247,0.08)', border: 'none', borderRight: '1px solid #2d1f4a', borderRadius: '9px 0 0 9px', color: '#a855f7', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', height: '100%', outline: 'none' }}>
+        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 7px 12px', background: 'rgba(168,85,247,0.08)', border: 'none', borderRight: '1px solid var(--line-1)', borderRadius: '9px 0 0 9px', color: '#a855f7', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', height: '100%', outline: 'none' }}>
         {selected.label}
         <ChevronDown size={11} style={{ color: '#a855f7', transform: open ? 'rotate(180deg)' : 'none', transition: '0.15s' }} />
       </button>
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 100, background: 'linear-gradient(135deg,#0f0a1f,#140830)', border: '1px solid #2d1f4a', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.6)', minWidth: 130, overflow: 'hidden', animation: 'fadeDown 0.12s ease' }}>
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 100, background: 'linear-gradient(135deg,var(--sfc-0f0a1f),var(--sfc-140830))', border: '1px solid var(--line-1)', borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.6)', minWidth: 130, overflow: 'hidden', animation: 'fadeDown 0.12s ease' }}>
           {fields.map((f, i) => {
             const isSel = f.key === value;
             return (
@@ -372,7 +372,7 @@ function ClockTimePicker({ value, onChange, ampm, onAmpmChange, mode, onModeChan
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
       {/* Clock face */}
       <svg width={170} height={170}>
-        <circle cx={cx} cy={cy} r={radius + 18} fill="#0d0820" stroke="#2d1f4a" strokeWidth={1} />
+        <circle cx={cx} cy={cy} r={radius + 18} fill="var(--sfc-0d0820)" stroke="var(--line-1)" strokeWidth={1} />
         <circle cx={cx} cy={cy} r={3} fill="#a855f7" />
         {selPos && <line x1={cx} y1={cy} x2={selPos.x} y2={selPos.y} stroke="#a855f7" strokeWidth={2} strokeLinecap="round" />}
         {nums.map((n, i) => {
@@ -458,13 +458,13 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
     } finally { setSaving(false); }
   };
 
-  const inp = { width: '100%', background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, color: '#e2d9f3', padding: '8px 12px', fontSize: 14, boxSizing: 'border-box', outline: 'none' };
+  const inp = { width: '100%', background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 8, color: 'var(--text-soft)', padding: '8px 12px', fontSize: 14, boxSizing: 'border-box', outline: 'none' };
   const lbl = { color: '#9ca3af', fontSize: 12, fontWeight: 600, marginBottom: 6, display: 'block' };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
-      <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 16, padding: 20, width: 520, maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', scrollbarWidth: 'none' }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 17, margin: '0 0 4px' }}>Confirm Meeting</h3>
+      <div style={{ background: 'linear-gradient(145deg,var(--sfc-1a1030),var(--sfc-120d24))', border: '1px solid var(--line-1)', borderRadius: 16, padding: 20, width: 520, maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', scrollbarWidth: 'none' }} onClick={e => e.stopPropagation()}>
+        <h3 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 17, margin: '0 0 4px' }}>Confirm Meeting</h3>
         <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 16px' }}>
           Set time for <strong style={{ color: '#a855f7' }}>{meeting.lead_name}</strong>.{' '}
           <span style={{ color: '#818cf8' }}>Ask Lead First</span> sends an approval email.{' '}
@@ -475,11 +475,11 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
 
           {/* Calendar */}
-          <div style={{ background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 12, padding: 12 }}>
+          <div style={{ background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 12, padding: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <button onClick={() => setCalMonth(new Date(y, mo - 1, 1))}
                 style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>‹</button>
-              <span style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 12 }}>{monthNames[mo].slice(0,3)} {y}</span>
+              <span style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 12 }}>{monthNames[mo].slice(0,3)} {y}</span>
               <button onClick={() => setCalMonth(new Date(y, mo + 1, 1))}
                 style={{ background: 'none', border: 'none', color: '#a855f7', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>›</button>
             </div>
@@ -498,7 +498,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                       textAlign: 'center', padding: '5px 0', borderRadius: 4, fontSize: 11,
                       cursor: d && !past ? 'pointer' : 'default',
                       background: selected ? '#a855f7' : todayD ? 'rgba(168,85,247,0.15)' : 'transparent',
-                      color: !d ? 'transparent' : past ? '#2d1f4a' : selected ? '#fff' : todayD ? '#a855f7' : '#c4b5d4',
+                      color: !d ? 'transparent' : past ? 'var(--line-1)' : selected ? '#fff' : todayD ? '#a855f7' : '#c4b5d4',
                       border: todayD && !selected ? '1px solid rgba(168,85,247,0.3)' : '1px solid transparent',
                     }}>
                     {d || ''}
@@ -510,7 +510,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
           </div>
 
           {/* Clock */}
-          <div style={{ background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <div style={{ background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <ClockTimePicker value={selTime} onChange={setSelTime} ampm={ampm} onAmpmChange={setAmpm} mode={clockMode} onModeChange={setClockMode} />
           </div>
         </div>
@@ -528,7 +528,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
           </div>
           <div>
             <label style={lbl}>Time</label>
-            <div style={{ display: 'flex', alignItems: 'center',  justifyContent:'space-between',gap: 8, background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, padding: '0 12px', height: 42, boxSizing: 'border-box', width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center',  justifyContent:'space-between',gap: 8, background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 8, padding: '0 12px', height: 42, boxSizing: 'border-box', width: '100%' }}>
               {/* HH : MM — editable inputs + clock sync */}
               {(() => {
                 const [hh, mm] = selTime ? selTime.split(':').map(Number) : [null, null];
@@ -537,7 +537,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                 const mStr = mm !== null ? String(mm).padStart(2,'0') : '';
                 const inputStyle = {
                   width: 28, background: 'transparent', border: 'none', outline: 'none',
-                  fontSize: 16, fontWeight: 700, color: '#e2d9f3', textAlign: 'center',
+                  fontSize: 16, fontWeight: 700, color: 'var(--text-soft)', textAlign: 'center',
                   padding: 0, caretColor: '#a855f7',
                   MozAppearance: 'textfield', WebkitAppearance: 'none', appearance: 'textfield',
                 };
@@ -566,7 +566,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                           if (v.length === 2) setClockMode('minute');
                         }
                       }}
-                      style={{ ...inputStyle, color: clockMode === 'hour' ? '#a855f7' : '#e2d9f3' }}
+                      style={{ ...inputStyle, color: clockMode === 'hour' ? '#a855f7' : 'var(--text-soft)' }}
                     />
                     <span style={{ color: '#6b7280', fontSize: 16, fontWeight: 700 }}>:</span>
                     <input
@@ -581,7 +581,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                           commitFromInputs(hCur, v || '0', ampm);
                         }
                       }}
-                      style={{ ...inputStyle, color: clockMode === 'minute' ? '#a855f7' : '#e2d9f3' }}
+                      style={{ ...inputStyle, color: clockMode === 'minute' ? '#a855f7' : 'var(--text-soft)' }}
                     />
                   </span>
                 );
@@ -603,7 +603,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
                       padding: '2px 8px', borderRadius: 4, border: '1px solid',
                       fontWeight: 700, fontSize: 11, cursor: 'pointer', transition: 'all 0.12s',
                       background: ampm === ap ? '#a855f7' : 'transparent',
-                      borderColor: ampm === ap ? '#a855f7' : '#2d1f4a',
+                      borderColor: ampm === ap ? '#a855f7' : 'var(--line-1)',
                       color: ampm === ap ? '#fff' : '#6b7280',
                     }}>{ap}</button>
                 ))}
@@ -621,11 +621,11 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          <Button variant="outline" onClick={onClose} style={{ border: '1px solid #2d1f4a', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+          <Button variant="outline" onClick={onClose} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
 
           {/* Option 1: Ask lead first */}
           <Button onClick={() => handleConfirm(true)} disabled={saving || !selDate || !selTime}
-            style={{ background: 'linear-gradient(90deg,#7c3aed,#6d28d9)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13 }}>
+            style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#6d28d9)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13 }}>
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
             <span style={{ marginLeft: 5 }}>Ask Lead First</span>
           </Button>
@@ -710,22 +710,22 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
         {earlyWarning && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
             onClick={() => setEarlyWarning(null)}>
-            <div style={{ background: 'linear-gradient(145deg,#1a1030,#120d24)', border: '1px solid #2d1f4a', borderRadius: 14, padding: 24, width: 380, maxWidth: '95vw' }}
+            <div style={{ background: 'linear-gradient(145deg,var(--sfc-1a1030),var(--sfc-120d24))', border: '1px solid var(--line-1)', borderRadius: 14, padding: 24, width: 380, maxWidth: '95vw' }}
               onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <AlertCircle size={18} style={{ color: '#a855f7', flexShrink: 0 }} />
-                <h4 style={{ color: '#e2d9f3', fontWeight: 700, fontSize: 15, margin: 0 }}>Meeting hasn't started yet</h4>
+                <h4 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 15, margin: 0 }}>Meeting hasn't started yet</h4>
               </div>
               <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.6, margin: '0 0 6px' }}>
                 Starts in <strong style={{ color: '#c084fc' }}>{earlyWarning.timeLeft}</strong>. Are you sure you want to "{earlyWarning.label}" now?
               </p>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
                 <button onClick={() => setEarlyWarning(null)}
-                  style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid #2d1f4a', background: 'transparent', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>
+                  style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid var(--line-1)', background: 'transparent', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>
                   Cancel
                 </button>
                 <button onClick={() => { doStatus(earlyWarning.status); setEarlyWarning(null); }}
-                  style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(90deg,#a855f7,#7c3aed)', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(90deg,#a855f7,hsl(var(--brand-600)))', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                   Yes, proceed
                 </button>
               </div>
@@ -759,7 +759,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             {local.status === 'scheduled' && (
               <>
                 <button disabled={!!actionLoading}
-                  style={{ ...btnBase, background: 'rgba(107,114,128,0.12)', color: '#9ca3af', border: '1px solid #2d1f4a' }}
+                  style={{ ...btnBase, background: 'rgba(107,114,128,0.12)', color: '#9ca3af', border: '1px solid var(--line-1)' }}
                   onClick={() => handleStatus('completed')}>
                   {actionLoading === 'status_completed' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Mark Completed
                 </button>
@@ -819,7 +819,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
                 <p style={{ margin: 0, color: '#818cf8', fontSize: 12, fontWeight: 700 }}>WAITING FOR LEAD RESPONSE</p>
                 <p style={{ margin: '2px 0 0', color: '#9ca3af', fontSize: 12 }}>
                   Approval email was sent. Lead will confirm or suggest another time.
-                  {local.scheduled_at && <> Proposed time: <strong style={{ color: '#e2d9f3' }}>{fmt(local.scheduled_at)}</strong></>}
+                  {local.scheduled_at && <> Proposed time: <strong style={{ color: 'var(--text-soft)' }}>{fmt(local.scheduled_at)}</strong></>}
                 </p>
               </div>
             </div>
@@ -961,12 +961,12 @@ const SDRMeetingsTab = () => {
   const scheduled = meetings.filter(m => m.status === 'scheduled').length;
 
   // ── Styles ──
-  const th = { padding: '10px 14px', color: '#6b7280', fontSize: 11, fontWeight: 700, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #1e1535', whiteSpace: 'nowrap' };
-  const td = { padding: '12px 14px', color: '#c4b5d4', fontSize: 13, borderBottom: '1px solid #1a1030', verticalAlign: 'middle' };
-  const inp = { background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 8, color: '#e2d9f3', padding: '7px 12px', fontSize: 13, outline: 'none' };
+  const th = { padding: '10px 14px', color: '#6b7280', fontSize: 11, fontWeight: 700, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--sfc-1e1535)', whiteSpace: 'nowrap' };
+  const td = { padding: '12px 14px', color: '#c4b5d4', fontSize: 13, borderBottom: '1px solid var(--sfc-1a1030)', verticalAlign: 'middle' };
+  const inp = { background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 8, color: 'var(--text-soft)', padding: '7px 12px', fontSize: 13, outline: 'none' };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0616' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--sfc-0a0616)' }}>
 
       {/* ── Prep Notes Modal ── */}
       {prepModal && (
@@ -983,10 +983,10 @@ const SDRMeetingsTab = () => {
       )}
 
       {/* ── Header ── */}
-      <div style={{ padding: '20px 24px 0', borderBottom: '1px solid #1e1535' }}>
+      <div style={{ padding: '20px 24px 0', borderBottom: '1px solid var(--sfc-1e1535)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
-            <h2 style={{ color: '#e2d9f3', fontWeight: 800, fontSize: 20, margin: 0 }}>Meeting Scheduler</h2>
+            <h2 style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 20, margin: 0 }}>Meeting Scheduler</h2>
             <p style={{ color: '#4b5563', fontSize: 12, margin: '3px 0 0' }}>
               {total} meeting{total !== 1 ? 's' : ''} · {pending} pending · {scheduled} scheduled
               {!activeOnly && <span style={{ color: '#f59e0b', marginLeft: 8 }}>· showing all campaigns</span>}
@@ -1002,7 +1002,7 @@ const SDRMeetingsTab = () => {
             )}
             {/* Active-only toggle */}
             <button onClick={() => setActiveOnly(o => !o)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, border: '1px solid #2d1f4a', cursor: 'pointer', background: activeOnly ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.08)', color: activeOnly ? '#10b981' : '#f59e0b', fontSize: 12, fontWeight: 600 }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, border: '1px solid var(--line-1)', cursor: 'pointer', background: activeOnly ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.08)', color: activeOnly ? '#10b981' : '#f59e0b', fontSize: 12, fontWeight: 600 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: activeOnly ? '#10b981' : '#f59e0b', display: 'inline-block' }} />
               {activeOnly ? 'Active campaigns' : 'All campaigns'}
             </button>
@@ -1030,7 +1030,7 @@ const SDRMeetingsTab = () => {
                   .catch(() => load())
                   .finally(() => setCheckingReplies(false));
               }}
-              style={{ background: 'none', border: '1px solid #2d1f4a', borderRadius: 8, padding: '6px 11px', color: checkingReplies ? '#4b5563' : '#6b7280', cursor: checkingReplies ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
+              style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '6px 11px', color: checkingReplies ? '#4b5563' : '#6b7280', cursor: checkingReplies ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
               <RefreshCw size={12} /> Refresh
             </button>
           </div>
@@ -1061,7 +1061,7 @@ const SDRMeetingsTab = () => {
                 campaign: 'Search by campaign name…',
               };
               return (
-                <div style={{ display: 'flex', flex: '1 1 240px', minWidth: 200, alignItems: 'center', background: '#0d0820', border: '1px solid #2d1f4a', borderRadius: 9, overflow: 'visible', position: 'relative' }}>
+                <div style={{ display: 'flex', flex: '1 1 240px', minWidth: 200, alignItems: 'center', background: 'var(--sfc-0d0820)', border: '1px solid var(--line-1)', borderRadius: 9, overflow: 'visible', position: 'relative' }}>
                   {/* Field selector — custom dark dropdown */}
                   <SearchFieldDropdown value={searchField} onChange={setSearchField} fields={SEARCH_FIELDS} />
                   {/* Input */}
@@ -1071,7 +1071,7 @@ const SDRMeetingsTab = () => {
                       placeholder={placeholders[searchField]}
                       value={searchRaw}
                       onChange={e => setSearchRaw(e.target.value)}
-                      style={{ background: 'transparent', border: 'none', outline: 'none', color: '#e2d9f3', fontSize: 13, padding: '7px 28px 7px 28px', width: '100%', boxSizing: 'border-box' }}
+                      style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-soft)', fontSize: 13, padding: '7px 28px 7px 28px', width: '100%', boxSizing: 'border-box' }}
                     />
                     {searchRaw && (
                       <button onClick={() => setSearchRaw('')} style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex', padding: 0 }}>
@@ -1095,7 +1095,7 @@ const SDRMeetingsTab = () => {
                       display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px',
                       borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
                       background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)',
-                      border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : '#2d1f4a'}`,
+                      border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : 'var(--line-1)'}`,
                       color: filtersOpen || mTotalActive > 0 ? '#c084fc' : '#9ca3af',
                       fontSize: 13, fontWeight: mTotalActive > 0 ? 600 : 400, transition: 'all 0.15s',
                     }}
@@ -1131,7 +1131,7 @@ const SDRMeetingsTab = () => {
             </select>
 
             {/* Refresh */}
-            <button onClick={() => load()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid #2d1f4a', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
+            <button onClick={() => load()} style={{ display: 'flex', alignItems: 'center', padding: '7px 10px', background: 'none', border: '1px solid var(--line-1)', borderRadius: 9, cursor: 'pointer', color: '#6b7280' }}>
               <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             </button>
           </div>
@@ -1247,9 +1247,9 @@ const SDRMeetingsTab = () => {
               ? <span style={{ color: '#a78bfa' }}>Loading…</span>
               : <>
                   <span>
-                    Showing <strong style={{ color: '#e2d9f3' }}>
+                    Showing <strong style={{ color: 'var(--text-soft)' }}>
                       {data.total === 0 ? 0 : ((data.page - 1) * pageSize) + 1}–{Math.min(data.page * pageSize, data.total)}
-                    </strong> of <strong style={{ color: '#e2d9f3' }}>{data.total}</strong> meetings
+                    </strong> of <strong style={{ color: 'var(--text-soft)' }}>{data.total}</strong> meetings
                   </span>
                   {(searchRaw || statusFilter || tempFilter || campaignFilter) && (
                     <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: '#a78bfa', fontSize: 11 }}>
@@ -1286,7 +1286,7 @@ const SDRMeetingsTab = () => {
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead style={{ position: 'sticky', top: 0, background: '#0d0820', zIndex: 1 }}>
+            <thead style={{ position: 'sticky', top: 0, background: 'var(--sfc-0d0820)', zIndex: 1 }}>
               <tr>
                 <th style={th}>Lead</th>
                 <th style={th}>Company</th>
@@ -1317,7 +1317,7 @@ const SDRMeetingsTab = () => {
                             {(m.lead_name || '?')[0].toUpperCase()}
                           </div>
                           <div>
-                            <div style={{ color: '#e2d9f3', fontWeight: 600, fontSize: 13 }}>{m.lead_name}</div>
+                            <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13 }}>{m.lead_name}</div>
                             <div style={{ color: '#4b5563', fontSize: 11 }}>{m.lead_email}</div>
                           </div>
                         </div>
@@ -1423,11 +1423,11 @@ const SDRMeetingsTab = () => {
 
       {/* ── Pagination footer ── */}
       {total_pages > 1 && !loading && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '12px 20px', borderTop: '1px solid #1e1535', background: '#0a0616' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '12px 20px', borderTop: '1px solid var(--sfc-1e1535)', background: 'var(--sfc-0a0616)' }}>
 
           {/* Left: page info */}
           <span style={{ fontSize: 13, color: '#6b7280' }}>
-            Page <strong style={{ color: '#e2d9f3' }}>{page}</strong> of <strong style={{ color: '#e2d9f3' }}>{total_pages}</strong>
+            Page <strong style={{ color: 'var(--text-soft)' }}>{page}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{total_pages}</strong>
             <span style={{ color: '#4b5563', marginLeft: 8 }}>({total.toLocaleString()} total)</span>
           </span>
 

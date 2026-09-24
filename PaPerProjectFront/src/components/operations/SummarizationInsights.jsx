@@ -200,7 +200,7 @@ const SummarizationInsights = () => {
             style={{ background: 'rgba(0,0,0,0.25)', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
             id="OPS-summarization-page-size-select" data-testid="OPS-summarization-page-size-select">
             {[5, 10, 20, 30, 50].map(n => (
-              <option key={n} value={n} className="bg-[#1a1028] text-white">{n} rows</option>
+              <option key={n} value={n} className="bg-[var(--sfc-1a1028)] text-white">{n} rows</option>
             ))}
           </select>
           {/* View Toggle */}
@@ -416,7 +416,7 @@ const SummarizationInsights = () => {
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               transition={{ duration: 0.2 }}
               className="w-full max-w-md rounded-2xl border border-white/[0.08] overflow-hidden"
-              style={{ background: '#1a1028' }}
+              style={{ background: 'var(--sfc-1a1028)' }}
               onClick={(e) => e.stopPropagation()}
               id="OPS-summarization-upload-modal"
               data-testid="OPS-summarization-upload-modal"

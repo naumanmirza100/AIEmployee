@@ -262,8 +262,8 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
       )}
 
       {/* Past resets (logged history) */}
-      <div className="rounded-xl border border-[#3a295a] bg-[#1a1333]/50 overflow-hidden">
-        <div className="flex items-center gap-1.5 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white/50 border-b border-[#3a295a]">
+      <div className="rounded-xl border border-[var(--line-2)] bg-[var(--panel-1)] overflow-hidden">
+        <div className="flex items-center gap-1.5 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white/50 border-b border-[var(--line-2)]">
           <History className="h-3.5 w-3.5" /> Past resets
           <span className="text-white/25 normal-case font-normal tracking-normal">· already run</span>
         </div>
@@ -278,7 +278,7 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
           <div className="overflow-x-auto scrollbar-violet">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-[#231845] text-white/60 text-xs uppercase tracking-wide">
+                <tr className="bg-[var(--sfc-231845)] text-white/60 text-xs uppercase tracking-wide">
                   {/* Explicit widths so the date columns stop soaking up the
                       spare space while the numeric headers wrap. */}
                   <th className="text-left font-semibold px-4 py-3 w-[16%]">Company</th>
@@ -291,7 +291,7 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
               </thead>
               <tbody>
                 {visible.map((l) => (
-                  <tr key={l.id} className="border-t border-[#3a295a]/60 text-white/80 hover:bg-white/[0.02]">
+                  <tr key={l.id} className="border-t border-[var(--line-2)] text-white/80 hover:bg-white/[0.02]">
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1.5">
                         <Building2 className="h-3.5 w-3.5 text-white/30" />
@@ -341,7 +341,7 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
 
       {/* Change reset schedule dialog */}
       <Dialog open={!!editRow} onOpenChange={(o) => !o && setEditRow(null)}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white max-w-sm">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Clock className="w-5 h-5 text-violet-400" /> Change reset schedule
@@ -356,8 +356,8 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
             <div className="space-y-1.5">
               <Label className="text-white/70 text-sm">Reset every</Label>
               <Select value={editPreset} onValueChange={setEditPreset}>
-                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                   <SelectItem value="7">7 days (weekly)</SelectItem>
                   <SelectItem value="10">10 days</SelectItem>
                   <SelectItem value="14">14 days (bi-weekly)</SelectItem>
@@ -376,7 +376,7 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
                   value={editCustom}
                   onChange={(e) => setEditCustom(e.target.value)}
                   placeholder="e.g. 21"
-                  className="bg-[#1a1333] border-[#3a295a] text-white placeholder:text-white/30"
+                  className="bg-[var(--panel-1)] border-[var(--line-2)] text-white placeholder:text-white/30"
                 />
               </div>
             )}
@@ -393,7 +393,7 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
                 value={editTokens}
                 onChange={(e) => setEditTokens(e.target.value)}
                 placeholder="Leave blank to keep current"
-                className="bg-[#1a1333] border-[#3a295a] text-white placeholder:text-white/30"
+                className="bg-[var(--panel-1)] border-[var(--line-2)] text-white placeholder:text-white/30"
               />
               <p className="text-[11px] text-white/40">How many managed tokens the quota refills to on each reset.</p>
             </div>
@@ -403,7 +403,7 @@ export const ResetLogsTab = ({ agentOptions = [] }) => {
           </div>
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5" onClick={() => setEditRow(null)}>Cancel</Button>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={saveSchedule} disabled={saving}>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={saveSchedule} disabled={saving}>
               {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save
             </Button>
           </DialogFooter>

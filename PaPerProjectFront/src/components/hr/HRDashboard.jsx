@@ -5,7 +5,7 @@
  *   * Outer wrapper: `rounded-2xl` gradient panel.
  *   * Stat cards: `rounded-xl` gradient + colored icon tile.
  *   * Tabs: violet pill-style with active gradient + mobile hamburger fallback.
- *   * Section cards: `border-white/10 bg-black/20 backdrop-blur-sm`.
+ *   * Section cards: `border-white/10 bg-pure-black/20 backdrop-blur-sm`.
  *   * List rows: `border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]`.
  *   * Empty states: centered icon tile + sub-line.
  */
@@ -880,7 +880,7 @@ const HRDashboard = () => {
     <div data-tour-hr="tabs" className="space-y-4">
       <div
         className="w-full rounded-2xl border border-white/[0.06] p-0"
-        style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+        style={{ background: 'var(--app-hero-bg)' }}
       >
         <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
 
@@ -898,9 +898,9 @@ const HRDashboard = () => {
               Take the Tour
             </button>
             {spotlightTooltip && (
-              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-violet-400/40 bg-[#161630] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
+              <div className="absolute -bottom-12 right-0 z-10 rounded-md border border-violet-400/40 bg-[var(--panel-4)] px-2.5 py-1.5 text-xs text-white/90 shadow-lg pointer-events-none whitespace-nowrap">
                 👋 Take the tour anytime from here
-                <span className="absolute -top-1 right-6 h-2 w-2 bg-[#161630] border-t border-l border-violet-400/40 rotate-45" />
+                <span className="absolute -top-1 right-6 h-2 w-2 bg-[var(--panel-4)] border-t border-l border-violet-400/40 rotate-45" />
               </div>
             )}
           </div>
@@ -991,7 +991,7 @@ const HRDashboard = () => {
             <div className="lg:hidden w-full mb-4">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-full justify-between h-11 border-[#3a295a] bg-[#1a1333] text-white/80 hover:bg-[#231845] hover:text-white">
+                  <Button variant="outline" className="w-full justify-between h-11 border-[var(--line-2)] bg-[var(--panel-1)] text-white/80 hover:bg-[var(--sfc-231845)] hover:text-white">
                     <div className="flex items-center gap-2 min-w-0">
                       <CurrentTabIcon className="h-4 w-4 shrink-0 text-violet-400" />
                       <span className="font-medium truncate">{currentTab.label}</span>
@@ -999,7 +999,7 @@ const HRDashboard = () => {
                     <Menu className="h-5 w-5 text-white/40 shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[#3a295a] bg-[#161630]">
+                <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto border-[var(--line-2)] bg-[var(--panel-4)]">
                   {HR_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
                     const isActive = item.value === activeTab;
                     const ItemIcon = item.icon;
@@ -1028,8 +1028,8 @@ const HRDashboard = () => {
                 using the hamburger dropdown above. */}
             <div className="hidden">
               <TabsList
-                className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[#1a1333] border border-[#3a295a]"
-                style={{ boxShadow: '0 2px 12px 0 #a259ff0a' }}
+                className="inline-flex w-max min-w-full h-auto p-1 gap-1 rounded-lg bg-[var(--panel-1)] border border-[var(--line-2)]"
+                style={{ boxShadow: '0 2px 12px 0 hsl(var(--brand-accent) / 0.04)' }}
               >
                 {HR_TAB_ITEMS.filter((t) => !t.hidden).map((item) => {
                   const TabIcon = item.icon;
@@ -1056,7 +1056,7 @@ const HRDashboard = () => {
                         : {
                             background: 'rgba(60, 30, 90, 0.22)',
                             color: '#cfc6e6',
-                            border: '1.5px solid #2d2342',
+                            border: '1.5px solid var(--line-3)',
                             boxShadow: 'none',
                           }
                       }
@@ -1066,7 +1066,7 @@ const HRDashboard = () => {
                       {showBadge && (
                         <span
                           title="Tour available — hover to launch or click 'Tour this tab' inside"
-                          className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-violet-400 ring-2 ring-[#1a1333]"
+                          className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-violet-400 ring-2 ring-[var(--panel-1)]"
                           style={{ animation: 'hrDotPulse 2s ease-in-out infinite' }}
                         />
                       )}
@@ -1176,7 +1176,7 @@ const HRDashboard = () => {
             <TabsContent value="employees" className="mt-6">
               <ErrorBoundary>
                 <div className="flex justify-end mb-3"><TabTourButton tabKey="employees" /></div>
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <CardTitle className="flex items-center gap-2">
@@ -1502,7 +1502,7 @@ const HRDashboard = () => {
             <TabsContent value="documents" className="mt-6">
               <ErrorBoundary>
                 <div className="flex justify-end mb-3"><TabTourButton tabKey="documents" /></div>
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <CardTitle className="flex items-center gap-2">
@@ -1630,7 +1630,7 @@ const HRDashboard = () => {
                                         <MoreHorizontal className="h-4 w-4" />
                                       </Button>
                                     </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="border-[#3a295a] bg-[#161630]">
+                                    <DropdownMenuContent align="end" className="border-[var(--line-2)] bg-[var(--panel-4)]">
                                       {hasVersionChain && (
                                         <DropdownMenuItem onClick={() => openDocVersions(d)} className="text-white/80">
                                           <History className="h-4 w-4 mr-2 text-violet-400" /> Version history
@@ -1898,7 +1898,7 @@ const HRDashboard = () => {
             <TabsContent value="workflows" className="mt-6">
               <ErrorBoundary>
                 <div className="flex justify-end mb-3"><TabTourButton tabKey="workflows" /></div>
-                <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+                <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-row items-center justify-between">
                     <div>
                       <CardTitle className="flex items-center gap-2">

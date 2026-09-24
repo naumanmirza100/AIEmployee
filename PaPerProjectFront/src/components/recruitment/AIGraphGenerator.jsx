@@ -370,7 +370,7 @@ const AIGraphGenerator = () => {
 
         {/* Generate Tab */}
         <TabsContent value="generate" className="space-y-4 mt-4">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm" id="REC-aigraph-create-card" data-testid="REC-aigraph-create-card">
+          <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-aigraph-create-card" data-testid="REC-aigraph-create-card">
             <CardHeader className="p-4 sm:p-6">
               <CardTitle className="text-base sm:text-lg flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-primary" />
@@ -439,7 +439,7 @@ const AIGraphGenerator = () => {
 
           {/* Generated Chart Display */}
           {generating && (
-            <Card className="border-white/10 bg-black/20 backdrop-blur-sm" id="REC-aigraph-generating-state" data-testid="REC-aigraph-generating-state">
+            <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-aigraph-generating-state" data-testid="REC-aigraph-generating-state">
               <CardContent className="py-12 flex flex-col items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
                 <p className="text-sm text-muted-foreground">Analyzing your request and generating visualization...</p>
@@ -448,7 +448,7 @@ const AIGraphGenerator = () => {
           )}
 
           {generatedChart && !generating && (
-            <Card className="border-white/10 bg-black/20 backdrop-blur-sm" id="REC-aigraph-result-card" data-testid="REC-aigraph-result-card">
+            <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-aigraph-result-card" data-testid="REC-aigraph-result-card">
               <CardHeader className="p-4 sm:p-6 flex flex-row items-start justify-between">
                 <div>
                   <CardTitle className="text-base sm:text-lg flex items-center gap-2">
@@ -489,7 +489,7 @@ const AIGraphGenerator = () => {
 
         {/* Saved Prompts Tab */}
         <TabsContent value="saved" className="space-y-4 mt-4">
-          <Card className="border-white/10 bg-black/20 backdrop-blur-sm" id="REC-aigraph-saved-card" data-testid="REC-aigraph-saved-card">
+          <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm" id="REC-aigraph-saved-card" data-testid="REC-aigraph-saved-card">
             <CardHeader className="p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>

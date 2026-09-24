@@ -9,7 +9,11 @@
 #
 #   docker compose up --build
 #
-# The database is external (Hostinger MariaDB); only Redis is local to the stack.
+# The database runs here too. It used to be Hostinger shared hosting, which
+# caps the DB user at 500 new connections an hour — Beat alone fires ~300 tasks
+# an hour, so the whole app would lock itself out and every agent's scheduled
+# work failed with OperationalError(1226) until the hour rolled over. A local
+# MariaDB has no such cap, and the round trip drops from ~150 ms to sub-ms.
 
 services:
   redis:
@@ -24,6 +28,35 @@ services:
       retries: 5
     restart: unless-stopped
 
+  db:
+    image: mariadb:11.4
+    # utf8mb4 end to end (the app stores emoji and non-Latin names).
+    # wait_timeout must stay above Django's CONN_MAX_AGE (540s) or a reused
+    # connection may already have been dropped server-side.
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max-connections=200
+      --wait-timeout=600
+      --interactive-timeout=600
+      --max-statement-time=120
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      MARIADB_DATABASE: ${DB_NAME:?set DB_NAME in .env}
+      MARIADB_USER: ${DB_USER:?set DB_USER in .env}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - dbdata:/var/lib/mysql
+    # Deliberately NOT published to the host: nothing outside this stack needs
+    # to reach the database. Use `docker compose exec db mariadb ...` for admin.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
   web:
     build: .
     env_file: .env
@@ -33,10 +66,15 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       USE_REDIS: "True"
+      # Overrides the .env value, which still points at the old remote host.
+      DB_HOST: db
+      DB_PORT: "3306"
     ports:
       - "8000:8000"
     depends_on:
       redis:
+        condition: service_healthy
+      db:
         condition: service_healthy
     restart: unless-stopped
 
@@ -47,11 +85,16 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       USE_REDIS: "True"
+      # Overrides the .env value, which still points at the old remote host.
+      DB_HOST: db
+      DB_PORT: "3306"
     # prefork + concurrency 4 come from settings on Linux; override here per
     # container size if needed.
     command: celery -A project_manager_ai worker -l info
     depends_on:
       redis:
+        condition: service_healthy
+      db:
         condition: service_healthy
       web:
         # Let the web container finish `migrate` before the worker touches the DB.
@@ -65,11 +108,21 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       USE_REDIS: "True"
+      # Overrides the .env value, which still points at the old remote host.
+      DB_HOST: db
+      DB_PORT: "3306"
     # Exactly one beat process, ever — a second one double-fires every schedule.
     command: celery -A project_manager_ai beat -l info
     depends_on:
       redis:
         condition: service_healthy
+      db:
+        condition: service_healthy
       web:
         condition: service_started
     restart: unless-stopped
+
+volumes:
+  # Survives `docker compose down`. Removed only by `down -v` — which deletes
+  # the database, so don't.
+  dbdata:

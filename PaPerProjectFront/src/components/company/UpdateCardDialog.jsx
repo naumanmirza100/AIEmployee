@@ -48,12 +48,12 @@ const getStripe = (publishableKey) => {
   return stripeCache.get(publishableKey);
 };
 
-// The dashboard shell is dark (#120d22); Elements defaults to a light theme and
+// The dashboard shell is dark (var(--panel-2)); Elements defaults to a light theme and
 // would otherwise render as a white slab inside the modal.
 const APPEARANCE = {
   theme: 'night',
   variables: {
-    colorPrimary: '#7c3aed',
+    colorPrimary: 'hsl(var(--brand-600))',
     colorBackground: '#1a1430',
     colorText: '#e9e6f5',
     colorDanger: '#f87171',

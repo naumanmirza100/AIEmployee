@@ -229,7 +229,7 @@ const ManualTaskCreation = ({ onTaskCreated, onSuccess, defaultProjectId }) => {
   };
 
   return (
-    <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+    <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
       <CardHeader>
         <CardTitle>Create Task Manually</CardTitle>
         <CardDescription>

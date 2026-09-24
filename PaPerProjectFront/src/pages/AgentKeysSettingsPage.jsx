@@ -23,7 +23,7 @@ import { CompanyResetLogs } from '@/components/marketing/CompanyResetLogs';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
 
-const GRADIENT_BG = 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)';
+const GRADIENT_BG = 'var(--app-page-bg)';
 
 const formatTokens = (n) => {
   if (n == null) return '—';
@@ -68,7 +68,7 @@ const modeBadge = (a) => {
 };
 
 const StatCard = ({ icon: Icon, label, value, accent }) => (
-  <div className="bg-[#120d22] border border-[#2d2342] rounded-xl p-4 hover:border-violet-500/30 transition-colors">
+  <div className="bg-[var(--panel-2)] border border-[var(--line-3)] rounded-xl p-4 hover:border-violet-500/30 transition-colors">
     <div className="flex items-center justify-between">
       <div>
         <p className="text-xs uppercase tracking-wider text-white/40 mb-1">{label}</p>
@@ -119,7 +119,7 @@ const QuotaBar = ({ quota }) => {
         </div>
         <span className="text-white/50 text-xs">{pct.toFixed(1)}% used</span>
       </div>
-      <div className="w-full h-2 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+      <div className="w-full h-2 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
         <div
           className={`h-full bg-gradient-to-r ${barGradient} transition-all`}
           style={{ width: `${pct}%`, boxShadow: '0 0 8px rgba(139,92,246,0.25)' }}
@@ -160,7 +160,7 @@ const QuotaBar = ({ quota }) => {
         const mPct = Math.min(100, (quota.managed_used_tokens / quota.managed_included_tokens) * 100);
         const mGrad = mPct >= 100 ? 'from-red-500 to-rose-500' : mPct >= 80 ? 'from-amber-400 to-orange-500' : 'from-violet-500 to-purple-500';
         return (
-          <div className="space-y-2 pt-1 border-t border-[#2d2342]">
+          <div className="space-y-2 pt-1 border-t border-[var(--line-3)]">
             <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Managed key quota</p>
             <div className="flex items-center justify-between text-sm">
               <div className="flex items-baseline gap-2">
@@ -170,7 +170,7 @@ const QuotaBar = ({ quota }) => {
               </div>
               <span className="text-white/50 text-xs">{mPct.toFixed(1)}% used</span>
             </div>
-            <div className="w-full h-2 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+            <div className="w-full h-2 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
               <div className={`h-full bg-gradient-to-r ${mGrad} transition-all`} style={{ width: `${mPct}%` }} />
             </div>
             {quota.managed_is_exhausted && (
@@ -224,10 +224,10 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-[#120d22] border border-[#2d2342] rounded-xl overflow-hidden hover:border-violet-500/30 transition-colors"
+        className="bg-[var(--panel-2)] border border-[var(--line-3)] rounded-xl overflow-hidden hover:border-violet-500/30 transition-colors"
       >
         {/* ── Header row ── */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#2d2342] bg-gradient-to-r from-[#1a1333]/50 to-transparent">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--line-3)] bg-gradient-to-r from-[var(--panel-1)] to-transparent">
           <div className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center shrink-0">
             <BrainCircuit className="w-4 h-4 text-violet-300" />
           </div>
@@ -269,7 +269,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
           <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-medium shrink-0 ${m.class}`}>{m.label}</span>
           {/* Actions */}
           <div className="flex items-center gap-1.5 shrink-0 ml-2">
-            <Button size="sm" className="h-7 bg-violet-600 hover:bg-violet-700 text-white text-xs px-3" onClick={() => onByok(agent)}>
+            <Button size="sm" className="h-7 bg-violet-600 hover:bg-violet-700 text-pure-white text-xs px-3" onClick={() => onByok(agent)}>
               <Key className="w-3 h-3 mr-1" />{agent.byok ? 'Update key' : 'Add key'}
             </Button>
             {!agent.managed && (
@@ -309,7 +309,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                   <span className="uppercase tracking-wide">Free tokens</span>
                   <span>{formatTokens(Math.min(q.used_tokens, q.included_tokens))} / {formatTokens(q.included_tokens)} · {freePct.toFixed(0)}%</span>
                 </div>
-                <div className="h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                <div className="h-1.5 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
                   <div className={`h-full bg-gradient-to-r ${barColor(freePct)} transition-all`} style={{ width: `${freePct}%` }} />
                 </div>
               </div>
@@ -328,7 +328,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                     </span>
                     <span>{formatTokens(Math.min(q.managed_used_tokens, q.managed_included_tokens))} / {formatTokens(q.managed_included_tokens)} · {managedPct.toFixed(0)}%</span>
                   </div>
-                  <div className="h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                  <div className="h-1.5 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
                     <div
                       className={keyExpired ? 'h-full bg-white/20' : `h-full bg-gradient-to-r ${barColor(managedPct)} transition-all`}
                       style={{ width: `${managedPct}%` }}
@@ -349,11 +349,11 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
                     : <span className="flex items-center gap-1.5">{formatTokens(q.byok_tokens_info)} used <button onClick={() => onSetByokLimit(agent)} className="text-violet-400/70 hover:text-violet-300 transition-colors">+ set cap</button></span>}
                 </div>
                 {q.byok_token_limit > 0 ? (
-                  <div className="h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                  <div className="h-1.5 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
                     <div className={`h-full bg-gradient-to-r ${barColor(byokPct)} transition-all`} style={{ width: `${byokPct}%` }} />
                   </div>
                 ) : (
-                  <div className="h-1.5 bg-[#1a1333] rounded-full border border-[#2d2342]" />
+                  <div className="h-1.5 bg-[var(--panel-1)] rounded-full border border-[var(--line-3)]" />
                 )}
               </div>
             )}
@@ -464,7 +464,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
           </div>
 
           {/* Right: key info pills */}
-          <div className="w-[260px] shrink-0 px-3 py-3 flex flex-col gap-1.5 border-l border-[#2d2342]">
+          <div className="w-[260px] shrink-0 px-3 py-3 flex flex-col gap-1.5 border-l border-[var(--line-3)]">
             {agent.byok && (
               <div className="flex items-center gap-2 px-2.5 py-2 bg-blue-500/8 border border-blue-500/20 rounded-lg">
                 <Lock className="w-3 h-3 text-blue-300 shrink-0" />
@@ -549,7 +549,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
 
       {/* Revoke confirm dialog */}
       <Dialog open={confirmRevoke} onOpenChange={setConfirmRevoke}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white max-w-sm">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Trash2 className="w-5 h-5 text-red-400" />Remove BYOK key
@@ -566,7 +566,7 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
             <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5" onClick={() => setConfirmRevoke(false)}>
               Cancel
             </Button>
-            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={() => { setConfirmRevoke(false); onRevoke(agent.agent_name); }}>
+            <Button className="bg-red-600 hover:bg-red-700 text-pure-white" onClick={() => { setConfirmRevoke(false); onRevoke(agent.agent_name); }}>
               Remove key
             </Button>
           </DialogFooter>
@@ -617,8 +617,8 @@ const RequestTimeline = ({ r }) => {
             <div className="flex flex-col items-center min-w-[60px] flex-1">
               <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center ${
                 done    ? 'bg-violet-600 border-violet-500' :
-                active  ? 'bg-violet-600/25 border-violet-400 ring-2 ring-violet-500/30 ring-offset-1 ring-offset-[#0f0a20]' :
-                          'bg-[#1a1333] border-[#3a295a]'
+                active  ? 'bg-violet-600/25 border-violet-400 ring-2 ring-violet-500/30 ring-offset-1 ring-offset-[var(--sfc-0f0a20)]' :
+                          'bg-[var(--panel-1)] border-[var(--line-2)]'
               }`}>
                 {done
                   ? <CheckCircle2 className="w-3.5 h-3.5 text-white" />
@@ -635,7 +635,7 @@ const RequestTimeline = ({ r }) => {
               )}
             </div>
             {i < FLOW_STAGES.length - 1 && (
-              <div className={`flex-1 h-[2px] mt-3.5 ${done ? 'bg-violet-500' : 'bg-[#3a295a]'}`} />
+              <div className={`flex-1 h-[2px] mt-3.5 ${done ? 'bg-violet-500' : 'bg-[var(--line-2)]'}`} />
             )}
           </React.Fragment>
         );
@@ -719,7 +719,7 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying, isCurrentAssignment = 
     <div className="flex gap-3">
       <div className="flex flex-col items-center shrink-0">
         <div className={`w-3 h-3 rounded-full border-2 shadow-sm mt-1 ${dotColor}`} />
-        {!isLast && <div className="w-px flex-1 bg-[#2d2342] mt-1" />}
+        {!isLast && <div className="w-px flex-1 bg-[var(--line-3)] mt-1" />}
       </div>
       <div className="flex-1 pb-4 min-w-0">
         <div className="flex items-start justify-between gap-2 flex-wrap">
@@ -785,7 +785,7 @@ const CompanyTimelineEntry = ({ r, isLast, onPay, paying, isCurrentAssignment = 
           {!r._synthetic && r.status === 'payment_pending' && (
             <Button
               size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white h-7 text-xs px-3 shrink-0"
+              className="bg-amber-600 hover:bg-amber-700 text-pure-white h-7 text-xs px-3 shrink-0"
               onClick={() => onPay(r)}
               disabled={paying}
             >
@@ -832,7 +832,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, keyEvents = [], onPay
     .find((e) => !e._synthetic && e.status === 'key_assigned')?.id;
 
   return (
-    <div className="bg-[#0f0a20] border border-[#2d2342] rounded-xl overflow-hidden hover:border-violet-500/30 transition-colors">
+    <div className="bg-[var(--sfc-0f0a20)] border border-[var(--line-3)] rounded-xl overflow-hidden hover:border-violet-500/30 transition-colors">
       <button
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
         onClick={() => setExpanded(e => !e)}
@@ -925,7 +925,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, keyEvents = [], onPay
       </button>
 
       {expanded && (
-        <div className="px-4 pb-2 pt-1 border-t border-[#2d2342]">
+        <div className="px-4 pb-2 pt-1 border-t border-[var(--line-3)]">
           {entries.map((r, i) => (
             <CompanyTimelineEntry
               key={r._syntheticId || r.id}
@@ -942,7 +942,7 @@ const AgentRequestGroupCard = ({ group, managedKey, quota, keyEvents = [], onPay
 
       {/* Weekly reset-history pop-up for this agent */}
       <Dialog open={resetLogsOpen} onOpenChange={setResetLogsOpen}>
-        <DialogContent className="max-w-2xl bg-[#120d22] border border-[#2d2342] text-white">
+        <DialogContent className="max-w-2xl bg-[var(--panel-2)] border border-[var(--line-3)] text-white">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <History className="w-5 h-5 text-violet-400" />
@@ -1252,12 +1252,12 @@ const AgentKeysSettingsPage = () => {
               <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
             </div>
           ) : agents.length === 0 ? (
-            <Card className="bg-[#120d22] border border-[#2d2342]">
+            <Card className="bg-[var(--panel-2)] border border-[var(--line-3)]">
               <CardContent className="p-12 text-center">
                 <BrainCircuit className="w-12 h-12 text-white/20 mx-auto mb-4" />
                 <h3 className="text-white font-semibold mb-2">No agents purchased yet</h3>
                 <p className="text-sm text-white/50 mb-4">Buy an agent from the dashboard to start configuring API keys and token quotas.</p>
-                <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => navigate('/company/dashboard')}>
+                <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={() => navigate('/company/dashboard')}>
                   Go to dashboard
                 </Button>
               </CardContent>
@@ -1290,7 +1290,7 @@ const AgentKeysSettingsPage = () => {
             Object.values(groupMap).forEach(g => g.requests.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
             const groups = Object.values(groupMap);
             return (
-              <Card className="bg-[#120d22] border border-[#2d2342] mt-6">
+              <Card className="bg-[var(--panel-2)] border border-[var(--line-3)] mt-6">
                 <CardHeader>
                   <CardTitle className="text-white flex items-center gap-2">
                     <Send className="w-5 h-5 text-violet-400" /> Key Requests
@@ -1325,7 +1325,7 @@ const AgentKeysSettingsPage = () => {
 
       {/* BYOK modal */}
       <Dialog open={byokModal.open} onOpenChange={(o) => !o && setByokModal({ ...byokModal, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Key className="w-5 h-5 text-violet-400" />
@@ -1339,8 +1339,8 @@ const AgentKeysSettingsPage = () => {
             <div className="space-y-1.5">
               <Label className="text-white/70 text-sm">Provider</Label>
               <Select value={byokModal.provider} onValueChange={(v) => setByokModal({ ...byokModal, provider: v, error: '' })}>
-                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                   {providers.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -1351,7 +1351,7 @@ const AgentKeysSettingsPage = () => {
                 type="password"
                 autoComplete="off"
                 placeholder="sk-..."
-                className="bg-[#1a1333] border-[#3a295a] text-white font-mono placeholder:text-white/30"
+                className="bg-[var(--panel-1)] border-[var(--line-2)] text-white font-mono placeholder:text-white/30"
                 value={byokModal.apiKey}
                 onChange={(e) => setByokModal({ ...byokModal, apiKey: e.target.value, error: '' })}
               />
@@ -1368,7 +1368,7 @@ const AgentKeysSettingsPage = () => {
           )}
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5" onClick={() => setByokModal({ ...byokModal, open: false })}>Cancel</Button>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitByok} disabled={submitting}>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={submitByok} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save key
             </Button>
           </DialogFooter>
@@ -1377,7 +1377,7 @@ const AgentKeysSettingsPage = () => {
 
       {/* Stripe Checkout modal */}
       <Dialog open={payModal.open} onOpenChange={(o) => !o && !paying && setPayModal({ ...payModal, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white max-w-md p-0 overflow-hidden">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white max-w-md p-0 overflow-hidden">
           {/* Header stripe */}
           <div className="bg-gradient-to-r from-violet-700 to-fuchsia-700 px-6 py-5">
             <div className="flex items-center gap-3">
@@ -1395,7 +1395,7 @@ const AgentKeysSettingsPage = () => {
             {/* What you're getting */}
             <div>
               <p className="text-white/50 text-[10px] uppercase tracking-wider mb-2">You're purchasing</p>
-              <div className="flex items-center gap-3 bg-[#1a1333] border border-[#2d2342] rounded-lg p-3">
+              <div className="flex items-center gap-3 bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg p-3">
                 <div className="w-9 h-9 rounded-lg bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
                   <Key className="w-4 h-4 text-violet-300" />
                 </div>
@@ -1409,15 +1409,15 @@ const AgentKeysSettingsPage = () => {
             {/* Order summary */}
             <div>
               <p className="text-white/50 text-[10px] uppercase tracking-wider mb-2">Order summary</p>
-              <div className="bg-[#1a1333] border border-[#2d2342] rounded-lg overflow-hidden">
-                <div className="flex justify-between items-center px-4 py-3 border-b border-[#2d2342]">
+              <div className="bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg overflow-hidden">
+                <div className="flex justify-between items-center px-4 py-3 border-b border-[var(--line-3)]">
                   <div>
                     <p className="text-white/80 text-sm">API Key Cost</p>
                     <p className="text-white/40 text-xs">One-time managed key</p>
                   </div>
                   <span className="text-white font-semibold text-sm">${(payModal.request?.key_cost_snapshot ?? 0).toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between items-center px-4 py-3 border-b border-[#2d2342]">
+                <div className="flex justify-between items-center px-4 py-3 border-b border-[var(--line-3)]">
                   <div>
                     <p className="text-white/80 text-sm">Service Charge</p>
                     <p className="text-white/40 text-xs">Platform fee</p>
@@ -1425,7 +1425,7 @@ const AgentKeysSettingsPage = () => {
                   <span className="text-white font-semibold text-sm">${(payModal.request?.service_charge_snapshot ?? 0).toFixed(2)}</span>
                 </div>
                 {(payModal.request?.discount_pct_snapshot > 0) && (
-                  <div className="flex justify-between items-center px-4 py-3 border-b border-[#2d2342] bg-emerald-500/5">
+                  <div className="flex justify-between items-center px-4 py-3 border-b border-[var(--line-3)] bg-emerald-500/5">
                     <div>
                       <p className="text-emerald-300 text-sm">Discount</p>
                       <p className="text-emerald-400/60 text-xs">{payModal.request.discount_pct_snapshot}% off applied by admin</p>
@@ -1465,7 +1465,7 @@ const AgentKeysSettingsPage = () => {
                 Cancel
               </Button>
               <Button
-                className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white font-semibold shadow-lg"
+                className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-pure-white font-semibold shadow-lg"
                 onClick={submitPay}
                 disabled={paying}
               >
@@ -1482,7 +1482,7 @@ const AgentKeysSettingsPage = () => {
 
       {/* Key request modal */}
       <Dialog open={requestModal.open} onOpenChange={(o) => !o && setRequestModal({ ...requestModal, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               {requestModal.is_renewal
@@ -1502,8 +1502,8 @@ const AgentKeysSettingsPage = () => {
             <div className="space-y-1.5">
               <Label className="text-white/70 text-sm">Preferred provider</Label>
               <Select value={requestModal.provider} onValueChange={(v) => setRequestModal({ ...requestModal, provider: v })}>
-                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                   {providers.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -1511,8 +1511,8 @@ const AgentKeysSettingsPage = () => {
             <div className="space-y-1.5">
               <Label className="text-white/70 text-sm">Billing Plan</Label>
               <Select value={requestModal.preferred_duration} onValueChange={(v) => setRequestModal({ ...requestModal, preferred_duration: v })}>
-                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                   <SelectItem value="monthly">Monthly — key expires after 1 month, pay to renew</SelectItem>
                   {/* <SelectItem value="yearly">Yearly — key expires after 1 year, pay once</SelectItem> */}
                 </SelectContent>
@@ -1525,7 +1525,7 @@ const AgentKeysSettingsPage = () => {
               <Label className="text-white/70 text-sm">Note for admin (optional)</Label>
               <Textarea
                 rows={3}
-                className="bg-[#1a1333] border-[#3a295a] text-white placeholder:text-white/30"
+                className="bg-[var(--panel-1)] border-[var(--line-2)] text-white placeholder:text-white/30"
                 placeholder="Briefly explain why you need a managed key..."
                 value={requestModal.note}
                 onChange={(e) => setRequestModal({ ...requestModal, note: e.target.value })}
@@ -1534,7 +1534,7 @@ const AgentKeysSettingsPage = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5" onClick={() => setRequestModal({ ...requestModal, open: false })}>Cancel</Button>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitRequest} disabled={submitting}>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={submitRequest} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Send request
             </Button>
           </DialogFooter>
@@ -1543,7 +1543,7 @@ const AgentKeysSettingsPage = () => {
 
       {/* BYOK token cap modal */}
       <Dialog open={byokLimitModal.open} onOpenChange={(o) => !o && setByokLimitModal({ ...byokLimitModal, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white max-w-sm">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-white flex items-center gap-2">
               <Settings className="w-5 h-5 text-violet-400" />
@@ -1567,7 +1567,7 @@ const AgentKeysSettingsPage = () => {
                 type="number"
                 min="0"
                 placeholder="e.g. 500000 (blank = no limit)"
-                className="bg-[#1a1333] border-[#3a295a] text-white placeholder:text-white/30"
+                className="bg-[var(--panel-1)] border-[var(--line-2)] text-white placeholder:text-white/30"
                 value={byokLimitModal.limitInput}
                 onChange={(e) => setByokLimitModal({ ...byokLimitModal, limitInput: e.target.value })}
               />
@@ -1576,7 +1576,7 @@ const AgentKeysSettingsPage = () => {
               </p>
             </div>
             {byokLimitModal.agent?.quota?.byok_tokens_info > 0 && (
-              <div className="flex items-center justify-between bg-[#1a1333] border border-[#2d2342] rounded-lg px-3 py-2">
+              <div className="flex items-center justify-between bg-[var(--panel-1)] border border-[var(--line-3)] rounded-lg px-3 py-2">
                 <span className="text-xs text-white/50">Current BYOK usage</span>
                 <span className="text-sm text-white font-semibold">{formatTokens(byokLimitModal.agent.quota.byok_tokens_info)}</span>
               </div>
@@ -1584,7 +1584,7 @@ const AgentKeysSettingsPage = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5" onClick={() => setByokLimitModal({ ...byokLimitModal, open: false })}>Cancel</Button>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitByokLimit} disabled={submitting}>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={submitByokLimit} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}Save cap
             </Button>
           </DialogFooter>

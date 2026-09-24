@@ -199,7 +199,7 @@ export const CompanyResetLogs = ({ agents = [], agentName = '', agentLabel = '',
   if (bare) return body;
 
   return (
-    <Card className="border-white/10 bg-black/20 backdrop-blur-sm">
+    <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
       <CardHeader>
         <CardTitle className="text-white flex items-center gap-2">
           <History className="w-5 h-5 text-violet-400" />

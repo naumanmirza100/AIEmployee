@@ -82,7 +82,7 @@ export const DatePicker = ({
             : <span>{placeholder}</span>}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0 bg-[#1a1333] border border-white/10" align="start">
+      <PopoverContent className="w-auto p-0 bg-popover border border-border" align="start">
         <Calendar
           mode="single"
           selected={selected}
@@ -176,7 +176,7 @@ export const DateTimePicker = ({
             : <span>{placeholder}</span>}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0 bg-[#1a1333] border border-white/10" align="start">
+      <PopoverContent className="w-auto p-0 bg-popover border border-border" align="start">
         <Calendar
           mode="single"
           selected={selected}
@@ -184,13 +184,13 @@ export const DateTimePicker = ({
           disabled={disabledMatchers.length ? disabledMatchers : undefined}
           initialFocus
         />
-        <div className="border-t border-white/10 p-3 flex items-center gap-2">
-          <Clock className="h-4 w-4 opacity-60 text-white/65" />
+        <div className="border-t border-border p-3 flex items-center gap-2">
+          <Clock className="h-4 w-4 opacity-60 text-muted-foreground" />
           <input
             type="time"
             value={timePart}
             onChange={(e) => onTimeChanged(e.target.value)}
-            className="bg-transparent border border-white/10 rounded px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-amber-500/50 [color-scheme:dark]"
+            className="bg-transparent border border-border rounded px-2 py-1 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-amber-500/50"
           />
         </div>
       </PopoverContent>

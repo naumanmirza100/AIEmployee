@@ -53,7 +53,7 @@ export default function FrontlineEmbedCsatPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-violet-950/40 to-slate-900">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-black/40 backdrop-blur-sm p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-pure-black/40 backdrop-blur-sm p-6 shadow-xl">
         {submitted ? (
           <div className="text-center py-8">
             <CheckCircle className="h-12 w-12 text-emerald-400 mx-auto mb-3" />
@@ -116,7 +116,7 @@ export default function FrontlineEmbedCsatPage() {
             <button
               type="submit"
               disabled={submitting || !rating}
-              className="mt-5 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-500 disabled:bg-violet-900 disabled:cursor-not-allowed transition-colors">
+              className="mt-5 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-medium text-pure-white hover:bg-violet-500 disabled:bg-violet-900 disabled:cursor-not-allowed transition-colors">
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
               Submit feedback
             </button>

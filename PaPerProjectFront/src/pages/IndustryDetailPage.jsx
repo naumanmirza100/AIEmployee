@@ -523,7 +523,7 @@ import React, { useState } from 'react';
     
           <Section className="bg-background">
             <div className="container mx-auto px-4 md:px-6">
-              <div className="bg-gradient-to-r from-gray-900 to-black rounded-2xl p-8 md:p-12 text-center text-white shadow-2xl relative overflow-hidden">
+              <div className="bg-gradient-to-r from-gray-900 to-black rounded-2xl p-8 md:p-12 text-center text-pure-white shadow-2xl relative overflow-hidden">
                 <div className="absolute -right-1/4 -bottom-1/2 opacity-10">
                     <Icon className="w-[500px] h-[500px] text-primary/50" />
                 </div>

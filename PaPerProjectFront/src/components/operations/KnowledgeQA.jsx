@@ -531,7 +531,7 @@ const KnowledgeQA = () => {
       className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)]"
       style={{
         background:
-          'linear-gradient(135deg, #1a1333 0%, #1a1333 45%, rgba(64,40,10,0.55) 100%)',
+          'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, rgba(64,40,10,0.55) 100%)',
       }}
     >
       <div className="flex w-full max-w-full relative" style={{ height: 'calc(100vh - 120px)', minHeight: 680 }}>
@@ -901,7 +901,7 @@ const KnowledgeQA = () => {
 
       {/* ── Onboarding / How-it-works modal ── */}
       <Dialog open={showOnboarding} onOpenChange={setShowOnboarding}>
-        <DialogContent id="OPS-qa-onboarding-dialog" data-testid="OPS-qa-onboarding-dialog" className="max-w-lg max-h-[85vh] overflow-y-auto border-white/10 text-white" style={{ background: '#100a20' }}>
+        <DialogContent id="OPS-qa-onboarding-dialog" data-testid="OPS-qa-onboarding-dialog" className="max-w-lg max-h-[85vh] overflow-y-auto border-white/10 text-white" style={{ background: 'var(--sfc-100a20)' }}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-white">
               <span className="flex items-center justify-center w-8 h-8 rounded-lg" style={{ backgroundColor: ACCENT_SOFT, border: `1px solid ${ACCENT_BORDER}` }}>
@@ -1110,7 +1110,7 @@ const Message = ({
                 onClick={onSubmitEdit}
                 disabled={editDisabled || !editValue.trim()}
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40 transition-transform active:scale-95"
-                style={{ backgroundColor: ACCENT, color: '#1a0e00' }}
+                style={{ backgroundColor: ACCENT, color: 'var(--sfc-1a0e00)' }}
               >
                 <Send className="h-3.5 w-3.5" /> Save &amp; resend
               </button>

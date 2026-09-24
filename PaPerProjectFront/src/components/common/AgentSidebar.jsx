@@ -158,8 +158,8 @@ const AgentSidebar = ({
       {loading && !navItems.some((i) => i.section && i.section !== 'dashboard') ? (
         Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className={`flex items-center rounded-lg h-11 ${collapsed ? 'justify-center px-0' : 'gap-3 px-3'}`}>
-            <span className="h-5 w-5 rounded-md bg-white/[0.06] animate-pulse shrink-0" />
-            {!collapsed && <span className="h-3 rounded bg-white/[0.06] animate-pulse" style={{ width: `${55 + (i % 3) * 12}%` }} />}
+            <span className="h-5 w-5 rounded-md bg-muted animate-pulse shrink-0" />
+            {!collapsed && <span className="h-3 rounded bg-muted animate-pulse" style={{ width: `${55 + (i % 3) * 12}%` }} />}
           </div>
         ))
       ) : (
@@ -179,11 +179,11 @@ const AgentSidebar = ({
                 } ${
                   active
                     ? 'bg-violet-600/90 text-white shadow-[0_0_14px_rgba(139,92,246,0.35)]'
-                    : 'text-white/60 hover:text-white hover:bg-white/[0.06]'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                 }`}
               >
                 {active && !collapsed && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r bg-white/90" />
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r bg-primary-foreground/90" />
                 )}
                 {/* Label/icon → navigate to the agent */}
                 <button
@@ -197,7 +197,7 @@ const AgentSidebar = ({
                     {collapsed && item.badge > 0 && (
                       <span
                         className={`absolute -top-1 -right-1.5 min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center ${
-                          item.badgeTone === 'danger' ? 'bg-red-500 text-white' : 'bg-violet-500 text-white'
+                          item.badgeTone === 'danger' ? 'bg-red-500 text-pure-white' : 'bg-violet-500 text-pure-white'
                         }`}
                       >
                         {item.badge > 9 ? '9+' : item.badge}
@@ -224,7 +224,7 @@ const AgentSidebar = ({
                     onClick={(e) => toggleExpand(e, item)}
                     title={open ? 'Collapse' : 'Expand'}
                     className={`shrink-0 h-7 w-7 flex items-center justify-center rounded-md transition-colors ${
-                      active ? 'hover:bg-white/15 text-white/80' : 'hover:bg-white/10 text-white/40'
+                      active ? 'hover:bg-white/15 text-white/80' : 'hover:bg-accent text-muted-foreground'
                     }`}
                   >
                     {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -235,7 +235,7 @@ const AgentSidebar = ({
               {/* Nested children (Marketing gets campaign tabs injected under
                   "Campaigns" while a campaign detail page is open). */}
               {showChildren && (
-                <div className="mt-1 mb-1 ml-4 pl-2 border-l border-white/10 space-y-0.5">
+                <div className="mt-1 mb-1 ml-4 pl-2 border-l border-border space-y-0.5">
                   {childrenWithCampaignTabs(item, location.pathname).map((child) => {
                     const hasGrand = child.children?.length > 0;
                     const groupActive = hasGrand && isChildGroupActive(child);
@@ -248,7 +248,7 @@ const AgentSidebar = ({
                           className={`w-full flex items-center gap-2.5 rounded-md h-9 px-2.5 text-[13px] transition-colors ${
                             cActive
                               ? 'bg-violet-500/15 text-violet-200 font-medium'
-                              : 'text-white/50 hover:text-white/90 hover:bg-white/[0.05]'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                           }`}
                         >
                           {CIcon && <CIcon className={`h-4 w-4 shrink-0 ${cActive ? 'text-violet-300' : ''}`} />}
@@ -258,7 +258,7 @@ const AgentSidebar = ({
                         {/* Third level (e.g. Settings → Email / Interview / …),
                             shown when that group is active. */}
                         {hasGrand && groupActive && (
-                          <div className="mt-0.5 mb-1 ml-3.5 pl-2 border-l border-white/10 space-y-0.5">
+                          <div className="mt-0.5 mb-1 ml-3.5 pl-2 border-l border-border space-y-0.5">
                             {child.children.map((gc) => {
                               const gActive = isChildActive(gc);
                               const GIcon = gc.icon;
@@ -269,7 +269,7 @@ const AgentSidebar = ({
                                   className={`w-full flex items-center gap-2 rounded-md h-8 px-2.5 text-[12.5px] transition-colors ${
                                     gActive
                                       ? 'bg-violet-500/15 text-violet-200 font-medium'
-                                      : 'text-white/45 hover:text-white/85 hover:bg-white/[0.05]'
+                                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                                   }`}
                                 >
                                   {GIcon && <GIcon className={`h-3.5 w-3.5 shrink-0 ${gActive ? 'text-violet-300' : ''}`} />}
@@ -293,19 +293,18 @@ const AgentSidebar = ({
 
   const panel = (mobile) => (
     <aside
-      className="flex flex-col h-full border-r border-white/[0.08]"
+      className="app-sidebar-surface flex flex-col h-full border-r border-border"
       style={{
         width,
-        background: 'linear-gradient(180deg, #0b0a16 0%, #0d0b1a 45%, #110e1f 100%)',
         transition: mobile ? undefined : 'width 180ms ease',
       }}
     >
       {/* Header row: brand + close (mobile) */}
-      <div className={`flex items-center h-14 border-b border-white/[0.08] shrink-0 ${collapsed && !mobile ? 'justify-center px-0' : 'justify-between px-3'}`}>
+      <div className={`flex items-center h-14 border-b border-border shrink-0 ${collapsed && !mobile ? 'justify-center px-0' : 'justify-between px-3'}`}>
         {(!collapsed || mobile) && (
           <div className="flex items-center gap-2 min-w-0">
             <img src="/logo.png" alt="" className="h-8 w-8 rounded-md object-contain shrink-0" />
-            <span className="text-sm font-bold text-white truncate">Pay Per Project</span>
+            <span className="text-sm font-bold text-foreground truncate">Pay Per Project</span>
           </div>
         )}
         {collapsed && !mobile && (
@@ -314,7 +313,7 @@ const AgentSidebar = ({
         {mobile && (
           <button
             onClick={onMobileClose}
-            className="h-8 w-8 flex items-center justify-center rounded-md text-white/60 hover:text-white hover:bg-white/10"
+            className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
             title="Close menu"
           >
             <X className="h-4 w-4" />
@@ -326,11 +325,11 @@ const AgentSidebar = ({
 
       {/* Collapse toggle — desktop only */}
       {!mobile && (
-        <div className="border-t border-white/[0.08] p-2 shrink-0">
+        <div className="border-t border-border p-2 shrink-0">
           <button
             onClick={onToggle}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className={`w-full flex items-center rounded-lg h-9 text-white/50 hover:text-white hover:bg-white/[0.06] transition-colors ${
+            className={`w-full flex items-center rounded-lg h-9 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors ${
               collapsed ? 'justify-center' : 'gap-2 px-3'
             }`}
           >

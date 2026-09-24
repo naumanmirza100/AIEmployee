@@ -215,7 +215,7 @@ const Campaigns = ({ onRefresh }) => {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : campaigns.length === 0 ? (
-        <Card className="border-white/10 bg-black/20 backdrop-blur-sm border-dashed">
+        <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm border-dashed">
           <CardContent className="py-12 text-center">
             <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center mx-auto mb-3">
               <Megaphone className="h-5 w-5 text-white/25" />
@@ -263,7 +263,7 @@ const Campaigns = ({ onRefresh }) => {
                 <Card
                   key={campaign.id}
                   onClick={() => navigate(`/marketing/dashboard/campaign/${campaign.id}`)}
-                  className={`group relative overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm transition-all cursor-pointer hover:bg-white/[0.04] hover:border-primary/30 ${
+                  className={`group relative overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm transition-all cursor-pointer hover:bg-white/[0.04] hover:border-primary/30 ${
                     isChecked ? 'ring-1 ring-primary border-primary/40' : ''
                   }`}
                 >

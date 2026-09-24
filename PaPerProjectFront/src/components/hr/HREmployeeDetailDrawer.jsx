@@ -1386,7 +1386,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
           <Button
             onClick={runDangerAction}
             disabled={dangerDialog.busy}
-            className="bg-rose-600 hover:bg-rose-700 text-white"
+            className="bg-rose-600 hover:bg-rose-700 text-pure-white"
           >
             {dangerDialog.busy && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
             {dangerDialog.action === 'anonymize' ? 'Anonymize permanently' : 'Deactivate employee'}

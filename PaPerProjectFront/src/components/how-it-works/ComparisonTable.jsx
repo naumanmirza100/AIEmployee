@@ -97,7 +97,7 @@ const ComparisonTable = () => {
             <TableHeader className="bg-secondary/40">
               <TableRow>
                 <TableHead className="py-5 px-6 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider w-[25%]">Feature</TableHead>
-                <TableHead className="py-5 px-6 text-center text-xs font-bold text-white uppercase tracking-wider w-[25%] bg-gradient-to-br from-primary to-purple-600">Pay Per Project</TableHead>
+                <TableHead className="py-5 px-6 text-center text-xs font-bold text-pure-white uppercase tracking-wider w-[25%] bg-gradient-to-br from-primary to-purple-600">Pay Per Project</TableHead>
                 <TableHead className="py-5 px-6 text-center text-xs font-bold text-muted-foreground uppercase tracking-wider w-[25%]">Hiring Freelancers</TableHead>
                 <TableHead className="py-5 px-6 text-center text-xs font-bold text-muted-foreground uppercase tracking-wider w-[25%]">Agency / Marketplace</TableHead>
               </TableRow>

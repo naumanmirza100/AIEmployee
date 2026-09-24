@@ -589,7 +589,7 @@ const FrontlineFloatingChat = () => {
       {/* Chat modal */}
       {open && createPortal(
         <div
-          className="fixed z-[9990] rounded-2xl border border-[#3a295a] bg-[#0e0e14] shadow-2xl flex flex-col overflow-hidden"
+          className="fixed z-[9990] rounded-2xl border border-[var(--line-2)] bg-[var(--sfc-0e0e14)] shadow-2xl flex flex-col overflow-hidden"
           style={geomStyle}
         >
           {/* Resize corner (top-left) — hidden on mobile */}
@@ -648,7 +648,7 @@ const FrontlineFloatingChat = () => {
 
           {/* Body: either the chat area or the history sidebar */}
           {showHistory ? (
-            <div className="flex-1 overflow-y-auto p-3 space-y-1.5" style={{ background: '#0a0a0f' }}>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5" style={{ background: 'var(--panel-3)' }}>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Recent conversations</p>
                 <span className="text-[10px] text-white/40">{history.length} saved</span>
@@ -679,7 +679,7 @@ const FrontlineFloatingChat = () => {
               )}
             </div>
           ) : (
-            <div data-tour-fc="messages" className="flex-1 overflow-y-auto p-3 space-y-2.5" style={{ background: '#0a0a0f' }}>
+            <div data-tour-fc="messages" className="flex-1 overflow-y-auto p-3 space-y-2.5" style={{ background: 'var(--panel-3)' }}>
               {messages.length === 0 ? (
                 <div className="text-white/60">
                   <div className="text-center py-4">
@@ -873,7 +873,7 @@ const FrontlineFloatingChat = () => {
 
           {/* Input row — always rendered, hidden behind history view visually */}
           {!showHistory && (
-            <div className="border-t border-white/10 relative" style={{ background: '#0e0e14' }}>
+            <div className="border-t border-white/10 relative" style={{ background: 'var(--sfc-0e0e14)' }}>
               {/* Multi-turn context indicator */}
               {messages.length >= 2 && (
                 <div className="px-3 pt-2">
@@ -882,7 +882,7 @@ const FrontlineFloatingChat = () => {
               )}
               {/* Slash-command menu */}
               {slashOpen && filteredCommands.length > 0 && (
-                <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[#3a295a] bg-[#161630] shadow-2xl overflow-hidden">
+                <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[var(--line-2)] bg-[var(--panel-4)] shadow-2xl overflow-hidden">
                   <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-white/40 font-semibold">
                     Commands · ↑↓ Tab/Enter to insert
                   </div>
@@ -930,7 +930,7 @@ const FrontlineFloatingChat = () => {
                   placeholder="Ask anything or type / for commands…"
                   rows={1}
                   disabled={sending || uploading}
-                  className="flex-1 resize-none rounded-lg border border-white/10 bg-[#0a0a0f] text-white text-sm px-3 py-2 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-amber-400/60 min-h-[38px] max-h-[110px]"
+                  className="flex-1 resize-none rounded-lg border border-white/10 bg-[var(--panel-3)] text-white text-sm px-3 py-2 placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-amber-400/60 min-h-[38px] max-h-[110px]"
                 />
                 <button
                   type="button" data-tour-fc="send" onClick={send}

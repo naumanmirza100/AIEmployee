@@ -256,7 +256,7 @@ export const DocumentsPanel = ({
 
           <div className="flex justify-end">
             <HoverTip tip={aiDocMeetingId ? 'Generate the document with AI and save it' : 'Generate a fill-in template (no meeting linked)'}>
-              <Button onClick={generateAiDoc} disabled={aiDocLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
+              <Button onClick={generateAiDoc} disabled={aiDocLoading} style={{ background: 'linear-gradient(90deg, hsl(var(--brand-accent)) 0%, hsl(var(--brand-600)) 100%)' }} className="text-pure-white border-0 hover:opacity-90">
                 {aiDocLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
                 {aiDocLoading ? 'Generating…' : (aiDocMeetingId ? 'Generate & Save' : 'Generate Template')}
               </Button>

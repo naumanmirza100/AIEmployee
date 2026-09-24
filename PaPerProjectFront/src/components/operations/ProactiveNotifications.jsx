@@ -202,7 +202,7 @@ const ProactiveNotifications = () => {
       data-testid="OPS-notifications-root"
       className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)] p-5 sm:p-6"
       style={{
-        background: 'linear-gradient(135deg, #1a1333 0%, #1a1333 45%, rgba(64,40,10,0.55) 100%)',
+        background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, rgba(64,40,10,0.55) 100%)',
       }}
     >
       {/* Header */}
@@ -218,7 +218,7 @@ const ProactiveNotifications = () => {
               <Bell className="h-5 w-5" style={{ color: '#f59e0b' }} />
             )}
             {totalUnread > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-pure-white text-[10px] font-bold flex items-center justify-center">
                 {totalUnread > 99 ? '99+' : totalUnread}
               </span>
             )}

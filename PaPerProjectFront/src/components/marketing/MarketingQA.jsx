@@ -287,7 +287,7 @@ const SimpleBarChart = ({ data, colors, height = 250, title }) => {
 
   return (
     <div
-      className="rounded-xl border border-white/10 bg-[#090c14] p-3 sm:p-4 shadow-[0_8px_30px_rgba(0,0,0,0.28)]"
+      className="rounded-xl border border-white/10 bg-[var(--sfc-090c14)] p-3 sm:p-4 shadow-[0_8px_30px_rgba(0,0,0,0.28)]"
       style={{ minHeight: `${Math.max(dynamicHeight, height * 0.6)}px` }}
     >
       {title && <h4 className="font-semibold text-sm text-white/90 mb-3">{title}</h4>}
@@ -668,7 +668,7 @@ const SimpleLineChart = ({ data, color = '#3b82f6', height = 280, title, variant
         {/* Tooltip */}
         {hoveredIndex !== null && dataPoints[hoveredIndex] && (
           <div
-            className="absolute pointer-events-none z-10 px-3 py-2 rounded-lg border border-white/15 bg-black/90 backdrop-blur-md shadow-xl"
+            className="absolute pointer-events-none z-10 px-3 py-2 rounded-lg border border-white/15 bg-pure-black/90 backdrop-blur-md shadow-xl"
             style={{
               left: `${(dataPoints[hoveredIndex].x / svgW) * 100}%`,
               top: `${(dataPoints[hoveredIndex].y / (svgH + (hasCampaignDates ? 55 : 40))) * 100}%`,
@@ -1321,7 +1321,7 @@ const MarketingQA = () => {
       <motion.div
         variants={itemVariants}
         className={cn(
-          "shrink-0 flex flex-col rounded-2xl border border-white/10 bg-black/20 backdrop-blur-sm overflow-hidden transition-all duration-300",
+          "shrink-0 flex flex-col rounded-2xl border border-white/10 bg-pure-black/20 backdrop-blur-sm overflow-hidden transition-all duration-300",
           sidebarOpen ? "w-80" : "w-16"
         )}
       >
@@ -1521,7 +1521,7 @@ const MarketingQA = () => {
         variants={itemVariants}
         className="flex-1 min-w-0 min-h-0"
       >
-        <Card className="h-full flex flex-col overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm rounded-2xl">
+        <Card className="h-full flex flex-col overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm rounded-2xl">
           {/* Header */}
           <CardHeader className="shrink-0 border-b border-white/10 pb-3 rounded-t-2xl bg-white/[0.03]">
             <div className="flex items-center justify-between">
@@ -1827,7 +1827,7 @@ const MarketingQA = () => {
                 <div
                   className="relative z-[1] rounded-[28px] px-2.5 py-2.5 space-y-3"
                   style={{
-                    background: '#0a0a0f',
+                    background: 'var(--panel-3)',
                     border: '1.5px solid rgba(255,255,255,0.08)',
                     boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
                   }}
@@ -1840,7 +1840,7 @@ const MarketingQA = () => {
                         <SelectTrigger
                           className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
                           style={{
-                            background: '#111118',
+                            background: 'var(--sfc-111118)',
                             border: '1.5px solid rgba(139, 92, 246, 0.55)',
                             boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
                             color: '#e2e2f0',
@@ -1863,7 +1863,7 @@ const MarketingQA = () => {
                         <SelectContent
                           className="rounded-xl"
                           style={{
-                            background: '#161630',
+                            background: 'var(--panel-4)',
                             border: '1px solid rgba(139, 92, 246, 0.25)',
                             color: '#e2e2f0',
                           }}
@@ -1885,7 +1885,7 @@ const MarketingQA = () => {
                     <div
                       className="flex-1 min-w-0 rounded-full flex items-center overflow-hidden"
                       style={{
-                        background: '#0e0e14',
+                        background: 'var(--sfc-0e0e14)',
                         boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
                         border: '1px solid rgba(255, 255, 255, 0.1)',
                         borderLeftColor: 'rgba(139, 92, 246, 0.45)',
@@ -1928,10 +1928,10 @@ const MarketingQA = () => {
                           style={{
                             background: loading
                               ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 50%, #991b1b 100%)'
-                              : 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
+                              : 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, #6d28d9 50%, #5b21b6 100%)',
                             boxShadow: loading
                               ? '0 0 16px rgba(220, 38, 38, 0.35), 0 2px 8px rgba(0,0,0,0.3)'
-                              : '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                              : '0 0 16px hsl(var(--brand-600) / 0.35), 0 2px 8px rgba(0,0,0,0.3)',
                             color: '#ffffff',
                           }}
                         >

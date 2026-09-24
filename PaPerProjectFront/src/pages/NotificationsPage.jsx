@@ -31,7 +31,7 @@ import { useAuth } from '@/contexts/AuthContext';
  * model for Django users. Keep the endpoint choice below in sync with the navbar.
  */
 
-const GRADIENT_BG = 'linear-gradient(135deg, #020308 0%, #0a0a1a 25%, #0d0b1f 50%, #0f0a20 75%, #020308 100%)';
+const GRADIENT_BG = 'var(--app-page-bg)';
 
 // Severity drives the left border + icon, so critical items are scannable.
 const getSeverity = (n) => {
@@ -102,7 +102,7 @@ const humanizeType = (type) =>
   (type || 'other').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
 const StatCard = ({ icon: Icon, label, value, accent }) => (
-  <div className="bg-[#120d22] border border-[#2d2342] rounded-xl p-4 hover:border-violet-500/30 transition-colors">
+  <div className="bg-[var(--panel-2)] border border-[var(--line-3)] rounded-xl p-4 hover:border-violet-500/30 transition-colors">
     <div className="flex items-center justify-between">
       <div>
         <p className="text-xs uppercase tracking-wider text-white/40 mb-1">{label}</p>
@@ -289,7 +289,7 @@ const NotificationsPage = () => {
                 placeholder="Search notifications..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 bg-[#120d22] border-[#2d2342] text-white placeholder:text-white/30"
+                className="pl-9 bg-[var(--panel-2)] border-[var(--line-3)] text-white placeholder:text-white/30"
               />
             </div>
             {/* No type filter: the backend stores nearly every notification as
@@ -297,10 +297,10 @@ const NotificationsPage = () => {
                 meaningless option. Search covers the same ground until the
                 backend assigns real types. */}
             <Select value={readFilter} onValueChange={setReadFilter}>
-              <SelectTrigger className="w-[130px] bg-[#120d22] border-[#2d2342] text-white">
+              <SelectTrigger className="w-[130px] bg-[var(--panel-2)] border-[var(--line-3)] text-white">
                 <SelectValue placeholder="All" />
               </SelectTrigger>
-              <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+              <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="unread">Unread</SelectItem>
                 <SelectItem value="read">Read</SelectItem>
@@ -311,7 +311,7 @@ const NotificationsPage = () => {
               size="icon"
               onClick={() => { setRefreshing(true); fetchNotifications(); }}
               disabled={refreshing}
-              className="border-[#2d2342] bg-[#120d22] text-white/70 hover:bg-white/5 hover:text-white shrink-0"
+              className="border-[var(--line-3)] bg-[var(--panel-2)] text-white/70 hover:bg-white/5 hover:text-white shrink-0"
             >
               {refreshing
                 ? <Loader2 className="h-4 w-4 animate-spin" />
@@ -321,7 +321,7 @@ const NotificationsPage = () => {
               <Button
                 onClick={markAllRead}
                 className="shrink-0 text-white"
-                style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)' }}
+                style={{ background: 'linear-gradient(90deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)' }}
               >
                 <Check className="h-4 w-4 mr-1" />
                 Mark all read
@@ -335,7 +335,7 @@ const NotificationsPage = () => {
               <Loader2 className="h-7 w-7 animate-spin text-violet-400" />
             </div>
           ) : visible.length === 0 ? (
-            <div className="rounded-xl border border-[#2d2342] bg-[#120d22] py-20 text-center">
+            <div className="rounded-xl border border-[var(--line-3)] bg-[var(--panel-2)] py-20 text-center">
               <Inbox className="h-10 w-10 mx-auto text-white/15 mb-3" />
               <p className="text-white/60 text-sm font-medium">
                 {notifications.length === 0 ? 'No notifications yet' : 'Nothing matches these filters'}
@@ -350,7 +350,7 @@ const NotificationsPage = () => {
                   variant="outline"
                   size="sm"
                   onClick={() => { setSearch(''); setReadFilter('all'); }}
-                  className="mt-4 border-[#2d2342] text-white/70 hover:bg-white/5 hover:text-white"
+                  className="mt-4 border-[var(--line-3)] text-white/70 hover:bg-white/5 hover:text-white"
                 >
                   Clear filters
                 </Button>
@@ -372,8 +372,8 @@ const NotificationsPage = () => {
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, delay: Math.min(i * 0.02, 0.2) }}
-                    className={`rounded-xl border border-[#2d2342] border-l-4 ${style.accent} p-4 transition-colors hover:border-violet-500/30 ${
-                      n.is_read ? 'bg-[#120d22]' : 'bg-[#181030]'
+                    className={`rounded-xl border border-[var(--line-3)] border-l-4 ${style.accent} p-4 transition-colors hover:border-violet-500/30 ${
+                      n.is_read ? 'bg-[var(--panel-2)]' : 'bg-[var(--sfc-181030)]'
                     }`}
                   >
                     <div className="flex items-start gap-3">
@@ -394,7 +394,7 @@ const NotificationsPage = () => {
                               real type — a badge reading "Custom" tells the user nothing,
                               so skip it. Genuine types still get a badge. */}
                           {type && type !== 'custom' && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full border border-[#3a295a] bg-white/5 text-white/45 shrink-0">
+                            <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--line-2)] bg-white/5 text-white/45 shrink-0">
                               {humanizeType(type)}
                             </span>
                           )}

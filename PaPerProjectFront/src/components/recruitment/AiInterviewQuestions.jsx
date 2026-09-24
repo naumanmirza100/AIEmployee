@@ -517,7 +517,7 @@ const AiInterviewQuestions = () => {
   return (
     <div
       className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
-      style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+      style={{ background: 'var(--app-hero-bg)' }}
     >
       {/* Scoped dark-bar placeholder color */}
       <style>{`.recruit-dark-input::placeholder { color: rgba(255,255,255,0.3) !important; }`}</style>
@@ -529,7 +529,7 @@ const AiInterviewQuestions = () => {
         }`}
         style={{
           minWidth: showChatHistory ? '16rem' : '0',
-          background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, #0a0a0f 55%, #0a0a0f 100%)',
+          background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
           borderRight: '1.5px solid rgba(255,255,255,0.10)',
           boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
           borderTopLeftRadius: 16,
@@ -717,18 +717,18 @@ const AiInterviewQuestions = () => {
               width: '7px',
               height: '48px',
               borderRadius: '8px',
-              background: 'linear-gradient(to bottom, #a259ff 0%, #6a1b9a 60%, #18122B 100%)',
+              background: 'linear-gradient(to bottom, hsl(var(--brand-accent)) 0%, #6a1b9a 60%, #18122B 100%)',
               marginLeft: '24px',
               marginRight: '18px',
-              boxShadow: '0 0 8px 2px #a259ff44',
+              boxShadow: '0 0 8px 2px hsl(var(--brand-accent) / 0.27)',
             }} />
-            <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(124, 58, 237, 0.15)' }}>
+            <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
               <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
             </div>
             <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
                 Recruitment Research Assistance
-                <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'rgba(124, 58, 237, 0.15)', color: '#a78bfa' }}>AI-Powered</span>
+                <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}>AI-Powered</span>
               </CardTitle>
               <CardDescription className="text-white/50 text-sm mt-0.5">
                 Ask anything about candidates, jobs, interview plans, and recruitment performance.
@@ -760,7 +760,7 @@ const AiInterviewQuestions = () => {
           <div id="REC-aiquestions-messages-area" data-testid="REC-aiquestions-messages-area" className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 custom-sidebar-scroll">
             {currentMessages.length === 0 && !loading && (
               <div id="REC-aiquestions-messages-empty" data-testid="REC-aiquestions-messages-empty" className="flex flex-col items-center justify-center min-h-[420px] text-center px-4">
-                <div className="h-20 w-20 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'rgba(124, 58, 237, 0.12)' }}>
+                <div className="h-20 w-20 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'hsl(var(--brand-600) / 0.12)' }}>
                   <Bot className="h-10 w-10" style={{ color: '#a78bfa' }} />
                 </div>
                 <h2 className="text-3xl font-semibold tracking-tight text-white">Ready to Research?</h2>
@@ -800,7 +800,7 @@ const AiInterviewQuestions = () => {
                 <div
                   className={`rounded-2xl ${msg.role === 'user' ? 'max-w-[80%]' : msg.responseData?.isGraph ? 'max-w-[72%]' : 'max-w-[88%]'}`}
                   style={msg.role === 'user' ? {
-                    background: 'linear-gradient(135deg, #7c3aed 0%, #a259ff 100%)',
+                    background: 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)',
                     padding: '10px 16px',
                   } : {
                     background: 'linear-gradient(135deg, rgba(18,12,40,0.97) 0%, rgba(14,10,32,0.97) 100%)',
@@ -879,8 +879,8 @@ const AiInterviewQuestions = () => {
                                   msg.responseData.chartType
                                 )}
                                 className={_isAdded
-                                  ? "rounded-xl bg-green-700 text-white border-0 shadow-[0_2px_8px_rgba(0,0,0,0.35)] px-4 py-2 h-9 cursor-not-allowed opacity-80"
-                                  : "rounded-xl bg-[#16162a] hover:bg-[#1e1e38] text-white border-0 shadow-[0_2px_8px_rgba(0,0,0,0.35)] hover:shadow-[0_3px_10px_rgba(0,0,0,0.4)] px-4 py-2 h-9"
+                                  ? "rounded-xl bg-green-700 text-pure-white border-0 shadow-[0_2px_8px_rgba(0,0,0,0.35)] px-4 py-2 h-9 cursor-not-allowed opacity-80"
+                                  : "rounded-xl bg-[var(--sfc-16162a)] hover:bg-[var(--sfc-1e1e38)] text-white border-0 shadow-[0_2px_8px_rgba(0,0,0,0.35)] hover:shadow-[0_3px_10px_rgba(0,0,0,0.4)] px-4 py-2 h-9"
                                 }
                               >
                                 {_isAdded
@@ -955,7 +955,7 @@ const AiInterviewQuestions = () => {
               <div
                 className="mx-4 mb-4 flex items-center gap-2.5 rounded-[28px] px-2.5 py-2.5"
                 style={{
-                  background: '#0a0a0f',
+                  background: 'var(--panel-3)',
                   border: '1.5px solid rgba(255,255,255,0.08)',
                   boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
                 }}
@@ -967,7 +967,7 @@ const AiInterviewQuestions = () => {
                   data-testid="REC-aiquestions-mode-trigger"
                   className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
                   style={{
-                    background: '#111118',
+                    background: 'var(--sfc-111118)',
                     border: '1.5px solid rgba(139, 92, 246, 0.55)',
                     boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
                     color: '#e2e2f0',
@@ -982,7 +982,7 @@ const AiInterviewQuestions = () => {
                   id="REC-aiquestions-mode-content"
                   data-testid="REC-aiquestions-mode-content"
                   style={{
-                    background: '#161630',
+                    background: 'var(--panel-4)',
                     border: '1px solid rgba(139, 92, 246, 0.25)',
                     color: '#e2e2f0',
                   }}
@@ -1011,7 +1011,7 @@ const AiInterviewQuestions = () => {
               <div
                 className="flex-1 min-w-0 rounded-full flex items-center overflow-hidden"
                 style={{
-                  background: '#0e0e14',
+                  background: 'var(--sfc-0e0e14)',
                   boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   borderLeftColor: 'rgba(139, 92, 246, 0.45)',
@@ -1040,8 +1040,8 @@ const AiInterviewQuestions = () => {
                 size="icon"
                 className="h-11 w-11 shrink-0 rounded-full border-0 transition-all duration-200"
                 style={{
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
-                  boxShadow: '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                  background: 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, #6d28d9 50%, #5b21b6 100%)',
+                  boxShadow: '0 0 16px hsl(var(--brand-600) / 0.35), 0 2px 8px rgba(0,0,0,0.3)',
                   color: '#ffffff',
                 }}
               >

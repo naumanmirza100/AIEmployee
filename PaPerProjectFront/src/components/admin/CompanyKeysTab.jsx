@@ -13,19 +13,19 @@ export const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFi
         placeholder="Search company..."
         value={filter.search || ''}
         onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-        className="bg-[#1a1333] border-[#3a295a] text-white w-60 placeholder:text-white/30"
+        className="bg-[var(--panel-1)] border-[var(--line-2)] text-white w-60 placeholder:text-white/30"
       />
       <Select value={filter.mode || 'all'} onValueChange={(v) => setFilter({ ...filter, mode: v === 'all' ? '' : v })}>
-        <SelectTrigger className="w-40 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All modes" /></SelectTrigger>
-        <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+        <SelectTrigger className="w-40 bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue placeholder="All modes" /></SelectTrigger>
+        <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
           <SelectItem value="all">All modes</SelectItem>
           <SelectItem value="managed">Managed</SelectItem>
           <SelectItem value="byok">BYOK</SelectItem>
         </SelectContent>
       </Select>
       <Select value={filter.agent_name || 'all'} onValueChange={(v) => setFilter({ ...filter, agent_name: v === 'all' ? '' : v })}>
-        <SelectTrigger className="w-52 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All agents" /></SelectTrigger>
-        <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+        <SelectTrigger className="w-52 bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue placeholder="All agents" /></SelectTrigger>
+        <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
           <SelectItem value="all">All agents</SelectItem>
           {agentOptions.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
         </SelectContent>
@@ -33,7 +33,7 @@ export const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFi
       <Button variant="outline" className="border-white/15 text-white/80 hover:bg-white/5 hover:text-white" onClick={onRefresh} disabled={loading}>
         {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <RefreshCw className="w-4 h-4 mr-1" />} Refresh
       </Button>
-      <Button className="bg-violet-600 hover:bg-violet-700 text-white ml-auto" onClick={() => onAssign(null)}>
+      <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white ml-auto" onClick={() => onAssign(null)}>
         <Plus className="w-4 h-4 mr-1" /> Assign Managed Key
       </Button>
     </div>
@@ -81,7 +81,7 @@ export const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFi
                           <span>Free tokens</span>
                           <span>{formatTokens(Math.min(q.used_tokens, q.included_tokens))} / {formatTokens(q.included_tokens)} ({freePct.toFixed(0)}%)</span>
                         </div>
-                        <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                        <div className="w-full h-1.5 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
                           <div className={`h-full ${freeBar} transition-all`} style={{ width: `${freePct}%` }} />
                         </div>
                       </div> */}
@@ -91,7 +91,7 @@ export const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFi
                             <span>Managed key tokens</span>
                             <span>{formatTokens(Math.min(q.managed_used_tokens, q.managed_included_tokens))} / {formatTokens(q.managed_included_tokens)} ({mPct.toFixed(0)}%)</span>
                           </div>
-                          <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                          <div className="w-full h-1.5 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
                             <div className={`h-full ${mBar} transition-all`} style={{ width: `${mPct}%` }} />
                           </div>
                         </div>
@@ -114,12 +114,12 @@ export const KeysTab = ({ keys, onAssign, onRevoke, onAdjustQuota, filter, setFi
                     </Button>
                   )}
                   {k.status === 'revoked' ? (
-                    <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
+                    <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={() => onAssign(k)}>
                       Re-assign
                     </Button>
                   ) : (
                     k.mode === 'managed' && (
-                      <Button size="sm" className="pr-4 pl-4 bg-violet-600 hover:bg-violet-700 text-white" onClick={() => onAssign(k)}>
+                      <Button size="sm" className="pr-4 pl-4 bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={() => onAssign(k)}>
                         Replace
                       </Button>
                     )

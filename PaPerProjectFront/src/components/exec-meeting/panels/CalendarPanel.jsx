@@ -454,7 +454,7 @@ export const CalendarPanel = ({
               </HoverTip>
             )}
             <HoverTip tip="Build an AI schedule for this week">
-              <Button onClick={runPlan} disabled={weekPlanLoading} style={{ background: 'linear-gradient(90deg, #a259ff 0%, #7c3aed 100%)' }} className="text-white border-0 hover:opacity-90">
+              <Button onClick={runPlan} disabled={weekPlanLoading} style={{ background: 'linear-gradient(90deg, hsl(var(--brand-accent)) 0%, hsl(var(--brand-600)) 100%)' }} className="text-pure-white border-0 hover:opacity-90">
                 {weekPlanLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarDays className="h-4 w-4 mr-2" />}
                 {weekPlanLoading ? 'Planning…' : 'Plan This Week'}
               </Button>
@@ -474,7 +474,7 @@ export const CalendarPanel = ({
               <SelectTrigger className="h-8 w-[84px] bg-violet-500/10 border-violet-400/30 text-violet-100 text-xs hover:bg-violet-500/20 focus:ring-violet-500">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-[#1a1030] border-violet-400/30 text-violet-100 max-h-56 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              <SelectContent className="bg-[var(--sfc-1a1030)] border-violet-400/30 text-violet-100 max-h-56 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                 {Array.from({ length: 24 }, (_, h) => (
                   <SelectItem key={h} value={String(h)} disabled={h >= workEndHour}
                     className="text-xs text-violet-100 focus:bg-violet-500/30 focus:text-white">
@@ -488,7 +488,7 @@ export const CalendarPanel = ({
               <SelectTrigger className="h-8 w-[84px] bg-violet-500/10 border-violet-400/30 text-violet-100 text-xs hover:bg-violet-500/20 focus:ring-violet-500">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-[#1a1030] border-violet-400/30 text-violet-100 max-h-56 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              <SelectContent className="bg-[var(--sfc-1a1030)] border-violet-400/30 text-violet-100 max-h-56 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                 {Array.from({ length: 25 }, (_, h) => (
                   <SelectItem key={h} value={String(h)} disabled={h <= workStartHour}
                     className="text-xs text-violet-100 focus:bg-violet-500/30 focus:text-white">
@@ -537,7 +537,7 @@ export const CalendarPanel = ({
       {/* "View as card" pop-up — auto-opens on a fresh generation */}
       <Dialog open={planModalOpen} onOpenChange={setPlanModalOpen}>
         <DialogContent
-          className="max-w-3xl w-full bg-[#0d0b1f] border-white/10 text-white p-0 gap-0"
+          className="max-w-3xl w-full bg-[var(--sfc-0d0b1f)] border-white/10 text-white p-0 gap-0"
           style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
         >
           <div className="flex items-center justify-between px-6 py-4 pr-14 border-b border-white/10 flex-shrink-0">

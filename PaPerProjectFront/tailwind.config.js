@@ -49,7 +49,33 @@ module.exports = {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))"
-        }
+        },
+        // violet-600 is #7C3AED — the brand colour, hardcoded as a utility in
+        // ~100 places that predate the `primary` token. Pointing that one shade
+        // at a variable makes every `bg-violet-600`, `hover:bg-violet-600` and
+        // `bg-violet-600/90` follow the theme: #427CF5 in light, #7C3AED in
+        // dark. `<alpha-value>` keeps the opacity modifiers working.
+        violet: {
+          400: "#a78bfa",
+          500: "#8b5cf6",
+          600: "hsl(var(--brand-600) / <alpha-value>)",
+          700: "#6d28d9"
+        },
+        // The agent dashboards were built for a dark page, so surfaces and
+        // text are written as white-with-opacity: `text-white`, `text-white/60`,
+        // `bg-white/5`, `border-white/10` — about 4,000 of them. On a light
+        // page every one of those is invisible. Rather than rewrite each call
+        // site, `white` points at a token that is near-black in light mode and
+        // real white in dark mode, so they all invert together.
+        // Use `pure-white` where the colour must stay white regardless — text
+        // sitting on a coloured or gradient button, for example.
+        white: "hsl(var(--surface-invert) / <alpha-value>)",
+        "pure-white": "#ffffff",
+        // Same idea for `black`: `bg-black/20` is an inset panel on a dark
+        // page, so it has to lighten rather than stay charcoal. Modal scrims
+        // keep real black via `pure-black`.
+        black: "hsl(var(--surface-base) / <alpha-value>)",
+        "pure-black": "#000000"
       },
       borderRadius: {
         lg: "var(--radius)",

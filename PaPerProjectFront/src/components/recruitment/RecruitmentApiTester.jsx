@@ -200,11 +200,11 @@ const RecruitmentApiTester = () => {
       className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
       style={{
         background:
-          'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)',
+          'var(--app-hero-bg)',
       }}
     >
       <div className="p-4 md:p-6 lg:p-8 space-y-6 w-full max-w-full">
-        <Card id="REC-apitester-card" data-testid="REC-apitester-card" className="border-white/10 bg-black/20 backdrop-blur-sm">
+        <Card id="REC-apitester-card" data-testid="REC-apitester-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-white">
               <FileText className="h-5 w-5" />

@@ -758,7 +758,7 @@ const Notifications = ({ onUnreadCountChange }) => {
     >
       {/* Page header with animated gradient */}
       <motion.div variants={itemVariants}>
-        <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/20 backdrop-blur-sm p-8">
+        <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-pure-black/20 backdrop-blur-sm p-8">
           <div className="relative z-10">
             <div className="flex items-center gap-3">
               <motion.div
@@ -789,7 +789,7 @@ const Notifications = ({ onUnreadCountChange }) => {
             key={stat.label}
             variants={statCardVariants}
             whileHover={{ scale: 1.02, y: -2 }}
-            className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/20 backdrop-blur-sm p-4 transition-all hover:shadow-lg"
+            className="group relative overflow-hidden rounded-xl border border-white/10 bg-pure-black/20 backdrop-blur-sm p-4 transition-all hover:shadow-lg"
           >
             <div className="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="relative z-10">
@@ -810,7 +810,7 @@ const Notifications = ({ onUnreadCountChange }) => {
 
       {/* Monitor section with enhanced design */}
       <motion.div variants={itemVariants} data-tour-mkt="notif-monitor">
-        <Card className="relative overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
+        <Card className="relative overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm shadow-lg">
           <div className="absolute inset-0 bg-grid-white/5 [mask-image:radial-gradient(ellipse_at_center,white,transparent)]" />
           <CardHeader className="relative pb-3">
             <div className="flex items-center gap-3">
@@ -896,7 +896,7 @@ const Notifications = ({ onUnreadCountChange }) => {
                         initial={{ scale: 0.9, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ delay: 0.1 }}
-                        className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/20 backdrop-blur-sm p-4"
+                        className="group relative overflow-hidden rounded-xl border border-white/10 bg-pure-black/20 backdrop-blur-sm p-4"
                       >
                         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                         <div className="flex items-center gap-3">
@@ -920,7 +920,7 @@ const Notifications = ({ onUnreadCountChange }) => {
 
       {/* Unread notifications with filters */}
       <motion.div variants={itemVariants} data-tour-mkt="notif-inbox">
-        <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
+        <Card className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm shadow-lg">
           <CardHeader className="pb-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -1008,7 +1008,7 @@ const Notifications = ({ onUnreadCountChange }) => {
                       onClick={() => setFilterType('all')}
                       className={cn(
                         'flex-1 gap-2 rounded-md shadow-sm',
-                        filterType === 'all' && 'bg-violet-500/30 hover:bg-violet-600 text-white hover:text-white'
+                        filterType === 'all' && 'bg-violet-500/30 hover:bg-violet-600 text-pure-white hover:text-pure-white'
                       )}
                     >
                       <Bell className="h-4 w-4 shrink-0" />
@@ -1032,7 +1032,7 @@ const Notifications = ({ onUnreadCountChange }) => {
                       onClick={() => setFilterType('opportunities')}
                       className={cn(
                         'flex-1 gap-2 rounded-md shadow-sm',
-                        filterType === 'opportunities' && 'bg-emerald-500/50 hover:bg-emerald-600 text-white hover:text-white'
+                        filterType === 'opportunities' && 'bg-emerald-500/50 hover:bg-emerald-600 text-pure-white hover:text-pure-white'
                       )}
                     >
                       <TrendingUp className="h-4 w-4 shrink-0" />
@@ -1103,7 +1103,7 @@ const Notifications = ({ onUnreadCountChange }) => {
 
       {/* History with similar enhancements */}
       <motion.div variants={itemVariants}>
-        <Card className="overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm shadow-lg">
+        <Card className="overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm shadow-lg">
           <CardHeader className="pb-4">
             <div className="flex items-center gap-3">
               <motion.div

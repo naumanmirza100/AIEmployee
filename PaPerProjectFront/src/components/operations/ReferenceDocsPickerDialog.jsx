@@ -66,7 +66,7 @@ const ReferenceDocsPickerDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent id="OPS-refpicker-dialog" data-testid="OPS-refpicker-dialog" className="bg-[#1a1333] border border-white/10 text-white max-w-2xl">
+      <DialogContent id="OPS-refpicker-dialog" data-testid="OPS-refpicker-dialog" className="bg-[var(--panel-1)] border border-white/10 text-white max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <Layers className="h-4 w-4 text-amber-300" />
@@ -198,7 +198,7 @@ const ReferenceDocsPickerDialog = ({
             data-testid="OPS-refpicker-confirm-btn"
             onClick={confirm}
             className="font-semibold"
-            style={{ backgroundColor: AUTHORING_ACCENT, color: '#1a0e00', border: 'none' }}
+            style={{ backgroundColor: AUTHORING_ACCENT, color: 'var(--sfc-1a0e00)', border: 'none' }}
           >
             {selected.size > 0 ? `Use ${selected.size} reference${selected.size === 1 ? '' : 's'}` : 'No references'}
           </Button>

@@ -161,7 +161,7 @@ function TaskList({ projects = [], onOpenPilot }) {
           <SelectTrigger className="w-full sm:w-52 bg-white/[0.03] border-white/[0.08] text-white/80">
             <SelectValue placeholder="All projects" />
           </SelectTrigger>
-          <SelectContent className="bg-[#161630] border-white/10">
+          <SelectContent className="bg-[var(--panel-4)] border-white/10">
             <SelectItem value="all">All projects</SelectItem>
             {projects.map((p) => (
               <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
@@ -172,7 +172,7 @@ function TaskList({ projects = [], onOpenPilot }) {
           <SelectTrigger className="w-full sm:w-44 bg-white/[0.03] border-white/[0.08] text-white/80">
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
-          <SelectContent className="bg-[#161630] border-white/10">
+          <SelectContent className="bg-[var(--panel-4)] border-white/10">
             <SelectItem value="all">All statuses</SelectItem>
             <SelectItem value="todo">Todo</SelectItem>
             <SelectItem value="in_progress">In progress</SelectItem>
@@ -236,7 +236,7 @@ function TaskList({ projects = [], onOpenPilot }) {
             const statusClass = STATUS_STYLES[t.status] || STATUS_STYLES.todo;
             const priorityClass = PRIORITY_STYLES[t.priority] || PRIORITY_STYLES.medium;
             return (
-              <Card key={t.id} className="bg-[#120d22] border border-[#2d2342] hover:border-cyan-400/30 transition-colors">
+              <Card key={t.id} className="bg-[var(--panel-2)] border border-[var(--line-3)] hover:border-cyan-400/30 transition-colors">
                 <CardContent className="py-3">
                   <div className="flex items-start gap-3">
                     <ListChecks className="h-4 w-4 text-cyan-300/70 mt-1 shrink-0" />
@@ -298,7 +298,7 @@ function TaskList({ projects = [], onOpenPilot }) {
 function NewTaskDialog({ open, onOpenChange, defaultProjectId, onTaskCreated }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-[#0d0b1f] border-white/10">
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-[var(--sfc-0d0b1f)] border-white/10">
         <DialogHeader>
           <DialogTitle className="text-white flex items-center gap-2">
             <ListChecks className="h-5 w-5 text-cyan-300" />

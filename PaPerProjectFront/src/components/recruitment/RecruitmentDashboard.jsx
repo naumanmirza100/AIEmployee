@@ -190,7 +190,7 @@ const RecruitmentDashboard = () => {
   return (
     <div
       className="w-full rounded-2xl border border-white/[0.06] p-0 overflow-hidden"
-      style={{ background: 'linear-gradient(90deg, #020308 0%, #020308 55%, rgba(10,37,64,0.68) 85%, rgba(14,39,71,0.52) 100%)' }}
+      style={{ background: 'var(--app-hero-bg)' }}
     >
     <div className="space-y-6 w-full max-w-full overflow-x-hidden p-4 md:p-6 lg:p-8">
       {/* Stats Cards */}

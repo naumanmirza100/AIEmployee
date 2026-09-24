@@ -4,14 +4,20 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
 /**
- * Check if company user is authenticated and has project manager or company_user role
+ * Check whether a company account is logged in.
+ *
+ * This used to only accept the `project_manager` and `company_user` roles, but
+ * CompanyUser has twelve and defaults to `admin` — so an owner or admin whose
+ * company had bought the PM module still got "Access Denied". Which agent a
+ * company may open is decided by the purchased modules, not by this role, and
+ * every other agent already gates on the module alone. So any company login
+ * passes here and the page's own module check does the real work.
  */
 const isCompanyUserAuthenticated = () => {
   try {
     const companyUserStr = localStorage.getItem('company_user');
     if (!companyUserStr) return false;
-    const companyUser = JSON.parse(companyUserStr);
-    return companyUser && (companyUser.role === 'project_manager' || companyUser.role === 'company_user');
+    return !!JSON.parse(companyUserStr);
   } catch {
     return false;
   }
@@ -59,11 +65,11 @@ const ProtectedRoute = ({ children, requireAdmin = false, requireProjectManager 
   }
 
   if (requireProjectManager) {
-    // Check if user is a project manager (regular user or company user)
-    // companyUserAuth already checks if role === 'project_manager'
+    // Any company login gets through — the dashboard then checks that the
+    // company actually bought the module. This only turns people away on the
+    // employee login, where there is no company and no module to check.
     const isPM = isProjectManager() || companyUserAuth;
     if (!isPM) {
-      // User is authenticated but not a project manager
       return (
         <div className="min-h-screen flex items-center justify-center">
           <div className="text-center">
@@ -72,7 +78,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, requireProjectManager 
               You don't have permission to access this page. Project Manager access required.
             </p>
             <p className="text-sm text-muted-foreground mt-2">
-              Please log in with a company account that has project manager role.
+              Please log in with your company account.
             </p>
           </div>
         </div>

@@ -44,7 +44,7 @@ from hr_agent.models import (
     HRDocumentAccessLog,
 )
 from hr_agent.throttling import (
-    HRPublicThrottle, HRLLMThrottle, HRUploadThrottle, HRCRUDThrottle,
+    HRPublicThrottle, HRLLMThrottle, HRStreamThrottle, HRUploadThrottle, HRCRUDThrottle,
 )
 from core.HR_agent.hr_agent import HRAgent
 from core.scheduling import (
@@ -79,19 +79,67 @@ def _hr_celery_broker_ready(timeout_seconds: float = 0.5) -> bool:
 
 
 def _hr_get_or_create_user_for_company_user(company_user):
-    """Get or create a Django User for a CompanyUser. Mirrors the Frontline
-    helper — needed because the `uploaded_by` FK on HRDocument points at
-    `auth.User`, not `core.CompanyUser`."""
-    user = User.objects.filter(email=company_user.email).first()
-    if user:
-        return user
-    username = f"company_user_{company_user.id}_{company_user.email}"
-    return User.objects.create_user(
-        username=username, email=company_user.email, password=None,
-        first_name=(company_user.full_name.split()[0] if company_user.full_name else ''),
-        last_name=(' '.join(company_user.full_name.split()[1:])
-                   if company_user.full_name and len(company_user.full_name.split()) > 1 else ''),
-    )
+    """The `auth.User` a dashboard login acts as — needed because FKs like
+    `HRDocument.uploaded_by` point at `auth.User`, not `core.CompanyUser`.
+
+    Keyed on the CompanyUser id, never the email address. `CompanyUser` is
+    unique per `(company, email)`, so the same address in two tenants used to
+    collapse onto one `auth.User` and records were attributed to a person in
+    another company (HR-SEC-5; the same defect as FL-SEC-3 in the Frontline
+    audit). `CompanyUser.login_user` was added and backfilled by
+    `core/migrations/0103`.
+    """
+    if company_user is None:
+        return None
+    if company_user.login_user_id:
+        return company_user.login_user
+
+    username = f"company_user_{company_user.id}"
+    user = User.objects.filter(username=username).first()
+    if user is None:
+        names = (company_user.full_name or '').split()
+        user = User.objects.create_user(
+            username=username, email=company_user.email, password=None,
+            first_name=(names[0] if names else ''),
+            last_name=(' '.join(names[1:]) if len(names) > 1 else ''),
+        )
+    CompanyUser.objects.filter(pk=company_user.pk).update(login_user=user)
+    company_user.login_user = user
+    return user
+
+
+def _caller_login_user_id(company_user):
+    """The `auth.User` id a dashboard login acts as, or None.
+
+    Every "is this my own record?" check in this module used to read
+    `_caller_login_user_id(request.user)`. `CompanyUser` has no `user_id`
+    field, so that is **always None** and every ownership check silently
+    evaluated False (HR-SEC-6). It went unnoticed because the checks are all
+    written `is_admin or is_owner`, and `_is_hr_admin` used to return True for
+    everyone — so the wrong half was carrying the right result. Tightening the
+    admin check is what exposed it: employees could no longer cancel or
+    withdraw their own leave, or export their own data.
+
+    Resolution order: the explicit `CompanyUser.login_user` link (added by
+    `core/migrations/0103`), then the Employee row that points at this
+    dashboard login, then the Employee row with the same work email.
+    """
+    if company_user is None:
+        return None
+    login_id = getattr(company_user, 'login_user_id', None)
+    if login_id:
+        return login_id
+    company_id = getattr(company_user, 'company_id', None)
+    if not company_id:
+        return None
+    emp = (Employee.objects
+           .filter(company_id=company_id, company_user=company_user)
+           .only('user_id').first())
+    if emp is None and getattr(company_user, 'email', None):
+        emp = (Employee.objects
+               .filter(company_id=company_id, work_email__iexact=company_user.email)
+               .only('user_id').first())
+    return emp.user_id if emp else None
 
 
 # ============================================================================
@@ -168,6 +216,16 @@ def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
     return True, None, current_sum
 
 
+#: Roles that administer HR for their company: salaries, performance reviews,
+#: the GDPR export, anonymisation, leave-balance adjustment, the audit log.
+#: `company_user` is deliberately NOT here — see `_is_hr_admin`.
+HR_ADMIN_ROLES = ('hr_agent', 'owner', 'admin')
+
+#: Roles `set_company_user_role` may grant. A subset of CompanyUser.ROLE_CHOICES:
+#: the agent-specific roles are not HR's to hand out.
+HR_ASSIGNABLE_ROLES = ('hr_agent', 'admin', 'manager', 'employee', 'company_user')
+
+
 def _resolve_asker_role(company_user: CompanyUser) -> str:
     """Map a CompanyUser.role to a knowledge confidentiality bucket.
 
@@ -177,10 +235,15 @@ def _resolve_asker_role(company_user: CompanyUser) -> str:
     Explicit ``employee`` / ``manager`` roles override the default.
     """
     role = (company_user.role or '').lower()
-    if role in ('owner', 'admin', 'hr_agent', 'company_user'):
+    if role in HR_ADMIN_ROLES:
         return 'hr'
     if role == 'manager':
         return 'manager'
+    # Anything else — including `company_user`, the role every invited login
+    # gets — sees only what an ordinary employee sees. This used to return
+    # 'hr' for the default role, so uploaded payslips and offer letters were
+    # answerable to anyone who could log in (HR-SEC-3). An unknown role must
+    # fall to the *lowest* rung, never the highest.
     return 'employee'
 
 
@@ -237,13 +300,17 @@ def list_employees(request):
     """
     try:
         company = request.user.company
-        # Backfill — idempotent + cheap.
-        from hr_agent.signals import backfill_employees_for_company
-        try:
-            backfill_employees_for_company(company.id)
-        except Exception:
-            logger.exception("list_employees: backfill failed for company %s", company.id)
-        qs = Employee.objects.filter(company=company)
+        # The backfill used to run here on every request — one existence query
+        # per person in the company, so a 200-person tenant paid ~30 s and a
+        # GET performed writes (HR-PERF-1). The CompanyUser→Employee signal
+        # covers new rows; `manage.py backfill_hr_employees` covers historical
+        # ones.
+        qs = Employee.objects.filter(company=company).select_related(
+            # _serialize_employee reads e.user.username and
+            # e.department_obj.name — two extra queries a row without this
+            # (HR-PERF-2).
+            'user', 'department_obj',
+        )
         q = (request.GET.get('q') or '').strip()
         if q:
             qs = qs.filter(Q(full_name__icontains=q) | Q(work_email__icontains=q))
@@ -425,17 +492,24 @@ def update_department(request, dept_id):
             if not parent or parent.pk == dept.pk:
                 return Response({'status': 'error', 'message': 'Invalid parent_id'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            # Walk up the candidate parent's ancestors to detect A→B→C→A cycles.
-            cursor = parent
-            depth = 0
-            while cursor is not None and depth < 50:
-                if cursor.parent_id == dept.pk:
+            # Walk up the candidate parent's ancestors to detect A→B→C→A
+            # cycles. The chain is read from one in-memory map rather than by
+            # following `cursor.parent`, which was a query per level
+            # (HR-PERF-5).
+            parent_of = dict(
+                Department.objects.filter(company=company)
+                .values_list('id', 'parent_id')
+            )
+            cursor_id = parent.pk
+            seen = set()
+            while cursor_id is not None and cursor_id not in seen:
+                if cursor_id == dept.pk:
                     return Response({
                         'status': 'error',
                         'message': 'Setting this parent would create a circular department hierarchy.',
                     }, status=status.HTTP_400_BAD_REQUEST)
-                cursor = cursor.parent
-                depth += 1
+                seen.add(cursor_id)
+                cursor_id = parent_of.get(cursor_id)
             dept.parent = parent
         fields_changed.append('parent')
     if 'head_id' in d:
@@ -584,7 +658,7 @@ def hr_knowledge_qa(request):
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
-@throttle_classes([HRLLMThrottle])
+@throttle_classes([HRStreamThrottle])
 def hr_knowledge_qa_stream(request):
     """Streaming variant of :func:`hr_knowledge_qa`. Returns a chunked HTTP
     response where each line is a JSON event:
@@ -1568,7 +1642,7 @@ def approve_hr_workflow_execution(request, execution_id):
     approver_user_id = req.get('approver_user_id')
     if approver_user_id:
         # Caller's CompanyUser.user FK must match the named approver.
-        caller_user_id = getattr(company_user, 'user_id', None)
+        caller_user_id = _caller_login_user_id(company_user)
         if str(caller_user_id) != str(approver_user_id) and not _is_hr_admin(company_user):
             return Response({'status': 'error', 'message': 'Not authorized to approve this execution'},
                             status=status.HTTP_403_FORBIDDEN)
@@ -1624,7 +1698,7 @@ def reject_hr_workflow_execution(request, execution_id):
     req = snap.get('approval_request') or {}
     approver_user_id = req.get('approver_user_id')
     if approver_user_id:
-        caller_user_id = getattr(company_user, 'user_id', None)
+        caller_user_id = _caller_login_user_id(company_user)
         if str(caller_user_id) != str(approver_user_id) and not _is_hr_admin(company_user):
             return Response({'status': 'error', 'message': 'Not authorized to reject this execution'},
                             status=status.HTTP_403_FORBIDDEN)
@@ -2327,7 +2401,7 @@ def update_leave_request(request, request_id):
                             status=status.HTTP_404_NOT_FOUND)
 
         is_admin = _is_hr_admin(request.user)
-        caller_user_id = getattr(request.user, 'user_id', None)
+        caller_user_id = _caller_login_user_id(request.user)
         is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
         if not (is_admin or is_owner):
             return Response({'status': 'error', 'message': 'Not authorized to edit this leave request'},
@@ -2412,7 +2486,7 @@ def cancel_leave_request(request, request_id):
             return Response({'status': 'error', 'message': 'Leave request not found'},
                             status=status.HTTP_404_NOT_FOUND)
         is_admin = _is_hr_admin(request.user)
-        caller_user_id = getattr(request.user, 'user_id', None)
+        caller_user_id = _caller_login_user_id(request.user)
         is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
         if not (is_admin or is_owner):
             return Response({'status': 'error', 'message': 'Only the submitter or HR-admin can cancel this request'},
@@ -2481,7 +2555,7 @@ def withdraw_leave_request(request, request_id):
                                 status=status.HTTP_404_NOT_FOUND)
 
             is_admin = _is_hr_admin(request.user)
-            caller_user_id = getattr(request.user, 'user_id', None)
+            caller_user_id = _caller_login_user_id(request.user)
             is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
             if not (is_admin or is_owner):
                 return Response({'status': 'error',
@@ -2518,9 +2592,8 @@ def withdraw_leave_request(request, request_id):
             # our LeaveBalance code existed?), skip silently rather than fail.
             restored = 0.0
             try:
-                from hr_agent.models import LeaveBalance
-                from datetime import date as _date
-                year_start = _date(lr.start_date.year, 1, 1)
+                from hr_agent.models import LeaveBalance, leave_year_start
+                year_start = leave_year_start(lr.start_date)
                 bal = LeaveBalance.objects.filter(
                     employee_id=lr.employee_id, leave_type=lr.leave_type,
                     period_start=year_start,
@@ -2604,8 +2677,11 @@ def decide_leave_request(request, request_id):
                 return Response({'status': 'error', 'message': f'Leave request is {lr.status}, not pending'},
                                 status=status.HTTP_400_BAD_REQUEST)
 
-            # Permission gate
-            is_hr_admin = (cu.role or '').lower() in ('hr_agent', 'owner', 'admin', 'company_user')
+            # Permission gate. Uses the shared helper rather than inlining the
+            # role list: the inlined copy here included 'company_user', so any
+            # colleague — including the requester — could decide the request
+            # (HR-SEC-1).
+            is_hr_admin = _is_hr_admin(cu)
             approver_emp = (Employee.objects.filter(company=company, company_user=cu).first()
                             or Employee.objects.filter(company=company, work_email__iexact=cu.email).first())
             is_assigned_approver = bool(lr.approver_id and approver_emp and lr.approver_id == approver_emp.id)
@@ -2627,11 +2703,12 @@ def decide_leave_request(request, request_id):
             # the increment wouldn't compound.
             if lr.status == 'approved':
                 try:
-                    from hr_agent.models import LeaveBalance
-                    from datetime import date as _date
+                    from hr_agent.models import LeaveBalance, leave_year_start
                     # Scope the balance to the leave year so used_days doesn't
-                    # bleed across annual accrual cycles.
-                    year_start = _date(lr.start_date.year, 1, 1)
+                    # bleed across annual accrual cycles. One shared helper, so
+                    # accrual and adjustment key the row the same way — they
+                    # used not to (HR-DATA-3).
+                    year_start = leave_year_start(lr.start_date)
                     bal, _ = LeaveBalance.objects.get_or_create(
                         employee_id=lr.employee_id,
                         leave_type=lr.leave_type,
@@ -4161,6 +4238,12 @@ def _serialize_leave_request(lr) -> dict:
 def list_leave_requests(request):
     """List leave requests in the caller's company.
 
+    Scope: an HR admin sees the whole company. Everyone else sees their own
+    requests plus the ones they are the approver for — a leave request carries
+    the reason the person gave ("chemotherapy", "funeral"), and this endpoint
+    used to return every employee's, to anyone who could log in, with no role
+    check at all (HR-SEC-2).
+
     Filters (query params):
       ``?status=pending|approved|rejected|cancelled``
       ``?mine=1`` — only requests submitted BY the caller
@@ -4172,27 +4255,38 @@ def list_leave_requests(request):
             'employee', 'approver',
         ).order_by('-created_at')
 
+        asker_emp = (Employee.objects.filter(company=company, company_user=request.user).first()
+                     or Employee.objects.filter(company=company, work_email__iexact=request.user.email).first())
+
+        if not _is_hr_admin(request.user):
+            if asker_emp:
+                qs = qs.filter(Q(employee=asker_emp) | Q(approver=asker_emp))
+            else:
+                # A dashboard login with no Employee row has no leave of their
+                # own and approves nobody.
+                qs = qs.none()
+
         if request.GET.get('status'):
             qs = qs.filter(status=request.GET['status'])
 
         if request.GET.get('mine') == '1':
-            asker_emp = (Employee.objects.filter(company=company, company_user=request.user).first()
-                         or Employee.objects.filter(company=company, work_email__iexact=request.user.email).first())
             if asker_emp:
                 qs = qs.filter(employee=asker_emp)
             else:
                 qs = qs.none()
 
         if request.GET.get('pending_for_me') == '1':
-            asker_emp = (Employee.objects.filter(company=company, company_user=request.user).first()
-                         or Employee.objects.filter(company=company, work_email__iexact=request.user.email).first())
             if asker_emp:
                 qs = qs.filter(status='pending', approver=asker_emp)
             else:
                 qs = qs.none()
 
-        rows = [_serialize_leave_request(lr) for lr in qs[:200]]
-        return Response({'status': 'success', 'data': rows, 'count': len(rows)})
+        # Paginated rather than silently cut at 200 (HR-PERF-4).
+        from api.pagination import paginate
+        page, pagination = paginate(request, qs, default_limit=200, max_limit=500)
+        rows = [_serialize_leave_request(lr) for lr in page]
+        return Response({'status': 'success', 'data': rows, 'count': len(rows),
+                         'pagination': pagination})
     except Exception:
         logger.exception("list_leave_requests failed")
         return Response({'status': 'error', 'message': 'Failed to list leave requests'},
@@ -4501,17 +4595,19 @@ def get_my_hr_profile(request):
 # ============================================================================
 
 def _is_hr_admin(company_user) -> bool:
-    """`hr_only` reads are restricted to roles in this set.
+    """Whether this dashboard login administers HR for its company.
 
-    ``company_user`` is the default role for dashboard logins — these are
-    operators, not workforce. Workforce is modeled as the `Employee` row.
-    So unless the CompanyUser is explicitly tagged as a non-admin role
-    (e.g. ``'employee'`` or ``'manager'`` if a tenant chooses to use those),
-    dashboard logins get HR-admin access for their own company.
+    `company_user` used to be in this set, which made the check meaningless:
+    it is the role `register_company_user` assigns to every login after a
+    company's first, so every colleague who was ever invited could read
+    everyone's salary (HR-SEC-1 in MDS/HR_AGENT_AUDIT.md). The ~35 callers of
+    this function read as access control and enforced nothing.
+
+    Existing tenants keep working because `core/migrations/0103` already
+    promoted each company's earliest login to `admin`, and roles can now be
+    granted from `set_company_user_role` below.
     """
-    return (company_user.role or '').lower() in (
-        'hr_agent', 'owner', 'admin', 'company_user',
-    )
+    return (company_user.role or '').lower() in HR_ADMIN_ROLES
 
 
 def _write_audit_log(actor_cu, company, action: str, target_type: str, target_id: int,
@@ -4564,7 +4660,7 @@ def update_employee(request, employee_id):
 
         company = request.user.company
         is_admin = _is_hr_admin(request.user)
-        caller_user_id = getattr(request.user, 'user_id', None)
+        caller_user_id = _caller_login_user_id(request.user)
         is_self = caller_user_id and str(caller_user_id) == str(emp.user_id)
 
         if not (is_admin or is_self):
@@ -5237,7 +5333,7 @@ def list_employee_reviews(request, employee_id):
     qs = PerformanceReview.objects.filter(employee=emp).select_related('cycle', 'reviewer')
     if not _is_hr_admin(request.user):
         # Self-view only sees released reviews.
-        caller_user_id = getattr(request.user, 'user_id', None)
+        caller_user_id = _caller_login_user_id(request.user)
         if str(caller_user_id) != str(emp.user_id):
             qs = qs.filter(visible_to_employee=True)
     return Response({'status': 'success',
@@ -5259,7 +5355,7 @@ def update_perf_review(request, review_id):
         return Response({'status': 'error', 'message': 'Review not found'},
                         status=status.HTTP_404_NOT_FOUND)
 
-    caller_user_id = getattr(request.user, 'user_id', None)
+    caller_user_id = _caller_login_user_id(request.user)
     is_admin = _is_hr_admin(request.user)
     is_reviewee = caller_user_id and str(caller_user_id) == str(r.employee.user_id)
     is_reviewer = caller_user_id and r.reviewer_id and str(caller_user_id) == str(r.reviewer.user_id)
@@ -5450,7 +5546,7 @@ def list_employee_goals(request, employee_id):
     emp, err = _company_employee_or_404(request, employee_id)
     if err:
         return err
-    caller_user_id = getattr(request.user, 'user_id', None)
+    caller_user_id = _caller_login_user_id(request.user)
     is_self = caller_user_id and str(caller_user_id) == str(emp.user_id)
     is_admin = _is_hr_admin(request.user)
     is_manager = False
@@ -5560,14 +5656,14 @@ def adjust_leave_balance(request, employee_id):
                          'message': 'reason is required — it goes to the audit log.'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    # Look up (or create) the row. We look at the current period-open row
-    # (`period_start=None` is the "always-on" bucket, which is how balances
-    # start out before an accrual policy tags them).
-    row = emp.leave_balances.filter(leave_type=leave_type).order_by('-period_start').first()
-    created = False
-    if row is None:
-        row = LeaveBalance.objects.create(employee=emp, leave_type=leave_type)
-        created = True
+    # The leave-year row — the same key accrual, approval and withdrawal use.
+    # This used to take whichever row sorted first by `-period_start`, which
+    # is a different row from the one approvals write whenever a
+    # `period_start=NULL` row exists (HR-DATA-3).
+    from hr_agent.models import leave_year_start
+    row, created = LeaveBalance.objects.get_or_create(
+        employee=emp, leave_type=leave_type, period_start=leave_year_start(),
+    )
 
     def _num(v):
         try:
@@ -5704,7 +5800,7 @@ def update_employee_goal(request, goal_id):
         return Response({'status': 'error', 'message': 'Goal not found'},
                         status=status.HTTP_404_NOT_FOUND)
     is_admin = _is_hr_admin(request.user)
-    caller_user_id = getattr(request.user, 'user_id', None)
+    caller_user_id = _caller_login_user_id(request.user)
     is_self = caller_user_id and str(caller_user_id) == str(g.employee.user_id)
     caller_emp = (Employee.objects.filter(company=request.user.company, company_user=request.user).first()
                   or Employee.objects.filter(company=request.user.company, work_email__iexact=request.user.email).first())
@@ -6144,6 +6240,108 @@ def list_hr_document_access_log(request, document_id):
 
 
 # ============================================================================
+# Role administration
+# ============================================================================
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_company_user_roles(request):
+    """The company's dashboard logins and their roles. HR-admin only."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    rows = [{
+        'id': cu.id,
+        'email': cu.email,
+        'full_name': cu.full_name,
+        'role': cu.role,
+        'is_active': cu.is_active,
+        'is_hr_admin': _is_hr_admin(cu),
+        'is_self': cu.id == request.user.id,
+    } for cu in CompanyUser.objects.filter(company=company).order_by('created_at', 'id')]
+    return Response({'status': 'success', 'data': rows,
+                     'assignable_roles': list(HR_ASSIGNABLE_ROLES)})
+
+
+@api_view(['PATCH', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def set_company_user_role(request, company_user_id):
+    """Change a dashboard login's role. HR-admin only.
+
+    The role ladder the rest of this module branches on used to be
+    unreachable: `register_company_user` assigns `admin` to a company's first
+    login and `company_user` to every one after, and nothing could change it
+    afterwards. So `manager`, `employee` and `hr_agent` were dead values,
+    `resolve_approver_for_leave`'s HR lookup never matched, and there was no
+    way to give a second person HR access without giving it to everyone
+    (HR-SEC-4).
+
+    Guards: a company can never be left without an HR admin, and you cannot
+    demote yourself — someone else has to do it, so an accidental click can't
+    lock a tenant out of its own HR data.
+    """
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    company = request.user.company
+    target = CompanyUser.objects.filter(company=company, pk=company_user_id).first()
+    if not target:
+        return Response({'status': 'error', 'message': 'Company user not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    new_role = str((request.data or {}).get('role') or '').strip().lower()
+    if new_role not in HR_ASSIGNABLE_ROLES:
+        return Response({
+            'status': 'error',
+            'message': f"role must be one of: {', '.join(HR_ASSIGNABLE_ROLES)}",
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    previous_role = target.role
+    if previous_role == new_role:
+        return Response({'status': 'success',
+                         'data': {'id': target.id, 'role': target.role, 'changed': False}})
+
+    losing_admin = _is_hr_admin(target) and new_role not in HR_ADMIN_ROLES
+    if losing_admin:
+        if target.id == request.user.id:
+            return Response({
+                'status': 'error',
+                'message': ('You cannot remove your own HR-admin role. Ask another '
+                            'HR admin to do it.'),
+            }, status=status.HTTP_400_BAD_REQUEST)
+        remaining = (CompanyUser.objects
+                     .filter(company=company, is_active=True, role__in=HR_ADMIN_ROLES)
+                     .exclude(pk=target.pk).count())
+        if remaining == 0:
+            return Response({
+                'status': 'error',
+                'message': ('This is the company\'s last HR admin — promote someone '
+                            'else first.'),
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    target.role = new_role
+    target.save(update_fields=['role'])
+
+    _write_audit_log(
+        request.user, company, 'company_user.role_change',
+        'company_user', target.id,
+        before={'role': previous_role},
+        after={'role': new_role, 'email': target.email,
+               'is_hr_admin': _is_hr_admin(target)},
+    )
+    return Response({'status': 'success', 'data': {
+        'id': target.id, 'role': target.role,
+        'is_hr_admin': _is_hr_admin(target), 'changed': True,
+    }})
+
+
+# ============================================================================
 # GDPR right-to-export (F3) — Article 15 / 20 data-portability bundle
 # ============================================================================
 
@@ -6169,7 +6367,7 @@ def export_employee_data(request, employee_id):
     if err:
         return err
     company = request.user.company
-    caller_user_id = getattr(request.user, 'user_id', None)
+    caller_user_id = _caller_login_user_id(request.user)
     is_self = caller_user_id and str(caller_user_id) == str(emp.user_id)
     is_admin = _is_hr_admin(request.user)
     if not (is_self or is_admin):

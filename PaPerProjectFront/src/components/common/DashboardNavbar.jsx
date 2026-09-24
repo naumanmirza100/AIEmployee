@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { LogOut, Bell, Key, User, Menu } from 'lucide-react';
 import AgentSidebar, { EXPANDED_W, COLLAPSED_W } from '@/components/common/AgentSidebar';
+import ThemeToggle from '@/components/common/ThemeToggle';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -170,10 +171,7 @@ const DashboardNavbar = ({
 
   return (
     <>
-      <header
-        className="border-b border-white/[0.08] sticky top-0 z-30"
-        style={{ background: 'linear-gradient(180deg, #0a0a14 0%, #0d0b1a 40%, #110e1f 100%)' }}
-      >
+      <header className="app-header-surface border-b border-border sticky top-0 z-30">
         <div className="container mx-auto px-3 sm:px-4 py-2 sm:py-2.5">
           {/* Header Row */}
           <div className="flex items-center justify-between gap-2">
@@ -181,7 +179,7 @@ const DashboardNavbar = ({
               {hasSidebar && (
                 <button
                   onClick={() => setMobileOpen(true)}
-                  className="md:hidden h-8 w-8 shrink-0 flex items-center justify-center rounded-md text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                  className="md:hidden h-8 w-8 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                   title="Open menu"
                 >
                   <Menu className="h-5 w-5" />
@@ -200,21 +198,22 @@ const DashboardNavbar = ({
               )}
               {Icon && <Icon className="h-5 w-5 sm:h-6 sm:w-6 text-violet-400 shrink-0" />}
               <div className="min-w-0">
-                <h1 className="text-sm sm:text-lg font-bold truncate text-white leading-tight">{title}</h1>
-                {subtitle && <p className="text-[11px] sm:text-xs text-white/45 truncate leading-tight">{subtitle}</p>}
+                <h1 className="text-sm sm:text-lg font-bold truncate text-foreground leading-tight">{title}</h1>
+                {subtitle && <p className="text-[11px] sm:text-xs text-muted-foreground truncate leading-tight">{subtitle}</p>}
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <ThemeToggle />
               {/* Notification Bell */}
               <div className="relative" ref={notifRef}>
                 <button
                   onClick={() => setShowNotifPanel((v) => !v)}
-                  className="h-8 w-8 sm:h-9 sm:w-9 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors relative"
+                  className="h-8 w-8 sm:h-9 sm:w-9 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors relative"
                   title="Notifications"
                 >
                   <Bell className="h-4 w-4" />
                   {unreadCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center justify-center"
+                    <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-red-500 text-[10px] font-bold text-pure-white flex items-center justify-center"
                       style={{ boxShadow: '0 0 6px rgba(239,68,68,0.5)' }}>
                       {unreadCount > 9 ? '9+' : unreadCount}
                     </span>
@@ -224,11 +223,11 @@ const DashboardNavbar = ({
                 {/* Notification Dropdown */}
                 {showNotifPanel && (
                   <div
-                    className="absolute right-0 top-11 w-80 max-h-[400px] overflow-y-auto scrollbar-none rounded-xl border border-white/10 z-50"
-                    style={{ background: 'linear-gradient(180deg, #0d0b1a 0%, #1a0a2e 100%)', boxShadow: '0 8px 40px rgba(0,0,0,0.5)', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                    className="app-panel-surface absolute right-0 top-11 w-80 max-h-[400px] overflow-y-auto scrollbar-none rounded-xl border border-border shadow-xl z-50"
+                    style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                   >
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                      <span className="text-sm font-semibold text-white">Notifications</span>
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                      <span className="text-sm font-semibold text-foreground">Notifications</span>
                       {unreadCount > 0 && (
                         <button onClick={markAllRead} className="text-[11px] text-violet-400 hover:text-violet-300">
                           Mark all read
@@ -236,7 +235,7 @@ const DashboardNavbar = ({
                       )}
                     </div>
                     {notifications.length === 0 ? (
-                      <div className="p-6 text-center text-sm text-white/40">No notifications</div>
+                      <div className="p-6 text-center text-sm text-muted-foreground">No notifications</div>
                     ) : (
                       <div className="divide-y divide-white/5">
                         {notifications.slice(0, 20).map((n) => (
@@ -254,14 +253,14 @@ const DashboardNavbar = ({
                                 navigate('/notifications');
                               }
                             }}
-                            className={`w-full text-left px-4 py-3 hover:bg-white/5 transition-colors ${!n.is_read ? 'bg-violet-500/5' : ''}`}
+                            className={`w-full text-left px-4 py-3 hover:bg-accent transition-colors ${!n.is_read ? 'bg-violet-500/5' : ''}`}
                           >
                             <div className="flex items-start gap-2">
                               {!n.is_read && <div className="w-2 h-2 rounded-full bg-violet-500 mt-1.5 shrink-0" />}
                               <div className="flex-1 min-w-0" title={`${n.title}\n\n${n.message}`}>
                                 <p className={`text-xs font-medium ${getNotifColor(n.type)} truncate`}>{n.title}</p>
-                                <p className="text-[11px] text-white/50 mt-0.5 line-clamp-2">{n.message}</p>
-                                <p className="text-[10px] text-white/30 mt-1">{formatTimeAgo(n.created_at)}</p>
+                                <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
+                                <p className="text-[10px] text-muted-foreground/70 mt-1">{formatTimeAgo(n.created_at)}</p>
                               </div>
                             </div>
                           </button>
@@ -277,8 +276,7 @@ const DashboardNavbar = ({
                         setShowNotifPanel(false);
                         navigate('/notifications');
                       }}
-                      className="w-full px-4 py-2.5 text-center text-[11px] font-medium text-violet-400 hover:text-violet-300 hover:bg-white/5 border-t border-white/10 transition-colors sticky bottom-0"
-                      style={{ background: 'linear-gradient(180deg, rgba(13,11,26,0.9) 0%, #1a0a2e 100%)' }}
+                      className="app-panel-surface w-full px-4 py-2.5 text-center text-[11px] font-medium text-violet-400 hover:text-violet-300 hover:bg-accent border-t border-border transition-colors sticky bottom-0"
                     >
                       View all notifications
                     </button>
@@ -292,15 +290,15 @@ const DashboardNavbar = ({
                   <DropdownMenuTrigger className="flex items-center gap-2 rounded-full focus:outline-none focus:ring-2 focus:ring-violet-400/50 pr-1">
                     <div
                       className="h-8 w-8 rounded-full flex items-center justify-center shrink-0 text-white font-bold text-sm select-none"
-                      style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a259ff 100%)', boxShadow: '0 0 10px rgba(124,58,237,0.45)' }}
+                      style={{ background: 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)', boxShadow: '0 0 10px hsl(var(--brand-600) / 0.45)' }}
                     >
                       {(user.fullName || user.username || user.email || 'U').charAt(0).toUpperCase()}
                     </div>
                     <div className="hidden sm:block text-left">
-                      <p className="text-xs font-semibold text-white leading-tight truncate max-w-[150px]">
+                      <p className="text-xs font-semibold text-foreground leading-tight truncate max-w-[150px]">
                         {user.fullName || user.username || user.email?.split('@')[0] || 'User'}
                       </p>
-                      <p className="text-[11px] text-white/40 leading-tight truncate max-w-[150px]">{user.email}</p>
+                      <p className="text-[11px] text-muted-foreground leading-tight truncate max-w-[150px]">{user.email}</p>
                     </div>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
@@ -374,41 +372,35 @@ const DashboardNavbar = ({
           onClick={() => setShowConfirm(false)}
         >
           <div
-            className="w-full max-w-sm mx-4 rounded-2xl p-6 flex flex-col gap-4"
-            style={{
-              background: 'linear-gradient(135deg, #0d0b1a 0%, #1a0a2e 100%)',
-              border: '1px solid rgba(124,58,237,0.3)',
-              boxShadow: '0 8px 40px 0 rgba(124,58,237,0.2)',
-            }}
+            className="app-panel-surface w-full max-w-sm mx-4 rounded-2xl p-6 flex flex-col gap-4 border border-primary/30 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Icon */}
             <div className="flex justify-center">
               <div
                 className="h-14 w-14 rounded-full flex items-center justify-center"
-                style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)' }}
+                style={{ background: 'hsl(var(--brand-600) / 0.15)', border: '1px solid hsl(var(--brand-600) / 0.3)' }}
               >
                 <LogOut className="h-6 w-6 text-violet-400" />
               </div>
             </div>
             {/* Text */}
             <div className="text-center">
-              <h3 className="text-lg font-semibold text-white">Logout?</h3>
-              <p className="text-sm text-white/50 mt-1">Are you sure you want to logout?</p>
+              <h3 className="text-lg font-semibold text-foreground">Logout?</h3>
+              <p className="text-sm text-muted-foreground mt-1">Are you sure you want to logout?</p>
             </div>
             {/* Buttons */}
             <div className="flex gap-3 mt-1">
               <button
                 onClick={() => setShowConfirm(false)}
-                className="flex-1 h-10 rounded-xl text-sm font-medium text-white/70 hover:text-white transition-colors"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                className="flex-1 h-10 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground bg-muted border border-border transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => { setShowConfirm(false); onLogout(); }}
                 className="flex-1 h-10 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
-                style={{ background: 'linear-gradient(90deg, #7c3aed 0%, #a259ff 100%)', boxShadow: '0 0 12px rgba(124,58,237,0.4)' }}
+                style={{ background: 'linear-gradient(90deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)', boxShadow: '0 0 12px hsl(var(--brand-600) / 0.4)' }}
               >
                 Yes, Logout
               </button>

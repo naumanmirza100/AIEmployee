@@ -32,7 +32,7 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent id="OPS-templatepicker-dialog" data-testid="OPS-templatepicker-dialog" className="bg-[#1a1333] border border-white/10 text-white max-w-2xl">
+      <DialogContent id="OPS-templatepicker-dialog" data-testid="OPS-templatepicker-dialog" className="bg-[var(--panel-1)] border border-white/10 text-white max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-white">Select a template</DialogTitle>
           <DialogDescription className="text-white/55">
@@ -99,7 +99,7 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
             data-testid="OPS-templatepicker-confirm-btn"
             onClick={confirm}
             className="font-semibold"
-            style={{ backgroundColor: AUTHORING_ACCENT, color: '#1a0e00', border: 'none' }}
+            style={{ backgroundColor: AUTHORING_ACCENT, color: 'var(--sfc-1a0e00)', border: 'none' }}
           >
             Use this template
           </Button>

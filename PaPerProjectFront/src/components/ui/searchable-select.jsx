@@ -46,7 +46,7 @@ const SearchableSelect = ({
       <PopoverTrigger asChild>
         <button
           className={cn(
-            'flex h-10 items-center justify-between rounded-md border border-white/20 bg-transparent px-3 py-2 text-sm text-white/80 hover:bg-white/5 focus:outline-none',
+            'flex h-10 items-center justify-between rounded-md border border-border bg-transparent px-3 py-2 text-sm text-foreground hover:bg-accent focus:outline-none',
             triggerClassName
           )}
         >
@@ -56,29 +56,29 @@ const SearchableSelect = ({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-[240px] p-0 border border-white/15 bg-[#0f0c1a] text-white shadow-xl"
+        className="w-[240px] p-0 border border-border bg-popover text-popover-foreground shadow-xl"
       >
         {/* Search input */}
-        <div className="flex items-center border-b border-white/10 px-3 py-2 gap-2">
-          <Search className="h-3.5 w-3.5 shrink-0 text-white/40" />
+        <div className="flex items-center border-b border-border px-3 py-2 gap-2">
+          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search..."
-            className="flex-1 bg-transparent text-sm text-white placeholder:text-white/30 outline-none"
+            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
         </div>
         {/* Options list */}
         <div className="max-h-[220px] overflow-y-auto py-1 custom-sidebar-scroll">
           {filtered.length === 0 ? (
-            <p className="py-3 text-center text-xs text-white/40">No results</p>
+            <p className="py-3 text-center text-xs text-muted-foreground">No results</p>
           ) : (
             filtered.map(opt => (
               <button
                 key={opt.value}
                 onClick={() => { onValueChange(opt.value); setOpen(false); }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-white/80 hover:bg-white/10 text-left"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent text-left"
               >
                 <Check className={cn('h-3.5 w-3.5 shrink-0', value === opt.value ? 'opacity-100 text-violet-400' : 'opacity-0')} />
                 <span>{opt.label}</span>

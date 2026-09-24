@@ -270,7 +270,7 @@ export default function WorkflowSuggestionsView({ onOpenPilot }) {
                       >
                         <div className="flex items-center gap-3">
                           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                            isCurrent ? 'bg-violet-600 text-white' : 'bg-white/[0.05] text-white/65'
+                            isCurrent ? 'bg-violet-600 text-pure-white' : 'bg-white/[0.05] text-white/65'
                           }`}>
                             {i + 1}
                           </div>

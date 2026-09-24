@@ -46,7 +46,7 @@ const ConfirmDialog = ({
 
   const confirmStyles = isDanger
     ? { backgroundColor: '#dc2626', color: '#fff', border: 'none' }
-    : { backgroundColor: '#f59e0b', color: '#1a0e00', border: 'none' };
+    : { backgroundColor: '#f59e0b', color: 'var(--sfc-1a0e00)', border: 'none' };
 
   const handleConfirm = async () => {
     if (loading) return;
@@ -55,7 +55,7 @@ const ConfirmDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!loading) onOpenChange?.(next); }}>
-      <DialogContent className="bg-[#1a1333] border border-white/10 text-white max-w-md">
+      <DialogContent className="bg-popover border border-border text-popover-foreground max-w-md">
         <DialogHeader>
           <div className="flex items-start gap-3">
             <div
@@ -65,9 +65,9 @@ const ConfirmDialog = ({
               {icon || <DefaultIcon className="h-5 w-5" style={{ color: iconTint }} />}
             </div>
             <div className="flex-1 min-w-0">
-              <DialogTitle className="text-white text-base">{title}</DialogTitle>
+              <DialogTitle className="text-foreground text-base">{title}</DialogTitle>
               {description && (
-                <DialogDescription className="text-white/60 mt-1 text-sm leading-relaxed">
+                <DialogDescription className="text-muted-foreground mt-1 text-sm leading-relaxed">
                   {description}
                 </DialogDescription>
               )}
@@ -80,7 +80,7 @@ const ConfirmDialog = ({
             variant="outline"
             onClick={() => onOpenChange?.(false)}
             disabled={loading}
-            className="border-white/10 bg-transparent text-white/80 hover:bg-white/5"
+            className="border-border bg-transparent text-foreground hover:bg-accent"
           >
             {cancelLabel}
           </Button>

@@ -680,7 +680,7 @@ const MarketResearch = () => {
       <motion.div 
         variants={itemVariants}
         className={cn(
-          "shrink-0 flex flex-col rounded-2xl border border-white/10 bg-black/20 backdrop-blur-sm overflow-hidden transition-all duration-300",
+          "shrink-0 flex flex-col rounded-2xl border border-white/10 bg-pure-black/20 backdrop-blur-sm overflow-hidden transition-all duration-300",
           sidebarOpen ? "w-80" : "w-16"
         )}
       >
@@ -902,7 +902,7 @@ const MarketResearch = () => {
         variants={itemVariants}
         className="flex-1 min-w-0 min-h-0"
       >
-        <Card className="h-full flex flex-col overflow-hidden border-white/10 bg-black/20 backdrop-blur-sm rounded-2xl">
+        <Card className="h-full flex flex-col overflow-hidden border-white/10 bg-pure-black/20 backdrop-blur-sm rounded-2xl">
           {/* Header */}
           <CardHeader className="shrink-0 border-b border-white/10 pb-3 rounded-t-2xl bg-white/[0.03]">
             <div className="flex items-center justify-between">
@@ -1162,7 +1162,7 @@ const MarketResearch = () => {
                 <div
                   className="relative z-[1] rounded-[28px] px-2.5 py-2.5 space-y-3"
                   style={{
-                    background: '#0a0a0f',
+                    background: 'var(--panel-3)',
                     border: '1.5px solid rgba(255,255,255,0.08)',
                     boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
                   }}
@@ -1175,7 +1175,7 @@ const MarketResearch = () => {
                         <SelectTrigger
                           className="h-11 w-[145px] shrink-0 rounded-full text-sm font-medium focus:ring-0 focus:ring-offset-0 transition-all duration-200 px-4 gap-2 [&>svg]:opacity-70"
                           style={{
-                            background: '#111118',
+                            background: 'var(--sfc-111118)',
                             border: '1.5px solid rgba(139, 92, 246, 0.55)',
                             boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
                             color: '#e2e2f0',
@@ -1187,7 +1187,7 @@ const MarketResearch = () => {
                       <SelectContent
                         className="rounded-xl"
                         style={{
-                          background: '#161630',
+                          background: 'var(--panel-4)',
                           border: '1px solid rgba(139, 92, 246, 0.25)',
                           color: '#e2e2f0',
                         }}
@@ -1209,7 +1209,7 @@ const MarketResearch = () => {
                     <div
                       className="flex-1 min-w-0 rounded-full flex items-center overflow-hidden"
                       style={{
-                        background: '#0e0e14',
+                        background: 'var(--sfc-0e0e14)',
                         boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
                         border: '1px solid rgba(255, 255, 255, 0.1)',
                         borderLeftColor: 'rgba(139, 92, 246, 0.45)',
@@ -1250,10 +1250,10 @@ const MarketResearch = () => {
                         style={{
                           background: loading
                             ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 50%, #991b1b 100%)'
-                            : 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%)',
+                            : 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, #6d28d9 50%, #5b21b6 100%)',
                           boxShadow: loading
                             ? '0 0 16px rgba(220, 38, 38, 0.35), 0 2px 8px rgba(0,0,0,0.3)'
-                            : '0 0 16px rgba(124, 58, 237, 0.35), 0 2px 8px rgba(0,0,0,0.3)',
+                            : '0 0 16px hsl(var(--brand-600) / 0.35), 0 2px 8px rgba(0,0,0,0.3)',
                           color: '#ffffff',
                         }}
                       >
@@ -1272,7 +1272,7 @@ const MarketResearch = () => {
                         size="icon"
                         className="h-11 w-11 rounded-full border-0 text-white/80 hover:text-white"
                         style={{
-                          background: '#111118',
+                          background: 'var(--sfc-111118)',
                           border: '1.5px solid rgba(139, 92, 246, 0.30)',
                           boxShadow: '0 0 12px rgba(139, 92, 246, 0.15)',
                         }}
@@ -1304,7 +1304,7 @@ const MarketResearch = () => {
                               placeholder="e.g., Competitor A, B"
                               value={competitors}
                               onChange={(e) => setCompetitors(e.target.value)}
-                              className="h-8 text-sm rounded-lg border-0 bg-[#111118] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                              className="h-8 text-sm rounded-lg border-0 bg-[var(--sfc-111118)] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
                               style={{ border: '1px solid rgba(139, 92, 246, 0.22)' }}
                             />
                           </div>
@@ -1314,7 +1314,7 @@ const MarketResearch = () => {
                               placeholder="e.g., Technology"
                               value={industry}
                               onChange={(e) => setIndustry(e.target.value)}
-                              className="h-8 text-sm rounded-lg border-0 bg-[#111118] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                              className="h-8 text-sm rounded-lg border-0 bg-[var(--sfc-111118)] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
                               style={{ border: '1px solid rgba(139, 92, 246, 0.22)' }}
                             />
                           </div>
@@ -1324,7 +1324,7 @@ const MarketResearch = () => {
                               placeholder="e.g., North America"
                               value={geographicRegion}
                               onChange={(e) => setGeographicRegion(e.target.value)}
-                              className="h-8 text-sm rounded-lg border-0 bg-[#111118] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                              className="h-8 text-sm rounded-lg border-0 bg-[var(--sfc-111118)] text-white placeholder:text-white/40 focus-visible:ring-0 focus-visible:ring-offset-0"
                               style={{ border: '1px solid rgba(139, 92, 246, 0.22)' }}
                             />
                           </div>

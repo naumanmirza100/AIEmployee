@@ -58,7 +58,7 @@ const CompanyPicker = ({ value, onChange, disabled, lockedLabel }) => {
         <Search className="w-4 h-4 text-white/40 absolute left-3 top-1/2 -translate-y-1/2" />
         <Input
           disabled={disabled}
-          className="bg-[#1a1333] border-[#3a295a] text-white pl-9"
+          className="bg-[var(--panel-1)] border-[var(--line-2)] text-white pl-9"
           placeholder={disabled ? '' : 'Search company by name...'}
           value={disabled && lockedLabel ? lockedLabel : selected ? `${selected.name} (#${selected.id})` : search}
           onChange={(e) => { setSearch(e.target.value); onChange(''); }}
@@ -67,12 +67,12 @@ const CompanyPicker = ({ value, onChange, disabled, lockedLabel }) => {
         />
       </div>
       {open && !disabled && options.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-[#1a1333] border border-[#3a295a] rounded-lg shadow-xl">
+        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-[var(--panel-1)] border border-[var(--line-2)] rounded-lg shadow-xl">
           {options.map(c => (
             <button
               key={c.id}
               type="button"
-              className="w-full text-left px-3 py-2 hover:bg-violet-500/20 text-white text-sm border-b border-[#2d2342] last:border-b-0"
+              className="w-full text-left px-3 py-2 hover:bg-violet-500/20 text-white text-sm border-b border-[var(--line-3)] last:border-b-0"
               onMouseDown={(e) => { e.preventDefault(); onChange(String(c.id)); setSearch(''); setOpen(false); }}
             >
               <span className="font-medium">{c.name}</span>
@@ -618,7 +618,7 @@ const SuperAdminApiKeysPage = () => {
 
       {/* Assign Managed Key Modal */}
       <Dialog open={assignModal.open} onOpenChange={(o) => !o && setAssignModal({ open: false, replacingKey: null, prefillRequest: null })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto no-scrollbar">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto no-scrollbar">
           <DialogHeader className="pb-2 border-b border-white/8">
             <DialogTitle className="flex items-center gap-2">
               <Key className="w-5 h-5 text-violet-400" />
@@ -653,8 +653,8 @@ const SuperAdminApiKeysPage = () => {
                     onValueChange={(v) => setAssignForm({ ...assignForm, agent_name: v })}
                     disabled={!!assignModal.replacingKey || !!assignModal.prefillRequest}
                   >
-                    <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                    <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                       {agentOptions.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -666,8 +666,8 @@ const SuperAdminApiKeysPage = () => {
                 <div>
                   <Label className="text-white/60 text-xs uppercase tracking-wider">Provider</Label>
                   <Select value={assignForm.provider} onValueChange={(v) => setAssignForm({ ...assignForm, provider: v })}>
-                    <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                    <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                       {PROVIDER_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -676,7 +676,7 @@ const SuperAdminApiKeysPage = () => {
                   <Label className="text-white/60 text-xs uppercase tracking-wider">API Key</Label>
                   <Input
                     type="password" autoComplete="off" placeholder="sk-..."
-                    className="bg-[#1a1333] border-[#3a295a] text-white mt-1 font-mono"
+                    className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1 font-mono"
                     value={assignForm.api_key}
                     onChange={(e) => setAssignForm({ ...assignForm, api_key: e.target.value })}
                   />
@@ -716,7 +716,7 @@ const SuperAdminApiKeysPage = () => {
                   <Input
                     type="number"
                     placeholder={`Default from pricing: ${formatTokens(pricing.find(p => p.agent_name === assignForm.agent_name)?.managed_key_tokens ?? 0)}`}
-                    className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+                    className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"
                     value={assignForm.managed_tokens}
                     onChange={(e) => setAssignForm((f) => ({ ...f, managed_tokens: e.target.value }))}
                   />
@@ -737,12 +737,12 @@ const SuperAdminApiKeysPage = () => {
               const daysLeft = validUntil ? Math.ceil((validUntil - new Date()) / (1000 * 60 * 60 * 24)) : null;
               const urgent = daysLeft !== null && daysLeft <= 7;
               return (
-                <div className="grid grid-cols-3 gap-4 p-4 bg-[#1a1333] border border-amber-500/20 rounded-xl">
+                <div className="grid grid-cols-3 gap-4 p-4 bg-[var(--panel-1)] border border-amber-500/20 rounded-xl">
                   <div className="col-span-3 flex items-center gap-2 mb-1">
                     <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                     <p className="text-[11px] text-amber-300 uppercase tracking-widest font-semibold">Current Key Info</p>
                   </div>
-                  <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                  <div className="bg-[var(--panel-2)] rounded-lg p-3 border border-[var(--line-3)]">
                     <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Billing Plan</p>
                     <p className="text-sm text-violet-300 font-semibold capitalize">
                       {!renewal || renewal === 'none' ? 'One-time' : renewal}
@@ -751,7 +751,7 @@ const SuperAdminApiKeysPage = () => {
                       {!renewal || renewal === 'none' ? 'Key never expires' : renewal === 'monthly' ? 'Renews monthly' : 'Renews yearly'}
                     </p>
                   </div>
-                  <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                  <div className="bg-[var(--panel-2)] rounded-lg p-3 border border-[var(--line-3)]">
                     <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Token Reset</p>
                     <p className="text-sm font-semibold">
                       {renewal && renewal !== 'none'
@@ -763,7 +763,7 @@ const SuperAdminApiKeysPage = () => {
                       {rk.tokens_per_period > 0 ? `${formatTokens(rk.tokens_per_period)} per reset` : '—'}
                     </p>
                   </div>
-                  <div className={`bg-[#120d22] rounded-lg p-3 border ${urgent ? 'border-amber-500/40' : 'border-[#2d2342]'}`}>
+                  <div className={`bg-[var(--panel-2)] rounded-lg p-3 border ${urgent ? 'border-amber-500/40' : 'border-[var(--line-3)]'}`}>
                     <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Key Valid Until</p>
                     {validUntil ? (
                       <>
@@ -784,7 +784,7 @@ const SuperAdminApiKeysPage = () => {
 
             {/* Row 2 — Billing plan: full width */}
             {assignModal.prefillRequest ? (
-              <div className="grid grid-cols-3 gap-4 p-4 bg-[#1a1333] border border-violet-500/30 rounded-xl">
+              <div className="grid grid-cols-3 gap-4 p-4 bg-[var(--panel-1)] border border-violet-500/30 rounded-xl">
                 <div className="col-span-3 flex items-center justify-between gap-2 mb-1">
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
@@ -796,7 +796,7 @@ const SuperAdminApiKeysPage = () => {
                     </span>
                   )}
                 </div>
-                <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                <div className="bg-[var(--panel-2)] rounded-lg p-3 border border-[var(--line-3)]">
                   <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Billing Plan</p>
                   <p className="text-sm text-violet-300 font-semibold">
                     {assignForm.renewal_period === 'none' ? 'One-time' : assignForm.renewal_period === 'monthly' ? 'Monthly' : 'Yearly'}
@@ -805,7 +805,7 @@ const SuperAdminApiKeysPage = () => {
                     {assignForm.renewal_period === 'none' ? 'Key never expires' : assignForm.renewal_period === 'monthly' ? 'Key expires after 1 month' : 'Key expires after 1 year'}
                   </p>
                 </div>
-                <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                <div className="bg-[var(--panel-2)] rounded-lg p-3 border border-[var(--line-3)]">
                   <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Token Reset</p>
                   <p className="text-sm text-emerald-400 font-semibold">
                     {assignForm.renewal_period === 'none' ? 'No reset' : `Every ${assignForm.reset_interval_days || 7} days`}
@@ -814,7 +814,7 @@ const SuperAdminApiKeysPage = () => {
                     {assignForm.renewal_period === 'none' ? 'One-time tokens only' : 'Automatic recurring reset'}
                   </p>
                 </div>
-                <div className="bg-[#120d22] rounded-lg p-3 border border-[#2d2342]">
+                <div className="bg-[var(--panel-2)] rounded-lg p-3 border border-[var(--line-3)]">
                   <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1">Key Valid For</p>
                   <p className="text-sm text-violet-300 font-semibold">
                     {assignForm.duration_months ? `${assignForm.duration_months} month${parseInt(assignForm.duration_months) !== 1 ? 's' : ''}` : 'Auto'}
@@ -826,7 +826,7 @@ const SuperAdminApiKeysPage = () => {
                   <Input
                     type="number"
                     placeholder={`Default from pricing: ${formatTokens(pricing.find(p => p.agent_name === assignForm.agent_name)?.managed_key_tokens ?? 0)}`}
-                    className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+                    className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"
                     value={assignForm.managed_tokens}
                     onChange={(e) => setAssignForm((f) => ({ ...f, managed_tokens: e.target.value }))}
                   />
@@ -842,8 +842,8 @@ const SuperAdminApiKeysPage = () => {
                       value={['7', '10', '14', '30'].includes(String(assignForm.reset_interval_days)) ? String(assignForm.reset_interval_days) : 'custom'}
                       onValueChange={(v) => setAssignForm((f) => ({ ...f, reset_interval_days: v === 'custom' ? '' : v }))}
                     >
-                      <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white flex-1"><SelectValue /></SelectTrigger>
-                      <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                      <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white flex-1"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                         <SelectItem value="7">7 days (weekly)</SelectItem>
                         <SelectItem value="10">10 days</SelectItem>
                         <SelectItem value="14">14 days</SelectItem>
@@ -855,7 +855,7 @@ const SuperAdminApiKeysPage = () => {
                       <Input
                         type="number" min="1" max="365"
                         placeholder="days"
-                        className="bg-[#1a1333] border-[#3a295a] text-white w-24 h-10"
+                        className="bg-[var(--panel-1)] border-[var(--line-2)] text-white w-24 h-10"
                         value={assignForm.reset_interval_days}
                         onChange={(e) => setAssignForm((f) => ({ ...f, reset_interval_days: e.target.value }))}
                       />
@@ -874,8 +874,8 @@ const SuperAdminApiKeysPage = () => {
                       value={['7', '10', '14', '30'].includes(String(assignForm.reset_interval_days)) ? String(assignForm.reset_interval_days) : 'custom'}
                       onValueChange={(v) => setAssignForm((f) => ({ ...f, reset_interval_days: v === 'custom' ? '' : v }))}
                     >
-                      <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white flex-1"><SelectValue /></SelectTrigger>
-                      <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                      <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white flex-1"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                         <SelectItem value="7">7 days (weekly)</SelectItem>
                         <SelectItem value="10">10 days</SelectItem>
                         <SelectItem value="14">14 days</SelectItem>
@@ -887,7 +887,7 @@ const SuperAdminApiKeysPage = () => {
                       <Input
                         type="number" min="1" max="365"
                         placeholder="days"
-                        className="bg-[#1a1333] border-[#3a295a] text-white w-24 h-10"
+                        className="bg-[var(--panel-1)] border-[var(--line-2)] text-white w-24 h-10"
                         value={assignForm.reset_interval_days}
                         onChange={(e) => setAssignForm((f) => ({ ...f, reset_interval_days: e.target.value }))}
                       />
@@ -900,7 +900,7 @@ const SuperAdminApiKeysPage = () => {
           </div>
           <DialogFooter className="pt-2 border-t border-white/8">
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setAssignModal({ open: false, replacingKey: null, prefillRequest: null })}>Cancel</Button>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitAssign} disabled={submitting}>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={submitAssign} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Assign key
             </Button>
           </DialogFooter>
@@ -909,7 +909,7 @@ const SuperAdminApiKeysPage = () => {
 
       {/* Adjust Quota Modal */}
       <Dialog open={adjustModal.open} onOpenChange={(o) => !o && setAdjustModal({ ...adjustModal, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white">
           <DialogHeader>
             <DialogTitle>
               {['set_managed', 'reset_managed'].includes(adjustModal.action) ? 'Managed Key Tokens' : 'Free Quota'} — {adjustModal.quota?.company_name}
@@ -939,7 +939,7 @@ const SuperAdminApiKeysPage = () => {
                 {adjustModal.action === 'add_tokens' ? 'Free tokens to add' : adjustModal.action === 'set_included' ? 'New free token limit' : 'New managed key token limit'}
               </Label>
               <Input
-                type="number" className="bg-[#1a1333] border-[#3a295a] text-white"
+                type="number" className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"
                 value={adjustModal.value}
                 onChange={(e) => setAdjustModal({ ...adjustModal, value: e.target.value })}
               />
@@ -953,11 +953,11 @@ const SuperAdminApiKeysPage = () => {
           {/* Weekly reset schedule — editable here so the admin does not have to
               go to the Reset Logs tab just to change how often tokens refill. */}
           {adjustModal.action === 'set_managed' && adjustModal.quota?.key_id && adjustModal.quota?.key_mode === 'managed' && (
-            <div className="space-y-2 py-2 border-t border-[#2d2342] mt-1 pt-3">
+            <div className="space-y-2 py-2 border-t border-[var(--line-3)] mt-1 pt-3">
               <Label className="text-white/70 text-sm">Reset every (days)</Label>
               <Input
                 type="number" min="1" max="365"
-                className="bg-[#1a1333] border-[#3a295a] text-white"
+                className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"
                 value={adjustModal.reset_interval_days}
                 onChange={(e) => setAdjustModal({ ...adjustModal, reset_interval_days: e.target.value })}
               />
@@ -981,7 +981,7 @@ const SuperAdminApiKeysPage = () => {
           )}
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setAdjustModal({ ...adjustModal, open: false })}>Cancel</Button>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitAdjust} disabled={submitting}>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={submitAdjust} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Confirm
             </Button>
           </DialogFooter>
@@ -990,7 +990,7 @@ const SuperAdminApiKeysPage = () => {
 
       {/* Approve Request Modal — sets price, notifies company to pay */}
       <Dialog open={approveModal.open} onOpenChange={(o) => !o && setApproveModal({ ...approveModal, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-emerald-400" /> Approve Key Request
@@ -1049,7 +1049,7 @@ const SuperAdminApiKeysPage = () => {
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
                         <Input
                           type="number" min="0" step="0.01" placeholder="0.00"
-                          className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
+                          className="bg-[var(--panel-1)] border-[var(--line-2)] text-white pl-6"
                           value={approveModal.key_cost}
                           onChange={(e) => setApproveModal({ ...approveModal, key_cost: e.target.value })}
                         />
@@ -1061,7 +1061,7 @@ const SuperAdminApiKeysPage = () => {
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
                         <Input
                           type="number" min="0" step="0.01" placeholder="0.00"
-                          className="bg-[#1a1333] border-[#3a295a] text-white pl-6"
+                          className="bg-[var(--panel-1)] border-[var(--line-2)] text-white pl-6"
                           value={approveModal.service_charge}
                           onChange={(e) => setApproveModal({ ...approveModal, service_charge: e.target.value })}
                         />
@@ -1072,7 +1072,7 @@ const SuperAdminApiKeysPage = () => {
                       <div className="relative mt-1">
                         <Input
                           type="number" min="0" max="100" step="1" placeholder="0"
-                          className="bg-[#1a1333] border-[#3a295a] text-white pr-7"
+                          className="bg-[var(--panel-1)] border-[var(--line-2)] text-white pr-7"
                           value={approveModal.discount_pct}
                           onChange={(e) => setApproveModal({ ...approveModal, discount_pct: e.target.value })}
                         />
@@ -1083,7 +1083,7 @@ const SuperAdminApiKeysPage = () => {
                   {/* Opt-in: also write this price to the agent's GLOBAL pricing
                       config. Off by default so the per-company override stays
                       the normal behaviour. */}
-                  <label className="flex items-start gap-2 px-3 py-2.5 bg-[#1a1333]/60 border border-[#3a295a] rounded-lg cursor-pointer hover:border-violet-500/40 transition-colors">
+                  <label className="flex items-start gap-2 px-3 py-2.5 bg-[var(--panel-1)] border border-[var(--line-2)] rounded-lg cursor-pointer hover:border-violet-500/40 transition-colors">
                     <input
                       type="checkbox"
                       className="mt-0.5 accent-violet-500"
@@ -1114,7 +1114,7 @@ const SuperAdminApiKeysPage = () => {
               <Label className="text-white/70 text-sm">Admin note <span className="text-white/40 font-normal">(shown to company)</span></Label>
               <Textarea
                 rows={2}
-                className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+                className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"
                 placeholder="Optional instructions or context..."
                 value={approveModal.admin_note}
                 onChange={(e) => setApproveModal({ ...approveModal, admin_note: e.target.value })}
@@ -1126,7 +1126,7 @@ const SuperAdminApiKeysPage = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setApproveModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '', sync_global_pricing: false })}>Cancel</Button>
-            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={submitApprove} disabled={submitting}>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-pure-white" onClick={submitApprove} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Approve & Notify
             </Button>
           </DialogFooter>
@@ -1135,7 +1135,7 @@ const SuperAdminApiKeysPage = () => {
 
       {/* Reject Request Modal */}
       <Dialog open={rejectModal.open} onOpenChange={(o) => !o && setRejectModal({ ...rejectModal, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white">
           <DialogHeader>
             <DialogTitle>Reject Request</DialogTitle>
             <DialogDescription className="text-white/60">
@@ -1146,7 +1146,7 @@ const SuperAdminApiKeysPage = () => {
             <Label className="text-white/70 text-sm">Reason (shown to user)</Label>
             <Textarea
               rows={3}
-              className="bg-[#1a1333] border-[#3a295a] text-white mt-1"
+              className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"
               value={rejectModal.note}
               onChange={(e) => setRejectModal({ ...rejectModal, note: e.target.value })}
               placeholder="Optional note explaining why..."
@@ -1154,7 +1154,7 @@ const SuperAdminApiKeysPage = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setRejectModal({ open: false, request: null, note: '' })}>Cancel</Button>
-            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={submitReject} disabled={submitting}>
+            <Button className="bg-red-600 hover:bg-red-700 text-pure-white" onClick={submitReject} disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Reject
             </Button>
           </DialogFooter>
@@ -1163,7 +1163,7 @@ const SuperAdminApiKeysPage = () => {
 
       {/* Edit Request Modal — price/duration/note before payment */}
       <Dialog open={editModal.open} onOpenChange={(o) => !o && setEditModal({ ...editModal, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white sm:max-w-lg w-full">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white sm:max-w-lg w-full">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Pencil className="w-5 h-5 text-violet-400" /> Edit Request
@@ -1179,8 +1179,8 @@ const SuperAdminApiKeysPage = () => {
             <div className="space-y-1.5">
               <Label className="text-white/70 text-sm">Billing duration</Label>
               <Select value={editModal.preferred_duration} onValueChange={(v) => setEditModal({ ...editModal, preferred_duration: v })}>
-                <SelectTrigger className="bg-[#1a1333] border-[#3a295a] text-white"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+                <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
                   <SelectItem value="monthly">Monthly</SelectItem>
                   {/* <SelectItem value="yearly">Yearly</SelectItem> */}
                 </SelectContent>
@@ -1189,19 +1189,19 @@ const SuperAdminApiKeysPage = () => {
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1">
                 <Label className="text-white/70 text-xs">Key Cost ($)</Label>
-                <Input type="number" min="0" step="0.01" className="bg-[#1a1333] border-[#3a295a] text-white"
+                <Input type="number" min="0" step="0.01" className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"
                   value={editModal.key_cost}
                   onChange={(e) => setEditModal({ ...editModal, key_cost: e.target.value })} />
               </div>
               <div className="space-y-1">
                 <Label className="text-white/70 text-xs">Service ($)</Label>
-                <Input type="number" min="0" step="0.01" className="bg-[#1a1333] border-[#3a295a] text-white"
+                <Input type="number" min="0" step="0.01" className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"
                   value={editModal.service_charge}
                   onChange={(e) => setEditModal({ ...editModal, service_charge: e.target.value })} />
               </div>
               <div className="space-y-1">
                 <Label className="text-white/70 text-xs">Discount (%)</Label>
-                <Input type="number" min="0" max="100" step="1" className="bg-[#1a1333] border-[#3a295a] text-white"
+                <Input type="number" min="0" max="100" step="1" className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"
                   value={editModal.discount_pct}
                   onChange={(e) => setEditModal({ ...editModal, discount_pct: e.target.value })} />
               </div>
@@ -1219,13 +1219,13 @@ const SuperAdminApiKeysPage = () => {
             })()}
             <div className="space-y-1.5">
               <Label className="text-white/70 text-sm">Admin note (optional)</Label>
-              <Textarea rows={2} className="bg-[#1a1333] border-[#3a295a] text-white"
+              <Textarea rows={2} className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"
                 value={editModal.admin_note}
                 onChange={(e) => setEditModal({ ...editModal, admin_note: e.target.value })}
                 placeholder="Internal / company-facing note…" />
             </div>
             {/* Opt-in: also write this price to the agent's GLOBAL pricing config. */}
-            <label className="flex items-start gap-2 px-3 py-2.5 bg-[#1a1333]/60 border border-[#3a295a] rounded-lg cursor-pointer hover:border-violet-500/40 transition-colors">
+            <label className="flex items-start gap-2 px-3 py-2.5 bg-[var(--panel-1)] border border-[var(--line-2)] rounded-lg cursor-pointer hover:border-violet-500/40 transition-colors">
               <input
                 type="checkbox"
                 className="mt-0.5 accent-violet-500"
@@ -1242,7 +1242,7 @@ const SuperAdminApiKeysPage = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setEditModal({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', preferred_duration: 'monthly', admin_note: '', sync_global_pricing: false })}>Cancel</Button>
-            <Button className="bg-violet-600 hover:bg-violet-700 text-white" onClick={submitEdit} disabled={editing}>
+            <Button className="bg-violet-600 hover:bg-violet-700 text-pure-white" onClick={submitEdit} disabled={editing}>
               {editing && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Save Changes
             </Button>
           </DialogFooter>
@@ -1251,7 +1251,7 @@ const SuperAdminApiKeysPage = () => {
 
       {/* Confirm Dialog */}
       <Dialog open={confirmDialog.open} onOpenChange={(o) => !o && setConfirmDialog({ ...confirmDialog, open: false })}>
-        <DialogContent className="bg-[#120d22] border border-[#2d2342] text-white max-w-sm">
+        <DialogContent className="bg-[var(--panel-2)] border border-[var(--line-3)] text-white max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-300">
               <AlertTriangle className="w-5 h-5" />
@@ -1263,7 +1263,7 @@ const SuperAdminApiKeysPage = () => {
           </DialogHeader>
           <DialogFooter className="mt-2">
             <Button variant="outline" className="border-white/15 text-white/80" onClick={() => setConfirmDialog({ ...confirmDialog, open: false })}>Cancel</Button>
-            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={() => { setConfirmDialog({ ...confirmDialog, open: false }); confirmDialog.onConfirm?.(); }}>
+            <Button className="bg-red-600 hover:bg-red-700 text-pure-white" onClick={() => { setConfirmDialog({ ...confirmDialog, open: false }); confirmDialog.onConfirm?.(); }}>
               Confirm
             </Button>
           </DialogFooter>

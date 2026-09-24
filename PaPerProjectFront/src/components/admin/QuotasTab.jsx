@@ -13,11 +13,11 @@ export const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, load
         placeholder="Search company..."
         value={filter.search || ''}
         onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-        className="bg-[#1a1333] border-[#3a295a] text-white w-60 placeholder:text-white/30"
+        className="bg-[var(--panel-1)] border-[var(--line-2)] text-white w-60 placeholder:text-white/30"
       />
       <Select value={filter.agent_name || 'all'} onValueChange={(v) => setFilter({ ...filter, agent_name: v === 'all' ? '' : v })}>
-        <SelectTrigger className="w-52 bg-[#1a1333] border-[#3a295a] text-white"><SelectValue placeholder="All agents" /></SelectTrigger>
-        <SelectContent className="bg-[#1a1333] border-[#3a295a] text-white">
+        <SelectTrigger className="w-52 bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue placeholder="All agents" /></SelectTrigger>
+        <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
           <SelectItem value="all">All agents</SelectItem>
           {agentOptions.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
         </SelectContent>
@@ -55,7 +55,7 @@ export const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, load
                     <span className="ml-1 text-white/30">({pct.toFixed(1)}% used)</span>
                   </span>
                 </div>
-                <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                <div className="w-full h-1.5 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
                   <div className={`h-full bg-gradient-to-r ${bar}`} style={{ width: `${pct}%` }} />
                 </div>
               </div>
@@ -70,7 +70,7 @@ export const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, load
                       <span className="ml-1 text-white/30">({mPct.toFixed(1)}% used)</span>
                     </span>
                   </div>
-                  <div className="w-full h-1.5 bg-[#1a1333] rounded-full overflow-hidden border border-[#2d2342]">
+                  <div className="w-full h-1.5 bg-[var(--panel-1)] rounded-full overflow-hidden border border-[var(--line-3)]">
                     <div className={`h-full bg-gradient-to-r ${mBar}`} style={{ width: `${mPct}%` }} />
                   </div>
                 </div>
@@ -79,7 +79,7 @@ export const QuotasTab = ({ quotas, onAdjust, filter, setFilter, onRefresh, load
               {q.provider_breakdown && Object.keys(q.provider_breakdown).length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {Object.entries(q.provider_breakdown).map(([provider, tokens]) => (
-                    <span key={provider} className="text-[10px] px-2 py-0.5 rounded-full bg-[#1a1333] border border-[#2d2342] text-white/60">
+                    <span key={provider} className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--panel-1)] border border-[var(--line-3)] text-white/60">
                       <span className="text-white/80 font-semibold uppercase">{provider}</span>
                       {' '}{formatTokens(Math.min(tokens, q.included_tokens))}
                     </span>

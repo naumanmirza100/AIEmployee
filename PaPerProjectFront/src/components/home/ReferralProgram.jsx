@@ -24,7 +24,7 @@ const ReferralProgram = () => {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.3 }}
           transition={{ duration: 0.7 }}
-          className="bg-gradient-to-r from-primary to-purple-600 rounded-xl p-8 md:p-12 text-white shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8"
+          className="bg-gradient-to-r from-primary to-purple-600 rounded-xl p-8 md:p-12 text-pure-white shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8"
         >
           <div className="flex items-center gap-6">
             <div className="hidden md:block bg-white/20 p-4 rounded-full">

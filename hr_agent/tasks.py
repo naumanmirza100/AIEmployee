@@ -299,6 +299,22 @@ def process_hr_document(self, document_id):
 # Leave accrual — credits employees per their LeaveAccrualPolicy
 # --------------------------------------------------------------------------
 
+def _accrual_period_key(period: str, when) -> str:
+    """The period a run belongs to, as a stable string.
+
+    Monthly and annual are calendar-aligned. Biweekly uses ISO week numbers
+    halved, so two runs 14 days apart land in different buckets while two runs
+    in the same fortnight collide — which is what the claim needs.
+    """
+    period = (period or '').lower()
+    if period == 'annual':
+        return str(when.year)
+    if period == 'biweekly':
+        iso_year, iso_week, _ = when.isocalendar()
+        return f"{iso_year}-W{(iso_week - 1) // 2 * 2 + 1:02d}"
+    return f"{when.year}-{when.month:02d}"
+
+
 @shared_task(name='hr_agent.tasks.accrue_leave_balances')
 def accrue_leave_balances():
     """Run every active `LeaveAccrualPolicy` and credit each active Employee
@@ -311,54 +327,96 @@ def accrue_leave_balances():
     by `policy.days_per_period`, capped at `policy.max_balance` if set.
     """
     from decimal import Decimal
-    from hr_agent.models import LeaveAccrualPolicy, LeaveBalance, Employee
+    from django.db import IntegrityError, transaction
+    from django.db.models import DecimalField, F, Value
+    from django.db.models.functions import Greatest, Least
+    from hr_agent.models import (
+        Employee, LeaveAccrualPolicy, LeaveAccrualRun, LeaveBalance, leave_year_start,
+    )
 
     now = timezone.now()
-    today = now.date()
     results = {'policies_run': 0, 'rows_credited': 0, 'skipped': 0}
 
     for pol in LeaveAccrualPolicy.objects.filter(is_active=True).select_related('company'):
-        # Period gate
-        if pol.last_run_at:
-            last = pol.last_run_at
-            if pol.period == 'monthly' and (last.year, last.month) == (now.year, now.month):
-                results['skipped'] += 1; continue
-            if pol.period == 'biweekly' and (now - last).days < 14:
-                results['skipped'] += 1; continue
-            if pol.period == 'annual' and last.year == now.year:
-                results['skipped'] += 1; continue
+        period_key = _accrual_period_key(pol.period, now)
 
-        emp_qs = Employee.objects.filter(
+        # Claim the period before doing any work. The unique constraint on
+        # (policy, period_key) is what makes a redelivered task a no-op: the
+        # old gate stamped `last_run_at` only after crediting everyone, so a
+        # worker killed mid-loop had the whole loop replayed and credited the
+        # already-credited a second time (HR-DATA-1).
+        try:
+            with transaction.atomic():
+                run = LeaveAccrualRun.objects.create(policy=pol, period_key=period_key)
+        except IntegrityError:
+            results['skipped'] += 1
+            continue
+
+        emp_ids = list(Employee.objects.filter(
             company=pol.company,
             employment_status__in=['active', 'probation', 'on_leave'],
-        )
+        ).values_list('id', flat=True))
+        if not emp_ids:
+            run.completed_at = timezone.now()
+            run.save(update_fields=['completed_at'])
+            continue
+
         delta = Decimal(str(pol.days_per_period))
         cap = pol.max_balance  # may be None
+        period_start = leave_year_start(now.date())
 
-        credited = 0
-        for emp in emp_qs.only('id'):
-            bal, _ = LeaveBalance.objects.get_or_create(
-                employee_id=emp.id, leave_type=pol.leave_type,
+        # Every balance writer keys on the leave-year row; accrual used to
+        # write the `period_start=NULL` row instead, so accrued days and used
+        # days lived in different rows (HR-DATA-3).
+        existing = set(
+            LeaveBalance.objects
+            .filter(employee_id__in=emp_ids, leave_type=pol.leave_type,
+                    period_start=period_start)
+            .values_list('employee_id', flat=True)
+        )
+        missing = [eid for eid in emp_ids if eid not in existing]
+        if missing:
+            LeaveBalance.objects.bulk_create(
+                [LeaveBalance(employee_id=eid, leave_type=pol.leave_type,
+                              period_start=period_start)
+                 for eid in missing],
+                ignore_conflicts=True,
             )
-            new_accrued = (bal.accrued_days or 0) + delta
-            if cap is not None:
-                # Cap on accrued + carryover, leaving used as-is.
-                projected_total = new_accrued + (bal.carried_over_days or 0)
-                if projected_total > cap:
-                    new_accrued = cap - (bal.carried_over_days or 0)
-                    if new_accrued < (bal.accrued_days or 0):
-                        # Already over the cap — don't change.
-                        continue
-            bal.accrued_days = new_accrued
-            bal.save(update_fields=['accrued_days', 'updated_at'])
-            credited += 1
+
+        # One UPDATE for the whole company, with the arithmetic done by the
+        # database. Previously this was a read-modify-write per employee, so
+        # two overlapping runs could lose a credit, and it cost two queries a
+        # head (HR-DATA-2, HR-PERF-3).
+        qs = LeaveBalance.objects.filter(
+            employee_id__in=emp_ids, leave_type=pol.leave_type,
+            period_start=period_start,
+        )
+        money = DecimalField(max_digits=6, decimal_places=2)
+        if cap is None:
+            credited = qs.update(accrued_days=F('accrued_days') + delta)
+        else:
+            # Cap applies to accrued + carried over. Greatest() keeps a row
+            # that is already above the cap unchanged rather than clawing days
+            # back, which is what the previous `continue` did.
+            headroom = Value(cap, output_field=money) - F('carried_over_days')
+            credited = qs.update(
+                accrued_days=Greatest(
+                    F('accrued_days'),
+                    Least(F('accrued_days') + delta, headroom, output_field=money),
+                    output_field=money,
+                ),
+            )
+
+        run.employees_credited = credited
+        run.completed_at = timezone.now()
+        run.save(update_fields=['employees_credited', 'completed_at'])
 
         pol.last_run_at = now
         pol.save(update_fields=['last_run_at', 'updated_at'])
         results['policies_run'] += 1
         results['rows_credited'] += credited
-        logger.info("accrue_leave_balances: policy %s (%s/%s) credited %d employees",
-                    pol.id, pol.leave_type, pol.period, credited)
+        logger.info("accrue_leave_balances: policy %s (%s/%s) period %s credited %d employees",
+                    pol.id, pol.leave_type, pol.period, period_key, credited)
 
     if results['policies_run'] or results['skipped']:
         logger.info("accrue_leave_balances: %s", results)
