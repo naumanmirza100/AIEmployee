@@ -30,6 +30,12 @@ services:
 
   db:
     image: mariadb:11.4
+    # Opt-in. `docker compose up -d` does NOT start this; only a host that sets
+    # COMPOSE_PROFILES=localdb in its .env gets it. That matters because
+    # .github/workflows/deploy.yml runs `docker compose up --build -d` on every
+    # push to main — without this guard, merging would point the app at a brand
+    # new empty database the moment DB_ROOT_PASSWORD existed.
+    profiles: ["localdb"]
     # utf8mb4 end to end (the app stores emoji and non-Latin names).
     # wait_timeout must stay above Django's CONN_MAX_AGE (540s) or a reused
     # connection may already have been dropped server-side.
@@ -41,10 +47,10 @@ services:
       --interactive-timeout=600
       --max-statement-time=120
     environment:
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
-      MARIADB_DATABASE: ${DB_NAME:?set DB_NAME in .env}
-      MARIADB_USER: ${DB_USER:?set DB_USER in .env}
-      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-}
+      MARIADB_DATABASE: ${DB_NAME:-}
+      MARIADB_USER: ${DB_USER:-}
+      MARIADB_PASSWORD: ${DB_PASSWORD:-}
     volumes:
       - dbdata:/var/lib/mysql
     # Deliberately NOT published to the host: nothing outside this stack needs
@@ -66,15 +72,10 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       USE_REDIS: "True"
-      # Overrides the .env value, which still points at the old remote host.
-      DB_HOST: db
-      DB_PORT: "3306"
     ports:
       - "8000:8000"
     depends_on:
       redis:
-        condition: service_healthy
-      db:
         condition: service_healthy
     restart: unless-stopped
 
@@ -85,16 +86,11 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       USE_REDIS: "True"
-      # Overrides the .env value, which still points at the old remote host.
-      DB_HOST: db
-      DB_PORT: "3306"
     # prefork + concurrency 4 come from settings on Linux; override here per
     # container size if needed.
     command: celery -A project_manager_ai worker -l info
     depends_on:
       redis:
-        condition: service_healthy
-      db:
         condition: service_healthy
       web:
         # Let the web container finish `migrate` before the worker touches the DB.
@@ -108,15 +104,10 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       USE_REDIS: "True"
-      # Overrides the .env value, which still points at the old remote host.
-      DB_HOST: db
-      DB_PORT: "3306"
     # Exactly one beat process, ever — a second one double-fires every schedule.
     command: celery -A project_manager_ai beat -l info
     depends_on:
       redis:
-        condition: service_healthy
-      db:
         condition: service_healthy
       web:
         condition: service_started
