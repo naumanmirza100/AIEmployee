@@ -20,6 +20,11 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          # A full image rebuild on the VPS (no layer cache hit) can take
+          # several minutes on its own — the action's own default (10m) was
+          # timing out mid-build even though the deploy itself was still
+          # succeeding. Give it real headroom.
+          command_timeout: 30m
           script: |
             set -e
             cd /opt/AIEmployee
