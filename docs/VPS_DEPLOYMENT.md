@@ -211,25 +211,37 @@ To stop the VPS running a local database at all, drop `COMPOSE_PROFILES` from
 
 ## Ongoing backups
 
-The data now lives in the `dbdata` Docker volume on one machine. That is a
-single point of failure — shared hosting was at least backed up by Hostinger.
-Add a nightly dump, for example a small script in `/usr/local/bin/ppp-backup.sh`:
+**Installed and running.** `scripts/ppp-db-backup.sh` lives on the VPS at
+`/usr/local/bin/ppp-db-backup.sh`, driven by `/etc/cron.d/ppp-db-backup`:
 
-```bash
-#!/bin/sh
-set -eu
-cd /path/to/AIEmployee
-. ./.env
-mkdir -p /var/backups/ppp
-docker compose exec -T -e MYSQL_PWD="$DB_ROOT_PASSWORD" db \
-  mariadb-dump -u root --single-transaction --quick "$DB_NAME" \
-  | gzip > "/var/backups/ppp/ppp-$(date +%F).sql.gz"
-find /var/backups/ppp -name 'ppp-*.sql.gz' -mtime +7 -delete
+```
+0 3 * * * root /usr/local/bin/ppp-db-backup.sh >> /var/log/ppp-backup.log 2>&1
 ```
 
-Then `chmod +x` it and add `0 3 * * * root /usr/local/bin/ppp-backup.sh` to
-`/etc/cron.d/ppp-db-backup`. Copy the dumps off the VPS, and test a restore once
-— an untested backup is not a backup.
+It dumps the database out of the `db` container, gzips it to
+`/var/backups/ppp/`, and keeps 7 days. Two details worth knowing:
+
+- It writes to a `.partial` file and only renames it after confirming
+  `mariadb-dump` wrote its "Dump completed" marker. A dump that dies halfway
+  still produces a valid-looking `.gz`, and without that check a silently
+  broken backup would rotate away the good ones.
+- Rotation happens only *after* tonight's backup is verified, for the same
+  reason.
+
+Verified on 2026-09-25 by restoring into a scratch database and diffing row
+counts against live: all 33 populated tables identical, 1,825 rows both sides.
+
+Check on it with:
+
+```bash
+tail -5 /var/log/ppp-backup.log
+ls -lh /var/backups/ppp/
+```
+
+**Still outstanding: these backups sit on the same machine as the database.**
+That protects against a bad migration or a dropped table, not against losing
+the VPS. Copy them somewhere else — object storage, another host, anything off
+this box.
 
 ## Security notes
 
