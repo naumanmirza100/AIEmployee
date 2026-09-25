@@ -238,10 +238,33 @@ tail -5 /var/log/ppp-backup.log
 ls -lh /var/backups/ppp/
 ```
 
-**Still outstanding: these backups sit on the same machine as the database.**
-That protects against a bad migration or a dropped table, not against losing
-the VPS. Copy them somewhere else — object storage, another host, anything off
-this box.
+### Off-site copies
+
+The same script also encrypts each dump and pushes it to Backblaze B2
+(EU Central), keeping 90 days there against 7 locally. Local copies cover a bad
+migration or a dropped table; the off-site copy covers losing the VPS.
+
+It is encrypted with `gpg --symmetric --cipher-algo AES256` **before** it leaves
+the machine, because the dump holds customer names, emails and auth tokens —
+that makes the storage provider hold an opaque blob rather than personal data.
+
+Configured through four values in `.env`: `BACKUP_GPG_PASSPHRASE`, `B2_KEY_ID`,
+`B2_APP_KEY`, `B2_BUCKET`. If any is missing the script still takes the local
+backup, warns, and exits 0 — so a half-configured host does not lose its
+backups or spam cron failures.
+
+**The passphrase must also live in a password manager.** It is the one thing
+that cannot be recovered from the server, and without it the off-site backups
+are unreadable. Verified 2026-09-25 by downloading from B2, decrypting, and
+restoring into a scratch database: all 33 populated tables identical to live,
+1,825 rows both sides.
+
+Restore from B2:
+
+```bash
+rclone copy "B2:<bucket>/db/<file>.sql.gz.gpg" .
+gpg -d <file>.sql.gz.gpg | gunzip | docker compose exec -T db mariadb -u root -p <dbname>
+```
 
 ## Security notes
 
