@@ -18,6 +18,32 @@ so this module can live here safely.
 from django.db import migrations
 
 
+# Both helpers below return ``RunPython(..., atomic=False)``, and that argument
+# is load-bearing on MySQL/MariaDB.
+#
+# Django decides whether to wrap an operation in a transaction like this
+# (django/db/migrations/migration.py, 4.2):
+#
+#     atomic_operation = operation.atomic or (
+#         self.atomic and operation.atomic is not False
+#     )
+#     if not schema_editor.atomic_migration and atomic_operation:
+#         with atomic(...): operation.database_forwards(...)
+#
+# `RunPython.atomic` is None unless you pass it, and `Migration.atomic` defaults
+# to True, so `atomic_operation` comes out True. MySQL cannot roll back DDL, so
+# `schema_editor.atomic_migration` is False — and Django therefore opens a
+# transaction around the operation. `schema_editor.execute()` then refuses to
+# run any DDL inside it:
+#
+#     TransactionManagementError: Executing DDL statements while in a
+#     transaction on databases that can't perform a rollback is prohibited.
+#
+# These operations exist only to issue DDL, which MySQL could not roll back
+# anyway, so the transaction buys nothing and costs us the migration. Passing
+# atomic=False makes `atomic_operation` False and lets them run. Without it the
+# app cannot migrate onto a fresh MySQL database at all — it crash-loops here.
+
 def _existing_columns(schema_editor, table):
     with schema_editor.connection.cursor() as cursor:
         return {
@@ -52,7 +78,7 @@ def ensure_columns(app_label, model_name, field_names):
                 continue
             schema_editor.add_field(model, field)
 
-    return migrations.RunPython(_forward, migrations.RunPython.noop)
+    return migrations.RunPython(_forward, migrations.RunPython.noop, atomic=False)
 
 
 def _rename_column(schema_editor, table, old_column, field):
@@ -109,4 +135,4 @@ def rename_or_ensure_columns(app_label, model_name, mapping):
             else:
                 schema_editor.add_field(model, field)
 
-    return migrations.RunPython(_forward, migrations.RunPython.noop)
+    return migrations.RunPython(_forward, migrations.RunPython.noop, atomic=False)
