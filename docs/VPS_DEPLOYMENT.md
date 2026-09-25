@@ -90,9 +90,22 @@ Choose a **new** `DB_PASSWORD`. The old one has been pasted into chat and into
 `MDS/HOSTINGER_DB_DEPLOYMENT.md`, so treat it as compromised regardless of this
 migration — and rotate it in hPanel afterwards.
 
-Leave `DB_HOST` / `DB_PORT` alone. `docker-compose.yml` overrides them to
-`db:3306` for the app containers, so the same `.env` still works for local dev
-against the old host.
+Leave `DB_HOST` / `DB_PORT` alone **for now** — they still point at the old
+host, which is what you want until the data is loaded and verified. Step 6 is
+where you switch them over.
+
+Add one more line, which is what turns the local database on at all:
+
+```ini
+COMPOSE_PROFILES=localdb
+```
+
+The `db` service carries `profiles: ["localdb"]`, so a plain
+`docker compose up -d` ignores it entirely. This matters because
+`.github/workflows/deploy.yml` runs `docker compose up --build -d` on every push
+to `main`: without the profile, merging the database change would start an empty
+MariaDB and point the app at it on the next deploy. With it, only a host that
+has opted in ever runs a local database, and only after you say so.
 
 The `db` container creates `DB_NAME`, `DB_USER` and `DB_PASSWORD` on its **first
 boot only**, from the empty `dbdata` volume. Changing them later in `.env` does
@@ -101,10 +114,13 @@ not change the database — see Troubleshooting.
 ## Step 3 — Start the database on its own
 
 ```bash
-docker compose up -d db
+docker compose --profile localdb up -d db
 docker compose ps db                      # wait for "healthy" (~40s first run)
 docker compose logs -f db                 # Ctrl-C once you see "ready for connections"
 ```
+
+The app is still talking to the old remote database at this point. Nothing has
+switched over yet.
 
 ## Step 4 — Load the backup
 
@@ -137,13 +153,27 @@ Compare against the old database before cutting over. As of 2026-09-24 that was
 off SQL Server in September, so documents have to be re-uploaded (or recovered
 from SQL Server separately).
 
-## Step 6 — Bring up the app
+## Step 6 — Cut the app over
+
+Only now, once the counts above look right, point the app at the new database.
+In `.env`:
+
+```ini
+DB_HOST=db
+DB_PORT=3306
+```
+
+Then rebuild:
 
 ```bash
 docker compose up -d --build
 docker compose ps                         # web, worker, beat, redis, db all up
 docker compose logs --tail=50 web
 ```
+
+This is the one irreversible-feeling moment, and it isn't: the old database is
+untouched, so putting the two old values back and re-running this command
+returns you to exactly where you started.
 
 The `web` container runs `migrate` on start, so any pending migrations apply
 automatically. `django_migrations` came across in the dump, so nothing re-runs.
@@ -164,12 +194,20 @@ docker compose logs --since=15m worker | grep -c "succeeded in"
 
 Nothing is destroyed by this process — the old database is untouched.
 
+Put the old `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` back in `.env`
+and rebuild:
+
 ```bash
-docker compose down            # NOT `down -v`, which deletes the volume
-# restore the old DB_HOST/DB_USER/DB_PASSWORD in .env
-# remove the DB_HOST/DB_PORT overrides from the app services in docker-compose.yml
-docker compose up -d
+docker compose up -d --build
 ```
+
+No change to `docker-compose.yml` is needed — the app reads the host from
+`.env`, so reverting those lines is the whole rollback. Leave the `db` container
+running or stop it with `docker compose --profile localdb stop db`; either way
+`down -v` is the one command to avoid, because it deletes the volume.
+
+To stop the VPS running a local database at all, drop `COMPOSE_PROFILES` from
+`.env`.
 
 ## Ongoing backups
 
