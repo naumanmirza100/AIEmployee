@@ -211,25 +211,60 @@ To stop the VPS running a local database at all, drop `COMPOSE_PROFILES` from
 
 ## Ongoing backups
 
-The data now lives in the `dbdata` Docker volume on one machine. That is a
-single point of failure — shared hosting was at least backed up by Hostinger.
-Add a nightly dump, for example a small script in `/usr/local/bin/ppp-backup.sh`:
+**Installed and running.** `scripts/ppp-db-backup.sh` lives on the VPS at
+`/usr/local/bin/ppp-db-backup.sh`, driven by `/etc/cron.d/ppp-db-backup`:
 
-```bash
-#!/bin/sh
-set -eu
-cd /path/to/AIEmployee
-. ./.env
-mkdir -p /var/backups/ppp
-docker compose exec -T -e MYSQL_PWD="$DB_ROOT_PASSWORD" db \
-  mariadb-dump -u root --single-transaction --quick "$DB_NAME" \
-  | gzip > "/var/backups/ppp/ppp-$(date +%F).sql.gz"
-find /var/backups/ppp -name 'ppp-*.sql.gz' -mtime +7 -delete
+```
+0 3 * * * root /usr/local/bin/ppp-db-backup.sh >> /var/log/ppp-backup.log 2>&1
 ```
 
-Then `chmod +x` it and add `0 3 * * * root /usr/local/bin/ppp-backup.sh` to
-`/etc/cron.d/ppp-db-backup`. Copy the dumps off the VPS, and test a restore once
-— an untested backup is not a backup.
+It dumps the database out of the `db` container, gzips it to
+`/var/backups/ppp/`, and keeps 7 days. Two details worth knowing:
+
+- It writes to a `.partial` file and only renames it after confirming
+  `mariadb-dump` wrote its "Dump completed" marker. A dump that dies halfway
+  still produces a valid-looking `.gz`, and without that check a silently
+  broken backup would rotate away the good ones.
+- Rotation happens only *after* tonight's backup is verified, for the same
+  reason.
+
+Verified on 2026-09-25 by restoring into a scratch database and diffing row
+counts against live: all 33 populated tables identical, 1,825 rows both sides.
+
+Check on it with:
+
+```bash
+tail -5 /var/log/ppp-backup.log
+ls -lh /var/backups/ppp/
+```
+
+### Off-site copies
+
+The same script also encrypts each dump and pushes it to Backblaze B2
+(EU Central), keeping 90 days there against 7 locally. Local copies cover a bad
+migration or a dropped table; the off-site copy covers losing the VPS.
+
+It is encrypted with `gpg --symmetric --cipher-algo AES256` **before** it leaves
+the machine, because the dump holds customer names, emails and auth tokens —
+that makes the storage provider hold an opaque blob rather than personal data.
+
+Configured through four values in `.env`: `BACKUP_GPG_PASSPHRASE`, `B2_KEY_ID`,
+`B2_APP_KEY`, `B2_BUCKET`. If any is missing the script still takes the local
+backup, warns, and exits 0 — so a half-configured host does not lose its
+backups or spam cron failures.
+
+**The passphrase must also live in a password manager.** It is the one thing
+that cannot be recovered from the server, and without it the off-site backups
+are unreadable. Verified 2026-09-25 by downloading from B2, decrypting, and
+restoring into a scratch database: all 33 populated tables identical to live,
+1,825 rows both sides.
+
+Restore from B2:
+
+```bash
+rclone copy "B2:<bucket>/db/<file>.sql.gz.gpg" .
+gpg -d <file>.sql.gz.gpg | gunzip | docker compose exec -T db mariadb -u root -p <dbname>
+```
 
 ## Security notes
 
