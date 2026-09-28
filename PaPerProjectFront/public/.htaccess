@@ -9,11 +9,17 @@
 <IfModule mod_headers.c>
   Header set X-Powered-By "Hostinger Horizons"
 
-  # Cache everything on CDN by default
-  Header set Cache-Control "public, s-maxage=604800, max-age=0"
-  
-  # Cache in browser all assets
+  # Never let the CDN hold the HTML. index.html is only a pointer to asset
+  # filenames that carry a content hash, so they change on every deploy. When
+  # the CDN kept index.html for 7 days (s-maxage=604800) a cached copy outlived
+  # the files it referenced: visitors got the old page, its scripts 404ed, and
+  # the site rendered as a blank white screen until the cache was purged by
+  # hand. Caching the pointer is what breaks; caching the targets is safe.
+  Header set Cache-Control "public, max-age=0, s-maxage=0, must-revalidate"
+
+  # Assets are content-hashed, so a given URL's bytes never change. These can
+  # be cached hard and for a long time, by the browser and the CDN alike.
   <If "%{REQUEST_URI} =~ m#^/assets/.*$#">
-    Header set Cache-Control "public, max-age=604800"
+    Header set Cache-Control "public, max-age=31536000, immutable"
   </If>
 </IfModule>
