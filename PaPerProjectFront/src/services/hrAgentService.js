@@ -633,7 +633,7 @@ export const listHRDocumentAccessLog = async (documentId, { limit = 50, offset =
 // the blob with the auth header, then trigger a client-side download.
 export const exportHREmployeeData = async (employeeId, filenameHint = '') => {
   const token = localStorage.getItem('company_auth_token');
-  const apiBase = (import.meta?.env?.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+  const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
   const resp = await fetch(`${apiBase}/hr/employees/${employeeId}/export`, {
     method: 'GET',
     headers: token ? { Authorization: `Token ${token}` } : {},

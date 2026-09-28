@@ -44,7 +44,7 @@ export const updateFrontlineWidgetConfig = async ({ config, allowedOrigins } = {
 /** Fetch the public widget config — for use by the embedded widget itself.
  * Not auth'd; passes widget_key via query param. */
 export const getPublicWidgetConfig = async (widgetKey) => {
-  const base = (import.meta?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const base = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
   const res = await fetch(`${base}/frontline/widget/public-config/?widget_key=${encodeURIComponent(widgetKey)}`);
   return res.json();
 };
@@ -1263,7 +1263,7 @@ export const unmarkFrontlineDocumentOutdated = async (documentId) => {
 // CSAT submit endpoint is PUBLIC (no auth) — uses bare fetch so the company
 // auth token isn't sent. The token in the URL authenticates the submission.
 export const submitFrontlineSatisfaction = async ({ token, rating, comment = '' }) => {
-  const apiBase = (import.meta?.env?.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+  const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
   const resp = await fetch(`${apiBase}/frontline/csat/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
