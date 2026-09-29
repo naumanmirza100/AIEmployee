@@ -220,6 +220,8 @@ class SDRCampaign(models.Model):
     sender_name = models.CharField(max_length=255, blank=True)
     sender_title = models.CharField(max_length=255, blank=True)
     sender_company = models.CharField(max_length=255, blank=True)
+    # Physical mailing address printed in the email footer (CAN-SPAM requirement).
+    postal_address = models.CharField(max_length=500, blank=True, default='')
 
     # SMTP settings (per-campaign, self-contained)
     from_email = models.CharField(max_length=255, blank=True)
@@ -344,6 +346,9 @@ class SDRCampaignEnrollment(models.Model):
     replied_at = models.DateTimeField(null=True, blank=True)
     reply_content = models.TextField(blank=True)
     reply_sentiment = models.CharField(max_length=20, blank=True)  # positive/negative/neutral
+    # Message-ID (or a hash of sender/date/subject) of the last reply we acted on.
+    # Claimed atomically so the same inbox message is never processed twice.
+    last_reply_message_id = models.CharField(max_length=255, blank=True, default='')
 
     enrolled_at = models.DateTimeField(default=timezone.now)
     completed_at = models.DateTimeField(null=True, blank=True)

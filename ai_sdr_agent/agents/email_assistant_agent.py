@@ -84,6 +84,46 @@ _POSITIVE = [
 ]
 
 
+# ── Reply-text helpers ────────────────────────────────────────────────────────
+# Where a mail client starts quoting the earlier thread. Everything from the
+# first marker on is our own outbound text (which itself contains words like
+# "unsubscribe" and "pricing"), so it must not be classified as the prospect's.
+_QUOTE_START = re.compile(
+    r'^[ \t]*(?:'
+    r'on\s[^\n]{0,200}(?:\n[^\n]{0,200})?\swrote:'      # "On <date>, X wrote:" (may wrap)
+    r'|-{2,}\s*(?:original message|forwarded message)\s*-{2,}'
+    r'|_{10,}'
+    r'|from:[^\n]*\n\s*(?:sent|date):'                  # Outlook header block
+    r')',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def strip_quoted_reply(text: str) -> str:
+    """Return only what the prospect wrote, without the quoted earlier thread."""
+    if not text:
+        return ''
+    m = _QUOTE_START.search(text)
+    if m:
+        text = text[:m.start()]
+    return '\n'.join(
+        line for line in text.splitlines() if not line.lstrip().startswith('>')
+    ).strip()
+
+
+def _keyword_regex(keywords):
+    """Whole-word/phrase matcher, so "i'm in" doesn't fire inside "I'm interested"."""
+    return re.compile(
+        '|'.join(r'(?<![a-z0-9])' + re.escape(k) + r'(?![a-z0-9])' for k in keywords)
+    )
+
+
+_OOO_RE = _keyword_regex(_OOO)
+_NOT_INTERESTED_RE = _keyword_regex(_NOT_INTERESTED)
+_WANTS_MORE_RE = _keyword_regex(_WANTS_MORE)
+_POSITIVE_RE = _keyword_regex(_POSITIVE)
+
+
 class EmailAssistantAgent:
     """Reads, classifies, and responds to prospect emails intelligently."""
 
@@ -121,23 +161,28 @@ class EmailAssistantAgent:
         if not reply_text or not reply_text.strip():
             return self._result(CAT_NEUTRAL, confidence='high', reason='Empty reply')
 
+        full_text = reply_text
+        reply_text = strip_quoted_reply(reply_text)
+        if not reply_text:
+            return self._result(CAT_NEUTRAL, confidence='high', reason='Reply contained only quoted text')
+
         lower = reply_text.lower()
 
         # OOO first — most distinct signal
-        if any(k in lower for k in _OOO):
+        if _OOO_RE.search(lower):
             return self._result(
                 CAT_OUT_OF_OFFICE,
                 reason='Out-of-office detected',
-                resume_date=self._extract_return_date(reply_text),
+                resume_date=self._extract_return_date(full_text),
             )
 
-        if any(k in lower for k in _NOT_INTERESTED):
+        if _NOT_INTERESTED_RE.search(lower):
             return self._result(CAT_NOT_INTERESTED, reason='Not-interested keyword match')
 
-        if any(k in lower for k in _POSITIVE):
+        if _POSITIVE_RE.search(lower):
             return self._result(CAT_POSITIVE, reason='Positive-interest keyword match')
 
-        if any(k in lower for k in _WANTS_MORE):
+        if _WANTS_MORE_RE.search(lower):
             return self._result(CAT_WANTS_MORE, reason='Wants-more-info keyword match')
 
         # Ambiguous — use AI

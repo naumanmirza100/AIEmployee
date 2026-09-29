@@ -15,6 +15,27 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+SDR_MODULE = 'ai_sdr_agent'
+
+
+def _has_sdr_access(company, cache: dict) -> bool:
+    """True if ``company`` has an active AI SDR subscription.
+
+    The API is gated by ModuleAccessMiddleware, but background jobs never pass
+    through it - without this a lapsed company keeps sending mail and spending
+    tokens. ``cache`` (one dict per run) avoids re-querying per campaign.
+    """
+    if company is None:
+        return False
+    if company.id not in cache:
+        from api.middleware.module_access import ModuleAccessMiddleware
+        try:
+            cache[company.id] = bool(ModuleAccessMiddleware._has_module(company, SDR_MODULE))
+        except Exception as exc:
+            logger.error("SDR subscription check failed for company=%s: %s", company.id, exc)
+            cache[company.id] = False   # fail closed: never send on an unknown state
+    return cache[company.id]
+
 
 # ---------------------------------------------------------------------------
 # Core implementations (plain Python — no Celery dependency)
@@ -25,7 +46,19 @@ def send_due_steps_impl():
     from ai_sdr_agent.models import SDRCampaign
     from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
+    from ai_sdr_agent.models import SDRCampaignEnrollment
+
     now = timezone.now()
+    access_cache: dict = {}
+
+    # Resume out-of-office pauses whose return date has arrived. Only OOO pauses
+    # are auto-resumed - a manual pause or a send_failed pause stays paused.
+    resumed = SDRCampaignEnrollment.objects.filter(
+        status='paused', reply_sentiment='out_of_office',
+        next_action_at__lte=now, campaign__status='active',
+    ).update(status='active', reply_sentiment='')
+    if resumed:
+        logger.info("SDR [send-due-steps] resumed %d out-of-office enrollments", resumed)
 
     active_campaigns = SDRCampaign.objects.filter(status='active').select_related('company_user__company')
     total_processed = 0
@@ -44,6 +77,13 @@ def send_due_steps_impl():
     sent_emails_this_run: set = set()
 
     for campaign in active_campaigns:
+        if not _has_sdr_access(campaign.company_user.company, access_cache):
+            logger.warning(
+                "SDR [send-due-steps] campaign=%d SKIPPED — no active AI SDR subscription",
+                campaign.id,
+            )
+            continue
+
         # Resolve key per campaign owner — each campaign belongs to a company_user
         try:
             _company = campaign.company_user.company
@@ -60,7 +100,7 @@ def send_due_steps_impl():
             continue
 
         due_qs = campaign.enrollments.filter(
-            status='active'
+            status='active', lead__is_deleted=False,
         ).filter(
             Q(next_action_at__lte=now) | Q(next_action_at__isnull=True)
         ).select_related('lead')
@@ -156,7 +196,9 @@ def send_due_steps_impl():
 def check_inbox_replies_impl():
     """Poll IMAP inbox for replies on every active campaign with auto_check_replies=True."""
     from ai_sdr_agent.models import SDRCampaign, SDRMeeting
-    from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+    from ai_sdr_agent.agents.outreach_agent import (
+        OutreachAgent, apply_unsubscribe, claim_reply, mark_bounced,
+    )
     from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
 
     campaigns = SDRCampaign.objects.filter(
@@ -165,6 +207,7 @@ def check_inbox_replies_impl():
 
     total_replies = 0
     total_meetings = 0
+    access_cache: dict = {}
 
     logger.info(
         "SDR [check-inbox] START — checking %d active campaigns for replies",
@@ -172,6 +215,13 @@ def check_inbox_replies_impl():
     )
 
     for campaign in campaigns:
+        if not _has_sdr_access(campaign.company_user.company, access_cache):
+            logger.warning(
+                "SDR [check-inbox] campaign=%d SKIPPED — no active AI SDR subscription",
+                campaign.id,
+            )
+            continue
+
         # Resolve keys per campaign owner
         try:
             _company = campaign.company_user.company
@@ -218,35 +268,18 @@ def check_inbox_replies_impl():
                 reply_subject = (r.get('subject') or '').lower()
 
                 # ── Bounce detection ─────────────────────────────────────────
-                # Hard bounces come from MAILER-DAEMON / postmaster with
-                # delivery-failure subjects. Detect and mark lead + enrollment.
-                _BOUNCE_SENDERS = ('mailer-daemon', 'postmaster', 'noreply+bounce',
-                                   'bounce+', 'bounces+', 'mail-noreply')
-                _BOUNCE_SUBJECTS = (
-                    'undeliverable', 'delivery failure', 'delivery status notification',
-                    'mail delivery failed', 'returned mail', 'failure notice',
-                    'auto-submitted', 'could not deliver', 'message not delivered',
-                    'address not found', 'user unknown',
-                )
-                is_bounce = (
-                    any(b in lead_email for b in _BOUNCE_SENDERS) or
-                    any(b in reply_subject for b in _BOUNCE_SUBJECTS)
-                )
-                if is_bounce:
-                    # Find the actual lead whose email bounced — it's the lead
-                    # enrolled in this campaign, not the mailer-daemon sender.
-                    bounced_lead = enrollment.lead
-                    if not bounced_lead.email_bounced:
-                        bounced_lead.email_bounced = True
-                        bounced_lead.email_bounced_at = timezone.now()
-                        bounced_lead.email_bounce_reason = f"{lead_email}: {reply_subject[:200]}"
-                        bounced_lead.save(update_fields=['email_bounced', 'email_bounced_at', 'email_bounce_reason'])
-                    enrollment.status = 'bounced'
-                    enrollment.save(update_fields=['status'])
-                    logger.warning(
-                        "SDR [BOUNCE] lead=%s email=%s enrollment=%d marked bounced — subject='%s'",
-                        bounced_lead.display_name, bounced_lead.email, enrollment.id, reply_subject,
-                    )
+                # check_inbox_for_replies flags delivery-failure notices (DSNs
+                # from MAILER-DAEMON / postmaster) about one of our leads.
+                if r.get('is_bounce'):
+                    if enrollment.status != 'bounced' and claim_reply(enrollment, r):
+                        mark_bounced(
+                            enrollment,
+                            f"{lead_email}: {reply_subject[:200]}",
+                        )
+                        logger.warning(
+                            "SDR [BOUNCE] lead=%s email=%s enrollment=%d marked bounced — subject='%s'",
+                            lead.display_name, lead.email, enrollment.id, reply_subject,
+                        )
                     continue   # skip normal reply classification
                 # ─────────────────────────────────────────────────────────────
 
@@ -257,6 +290,11 @@ def check_inbox_replies_impl():
                 # Skip 'replied' enrollments that already have a meeting booked
                 already_has_meeting = SDRMeeting.objects.filter(enrollment=enrollment).exists()
                 if enrollment.status == 'replied' and already_has_meeting:
+                    continue
+
+                # The IMAP poll re-returns the same messages every cycle; only
+                # the one caller that claims this message may act on it.
+                if not claim_reply(enrollment, r):
                     continue
 
                 classification = email_agent.classify_reply(reply_text)
@@ -279,13 +317,12 @@ def check_inbox_replies_impl():
                     logger.info('SDR [OOO] enrollment=%d paused until %s', enrollment.id, enrollment.next_action_at)
 
                 elif action == 'stop':
-                    enrollment.status = 'unsubscribed'
                     enrollment.replied_at = timezone.now()
                     enrollment.reply_content = reply_text[:2000]
                     enrollment.reply_sentiment = 'not_interested'
-                    enrollment.save()
-                    lead.status = 'disqualified'
-                    lead.save(update_fields=['status'])
+                    enrollment.save(update_fields=['replied_at', 'reply_content', 'reply_sentiment'])
+                    # Opt the address out of every campaign, not just this one.
+                    apply_unsubscribe(enrollment)
                     total_replies += 1
                     logger.info('SDR [NOT-INTERESTED] enrollment=%d unsubscribed, lead=%s disqualified', enrollment.id, lead.display_name)
 
@@ -348,9 +385,16 @@ def check_inbox_replies_impl():
                             logger.warning('SDR [MEETING] scheduling email FAILED for %s: %s', lead.email, exc)
 
                 else:  # wait / neutral
+                    # A real person answered but intent is unclear: stop the
+                    # automated follow-ups and leave it for a human.
                     enrollment.reply_content = reply_text[:2000]
                     enrollment.reply_sentiment = 'neutral'
-                    enrollment.save(update_fields=['reply_content', 'reply_sentiment'])
+                    fields = ['reply_content', 'reply_sentiment']
+                    if enrollment.status == 'active':
+                        enrollment.status = 'replied'
+                        enrollment.replied_at = timezone.now()
+                        fields += ['status', 'replied_at']
+                    enrollment.save(update_fields=fields)
 
             campaign.last_replies_checked_at = timezone.now()
             campaign.save(update_fields=['replies_received', 'meetings_booked', 'last_replies_checked_at'])
@@ -414,7 +458,10 @@ def auto_pause_expired_campaigns_impl():
 
     active = SDRCampaign.objects.filter(status='active').exclude(end_date__lt=today)
     for campaign in active:
-        if not campaign.enrollments.filter(status='active').exists() and campaign.enrollments.exists():
+        open_qs = campaign.enrollments.filter(
+            Q(status='active') | Q(status='paused', reply_sentiment='out_of_office')
+        )
+        if not open_qs.exists() and campaign.enrollments.exists():
             campaign.status = 'completed'
             campaign.save(update_fields=['status'])
             completed += 1
@@ -430,6 +477,7 @@ def send_meeting_reminders_impl():
 
     agent = MeetingSchedulingAgent()
     now = timezone.now()
+    access_cache: dict = {}
     window_start = now + timedelta(hours=24)
     window_end = now + timedelta(hours=26)
 
@@ -438,11 +486,13 @@ def send_meeting_reminders_impl():
         scheduled_at__gte=window_start,
         scheduled_at__lte=window_end,
         reminder_sent_at__isnull=True,
-    ).select_related('lead', 'enrollment__campaign')
+    ).select_related('lead', 'enrollment__campaign', 'company_user__company')
 
     sent = failed = 0
     for meeting in due:
         if not meeting.enrollment or not meeting.enrollment.campaign:
+            continue
+        if not _has_sdr_access(meeting.company_user.company, access_cache):
             continue
         campaign = meeting.enrollment.campaign
         try:
@@ -475,6 +525,7 @@ def send_daily_analytics_impl():
     agent = AnalyticsAgent()
     processed = 0
     alerts_sent = 0
+    access_cache: dict = {}
 
     # Find distinct company users with at least one active campaign
     company_user_ids = (
@@ -491,6 +542,9 @@ def send_daily_analytics_impl():
             company_user = CompanyUser.objects.get(pk=cu_id)
         except Exception as exc:
             logger.error('SDR [daily-analytics] cannot load company_user=%d: %s', cu_id, exc)
+            continue
+
+        if not _has_sdr_access(company_user.company, access_cache):
             continue
 
         try:
@@ -584,12 +638,15 @@ def auto_research_leads_impl(leads_per_run: int = 10):
     researcher = LeadResearchAgent()
     total_created = 0
     errors = 0
+    access_cache: dict = {}
 
-    active_icps = SDRIcpProfile.objects.filter(is_active=True).select_related('company_user')
+    active_icps = SDRIcpProfile.objects.filter(is_active=True).select_related('company_user__company')
     logger.info("Apify auto-research: found %d active ICP profiles", active_icps.count())
 
     for icp in active_icps:
         company_user = icp.company_user
+        if not _has_sdr_access(company_user.company, access_cache):
+            continue
         try:
             job = SDRLeadResearchJob.objects.create(
                 company_user=company_user,
@@ -697,6 +754,7 @@ def qualify_queue_impl():
 
     qualified = 0
     failed = 0
+    access_cache: dict = {}
     # Cache one agent + active ICP per company; skip companies whose key is out.
     agents: dict = {}
     icps: dict = {}
@@ -707,6 +765,8 @@ def qualify_queue_impl():
         cu_id = lead.company_user_id
         if cu_id in blocked_companies:
             continue  # key already out for this company this tick
+        if not _has_sdr_access(company, access_cache):
+            continue  # lapsed subscription: leave the lead pending
 
         try:
             if cu_id not in agents:
