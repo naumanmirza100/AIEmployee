@@ -487,11 +487,18 @@ const browserTimezone = () => {
   }
 };
 
-export const meetingSchedule = async (message) => {
+/**
+ * @param {string} message  what the user typed, or a readable summary of a picker answer
+ * @param {object} extra    structured answers. `{ pending_intent, proposed_time }`
+ *                          finishes a "when should it happen?" question directly,
+ *                          without the model re-reading `message`.
+ */
+export const meetingSchedule = async (message, extra = {}) => {
   try {
     const response = await companyApi.post('/project-manager/ai/meetings/schedule', {
       message,
       timezone: browserTimezone(),
+      ...extra,
     });
     return response;
   } catch (error) {

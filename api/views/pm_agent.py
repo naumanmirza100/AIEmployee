@@ -4485,12 +4485,24 @@ def meeting_schedule(request):
         agent.agent_key_name = 'project_manager_agent'
         agent.timezone_name = tz_name
         current_time = timezone.now().isoformat()
-        result = agent.process(
-            message=message,
-            company_users=project_users_list,
-            current_time=current_time,
-            organizer_id=company_user.id,
-        )
+
+        pending_intent = request.data.get("pending_intent")
+        picked_time = request.data.get("proposed_time")
+        if isinstance(pending_intent, dict) and picked_time:
+            # The user answered the "when?" question with the date picker.
+            # Who and how long were already understood, so finish from those
+            # values rather than asking the model to re-read a sentence built
+            # out of them — that round trip is what used to fail. Invitees are
+            # still re-checked against this company below, like any other.
+            result = agent.schedule_from_pending(
+                pending_intent, picked_time, company_users=project_users_list)
+        else:
+            result = agent.process(
+                message=message,
+                company_users=project_users_list,
+                current_time=current_time,
+                organizer_id=company_user.id,
+            )
 
         action = result.get("action")
         logger.info(f"[MEETING] Agent result: action={action}")

@@ -3256,6 +3256,24 @@ def hr_meeting_schedule(request):
             return Response({'status': 'error', 'message': 'message is required'},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        # The date picker answering a "when should it happen?" question. Who,
+        # what and how long were already understood the first time round and
+        # came back as `pending_intent`; only the time is new. The picker used
+        # to turn all that into a sentence for the model to parse again, which
+        # failed — and the sentence also said e.g. "Wed", which the
+        # relative-date correction further down could shift to the *next*
+        # Wednesday. With `picked` set, the steps below take the values as
+        # given instead.
+        pending = request.data.get('pending_intent')
+        picked = None
+        if isinstance(pending, dict) and request.data.get('proposed_time'):
+            picked = _hr_aware(_parse_iso_dt(request.data.get('proposed_time')))
+            if picked is None:
+                return Response({'status': 'success', 'data': {
+                    'reply': "That time couldn't be read. Please pick it again.",
+                    'meeting': None, 'parsed': None, 'action': 'error',
+                }})
+
         # Build a tiny employee directory the LLM can name-match against.
         emp_rows = list(Employee.objects.filter(company=company)
                         .values('id', 'full_name', 'work_email', 'job_title')[:200])
@@ -3319,37 +3337,52 @@ def hr_meeting_schedule(request):
             f"User message: {message}"
         )
 
-        agent = HRAgent(company_id=company.id)
-        try:
-            raw = agent._call_llm(
-                prompt=prompt,
-                system_prompt=(
-                    "You are a precise meeting-scheduling assistant. Output ONLY a single valid "
-                    "JSON object — no commentary, no markdown fences."
-                ),
-                temperature=0.1, max_tokens=600,
-            )
-        except KeyServiceError:
-            raise
-        except Exception as exc:
-            logger.exception("hr_meeting_schedule: LLM call failed")
-            return Response({'status': 'error',
-                             'data': {'reply': f"LLM call failed: {exc}", 'meeting': None}},
-                            status=status.HTTP_502_BAD_GATEWAY)
+        if picked is not None:
+            # Rebuild the intent from what was already agreed; no model call.
+            parsed = {
+                'intent': 'create',
+                'title': pending.get('title'),
+                'description': pending.get('description') or '',
+                'meeting_type': pending.get('meeting_type') or 'one_on_one',
+                'duration_minutes': pending.get('duration_minutes') or 30,
+                'participant_names': pending.get('participant_names') or [],
+                'participant_ids': pending.get('participant_ids') or [],
+                'location': pending.get('location') or '',
+                'meeting_link': pending.get('meeting_link'),
+                'scheduled_at': picked.isoformat(),
+            }
+        else:
+            agent = HRAgent(company_id=company.id)
+            try:
+                raw = agent._call_llm(
+                    prompt=prompt,
+                    system_prompt=(
+                        "You are a precise meeting-scheduling assistant. Output ONLY a single valid "
+                        "JSON object — no commentary, no markdown fences."
+                    ),
+                    temperature=0.1, max_tokens=600,
+                )
+            except KeyServiceError:
+                raise
+            except Exception as exc:
+                logger.exception("hr_meeting_schedule: LLM call failed")
+                return Response({'status': 'error',
+                                 'data': {'reply': f"LLM call failed: {exc}", 'meeting': None}},
+                                status=status.HTTP_502_BAD_GATEWAY)
 
-        s = (raw or '').strip()
-        if s.startswith('```'):
-            s = s.split('```', 2)[1]
-            if s.startswith('json'):
-                s = s[4:]
-            s = s.strip('` \n')
-        try:
-            parsed = json.loads(s)
-        except Exception:
-            return Response({'status': 'success', 'data': {
-                'reply': raw or 'I need a bit more info to schedule that.',
-                'meeting': None, 'parsed': None,
-            }})
+            s = (raw or '').strip()
+            if s.startswith('```'):
+                s = s.split('```', 2)[1]
+                if s.startswith('json'):
+                    s = s[4:]
+                s = s.strip('` \n')
+            try:
+                parsed = json.loads(s)
+            except Exception:
+                return Response({'status': 'success', 'data': {
+                    'reply': raw or 'I need a bit more info to schedule that.',
+                    'meeting': None, 'parsed': None,
+                }})
 
         intent = (parsed.get('intent') or 'clarify').lower()
         meeting_payload = None
@@ -3360,8 +3393,18 @@ def hr_meeting_schedule(request):
         # the same two-pass algorithm the PM scheduler uses. The LLM's
         # extracted names are only used as a fallback for the "not-found"
         # error message.
-        det = _hr_find_users_in_message(message, all_emps)
-        all_matched_emps = det['all_matched']
+        if picked is not None:
+            # Participants were resolved (and any ambiguity settled) on the
+            # first pass; take them by id rather than re-scanning the picker's
+            # summary sentence. The company filter keeps client-supplied ids
+            # inside this tenant.
+            ids = [int(x) for x in (parsed.get('participant_ids') or []) if _is_int(x)]
+            all_matched_emps = list(Employee.objects.filter(company=company, pk__in=ids))
+            det = {'all_matched': all_matched_emps,
+                   'ambiguous_candidates': [], 'ambiguous_token': None}
+        else:
+            det = _hr_find_users_in_message(message, all_emps)
+            all_matched_emps = det['all_matched']
 
         # Ambiguous single-token match (e.g. two employees both named "Ali").
         # We surface this even if other participants matched cleanly — the
@@ -3473,7 +3516,12 @@ def hr_meeting_schedule(request):
             # has no temporal reference at all, we treat the LLM's
             # `scheduled_at` as bogus and ask for a real time.
             sched = None
-            if _hr_message_has_time_reference(message):
+            if picked is not None:
+                # Exact, and already UTC. It must not go through the
+                # correction below: that corrects *the model's* reading of
+                # the user's words, and there was no model reading here.
+                sched = picked
+            elif _hr_message_has_time_reference(message):
                 sched = _hr_aware(_parse_iso_dt(parsed.get('scheduled_at')))
 
             # HR-BUG-07: correct the DATE portion when we can resolve it
@@ -3482,7 +3530,7 @@ def hr_meeting_schedule(request):
             # from `now_iso` by a week or land on the wrong weekday
             # entirely; a local weekday calculation is authoritative.
             # We preserve the LLM's time-of-day.
-            if sched is not None:
+            if sched is not None and picked is None:
                 try:
                     from datetime import datetime as _dt, timezone as _dt_tz
                     now_dt = timezone.now().astimezone(_dt_tz.utc)

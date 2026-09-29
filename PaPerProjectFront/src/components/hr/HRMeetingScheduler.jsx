@@ -216,7 +216,7 @@ export default function HRMeetingScheduler() {
     }
   };
 
-  const handleSend = async (overrideMsg = null) => {
+  const handleSend = async (overrideMsg = null, extra = {}) => {
     const msg = (typeof overrideMsg === 'string' ? overrideMsg : input).trim();
     if (!msg || loading) return;
     if (typeof overrideMsg !== 'string') setInput('');
@@ -234,7 +234,7 @@ export default function HRMeetingScheduler() {
     try {
       const history = (selectedChat?.messages || []).slice(-6)
         .map((m) => ({ role: m.role, content: m.content }));
-      const res = await hrAgentService.hrMeetingSchedule(msg, history);
+      const res = await hrAgentService.hrMeetingSchedule(msg, history, extra);
       const data = res?.data || {};
       const reply = data.reply || 'Done.';
 
@@ -663,7 +663,13 @@ export default function HRMeetingScheduler() {
                                     });
                                     const who = names.length ? ` with ${names.join(', ')}` : '';
                                     const dur = pi.duration_minutes ? ` for ${pi.duration_minutes} minutes` : '';
-                                    handleSend(`Schedule the meeting${who} on ${pretty} (${datetimeIso})${dur}.`);
+                                    // The sentence is only for the chat log; the time and the
+                                    // already-understood request go as data, so the backend
+                                    // finishes without re-parsing this line with the model.
+                                    handleSend(`Schedule the meeting${who} on ${pretty}${dur}.`, {
+                                      pending_intent: pi,
+                                      proposed_time: datetimeIso,
+                                    });
                                   }}
                                 />
                               )}
@@ -1138,12 +1144,11 @@ export default function HRMeetingScheduler() {
 // half-hour slot; caller re-submits the message via handleSend on confirm.
 function NeedsTimePicker({ pendingIntent, disabled, onConfirm }) {
   const [datetime, setDatetime] = useState(() => {
+    // 09:00 tomorrow — see the matching picker in pm-agent/MeetingScheduler.
+    // "This time tomorrow, rounded" rolled into midnight after about 23:30.
     const t = new Date();
     t.setDate(t.getDate() + 1);
-    t.setMinutes(t.getMinutes() < 30 ? 30 : 0);
-    if (t.getMinutes() === 0) t.setHours(t.getHours() + 1);
-    t.setSeconds(0);
-    t.setMilliseconds(0);
+    t.setHours(9, 0, 0, 0);
     // <input type="datetime-local"> wants local YYYY-MM-DDTHH:MM without seconds
     const pad = (n) => String(n).padStart(2, '0');
     return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;

@@ -826,7 +826,14 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
 
             # Ship a `pending_intent` blob so the frontend datetime picker
             # can call back with the missing time and everything else
-            # (title, participants, duration) is already known.
+            # (title, participants, duration) is already known. The picker
+            # posts it back verbatim and `schedule_from_pending` finishes the
+            # job without asking the model to read the request a second time.
+            #
+            # Recurrence travels too: "a weekly standup with the team" with no
+            # time used to come back as a one-off, because only the fields
+            # above made the trip. `request` is the original sentence, kept so
+            # template detection ("standup", "1:1") still sees it.
             pending_intent = {
                 "invitee_ids": invitee_ids,
                 "invitee_names": invitee_names,
@@ -834,6 +841,9 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
                 "title": parsed.get("title") or None,
                 "description": parsed.get("description") or "",
                 "agenda": parsed.get("agenda") or [],
+                "recurrence": parsed.get("recurrence") or "none",
+                "recurrence_end_date": parsed.get("recurrence_end_date"),
+                "request": message,
             }
             if suggestions_text:
                 return {
@@ -855,6 +865,71 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
                     "needs_time": True,
                     "pending_intent": pending_intent,
                 }
+
+        return self._schedule_result(invitees, parsed, message, company_users)
+
+    def schedule_from_pending(self, pending_intent: Dict, proposed_time: str,
+                              company_users: List[Dict] = None) -> Dict:
+        """Finish a request that stopped only because it had no time.
+
+        When a request names who and how long but not when, `process` returns
+        `needs_time` with a `pending_intent` and the chat shows a date picker.
+        The picker used to turn the answer back into prose — "Schedule the
+        meeting with ali on Wed, 30 Sept 2026, 0:03 (2026-09-29T19:03:00Z)" —
+        and send it through the model again. That sentence named two different
+        calendar days (local and UTC), the model could not make it into JSON,
+        and the user got "I couldn't understand your meeting request" about a
+        meeting they had just answered every question for.
+
+        Nothing here is ambiguous any more, so there is nothing to parse: the
+        people and duration come from `pending_intent`, the time from the
+        picker. No model call. The invitee IDs are client-supplied, which is
+        fine because the view re-resolves every one against the organiser's
+        company before creating anything.
+        """
+        pending_intent = pending_intent or {}
+        try:
+            when = datetime.fromisoformat(str(proposed_time).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return {
+                "action": "error",
+                "response": "That time couldn't be read. Please pick it again.",
+                "data": None,
+            }
+        if timezone.is_naive(when):
+            when = timezone.make_aware(when)
+
+        ids = pending_intent.get("invitee_ids") or []
+        names = pending_intent.get("invitee_names") or []
+        invitees = [{"id": i, "name": n} for i, n in zip(ids, names)]
+        if not invitees:
+            return {
+                "action": "error",
+                "response": "I lost track of who this meeting is with. Please ask again.",
+                "data": None,
+            }
+
+        parsed = {
+            "proposed_time": when.isoformat(),
+            "duration_minutes": pending_intent.get("duration_minutes") or 30,
+            "title": pending_intent.get("title"),
+            "description": pending_intent.get("description") or "",
+            "agenda": pending_intent.get("agenda") or [],
+            "recurrence": pending_intent.get("recurrence") or "none",
+            "recurrence_end_date": pending_intent.get("recurrence_end_date"),
+        }
+        return self._schedule_result(invitees, parsed, pending_intent.get("request") or "",
+                                     company_users)
+
+    def _schedule_result(self, invitees: List[Dict], parsed: Dict, message: str,
+                         company_users: List[Dict] = None) -> Dict:
+        """Turn a fully specified request into the `schedule` action.
+
+        Shared by `process` (time came in the sentence) and
+        `schedule_from_pending` (time came from the picker), so both produce
+        the same meeting from the same inputs.
+        """
+        invitee_names = [i["name"] for i in invitees]
 
         # Validate proposed time is in the future
         try:

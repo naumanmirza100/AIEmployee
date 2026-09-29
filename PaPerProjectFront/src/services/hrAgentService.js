@@ -895,9 +895,14 @@ const browserTimezone = () => {
   }
 };
 
-export const hrMeetingSchedule = async (message, chatHistory = []) => {
+/**
+ * @param {object} extra  structured answers; `{ pending_intent, proposed_time }`
+ *                        finishes a "when should it happen?" question without
+ *                        the model re-reading `message`.
+ */
+export const hrMeetingSchedule = async (message, chatHistory = [], extra = {}) => {
   try {
-    const payload = { message, timezone: browserTimezone() };
+    const payload = { message, timezone: browserTimezone(), ...extra };
     if (Array.isArray(chatHistory) && chatHistory.length > 0) {
       payload.chat_history = chatHistory;
     }

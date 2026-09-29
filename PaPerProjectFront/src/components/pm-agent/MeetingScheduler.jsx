@@ -147,7 +147,7 @@ export default function MeetingScheduler() {
     setTimeout(scrollToBottom, 100);
   };
 
-  const handleSend = async (overrideMsg = null) => {
+  const handleSend = async (overrideMsg = null, extra = {}) => {
     const msg = (typeof overrideMsg === 'string' ? overrideMsg : input).trim();
     if (!msg || loading) return;
     if (typeof overrideMsg !== 'string') setInput('');
@@ -163,7 +163,7 @@ export default function MeetingScheduler() {
     setTimeout(scrollToBottom, 50);
 
     try {
-      const res = await pmAgentService.meetingSchedule(msg);
+      const res = await pmAgentService.meetingSchedule(msg, extra);
       const data = res?.data?.data || res?.data || {};
       const response = data.response || data.message || 'Something went wrong. Please try again.';
 
@@ -530,7 +530,14 @@ export default function MeetingScheduler() {
                                   });
                                   const who = names.length ? ` with ${names.join(', ')}` : '';
                                   const dur = pi.duration_minutes ? ` for ${pi.duration_minutes} minutes` : '';
-                                  handleSend(`Schedule the meeting${who} on ${pretty} (${datetimeIso})${dur}.`);
+                                  // The sentence is only for the chat log. The time and the
+                                  // already-understood request go as data, so the backend
+                                  // finishes without asking the model to re-parse this line
+                                  // (which is what used to fail).
+                                  handleSend(`Schedule the meeting${who} on ${pretty}${dur}.`, {
+                                    pending_intent: pi,
+                                    proposed_time: datetimeIso,
+                                  });
                                 }}
                               />
                             )}
@@ -781,12 +788,12 @@ export default function MeetingScheduler() {
 // remember the previous turn.
 function NeedsTimePicker({ pendingIntent, disabled, onConfirm }) {
   const [datetime, setDatetime] = useState(() => {
+    // Default to 09:00 tomorrow — the start of the working day, and the first
+    // slot the agent suggests. It used to be "this time tomorrow, rounded to
+    // the half hour", which after about 23:30 rolled into a midnight meeting.
     const t = new Date();
     t.setDate(t.getDate() + 1);
-    t.setMinutes(t.getMinutes() < 30 ? 30 : 0);
-    if (t.getMinutes() === 0) t.setHours(t.getHours() + 1);
-    t.setSeconds(0);
-    t.setMilliseconds(0);
+    t.setHours(9, 0, 0, 0);
     const pad = (n) => String(n).padStart(2, '0');
     return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
   });
