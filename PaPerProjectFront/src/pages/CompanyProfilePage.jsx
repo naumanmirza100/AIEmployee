@@ -234,7 +234,7 @@ const CompanyProfilePage = () => {
           {activeTab === 'integrations' ? (
             <IntegrationsTab />
           ) : (
-            <div className="rounded-2xl border border-white/[0.08] p-6 sm:p-7" style={{ background: 'rgba(14,10,26,0.7)' }}>
+            <div className="rounded-2xl border border-white/[0.08] p-6 sm:p-7" style={{ background: 'hsl(var(--sfr-0e0a1a) / 0.7)' }}>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-6">
                 <Field icon={Building2} label="Company name" name="name" value={form.name} editing={editing} onChange={setField} placeholder="Acme Inc." />
                 <Field icon={Mail} label="Email" value={c.email} locked />
@@ -326,7 +326,7 @@ const IntegrationsTab = () => {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       {/* Google Calendar */}
-      <div className="rounded-2xl border border-white/[0.08] p-5 flex flex-col" style={{ background: 'rgba(14,10,26,0.7)' }}>
+      <div className="rounded-2xl border border-white/[0.08] p-5 flex flex-col" style={{ background: 'hsl(var(--sfr-0e0a1a) / 0.7)' }}>
         <div className="flex items-start gap-3">
           <div className="flex items-center justify-center w-11 h-11 rounded-xl shrink-0" style={{ background: '#1a73e8' }}>
             <CalendarCheck className="h-6 w-6 text-white" />

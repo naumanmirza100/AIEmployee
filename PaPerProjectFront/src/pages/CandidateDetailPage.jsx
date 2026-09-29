@@ -296,7 +296,7 @@ const CandidateDetailPage = () => {
 
       {/* ── Top bar ── */}
       <div className="sticky top-0 z-20 px-6 py-3 flex items-center justify-between gap-3 border-b border-white/6 backdrop-blur-md"
-        style={{ background: 'rgba(10,10,26,0.85)' }}>
+        style={{ background: 'hsl(var(--sfr-0a0a1a) / 0.85)' }}>
         <button onClick={() => navigate('/recruitment/candidates')}
           className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors">
           <ArrowLeft className="h-4 w-4" />Back to Candidates

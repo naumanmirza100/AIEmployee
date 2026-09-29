@@ -1054,7 +1054,7 @@ const HRDashboard = () => {
                             boxShadow: '0 0 8px 0 #f59e0b55',
                           }
                         : {
-                            background: 'rgba(60, 30, 90, 0.22)',
+                            background: 'hsl(var(--sfr-3c1e5a) / 0.22)',
                             color: '#cfc6e6',
                             border: '1.5px solid var(--line-3)',
                             boxShadow: 'none',

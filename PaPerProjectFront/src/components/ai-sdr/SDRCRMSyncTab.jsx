@@ -190,7 +190,7 @@ function ConnectModal({ provider, onClose, onSaved }) {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
     }}>
-      <div style={{ ...card, width: 480, maxWidth: '95vw', background: 'rgba(20,10,40,0.98)', border: '1px solid rgba(255,255,255,0.12)' }}>
+      <div style={{ ...card, width: 480, maxWidth: '95vw', background: 'hsl(var(--sfr-140a28) / 0.98)', border: '1px solid rgba(255,255,255,0.12)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <span style={{ fontSize: 28 }}>{cfg.logo}</span>
           <div>

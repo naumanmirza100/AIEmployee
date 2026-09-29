@@ -1141,7 +1141,7 @@ const SDRMeetingsTab = () => {
             <div style={{
               marginTop: 10,
               padding: '16px 16px 14px',
-              background: 'linear-gradient(135deg,rgba(10,4,28,0.92),rgba(16,6,38,0.95))',
+              background: 'linear-gradient(135deg,hsl(var(--sfr-0a041c) / 0.92),hsl(var(--sfr-100626) / 0.95))',
               border: '1px solid rgba(168,85,247,0.2)',
               borderRadius: 11,
               boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06), 0 4px 20px rgba(0,0,0,0.3)',

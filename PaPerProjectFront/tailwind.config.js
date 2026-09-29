@@ -55,11 +55,27 @@ module.exports = {
         // at a variable makes every `bg-violet-600`, `hover:bg-violet-600` and
         // `bg-violet-600/90` follow the theme: #427CF5 in light, #7C3AED in
         // dark. `<alpha-value>` keeps the opacity modifiers working.
+        // Only the shades chosen for a dark page are remapped. `extend` merges
+        // into Tailwind's palette, so every other shade keeps its stock value.
+        // 200-400 are text (pale on dark -> deep on light); 700-900 are fills
+        // (deep on dark -> pale on light).
         violet: {
-          400: "#a78bfa",
+          200: "hsl(var(--v-200) / <alpha-value>)",
+          300: "hsl(var(--v-300) / <alpha-value>)",
+          400: "hsl(var(--v-400) / <alpha-value>)",
           500: "#8b5cf6",
           600: "hsl(var(--brand-600) / <alpha-value>)",
-          700: "#6d28d9"
+          700: "hsl(var(--v-700) / <alpha-value>)",
+          900: "hsl(var(--v-900) / <alpha-value>)"
+        },
+        amber: {
+          200: "hsl(var(--a-200) / <alpha-value>)",
+          300: "hsl(var(--a-300) / <alpha-value>)",
+          400: "hsl(var(--a-400) / <alpha-value>)"
+        },
+        yellow: {
+          300: "hsl(var(--y-300) / <alpha-value>)",
+          400: "hsl(var(--y-400) / <alpha-value>)"
         },
         // The agent dashboards were built for a dark page, so surfaces and
         // text are written as white-with-opacity: `text-white`, `text-white/60`,

@@ -751,7 +751,7 @@ function PortalDashboard({ token }) {
 
       {/* ── Nav ── */}
       <nav className="relative z-20 sticky top-0 flex items-center justify-between px-5 py-4 border-b"
-        style={{ background:'rgba(8,11,26,0.85)', borderColor:'rgba(255,255,255,0.07)', backdropFilter:'blur(16px)' }}>
+        style={{ background:'hsl(var(--sfr-080b1a) / 0.85)', borderColor:'rgba(255,255,255,0.07)', backdropFilter:'blur(16px)' }}>
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center"
             style={{ background:'linear-gradient(135deg,#6366f1,#4f46e5)' }}>

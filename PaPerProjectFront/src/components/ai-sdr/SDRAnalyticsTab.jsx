@@ -27,7 +27,7 @@ function StatCard({ icon: Icon, label, value, sub, color, trend: t }) {
   const TIcon = t?.icon;
   return (
     <div style={{
-      background: 'linear-gradient(135deg,rgba(15,10,31,0.95),rgba(20,8,40,0.95))',
+      background: 'linear-gradient(135deg,hsl(var(--sfr-0f0a1f) / 0.95),hsl(var(--sfr-140828) / 0.95))',
       border: '1px solid var(--line-1)', borderRadius: 12, padding: '18px 20px',
       display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 140,
     }}>
@@ -187,7 +187,7 @@ export default function SDRAnalyticsTab() {
   };
 
   const card = {
-    background: 'linear-gradient(135deg,rgba(15,10,31,0.95),rgba(20,8,40,0.95))',
+    background: 'linear-gradient(135deg,hsl(var(--sfr-0f0a1f) / 0.95),hsl(var(--sfr-140828) / 0.95))',
     border: '1px solid var(--line-1)', borderRadius: 12, padding: '20px 22px',
   };
 
@@ -331,7 +331,7 @@ export default function SDRAnalyticsTab() {
               </thead>
               <tbody>
                 {m.campaign_rows.map((row, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
+                  <tr key={i} style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
                     <td style={{ padding: '10px 10px', fontSize: 12, color: 'var(--text-soft)', fontWeight: 500 }}>{row.name}</td>
                     <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: '#9ca3af' }}>{row.emails_sent}</td>
                     <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: '#9ca3af' }}>{row.replies}</td>

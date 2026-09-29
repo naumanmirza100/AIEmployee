@@ -21,11 +21,11 @@ import {
 // Helpers
 // --------------------------------------------------------------------------
 const cardStyle = {
-  background: 'linear-gradient(135deg, rgba(15,10,31,0.95) 0%, rgba(20,8,40,0.95) 100%)',
+  background: 'linear-gradient(135deg, hsl(var(--sfr-0f0a1f) / 0.95) 0%, hsl(var(--sfr-140828) / 0.95) 100%)',
   border: '1px solid var(--line-1)', borderRadius: 12,
 };
 const inputStyle = {
-  background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)',
+  background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)',
   borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
@@ -140,7 +140,7 @@ const StepCard = ({ step, onEdit, onDelete, isLast }) => (
           {step.delay_days}
         </span>
       </div>
-      {!isLast && <div style={{ width: 2, height: 28, background: 'rgba(45,31,74,0.8)', margin: '4px 0' }} />}
+      {!isLast && <div style={{ width: 2, height: 28, background: 'hsl(var(--sfr-2d1f4a) / 0.8)', margin: '4px 0' }} />}
     </div>
 
     {/* Step content */}
@@ -1247,7 +1247,7 @@ const SDROutreachTab = () => {
                   const TIcon = TEMP_ICON[enr.lead_temperature];
                   return (
                     <tr key={enr.id}
-                      style={{ borderBottom: '1px solid rgba(45,31,74,0.4)' }}
+                      style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.4)' }}
                       onMouseEnter={e => e.currentTarget.style.background = 'rgba(168,85,247,0.04)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
@@ -1429,7 +1429,7 @@ const SDROutreachTab = () => {
                     const TIcon = TEMP_ICON[lead.temperature];
                     return (
                       <tr key={lead.id}
-                        style={{ borderBottom: '1px solid rgba(45,31,74,0.4)', cursor: 'pointer' }}
+                        style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.4)', cursor: 'pointer' }}
                         onClick={() => setSelectedLeadIds(prev =>
                           prev.includes(lead.id) ? prev.filter(id => id !== lead.id) : [...prev, lead.id]
                         )}

@@ -119,7 +119,7 @@ const HowItWorksModal = ({
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-[9998]"
-        style={{ background: 'rgba(2, 3, 8, 0.75)' }}
+        style={{ background: 'hsl(var(--sfr-020308) / 0.75)' }}
         onClick={onClose}
       />
 

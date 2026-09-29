@@ -473,14 +473,14 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       <div className="flex w-full max-w-full relative max-h-[calc(100vh-40px)]">
         <div
           data-tour-pm-pp="sidebar"
-          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
+          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_hsl(var(--sfr-5024b4) / 0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
-            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
+            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
             borderRight: '1.5px solid rgba(255,255,255,0.10)',
-            boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
+            boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
             borderTopLeftRadius: 16,
             borderBottomLeftRadius: 16,
             backdropFilter: 'blur(12px)',
@@ -492,7 +492,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             <div
               className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
               style={{
-                background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)',
+                background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)',
                 borderTopLeftRadius: 16,
               }}
             >
@@ -516,7 +516,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                   className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
                   style={{
                     border: '1.5px solid rgba(139,92,246,0.22)',
-                    background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                    background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)',
                     boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
                     backdropFilter: 'blur(4px)',
                     WebkitBackdropFilter: 'blur(4px)',
@@ -558,7 +558,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                   className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
                   style={{
                     border: '1.5px solid rgba(139,92,246,0.22)',
-                    background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                    background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)',
                     boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
                     backdropFilter: 'blur(4px)',
                     WebkitBackdropFilter: 'blur(4px)',
@@ -607,7 +607,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                 <div
                   className="p-2 space-y-1"
                   style={{
-                    background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)',
+                    background: 'linear-gradient(180deg, hsl(var(--sfr-241236) / 0.10) 0%, hsl(var(--sfr-18122b) / 0.18) 100%)',
                     borderRadius: 12,
                   }}
                 >
@@ -637,7 +637,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           boxShadow:
                             selectedChatId === c.id
                               ? '0 0 12px 0 rgba(139,92,246,0.18), 0 1.5px 0 0 rgba(120,80,255,0.10) inset'
-                              : '0 1px 2px 0 rgba(36,18,54,0.08) inset',
+                              : '0 1px 2px 0 hsl(var(--sfr-241236) / 0.08) inset',
                           borderWidth: 1.5,
                         }}
                       >

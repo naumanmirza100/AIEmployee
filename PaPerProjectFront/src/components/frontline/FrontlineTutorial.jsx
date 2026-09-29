@@ -464,7 +464,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
       {isCentered && (
         <div
           className="fixed inset-0 z-[9998] pointer-events-auto"
-          style={{ background: 'rgba(2, 3, 8, 0.72)' }}
+          style={{ background: 'hsl(var(--sfr-020308) / 0.72)' }}
         />
       )}
 
@@ -483,7 +483,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
             left: targetRect.left - 6,
             width: targetRect.width + 12,
             height: targetRect.height + 12,
-            boxShadow: '0 0 0 3px #f59e0b, 0 0 0 9999px rgba(2,3,8,0.72)',
+            boxShadow: '0 0 0 3px #f59e0b, 0 0 0 9999px hsl(var(--sfr-020308) / 0.72)',
             animation: 'fltPulse 1.8s ease-in-out infinite',
             transition: 'top 220ms cubic-bezier(0.4, 0, 0.2, 1), left 220ms cubic-bezier(0.4, 0, 0.2, 1), width 220ms cubic-bezier(0.4, 0, 0.2, 1), height 220ms cubic-bezier(0.4, 0, 0.2, 1)',
           }}
@@ -628,7 +628,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
           progress saved from a previous session. */}
       {resumePrompt && (
         <>
-          <div className="fixed inset-0 z-[10001]" style={{ background: 'rgba(2, 3, 8, 0.55)' }} />
+          <div className="fixed inset-0 z-[10001]" style={{ background: 'hsl(var(--sfr-020308) / 0.55)' }} />
           <div
             role="alertdialog"
             aria-modal="true"
@@ -671,7 +671,7 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
           {/* Extra backdrop above the tour overlay so nothing behind is clickable */}
           <div
             className="fixed inset-0 z-[10001]"
-            style={{ background: 'rgba(2, 3, 8, 0.55)' }}
+            style={{ background: 'hsl(var(--sfr-020308) / 0.55)' }}
             onClick={cancelSkip}
           />
           <div
@@ -739,8 +739,8 @@ const FrontlineTutorial = ({ open, onClose, setActiveTab, steps, storageKey, sib
       {/* Pulse animation keyframes */}
       <style>{`
         @keyframes fltPulse {
-          0%, 100% { box-shadow: 0 0 0 3px #f59e0b, 0 0 0 9999px rgba(2,3,8,0.72); }
-          50%      { box-shadow: 0 0 0 7px #f59e0b88, 0 0 0 9999px rgba(2,3,8,0.72); }
+          0%, 100% { box-shadow: 0 0 0 3px #f59e0b, 0 0 0 9999px hsl(var(--sfr-020308) / 0.72); }
+          50%      { box-shadow: 0 0 0 7px #f59e0b88, 0 0 0 9999px hsl(var(--sfr-020308) / 0.72); }
         }
       `}</style>
     </>

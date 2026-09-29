@@ -1325,7 +1325,7 @@ const MarketingQA = () => {
           sidebarOpen ? "w-80" : "w-16"
         )}
       >
-        <div className="px-3 pt-3 pb-2 border-b border-violet-500/20 flex flex-col gap-2" style={{ background: 'linear-gradient(180deg, rgba(60,30,90,0.22) 0%, rgba(36,18,54,0.85) 100%)' }}>
+        <div className="px-3 pt-3 pb-2 border-b border-violet-500/20 flex flex-col gap-2" style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)' }}>
           <div className="flex items-center justify-between">
             <AnimatePresence mode="wait">
               {sidebarOpen ? (
@@ -1383,7 +1383,7 @@ const MarketingQA = () => {
             </div>
           </div>
           {sidebarOpen && showSidebarSearch && (
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg" style={{ border: '1.5px solid rgba(139,92,246,0.30)', background: 'rgba(80,36,180,0.12)' }}>
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg" style={{ border: '1.5px solid rgba(139,92,246,0.30)', background: 'hsl(var(--sfr-5024b4) / 0.12)' }}>
               <Search className="h-3.5 w-3.5 text-violet-400 shrink-0" />
               <input
                 autoFocus
@@ -1821,7 +1821,7 @@ const MarketingQA = () => {
                 <div
                   className="absolute inset-0 rounded-[28px] pointer-events-none"
                   style={{
-                    // background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
+                    // background: 'linear-gradient(90deg, transparent 60%, hsl(var(--sfr-0a2540) / 0.38) 90%, hsl(var(--sfr-0e2747) / 0.22) 100%)',
                   }}
                 />
                 <div
@@ -1959,7 +1959,7 @@ const MarketingQA = () => {
                           onClick={() => setShowSuggestions(!showSuggestions)}
                           className="h-7 w-7 p-0 rounded-full transition-all text-white/70 hover:text-white"
                           style={{
-                            background: 'rgba(17,17,24,0.8)',
+                            background: 'hsl(var(--sfr-111118) / 0.8)',
                             border: '1px solid rgba(139, 92, 246, 0.30)',
                             boxShadow: '0 0 12px rgba(139, 92, 246, 0.15)',
                           }}
@@ -2041,7 +2041,7 @@ const MarketingQA = () => {
                             group.color
                           )}
                           style={{
-                            background: 'rgba(17,17,24,0.9)',
+                            background: 'hsl(var(--sfr-111118) / 0.9)',
                             borderColor: 'rgba(139, 92, 246, 0.22)',
                           }}
                           onClick={() => setQuestion(prompt)}

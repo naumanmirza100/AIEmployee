@@ -246,12 +246,12 @@ async function exportToPdf(leads, filename = 'leads') {
 // Shared styles
 // --------------------------------------------------------------------------
 const cardStyle = {
-  background: 'linear-gradient(135deg, rgba(15,10,31,0.95) 0%, rgba(20,8,40,0.95) 100%)',
+  background: 'linear-gradient(135deg, hsl(var(--sfr-0f0a1f) / 0.95) 0%, hsl(var(--sfr-140828) / 0.95) 100%)',
   border: '1px solid var(--line-1)', borderRadius: 12,
 };
 
 const inputStyle = {
-  background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)',
+  background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)',
   borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
@@ -1027,7 +1027,7 @@ const SDRLeadsTab = () => {
         </div>
 
         {filtersOpen && (
-          <div style={{ marginTop: 10, padding: '16px 16px 14px', background: 'linear-gradient(135deg,rgba(10,4,28,0.9),rgba(16,6,38,0.95))', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 11, boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06)' }}>
+          <div style={{ marginTop: 10, padding: '16px 16px 14px', background: 'linear-gradient(135deg,hsl(var(--sfr-0a041c) / 0.9),hsl(var(--sfr-100626) / 0.95))', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 11, boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06)' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
               <div>
                 <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -1174,7 +1174,7 @@ const SDRLeadsTab = () => {
                 const confScore = lead.confidence_score;
                 return (
                   <tr key={lead.id}
-                    style={{ borderBottom: '1px solid rgba(45,31,74,0.4)', cursor: 'pointer', transition: 'background 0.15s', background: isChecked ? 'rgba(168,85,247,0.06)' : 'transparent' }}
+                    style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.4)', cursor: 'pointer', transition: 'background 0.15s', background: isChecked ? 'rgba(168,85,247,0.06)' : 'transparent' }}
                     onMouseEnter={e => { if (!isChecked) e.currentTarget.style.background = 'rgba(168,85,247,0.04)'; }}
                     onMouseLeave={e => { e.currentTarget.style.background = isChecked ? 'rgba(168,85,247,0.06)' : 'transparent'; }}
                   >
@@ -1573,7 +1573,7 @@ const SDRLeadsTab = () => {
                   { n: 8, col: 'Phone',        req: false, ex: '+1 555 000 0000' },
                   { n: 9, col: 'LinkedIn URL', req: false, ex: 'https://linkedin.com/in/jane' },
                 ].map((r) => (
-                  <div key={r.n} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
+                  <div key={r.n} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
                     <span style={{ width: 22, height: 22, borderRadius: 6, background: 'rgba(168,85,247,0.15)', color: '#c084fc', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{r.n}</span>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-soft)', minWidth: 110 }}>{r.col}</span>
                     {r.req
@@ -1625,7 +1625,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                   </thead>
                   <tbody>
                     {csvImport.rows.slice(0, 10).map((row, ri) => (
-                      <tr key={ri} style={{ borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
+                      <tr key={ri} style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
                         {csvImport.columns.map((c) => (
                           <td key={c.key} style={{ padding: '8px 12px', color: row[c.key] ? 'var(--text-soft)' : '#4b5563', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {row[c.key] || '—'}
@@ -1769,7 +1769,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             {icpProfiles.length > 1 && (
               <div>
                 <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 6 }}>ICP Profile</label>
-                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle, background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)' }}>
+                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle, background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)' }}>
                   {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active ? ' (Active)' : ''}</option>)}
                 </select>
               </div>

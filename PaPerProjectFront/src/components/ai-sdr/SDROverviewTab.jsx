@@ -46,12 +46,12 @@ const SOURCE_LABELS = {
 // Style helpers
 // ---------------------------------------------------------------------------
 const card = {
-  background: 'linear-gradient(135deg,rgba(15,10,31,0.95) 0%,rgba(20,8,40,0.95) 100%)',
+  background: 'linear-gradient(135deg,hsl(var(--sfr-0f0a1f) / 0.95) 0%,hsl(var(--sfr-140828) / 0.95) 100%)',
   border: '1px solid var(--line-1)', borderRadius: 12,
 };
 
 const inputStyle = {
-  background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)',
+  background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)',
   borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };

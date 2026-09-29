@@ -77,7 +77,7 @@ const AnalyticsDashboardTab = () => {
     <div
       className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)] p-5 sm:p-6"
       style={{
-        background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, rgba(64,40,10,0.55) 100%)',
+        background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, hsl(var(--sfr-40280a) / 0.55) 100%)',
       }}
       id="OPS-analytics-root"
       data-testid="OPS-analytics-root"

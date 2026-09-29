@@ -524,14 +524,14 @@ const AiInterviewQuestions = () => {
       <div className="flex w-full max-w-full relative">
       {/* Sidebar - Previous chats with smooth transition */}
       <div
-        className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
+        className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_hsl(var(--sfr-5024b4) / 0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
           showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
         }`}
         style={{
           minWidth: showChatHistory ? '16rem' : '0',
-          background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
+          background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
           borderRight: '1.5px solid rgba(255,255,255,0.10)',
-          boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
+          boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
           borderTopLeftRadius: 16,
           borderBottomLeftRadius: 16,
           backdropFilter: 'blur(12px)',
@@ -540,7 +540,7 @@ const AiInterviewQuestions = () => {
         }}
       >
         <div className="w-64">
-          <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2" style={{ background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)', borderTopLeftRadius: 16 }}>
+          <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2" style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)', borderTopLeftRadius: 16 }}>
             <div className="flex items-center justify-between mb-1">
               <span className="text-base font-semibold text-white/90 tracking-wide">Payper Project</span>
               <button
@@ -559,7 +559,7 @@ const AiInterviewQuestions = () => {
                 className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
                 style={{
                   border: '1.5px solid rgba(139,92,246,0.22)',
-                  background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                  background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)',
                   boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
                   backdropFilter: 'blur(4px)',
                   WebkitBackdropFilter: 'blur(4px)',
@@ -590,7 +590,7 @@ const AiInterviewQuestions = () => {
                 className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
                 style={{
                   border: '1.5px solid rgba(139,92,246,0.22)',
-                  background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                  background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)',
                   boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
                   backdropFilter: 'blur(4px)',
                   WebkitBackdropFilter: 'blur(4px)',
@@ -620,7 +620,7 @@ const AiInterviewQuestions = () => {
             ) : chats.length === 0 ? (
               <div id="REC-aiquestions-chats-empty" data-testid="REC-aiquestions-chats-empty" className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Ask a question to start.</div>
             ) : (
-              <div id="REC-aiquestions-chats-list" data-testid="REC-aiquestions-chats-list" className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)', borderRadius: 12 }}>
+              <div id="REC-aiquestions-chats-list" data-testid="REC-aiquestions-chats-list" className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-241236) / 0.10) 0%, hsl(var(--sfr-18122b) / 0.18) 100%)', borderRadius: 12 }}>
                 {(() => {
                   const searchTerm = sidebarSearch.trim().toLowerCase();
                   const filteredChats = searchTerm
@@ -646,7 +646,7 @@ const AiInterviewQuestions = () => {
                     style={{
                       boxShadow: selectedChatId === c.id
                         ? '0 0 12px 0 rgba(139,92,246,0.18), 0 1.5px 0 0 rgba(120,80,255,0.10) inset'
-                        : '0 1px 2px 0 rgba(36,18,54,0.08) inset',
+                        : '0 1px 2px 0 hsl(var(--sfr-241236) / 0.08) inset',
                       borderWidth: 1.5,
                     }}
                   >
@@ -803,7 +803,7 @@ const AiInterviewQuestions = () => {
                     background: 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)',
                     padding: '10px 16px',
                   } : {
-                    background: 'linear-gradient(135deg, rgba(18,12,40,0.97) 0%, rgba(14,10,32,0.97) 100%)',
+                    background: 'linear-gradient(135deg, hsl(var(--sfr-120c28) / 0.97) 0%, hsl(var(--sfr-0e0a20) / 0.97) 100%)',
                     border: '1px solid rgba(167,139,250,0.2)',
                     padding: msg.responseData?.isGraph ? '10px' : '14px 18px',
                   }}
@@ -928,7 +928,7 @@ const AiInterviewQuestions = () => {
             ))}
             {loading && (
               <div id="REC-aiquestions-messages-loading" data-testid="REC-aiquestions-messages-loading" className="flex justify-start">
-                <div className="rounded-2xl px-4 py-3 flex items-center gap-2" style={{ background: 'rgba(18,12,40,0.97)', border: '1px solid rgba(167,139,250,0.2)' }}>
+                <div className="rounded-2xl px-4 py-3 flex items-center gap-2" style={{ background: 'hsl(var(--sfr-120c28) / 0.97)', border: '1px solid rgba(167,139,250,0.2)' }}>
                   <Loader2 className="h-4 w-4 animate-spin" style={{ color: '#a78bfa' }} />
                   <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }}>Analyzing...</span>
                 </div>
@@ -948,7 +948,7 @@ const AiInterviewQuestions = () => {
                 top: 0,
                 zIndex: 1,
                 pointerEvents: 'none',
-                background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
+                background: 'linear-gradient(90deg, transparent 60%, hsl(var(--sfr-0a2540) / 0.38) 90%, hsl(var(--sfr-0e2747) / 0.22) 100%)',
               }}
             />
             <form id="REC-aiquestions-form" data-testid="REC-aiquestions-form" onSubmit={handleSubmit} className="shrink-0" style={{ position: 'relative', zIndex: 2 }}>

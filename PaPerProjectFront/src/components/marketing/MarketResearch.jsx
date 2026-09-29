@@ -687,7 +687,7 @@ const MarketResearch = () => {
         <div
           className="px-3 pt-3 pb-2 border-b border-violet-500/20 flex flex-col gap-2"
           style={{
-            background: 'linear-gradient(180deg, rgba(60,30,90,0.22) 0%, rgba(36,18,54,0.85) 100%)',
+            background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)',
           }}
         >
           <div className="flex items-center justify-between">
@@ -755,7 +755,7 @@ const MarketResearch = () => {
               className="flex items-center gap-2 px-2 py-1.5 rounded-lg"
               style={{
                 border: '1.5px solid rgba(139,92,246,0.30)',
-                background: 'rgba(80,36,180,0.12)',
+                background: 'hsl(var(--sfr-5024b4) / 0.12)',
               }}
             >
               <Search className="h-3.5 w-3.5 text-violet-400 shrink-0" />
@@ -1156,7 +1156,7 @@ const MarketResearch = () => {
                 <div
                   className="absolute inset-0 rounded-[28px] pointer-events-none"
                   style={{
-                    background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
+                    background: 'linear-gradient(90deg, transparent 60%, hsl(var(--sfr-0a2540) / 0.38) 90%, hsl(var(--sfr-0e2747) / 0.22) 100%)',
                   }}
                 />
                 <div
@@ -1294,7 +1294,7 @@ const MarketResearch = () => {
                         <div
                           className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 p-2"
                           // style={{
-                          //   background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.22) 55%, rgba(12,12,18,0.95) 100%)',
+                          //   background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.22) 55%, hsl(var(--sfr-0c0c12) / 0.95) 100%)',
                           //   borderColor: 'rgba(139, 92, 246, 0.22)',
                           // }}
                         >

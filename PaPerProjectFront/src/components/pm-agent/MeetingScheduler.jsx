@@ -333,14 +333,14 @@ export default function MeetingScheduler() {
         {/* ========== SIDEBAR ========== */}
         <div
           data-tour-pm-ms="sidebar"
-          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
+          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_hsl(var(--sfr-5024b4) / 0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
-            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
+            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
             borderRight: '1.5px solid rgba(255,255,255,0.10)',
-            boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
+            boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
             borderTopLeftRadius: 16, borderBottomLeftRadius: 16,
             backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
             overflow: 'hidden',
@@ -348,7 +348,7 @@ export default function MeetingScheduler() {
         >
           <div className="w-64 h-full flex flex-col">
             <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
-              style={{ background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)', borderTopLeftRadius: 16 }}
+              style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)', borderTopLeftRadius: 16 }}
             >
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
@@ -362,7 +362,7 @@ export default function MeetingScheduler() {
               </div>
               {showSidebarSearch ? (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
-                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)' }}>
+                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)' }}>
                   <input autoFocus value={sidebarSearch} onChange={(e) => setSidebarSearch(e.target.value)}
                     placeholder="Search..." className="flex-1 bg-transparent outline-none border-0 text-white/90 text-sm px-2 py-1.5 placeholder-white/40" />
                   <button onClick={() => { setSidebarSearch(''); setShowSidebarSearch(false); }}
@@ -374,7 +374,7 @@ export default function MeetingScheduler() {
                 </div>
               ) : (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
-                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)' }}>
+                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)' }}>
                   <span className="text-sm font-medium text-white/80 flex-1">Conversations</span>
                   <button title="Search" onClick={() => setShowSidebarSearch(true)}
                     className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150">
@@ -396,7 +396,7 @@ export default function MeetingScheduler() {
               ) : chats.length === 0 ? (
                 <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Send a request to start.</div>
               ) : (
-                <div className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)', borderRadius: 12 }}>
+                <div className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-241236) / 0.10) 0%, hsl(var(--sfr-18122b) / 0.18) 100%)', borderRadius: 12 }}>
                   {(() => {
                     const term = sidebarSearch.trim().toLowerCase();
                     const filtered = term

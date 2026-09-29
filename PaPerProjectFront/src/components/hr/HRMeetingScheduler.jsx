@@ -485,18 +485,18 @@ export default function HRMeetingScheduler() {
         {/* SIDEBAR */}
         <div
           data-tour-hrmeet="sidebar"
-          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] overflow-hidden transition-all duration-300 ease-in-out ${
+          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_hsl(var(--sfr-5024b4) / 0.18)] overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
-            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
+            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
             backdropFilter: 'blur(12px)',
           }}
         >
           <div className="w-64 h-full flex flex-col">
             <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
-                 style={{ background: 'linear-gradient(180deg, rgba(60,30,90,0.22) 0%, rgba(36,18,54,0.85) 100%)' }}>
+                 style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)' }}>
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
                   <span className="text-base font-semibold text-white/90 tracking-wide">Meetings</span>
@@ -510,7 +510,7 @@ export default function HRMeetingScheduler() {
 
               {showSidebarSearch ? (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
-                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)' }}>
+                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)' }}>
                   <input autoFocus value={sidebarSearch} onChange={(e) => setSidebarSearch(e.target.value)}
                     placeholder="Search..." className="flex-1 bg-transparent outline-none text-white/90 text-sm px-2 py-1.5 placeholder-white/40" />
                   <button onClick={() => { setSidebarSearch(''); setShowSidebarSearch(false); }}
