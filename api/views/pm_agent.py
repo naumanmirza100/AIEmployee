@@ -4801,6 +4801,14 @@ def meeting_schedule(request):
             payload["needs_time"] = True
         if result.get("pending_intent"):
             payload["pending_intent"] = result["pending_intent"]
+        # The details form: who / when / how long, whichever the user didn't
+        # say, plus a draft of everything they did. The form posts `draft`
+        # back as `pending_intent` with a `proposed_time`, which lands on the
+        # model-free path at the top of this view.
+        if result.get("needs_input"):
+            payload["needs_input"] = True
+            for key in ("draft", "missing", "options", "note"):
+                payload[key] = result.get(key)
         return Response({"status": "success", "data": payload}, status=status.HTTP_200_OK)
 
     except KeyServiceError:

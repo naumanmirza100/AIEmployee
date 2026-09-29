@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import MeetingDraftForm from '@/components/common/MeetingDraftForm';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -176,6 +177,11 @@ export default function MeetingScheduler() {
           action: data.action,
           needsTime: !!data.needs_time,
           pendingIntent: data.pending_intent || null,
+          needsInput: !!data.needs_input,
+          draft: data.draft || null,
+          missing: data.missing || [],
+          options: data.options || null,
+          note: data.note || null,
         },
       };
 
@@ -516,6 +522,27 @@ export default function MeetingScheduler() {
                         ) : (
                           <div>
                             <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.content) }} />
+                            {msg.responseData?.needsInput && msg.responseData.draft && i === currentMessages.length - 1 && (
+                              <MeetingDraftForm
+                                draft={msg.responseData.draft}
+                                missing={msg.responseData.missing}
+                                options={msg.responseData.options || {}}
+                                note={msg.responseData.note}
+                                busy={loading}
+                                onConfirm={(edited, iso) => {
+                                  const pretty = new Date(iso).toLocaleString(undefined, {
+                                    weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+                                  });
+                                  const who = (edited.invitee_names || []).join(', ');
+                                  // Readable line for the chat log; the booking itself is
+                                  // the reviewed draft, sent as data.
+                                  handleSend(`Book it: with ${who}, ${pretty}, ${edited.duration_minutes} minutes.`, {
+                                    pending_intent: edited,
+                                    proposed_time: iso,
+                                  });
+                                }}
+                              />
+                            )}
                             {msg.responseData?.needsTime && i === currentMessages.length - 1 && (
                               <NeedsTimePicker
                                 pendingIntent={msg.responseData.pendingIntent}

@@ -47,9 +47,11 @@ from hr_agent.throttling import (
     HRPublicThrottle, HRLLMThrottle, HRStreamThrottle, HRUploadThrottle, HRCRUDThrottle,
 )
 from core.HR_agent.hr_agent import HRAgent
+from zoneinfo import ZoneInfo
+
 from core.scheduling import (
-    ScheduleConflict, booking_guard, ensure_free, find_conflicts, people_for, suggest_slots,
-    zone_name,
+    ScheduleConflict, booking_guard, duration_mentioned, ensure_free, find_conflicts, in_zone,
+    people_for, suggest_slots, zone_name,
 )
 from core.scheduling.identity import login_user_ids_for_employees, member_ids
 from core.api_key_service import KeyServiceError
@@ -2163,6 +2165,99 @@ def _hr_people(company, participant_employee_ids, organizer_employee_id=None):
     return sorted(set(logins.values()))
 
 
+_HR_DURATION_CHOICES = [15, 30, 45, 60, 90, 120]
+
+
+def _hr_slot_options(people, duration, tz_name, days=3, per_day=4):
+    """Free start times for `people` (logins) on the next few weekdays, as
+    one-click choices for the details form: exact instants, not prose."""
+    from core.scheduling import free_slots
+    from core.scheduling.conflicts import clock_label, zone_info
+
+    zone = zone_info(tz_name)
+    day = timezone.now().astimezone(zone).date()
+    out, seen = [], 0
+    try:
+        while seen < days:
+            day += timedelta(days=1)
+            if day.weekday() >= 5:
+                continue
+            seen += 1
+            for slot in free_slots(people, day, duration, tz_name, limit=per_day):
+                local = slot.astimezone(zone)
+                out.append({'iso': slot.isoformat(),
+                            'label': f"{local:%a %d %b} · {clock_label(local)}"})
+    except Exception:
+        logger.exception('hr_meeting_schedule: could not compute slot suggestions')
+    return out
+
+
+def _hr_details_form(*, company, parsed, missing, participant_ids, sched, unknown_names,
+                     emp_rows, organizer_id, tz_name):
+    """Ask for who / when / how long in one form instead of guessing.
+
+    The draft carries everything already understood, pre-filled for review;
+    confirming posts it back as `pending_intent` with the chosen time, and the
+    picker path books exactly that without another model call.
+    """
+    logins, no_login = _hr_invitable(company, participant_ids)
+    # Someone without a login can't be invited; say so rather than pre-select
+    # them and fail on confirm.
+    invitable = [e for e in emp_rows if e['id'] in logins]
+    if not invitable and 'attendees' not in missing:
+        missing = ['attendees'] + list(missing)
+
+    notes = []
+    if unknown_names:
+        notes.append("I couldn't find " + ', '.join(f'**{n}**' for n in unknown_names)
+                     + ' in your company.')
+    if no_login:
+        names = ', '.join(f'**{e.full_name or e.work_email}**' for e in no_login)
+        verb = 'has' if len(no_login) == 1 else 'have'
+        notes.append(f"{names} {verb} no login yet, so can't be invited — "
+                     "create their account first.")
+
+    duration = _hr_duration(parsed.get('duration_minutes'))
+    draft = {
+        'invitee_ids': [e['id'] for e in invitable],
+        'invitee_names': [e['full_name'] for e in invitable],
+        'proposed_time': sched.isoformat() if sched else None,
+        'duration_minutes': duration,
+        'title': parsed.get('title') or None,
+        'description': parsed.get('description') or '',
+        'meeting_type': parsed.get('meeting_type') or 'one_on_one',
+        'location': parsed.get('location') or '',
+        'meeting_link': parsed.get('meeting_link') or None,
+    }
+
+    # Everyone who can be invited, except whoever is asking (the organiser).
+    everyone, _ = _hr_invitable(company, [e['id'] for e in emp_rows])
+    users = [{'id': e['id'], 'name': e['full_name'], 'email': e['work_email']}
+             for e in emp_rows if e['id'] in everyone and e['id'] != organizer_id]
+
+    slots = []
+    if draft['invitee_ids'] and 'time' in missing:
+        people = _hr_people(company, draft['invitee_ids'], organizer_id)
+        slots = _hr_slot_options(people, duration, tz_name)
+
+    wanted = {'attendees': 'who should attend', 'time': 'when it should be',
+              'duration': 'how long it should last'}
+    asks = [wanted[m] for m in missing]
+    asked = asks[0] if len(asks) == 1 else ', '.join(asks[:-1]) + ' and ' + asks[-1]
+    return Response({'status': 'success', 'data': {
+        'reply': (f"Before I book this, I need to know {asked}. "
+                  "Fill it in below, check the details, and confirm."),
+        'meeting': None,
+        'parsed': parsed,
+        'action': 'needs_input',
+        'needs_input': True,
+        'draft': draft,
+        'missing': missing,
+        'note': ' '.join(notes) or None,
+        'options': {'users': users, 'durations': _HR_DURATION_CHOICES, 'slots': slots},
+    }})
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -3307,19 +3402,27 @@ def hr_meeting_schedule(request):
             if recent:
                 history_text = "Previous conversation:\n" + "\n".join(recent) + "\n\n"
 
-        from datetime import timezone as _dtz
-        now_iso = timezone.now().astimezone(_dtz.utc).isoformat()
+        # The user's own zone, from the browser. The model is told the time in
+        # it and answers in it: it was told only UTC and asked for UTC back, so
+        # "3 PM" became 15:00 UTC — 8 PM for a user in Karachi. Converting a
+        # local time to UTC is our job; the model neither knew the offset nor
+        # does that arithmetic reliably.
+        tz_name = zone_name(request.data.get('timezone'))
+        local_now = timezone.now().astimezone(ZoneInfo(tz_name)).replace(microsecond=0)
 
         prompt = (
-            f"{history_text}You are an HR meeting scheduling assistant. Today (UTC) is "
-            f"{now_iso}. From the user's request, extract a meeting intent and return ONLY "
+            f"{history_text}You are an HR meeting scheduling assistant. The user's timezone is "
+            f"{tz_name}; right now it is {local_now.isoformat()} ({local_now:%A}) there. "
+            "Every time the user says is in that timezone. "
+            "From the user's request, extract a meeting intent and return ONLY "
             "a JSON object with these keys (use null when a value is not specified):\n"
             "  {\"intent\": \"create\"|\"update\"|\"cancel\"|\"clarify\",\n"
             "   \"title\": str|null, \"description\": str|null,\n"
             "   \"meeting_type\": one of [onboarding_orientation, one_on_one, performance_review,\n"
             "                              mid_year_check_in, exit_interview, grievance_hearing,\n"
             "                              training_session, benefits_consult, other]|null,\n"
-            "   \"scheduled_at\": ISO-8601 UTC datetime|null, \"duration_minutes\": int|null,\n"
+            "   \"scheduled_at\": wall-clock datetime in the user's timezone, YYYY-MM-DDTHH:MM:SS with\n"
+            "                     no offset|null, \"duration_minutes\": int|null,\n"
             "   \"participant_names\": [str]|null,  // raw names from the user's message, verbatim.\n"
             "                          //   ALWAYS include this when the user mentions people, even if\n"
             "                          //   the name is not in the directory.\n"
@@ -3328,9 +3431,11 @@ def hr_meeting_schedule(request):
             "                          //   server will resolve or ask for clarification.\n"
             "   \"location\": str|null, \"meeting_link\": str|null,\n"
             "   \"reply\": str  // friendly natural-language reply. NEVER claim to have scheduled\n"
-            "                   //   a meeting — the server decides that. If a mentioned name is\n"
-            "                   //   not in the directory below, set intent='clarify' and say so.\n"
+            "                   //   a meeting — the server decides that.\n"
             "  }\n"
+            "Use intent='create' for ANY request to set up a new meeting, even when who, when or\n"
+            "how long is missing, or a name is not in the directory — the server asks the user for\n"
+            "whatever is missing. Use 'clarify' only when you can't tell what the user wants.\n"
             "Default duration_minutes=30 when unspecified. Default meeting_type='one_on_one'.\n"
             f"Visibility for exit_interview/grievance_hearing/performance_review will be set to private automatically.\n\n"
             f"Employee directory ({len(emp_rows)} rows):\n" + "\n".join(directory_lines) + "\n\n"
@@ -3339,14 +3444,18 @@ def hr_meeting_schedule(request):
 
         if picked is not None:
             # Rebuild the intent from what was already agreed; no model call.
+            # The details form names attendees `invitee_*` (shared with the
+            # Project Manager scheduler); the older picker, `participant_*`.
             parsed = {
                 'intent': 'create',
                 'title': pending.get('title'),
                 'description': pending.get('description') or '',
                 'meeting_type': pending.get('meeting_type') or 'one_on_one',
                 'duration_minutes': pending.get('duration_minutes') or 30,
-                'participant_names': pending.get('participant_names') or [],
-                'participant_ids': pending.get('participant_ids') or [],
+                'participant_names': (pending.get('invitee_names')
+                                      or pending.get('participant_names') or []),
+                'participant_ids': (pending.get('invitee_ids')
+                                    or pending.get('participant_ids') or []),
                 'location': pending.get('location') or '',
                 'meeting_link': pending.get('meeting_link'),
                 'scheduled_at': picked.isoformat(),
@@ -3441,7 +3550,10 @@ def hr_meeting_schedule(request):
         raw_names = parsed.get('participant_names') or []
         if not isinstance(raw_names, list):
             raw_names = []
-        if not all_matched_emps and raw_names:
+        # For a new meeting, an unknown name goes to the details form below
+        # (with a note saying who wasn't found) rather than ending the turn.
+        unknown_names = raw_names if (not all_matched_emps and raw_names) else []
+        if unknown_names and intent != 'create':
             names_str = ', '.join(f'"{n}"' for n in raw_names)
             override_reply = (
                 f"I couldn't find {names_str} in your company directory. "
@@ -3522,7 +3634,8 @@ def hr_meeting_schedule(request):
                 # the user's words, and there was no model reading here.
                 sched = picked
             elif _hr_message_has_time_reference(message):
-                sched = _hr_aware(_parse_iso_dt(parsed.get('scheduled_at')))
+                # Wall-clock time in the user's zone (see the prompt).
+                sched = in_zone(parsed.get('scheduled_at'), tz_name)
 
             # HR-BUG-07: correct the DATE portion when we can resolve it
             # deterministically from the user's message. The LLM has
@@ -3532,9 +3645,9 @@ def hr_meeting_schedule(request):
             # We preserve the LLM's time-of-day.
             if sched is not None and picked is None:
                 try:
-                    from datetime import datetime as _dt, timezone as _dt_tz
-                    now_dt = timezone.now().astimezone(_dt_tz.utc)
-                    resolved_date = _hr_resolve_relative_date(message, now_dt)
+                    # "Tomorrow" is the user's tomorrow: resolve against their
+                    # local date, not UTC's, which differs near midnight.
+                    resolved_date = _hr_resolve_relative_date(message, local_now)
                     if resolved_date is not None and resolved_date != sched.date():
                         corrected = sched.replace(
                             year=resolved_date.year,
@@ -3552,43 +3665,34 @@ def hr_meeting_schedule(request):
                 except Exception:
                     logger.exception('hr_meeting_schedule: relative-date correction failed')
 
-            if not sched:
-                # We still know who this meeting is (probably) with — return
-                # that context so the frontend can render a date/time picker
-                # with the participants pre-filled.
-                names_display = ', '.join(e.full_name for e in all_matched_emps) or 'the participants'
-                return Response({'status': 'success', 'data': {
-                    'reply': (
-                        f"When should the meeting with **{names_display}** happen? "
-                        "Please pick a date and time."
-                    ),
-                    'meeting': None,
-                    'parsed': parsed,
-                    'action': 'needs_time',
-                    'needs_time': True,
-                    'pending_intent': {
-                        'title': parsed.get('title') or None,
-                        'description': parsed.get('description') or '',
-                        'meeting_type': parsed.get('meeting_type') or 'one_on_one',
-                        'duration_minutes': int(parsed.get('duration_minutes') or 30),
-                        'participant_ids': sorted(validated_ids),
-                        'participant_names': [e.full_name for e in all_matched_emps],
-                        'location': parsed.get('location') or '',
-                        'meeting_link': parsed.get('meeting_link') or None,
-                    },
-                }})
-
-            # Require at least one resolved participant OR the asker themselves,
-            # otherwise the meeting has no one to meet with.
+            # ---- Anything the user didn't say? ---------------------------
+            # Who, when and how long. These used to be three different
+            # outcomes: a bare date picker, a "Who should this meeting be
+            # with?" dead end, and — for how long — a silent 30 minutes. Now
+            # whatever is missing is asked for together, in one form, with
+            # everything already understood filled in for review. The form
+            # posts back to the `picked` path above, which books it as shown.
+            missing = []
             if not validated_ids:
-                return Response({'status': 'success', 'data': {
-                    'reply': (
-                        "Who should this meeting be with? Please tell me the participant's "
-                        f"name from the directory:\n\n{directory_hint}"
-                    ),
-                    'meeting': None, 'parsed': parsed,
-                    'action': 'user_not_found',
-                }})
+                # Also on the picker path: a form sent back with nobody on it
+                # comes back as the form, never as a meeting with no one.
+                missing.append('attendees')
+            unreachable = []
+            if picked is None:
+                if not sched:
+                    missing.append('time')
+                if not duration_mentioned(message):
+                    missing.append('duration')
+                # Named someone who can't be invited (no login): the form
+                # says so and lets the user choose again, rather than refuse.
+                unreachable = _hr_invitable(company, validated_ids)[1]
+            if missing or unreachable:
+                return _hr_details_form(
+                    company=company, parsed=parsed, missing=missing,
+                    participant_ids=sorted(validated_ids), sched=sched,
+                    unknown_names=unknown_names, emp_rows=emp_rows,
+                    organizer_id=organizer_id, tz_name=tz_name,
+                )
 
             # Only employees who can log in can be invited.
             _, no_login = _hr_invitable(company, validated_ids)
@@ -3610,7 +3714,6 @@ def hr_meeting_schedule(request):
             if organizer_id:
                 organizer = Employee.objects.filter(pk=organizer_id, company=company).first()
             duration = _hr_duration(parsed.get('duration_minutes'))
-            tz_name = zone_name(request.data.get('timezone'))
             valid_ids = list(Employee.objects.filter(pk__in=validated_ids, company=company)
                              .values_list('id', flat=True))
             people = _hr_people(company, valid_ids, organizer.id if organizer else None)

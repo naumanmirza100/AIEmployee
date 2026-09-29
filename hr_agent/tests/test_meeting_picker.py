@@ -43,22 +43,6 @@ class HRMeetingPickerTests(HRTestCase):
         self.when = (now + timedelta(days=days + 7)).replace(
             hour=10, minute=0, second=0, microsecond=0)
 
-    @staticmethod
-    def employee_with_login(username, full_name, company, created_by):
-        from django.contrib.auth import get_user_model
-        from core.models import UserProfile
-        from hr_agent.models import Employee
-        user = get_user_model().objects.create_user(
-            username=username, password='x', email=f'{username}@test.local')
-        UserProfile.objects.update_or_create(user=user, defaults={
-            'company': company, 'created_by_company_user': created_by, 'role': 'team_member'})
-        # hr_agent.signals creates the Employee row for a new employee login;
-        # take that one rather than colliding with it.
-        employee, _ = Employee.objects.update_or_create(
-            company=company, work_email=f'{username}@test.local',
-            defaults={'user': user, 'full_name': full_name, 'employment_status': 'active'})
-        return employee
-
     def post(self, participant, name):
         with mock.patch('api.views.hr_agent.HRAgent._call_llm', side_effect=_no_model):
             return self.call(views.hr_meeting_schedule, self.admin, {

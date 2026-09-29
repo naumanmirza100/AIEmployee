@@ -302,19 +302,28 @@ You MUST validate that mentioned users exist in the company before scheduling.""
             for u in company_users
         )
 
-        # Calculate the current day of week for better relative date parsing
+        # Calculate the current day of week for better relative date parsing.
+        # Everything is given in the organiser's own zone: "tomorrow" and
+        # "3 PM" mean their tomorrow and their 3 PM, not UTC's.
+        tz_name = getattr(self, 'timezone_name', 'UTC') or 'UTC'
         try:
             from datetime import datetime as _dt
-            now = _dt.fromisoformat(current_time.replace("Z", "+00:00")) if "T" in current_time else _dt.now()
+            now = _dt.fromisoformat(current_time.replace("Z", "+00:00")) if "T" in current_time else timezone.now()
+            if timezone.is_naive(now):
+                now = timezone.make_aware(now)
+            now = now.astimezone(self._organiser_zone())
+            current_local = now.replace(microsecond=0).isoformat()
             day_of_week = now.strftime("%A")
             date_display = now.strftime("%A, %B %d, %Y at %I:%M %p")
         except Exception:
+            current_local = current_time
             day_of_week = "unknown"
             date_display = current_time
 
         prompt = f"""Parse the following meeting scheduling request. Extract the meeting details.
 
-CURRENT DATE/TIME: {current_time}
+CURRENT DATE/TIME: {current_local}
+ORGANISER'S TIMEZONE: {tz_name}. All times the user says are in this timezone.
 TODAY IS: {day_of_week} ({date_display})
 
 AVAILABLE COMPANY USERS:
@@ -350,7 +359,7 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         {{"id": <user_id>, "name": "<FULL NAME from company users list>"}}
     ],
     "users_not_found": ["<unmatched name 1>", "<unmatched name 2>"],
-    "proposed_time": "<ISO datetime string YYYY-MM-DDTHH:MM:SS or null>",
+    "proposed_time": "<ISO datetime YYYY-MM-DDTHH:MM:SS as wall-clock time in the organiser's timezone ({tz_name}), no offset, or null>",
     "duration_minutes": <number>,
     "recurrence": "none|daily|weekly|weekly_weekdays|biweekly|monthly",
     "recurrence_end_date": "<YYYY-MM-DD or null>",
@@ -525,6 +534,136 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         },
     }
 
+    # Offered in the details form. 30 is the default the model assumes anyway.
+    DURATION_CHOICES = [15, 30, 45, 60, 90, 120]
+
+    def _organiser_zone(self):
+        from core.scheduling.conflicts import zone_info
+        return zone_info(getattr(self, 'timezone_name', 'UTC'))
+
+    def _aware_iso(self, value) -> Optional[str]:
+        """The model's `proposed_time` as ISO with an explicit UTC offset.
+
+        The model writes wall-clock time in the organiser's zone — the prompt
+        tells it which. It used to be told only the current UTC time, so "3 PM"
+        came back as a naive 15:00, the server read that as UTC, and a Karachi
+        user's 3 PM meeting was booked for 8 PM. A naive value is now read in
+        the organiser's zone, and the offset travels with it from here on, so
+        the view and the browser can't reinterpret it.
+        """
+        if not value:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if timezone.is_naive(dt):
+            dt = dt.replace(tzinfo=self._organiser_zone())
+        return dt.isoformat()
+
+    def _duration_mentioned(self, message: str) -> bool:
+        """Did the user say how long?
+
+        The parsing prompt tells the model to default to 30 minutes, so its
+        `duration_minutes` is always filled and cannot distinguish "30, as I
+        said" from "I never said". The raw message can. Shared with the HR
+        scheduler via core.scheduling.
+        """
+        from core.scheduling import duration_mentioned
+        return duration_mentioned(message)
+
+    def _slot_options(self, invitee_ids: List[int], duration: int,
+                      days: int = 3, per_day: int = 4) -> List[Dict]:
+        """Free times for everyone invited, as one-click choices for the form.
+
+        Same source as the prose suggestions used to be (`free_slots`, across
+        every agent's calendar, in the organiser's working hours), but returned
+        as exact instants instead of text the user had to retype.
+        """
+        from core.scheduling import free_slots
+        from core.scheduling.conflicts import clock_label, zone_info
+
+        tz_name = getattr(self, 'timezone_name', 'UTC')
+        zone = zone_info(tz_name)
+        day = timezone.now().astimezone(zone).date()
+        out, seen = [], 0
+        try:
+            while seen < days:            # the next `days` weekdays
+                day += timedelta(days=1)
+                if day.weekday() >= 5:
+                    continue
+                seen += 1
+                for slot in free_slots(invitee_ids, day, duration, tz_name, limit=per_day):
+                    local = slot.astimezone(zone)
+                    out.append({
+                        "iso": slot.isoformat(),
+                        "label": f"{local:%a %d %b} · {clock_label(local)}",
+                    })
+        except Exception:
+            logger.exception("[MEETING] could not compute slot suggestions")
+        return out
+
+    def _needs_input(self, message: str, parsed: Dict, invitees: List[Dict],
+                     missing: List[str], template: Optional[Dict],
+                     company_users: List[Dict]) -> Dict:
+        """Ask for the missing details in a form, instead of guessing them.
+
+        `draft` has the same shape as the old `pending_intent`, so the form
+        posts it straight back and `schedule_from_pending` creates the meeting
+        without another model call. Everything already understood is
+        pre-filled; the user reviews the lot and confirms.
+        """
+        template = template or {}
+        if self._duration_mentioned(message):
+            duration = parsed.get("duration_minutes") or 30
+        else:
+            duration = template.get("duration_minutes") or 30
+        recurrence = parsed.get("recurrence")
+        if not recurrence or recurrence == "none":
+            recurrence = template.get("recurrence") or "none"
+
+        draft = {
+            "invitee_ids": [i["id"] for i in invitees],
+            "invitee_names": [i["name"] for i in invitees],
+            "proposed_time": parsed.get("proposed_time"),
+            "duration_minutes": int(duration),
+            "title": parsed.get("title") or template.get("title"),
+            "description": parsed.get("description") or "",
+            "agenda": parsed.get("agenda") or [],
+            "recurrence": recurrence,
+            "recurrence_end_date": parsed.get("recurrence_end_date"),
+            "request": message,
+        }
+
+        note = None
+        not_found = [n for n in (parsed.get("users_not_found") or []) if n]
+        if "attendees" in missing and not_found:
+            note = "I couldn't find " + ", ".join(f"**{n}**" for n in not_found) + " in your company."
+
+        wanted = {"attendees": "who should attend", "time": "when it should be",
+                  "duration": "how long it should last"}
+        asks = [wanted[m] for m in missing]
+        asked = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + " and " + asks[-1]
+        response = (f"Before I book this, I need to know {asked}. "
+                    "Fill it in below, check the details, and confirm.")
+
+        return {
+            "action": "needs_input",
+            "response": response,
+            "data": None,
+            "needs_input": True,
+            "draft": draft,
+            "missing": missing,
+            "note": note,
+            "options": {
+                "users": [{"id": u["id"], "name": u["full_name"], "email": u.get("email", "")}
+                          for u in company_users],
+                "durations": self.DURATION_CHOICES,
+                "slots": (self._slot_options(draft["invitee_ids"], draft["duration_minutes"])
+                          if draft["invitee_ids"] and "time" in missing else []),
+            },
+        }
+
     def _detect_template(self, message: str) -> Optional[Dict]:
         """Check if the message references a known meeting template."""
         msg_lower = message.lower()
@@ -696,7 +835,7 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         if self._is_reschedule_request(message):
             # Parse the new time from the message
             parsed = self.parse_meeting_request(message, company_users, current_time)
-            new_time = parsed.get("proposed_time")
+            new_time = self._aware_iso(parsed.get("proposed_time"))
             if not new_time:
                 return {
                     "action": "parse_error",
@@ -742,14 +881,11 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
                 "data": None,
             }
 
-        # Handle no match found
-        if not all_matched and single_match["match"] == "not_found":
-            all_users_str = "\n".join(f"- **{u['full_name']}** ({u['email']})" for u in company_users[:15])
-            return {
-                "action": "user_not_found",
-                "response": f"I couldn't find that user in your company.\n\nAvailable team members:\n{all_users_str}",
-                "data": None,
-            }
+        # A name that matches nobody is no longer an early exit. It used to
+        # return "I couldn't find that user" before the model had even said
+        # whether this was a meeting request at all — and it was also what
+        # happened when the user simply didn't name anyone. Both now reach
+        # the details form below, once we know it *is* a meeting request.
 
         # If multi-match found nothing but single match did, use single
         if not all_matched and single_match["match"] in ("exact", "single"):
@@ -762,10 +898,12 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         # The LLM will sometimes invent a `proposed_time` (e.g. "tomorrow at
         # midnight") even when the user said nothing about when. If the raw
         # message has no temporal token at all, drop the LLM's time and
-        # force the "no time specified" path below.
+        # treat the time as missing.
         if parsed.get("proposed_time") and not self._message_has_time_reference(message):
             logger.info("[MEETING] LLM invented proposed_time; dropping since raw message has no time tokens")
             parsed["proposed_time"] = None
+        # Pin the time to the organiser's zone now, before anything reads it.
+        parsed["proposed_time"] = self._aware_iso(parsed.get("proposed_time"))
 
         if not parsed.get("is_meeting_request"):
             response = self.generate_response("not_meeting_request", parsed, company_users)
@@ -775,96 +913,33 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             response = self.generate_response("parse_error", parsed)
             return {"action": "parse_error", "response": response, "data": None}
 
-        # ── Step 3: Merge deterministic match with LLM results ──
-        # If deterministic matching found users, prefer that over LLM
+        # ── Step 3: Who ──
+        # Deterministic matches win. Names only the model found are used when
+        # they resolve to a real company user, never taken on trust.
         if all_matched:
             invitees = [{"id": u["id"], "name": u["full_name"]} for u in all_matched]
-        elif parsed.get("invitees"):
-            # Use LLM-detected invitees, but verify each one
+        else:
             invitees = []
-            for inv in parsed["invitees"]:
+            for inv in parsed.get("invitees") or []:
                 verify = self._find_user_in_message(f"meet with {inv.get('name', '')}", company_users)
                 if verify["match"] in ("exact", "single"):
                     invitees.append({"id": verify["user"]["id"], "name": verify["user"]["full_name"]})
-        else:
-            # Fallback: try LLM's users_not_found
-            not_found = parsed.get("users_not_found", [])
-            if not_found:
-                not_found_str = ", ".join(f"**{n}**" for n in not_found)
-                all_users_str = "\n".join(f"- **{u['full_name']}** ({u['email']})" for u in company_users[:15])
-                return {
-                    "action": "user_not_found",
-                    "response": f"I couldn't find: {not_found_str}\n\nAvailable team members:\n{all_users_str}",
-                    "data": None,
-                }
-            response = self.generate_response("user_not_found", parsed, company_users)
-            return {"action": "user_not_found", "response": response, "data": None}
 
+        # ── Step 4: Anything the user didn't tell us? ──
+        # Who, when and how long. Each used to be either a dead end ("couldn't
+        # find that user"), a bare date picker, or — for how long — a silent
+        # 30 minutes. Now they are asked for together, in one form, with
+        # everything already understood filled in for review.
+        template = self._detect_template(message)
+        missing = []
         if not invitees:
-            response = self.generate_response("user_not_found", parsed, company_users)
-            return {"action": "user_not_found", "response": response, "data": None}
-
-        # No time specified
-        invitee_names = [i["name"] for i in invitees]
-        invitee_ids = [i["id"] for i in invitees]
-        duration = parsed.get("duration_minutes", 30)
-
+            missing.append("attendees")
         if not parsed.get("proposed_time"):
-            # Try to suggest available slots for tomorrow and the next few days
-            names_str = ", ".join(f"**{n}**" for n in invitee_names)
-            suggestions_text = ""
-            try:
-                now = timezone.now()
-                for day_offset in range(1, 4):  # tomorrow, day after, day after that
-                    check_date = (now + timedelta(days=day_offset)).date()
-                    day_name = check_date.strftime("%A, %b %d")
-                    slots = self.suggest_available_slots(invitee_ids, check_date, duration)
-                    if slots:
-                        suggestions_text += f"\n**{day_name}:** {', '.join(slots[:5])}"
-            except Exception:
-                pass
-
-            # Ship a `pending_intent` blob so the frontend datetime picker
-            # can call back with the missing time and everything else
-            # (title, participants, duration) is already known. The picker
-            # posts it back verbatim and `schedule_from_pending` finishes the
-            # job without asking the model to read the request a second time.
-            #
-            # Recurrence travels too: "a weekly standup with the team" with no
-            # time used to come back as a one-off, because only the fields
-            # above made the trip. `request` is the original sentence, kept so
-            # template detection ("standup", "1:1") still sees it.
-            pending_intent = {
-                "invitee_ids": invitee_ids,
-                "invitee_names": invitee_names,
-                "duration_minutes": duration,
-                "title": parsed.get("title") or None,
-                "description": parsed.get("description") or "",
-                "agenda": parsed.get("agenda") or [],
-                "recurrence": parsed.get("recurrence") or "none",
-                "recurrence_end_date": parsed.get("recurrence_end_date"),
-                "request": message,
-            }
-            if suggestions_text:
-                return {
-                    "action": "suggest_times",
-                    "response": (
-                        f"When should the meeting with {names_str} happen? "
-                        "Please pick a date and time.\n\n"
-                        f"Suggested available slots:{suggestions_text}"
-                    ),
-                    "data": None,
-                    "needs_time": True,
-                    "pending_intent": pending_intent,
-                }
-            else:
-                return {
-                    "action": "needs_time",
-                    "response": f"When should the meeting with {names_str} happen? Please pick a date and time.",
-                    "data": None,
-                    "needs_time": True,
-                    "pending_intent": pending_intent,
-                }
+            missing.append("time")
+        if not self._duration_mentioned(message) and not (template or {}).get("duration_minutes"):
+            missing.append("duration")
+        if missing:
+            return self._needs_input(message, parsed, invitees, missing, template, company_users)
 
         return self._schedule_result(invitees, parsed, message, company_users)
 
@@ -918,16 +993,22 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             "recurrence": pending_intent.get("recurrence") or "none",
             "recurrence_end_date": pending_intent.get("recurrence_end_date"),
         }
+        # The length came from the form, where the user saw and chose it:
+        # it beats any template default.
         return self._schedule_result(invitees, parsed, pending_intent.get("request") or "",
-                                     company_users)
+                                     company_users, duration_confirmed=True)
 
     def _schedule_result(self, invitees: List[Dict], parsed: Dict, message: str,
-                         company_users: List[Dict] = None) -> Dict:
+                         company_users: List[Dict] = None,
+                         duration_confirmed: bool = False) -> Dict:
         """Turn a fully specified request into the `schedule` action.
 
         Shared by `process` (time came in the sentence) and
         `schedule_from_pending` (time came from the picker), so both produce
         the same meeting from the same inputs.
+
+        `duration_confirmed` means the length was chosen by the user, not
+        inferred — see the duration rule below.
         """
         invitee_names = [i["name"] for i in invitees]
 
@@ -967,11 +1048,21 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             if recurrence == "none" and template.get("recurrence", "none") != "none":
                 recurrence = template["recurrence"]
 
+        # How long. The parse always carries a number because the prompt tells
+        # the model to default to 30, so "parse first" used to mean a standup
+        # template's 15 never applied. A length the user actually said, or
+        # chose in the form, wins; otherwise the template's; otherwise 30.
+        template_minutes = (template or {}).get("duration_minutes")
+        if duration_confirmed or self._duration_mentioned(message):
+            duration = parsed.get("duration_minutes") or template_minutes or 30
+        else:
+            duration = template_minutes or parsed.get("duration_minutes") or 30
+
         meeting_data = {
             "invitees": invitees,
             "invitee_names": invitee_names,
             "proposed_time": parsed["proposed_time"],
-            "duration_minutes": parsed.get("duration_minutes") or (template.get("duration_minutes") if template else 30) or 30,
+            "duration_minutes": duration,
             "title": parsed.get("title") or (template.get("title") if template else None) or title_default,
             "description": parsed.get("description") or "",
             "agenda": agenda_items,
