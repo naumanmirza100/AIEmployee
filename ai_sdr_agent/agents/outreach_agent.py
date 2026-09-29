@@ -10,6 +10,7 @@ LinkedIn steps: logged as a manual-action note.
 """
 
 import email as email_lib
+import hashlib
 import email.utils
 import imaplib
 import json
@@ -32,6 +33,165 @@ _SYSTEM_PROMPT = (
     "Write concise, personalised, high-converting outreach. "
     "Return ONLY valid JSON — no markdown, no extra text."
 )
+
+
+# Give up on a step after this many failed sends (SMTP/LLM errors) so a dead
+# address or broken SMTP login can't retry - and burn LLM tokens - forever.
+MAX_SEND_ATTEMPTS = 3
+
+_UNSUB_SALT = 'sdr-unsubscribe'
+_BOUNCE_SENDER_HINTS = ('mailer-daemon', 'postmaster', 'mail-daemon', 'bounce')
+_BOUNCE_SUBJECT_HINTS = (
+    'undeliverable', 'delivery failure', 'delivery status notification',
+    'mail delivery failed', 'returned mail', 'failure notice', 'could not deliver',
+    'message not delivered', 'address not found', 'user unknown',
+)
+# SMTP replies that mean "this recipient will never work" (not auth/transient).
+_PERMANENT_SMTP_CODES = {550, 551, 553, 554}
+
+
+class PermanentSendError(ValueError):
+    """The recipient address was rejected for good - retrying is pointless."""
+
+
+def mark_bounced(enrollment, reason: str = '') -> None:
+    """Flag the lead's address as hard-bounced and stop every open enrollment for it."""
+    from ai_sdr_agent.models import SDRCampaignEnrollment
+
+    lead = enrollment.lead
+    if not lead.email_bounced:
+        lead.email_bounced = True
+        lead.email_bounced_at = timezone.now()
+        lead.email_bounce_reason = (reason or '')[:500]
+        lead.save(update_fields=['email_bounced', 'email_bounced_at', 'email_bounce_reason'])
+    SDRCampaignEnrollment.objects.filter(
+        lead=lead, status__in=['active', 'paused', 'replied']
+    ).update(status='bounced')
+    enrollment.status = 'bounced'
+
+
+def claim_reply(enrollment, reply: dict) -> bool:
+    """Atomically claim an inbox reply so it is processed exactly once.
+
+    The IMAP poll uses ``SINCE <date>`` and returns the same messages every
+    cycle; the scheduler and the "check replies" endpoints also race each other.
+    Returns True only for the single caller that should act on this message.
+    """
+    from ai_sdr_agent.models import SDRCampaignEnrollment
+
+    received_at = reply.get('received_at')
+    # Anything received before we last acted on this enrollment was already handled
+    # (covers replies processed before last_reply_message_id existed).
+    if received_at and enrollment.replied_at and received_at <= enrollment.replied_at:
+        return False
+
+    key = (reply.get('message_id') or '').strip()
+    if not key:
+        raw = f"{reply.get('sender_email', '')}|{received_at}|{reply.get('subject', '')}"
+        key = hashlib.sha1(raw.encode('utf-8', 'replace')).hexdigest()
+    key = key[:255]
+
+    claimed = (
+        SDRCampaignEnrollment.objects.filter(id=enrollment.id)
+        .exclude(last_reply_message_id=key)
+        .update(last_reply_message_id=key)
+    )
+    if claimed:
+        enrollment.last_reply_message_id = key
+    return bool(claimed)
+
+
+def is_email_suppressed(company_user, email_addr: str) -> bool:
+    """True if this address hard-bounced or unsubscribed anywhere in the company."""
+    from ai_sdr_agent.models import SDRCampaignEnrollment, SDRLead
+
+    email_addr = (email_addr or '').strip()
+    if not email_addr:
+        return False
+    if SDRLead.all_objects.filter(
+        company_user=company_user, email__iexact=email_addr, email_bounced=True
+    ).exists():
+        return True
+    return SDRCampaignEnrollment.objects.filter(
+        campaign__company_user=company_user,
+        lead__email__iexact=email_addr,
+        status='unsubscribed',
+    ).exists()
+
+
+def make_unsubscribe_token(enrollment_id: int) -> str:
+    from django.core import signing
+    return signing.dumps({'e': enrollment_id}, salt=_UNSUB_SALT)
+
+
+def read_unsubscribe_token(token: str):
+    """Return the enrollment id encoded in ``token`` or None if invalid."""
+    from django.core import signing
+    try:
+        return signing.loads(token, salt=_UNSUB_SALT)['e']
+    except (signing.BadSignature, KeyError, TypeError):
+        return None
+
+
+def build_unsubscribe_url(enrollment) -> str:
+    from ai_sdr_agent.agents.meeting_scheduling_agent import _backend_base
+    return f"{_backend_base()}/api/sdr/unsubscribe/{make_unsubscribe_token(enrollment.id)}/"
+
+
+def apply_unsubscribe(enrollment) -> None:
+    """Opt the address out of every campaign for this company."""
+    from ai_sdr_agent.models import SDRCampaignEnrollment, SDRLead
+
+    lead = enrollment.lead
+    company_user = enrollment.campaign.company_user
+    now = timezone.now()
+    email_addr = (lead.email or '').strip()
+    if email_addr:
+        SDRCampaignEnrollment.objects.filter(
+            campaign__company_user=company_user, lead__email__iexact=email_addr,
+        ).exclude(status='bounced').update(status='unsubscribed', replied_at=now)
+        SDRLead.all_objects.filter(
+            company_user=company_user, email__iexact=email_addr,
+        ).update(status='disqualified')
+    else:
+        enrollment.status = 'unsubscribed'
+        enrollment.replied_at = now
+        enrollment.save(update_fields=['status', 'replied_at'])
+        lead.status = 'disqualified'
+        lead.save(update_fields=['status'])
+
+
+def _detect_bounce(msg, raw_bytes, sender_email, subject, email_map):
+    """If ``msg`` is a hard-bounce DSN for one of our leads, return that lead's
+    lower-cased email (a key of ``email_map``); otherwise None."""
+    local = sender_email.split('@')[0]
+    is_dsn = (
+        any(h in local for h in _BOUNCE_SENDER_HINTS)
+        or msg.get_content_type() == 'multipart/report'
+    )
+    if not is_dsn:
+        return None
+
+    blob = raw_bytes.decode('utf-8', errors='replace').lower()
+    subj = (subject or '').lower()
+    if 'action: delayed' in blob or 'delay' in subj:
+        return None    # transient warning, not a hard bounce
+    hard = (
+        'action: failed' in blob
+        or re.search(r'\b5\.\d{1,3}\.\d{1,3}\b', blob)
+        or any(h in subj for h in _BOUNCE_SUBJECT_HINTS)
+    )
+    if not hard:
+        return None
+
+    failed = (msg.get('X-Failed-Recipients') or '').lower()
+    for addr in email_map:
+        if addr in failed:
+            return addr
+    for addr in email_map:
+        if addr in blob:
+            return addr
+    return None
 
 
 class OutreachAgent:
@@ -360,10 +520,32 @@ Rules:
                         from_header = msg.get('From', '')
                         sender_email = email.utils.parseaddr(from_header)[1].lower()
 
+                        subject = msg.get('Subject', '')
+
                         if sender_email not in email_map:
+                            # Not from a lead - but it may be a bounce (DSN) about one.
+                            bounced_key = _detect_bounce(msg, raw, sender_email, subject, email_map)
+                            b_mid = msg.get('Message-ID', '').strip()
+                            b_ot = outreach_sent_map.get(bounced_key) if bounced_key else None
+                            if (
+                                bounced_key
+                                and not (b_mid and b_mid in seen_message_ids)
+                                and not (internal_date and b_ot and internal_date <= b_ot)
+                            ):
+                                if b_mid:
+                                    seen_message_ids.add(b_mid)
+                                found.append({
+                                    'enrollment': email_map[bounced_key],
+                                    'reply_text': _extract_email_body(msg) or '',
+                                    'sender_email': sender_email,
+                                    'subject': subject,
+                                    'is_bounce': True,
+                                    'bounced_email': bounced_key,
+                                    'message_id': b_mid,
+                                    'received_at': internal_date,
+                                })
                             continue
 
-                        subject = msg.get('Subject', '')
                         date_raw = msg.get('Date', '').strip()
                         message_id = msg.get('Message-ID', '').strip()
 
@@ -446,6 +628,8 @@ Rules:
                             'reply_text': body,
                             'sender_email': sender_email,
                             'subject': subject,
+                            'message_id': message_id,
+                            'received_at': email_date,
                         })
 
                     except Exception as exc:
@@ -475,7 +659,8 @@ Rules:
     # Email sending
     # ------------------------------------------------------------------
 
-    def send_email(self, campaign, to_email: str, subject: str, body: str) -> None:
+    def send_email(self, campaign, to_email: str, subject: str, body: str,
+                   unsubscribe_url: str = '') -> None:
         if not (campaign.smtp_host and campaign.smtp_username and campaign.smtp_password):
             raise ValueError(
                 "Campaign SMTP credentials not configured. "
@@ -493,6 +678,7 @@ Rules:
                 to_email=to_email,
                 subject=subject,
                 body=body,
+                unsubscribe_url=unsubscribe_url,
             )
             return
 
@@ -519,11 +705,15 @@ Rules:
             raise ValueError(f"Email send failed: {exc}") from exc
 
     def _send_via_smtp(self, host, port, username, password, use_tls,
-                       from_addr, display_name, to_email, subject, body) -> None:
+                       from_addr, display_name, to_email, subject, body,
+                       unsubscribe_url: str = '') -> None:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
         msg['From'] = f"{display_name} <{from_addr}>" if display_name else from_addr
         msg['To'] = to_email
+        if unsubscribe_url:
+            msg['List-Unsubscribe'] = f"<{unsubscribe_url}>"
+            msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
         context = ssl.create_default_context()
@@ -535,6 +725,12 @@ Rules:
                     server.ehlo()
                 server.login(username, password)
                 server.sendmail(from_addr, to_email, msg.as_string())
+        except smtplib.SMTPRecipientsRefused as exc:
+            raise PermanentSendError(f"Recipient rejected: {exc}") from exc
+        except smtplib.SMTPResponseException as exc:
+            if exc.smtp_code in _PERMANENT_SMTP_CODES:
+                raise PermanentSendError(f"SMTP error: {exc}") from exc
+            raise ValueError(f"SMTP error: {exc}") from exc
         except smtplib.SMTPException as exc:
             raise ValueError(f"SMTP error: {exc}") from exc
 
@@ -555,6 +751,28 @@ Rules:
             enrollment.id, lead.display_name, lead.email,
             campaign.id, campaign.name, enrollment.current_step, len(steps),
         )
+
+        # Guard: never send to a lead that was deleted (soft-delete keeps the
+        # enrollment row, so the sequence would otherwise carry on).
+        if getattr(lead, 'is_deleted', False):
+            logger.info(
+                "SDR [DELETED-LEAD] enrollment=%d lead=%s - lead deleted, skipping",
+                enrollment.id, lead.display_name,
+            )
+            return {'status': 'lead_deleted', 'lead': lead.display_name}
+
+        # Guard: never send to an address that unsubscribed (in ANY campaign of
+        # this company) or hard-bounced.
+        if enrollment.status == 'active' and is_email_suppressed(campaign.company_user, lead.email):
+            from ai_sdr_agent.models import SDRCampaignEnrollment as _E
+            new_status = 'bounced' if getattr(lead, 'email_bounced', False) else 'unsubscribed'
+            _E.objects.filter(id=enrollment.id, status='active').update(status=new_status)
+            enrollment.status = new_status
+            logger.warning(
+                "SDR [SUPPRESSED] enrollment=%d lead=%s email=%s - suppressed, skipping",
+                enrollment.id, lead.display_name, lead.email,
+            )
+            return {'status': 'suppressed', 'lead': lead.display_name}
 
         # Guard: never send to a lead whose email has hard-bounced
         if getattr(lead, 'email_bounced', False):
@@ -723,7 +941,16 @@ Rules:
                         step.step_order, content['subject'],
                         campaign.smtp_host or '(django default)',
                     )
-                    self.send_email(campaign, lead.email, content['subject'], content['body'])
+                    unsubscribe_url = build_unsubscribe_url(enrollment)
+                    address_line = f"{campaign.postal_address.strip()}\n" if campaign.postal_address else ''
+                    body = (
+                        f"{content['body']}\n\n--\n{address_line}"
+                        f"Don't want to hear from us? Unsubscribe: {unsubscribe_url}"
+                    )
+                    self.send_email(
+                        campaign, lead.email, content['subject'], body,
+                        unsubscribe_url=unsubscribe_url,
+                    )
                     logger.info(
                         "SDR [EMAIL-SEND] enrollment=%d lead=%s TO=%s step=%d — SUCCESS",
                         enrollment.id, lead.display_name, lead.email, step.step_order,
@@ -731,7 +958,7 @@ Rules:
                     SDROutreachLog.objects.create(
                         **log_base, status='sent',
                         subject_sent=content['subject'],
-                        body_sent=content['body'],
+                        body_sent=body,
                     )
                     campaign.emails_sent = (campaign.emails_sent or 0) + 1
                     campaign.save(update_fields=['emails_sent'])
@@ -751,6 +978,38 @@ Rules:
                         error_message=error_message,
                     )
                     result_status = 'failed'
+
+                    from core.api_key_service import KeyServiceError as _KSE
+                    _failed_result = {
+                        'status': 'failed',
+                        'step_type': step.step_type,
+                        'step_order': step.step_order,
+                        'lead': lead.display_name,
+                        'error': error_message,
+                    }
+                    if isinstance(exc, PermanentSendError):
+                        # Recipient rejected for good - stop, don't retry.
+                        mark_bounced(enrollment, error_message)
+                        logger.warning(
+                            "SDR [EMAIL-FAIL] enrollment=%d lead=%s - permanent rejection, marked bounced",
+                            enrollment.id, lead.display_name,
+                        )
+                        return _failed_result
+                    attempts = SDROutreachLog.objects.filter(
+                        enrollment=enrollment, step_order=step.step_order, status='failed',
+                    ).count()
+                    if attempts >= MAX_SEND_ATTEMPTS and not isinstance(exc, _KSE):
+                        from ai_sdr_agent.models import SDRCampaignEnrollment as _EnrCap
+                        _EnrCap.objects.filter(id=enrollment.id).update(
+                            current_step=idx, status='paused',
+                            reply_sentiment='send_failed', next_action_at=None,
+                        )
+                        enrollment.status = 'paused'
+                        logger.error(
+                            "SDR [EMAIL-FAIL] enrollment=%d step=%d failed %d times - paused",
+                            enrollment.id, step.step_order, attempts,
+                        )
+                        return _failed_result
 
                     # Roll back current_step so the scheduler retries this step next cycle.
                     # Without this, current_step stays at idx+1 and Step N is permanently skipped.

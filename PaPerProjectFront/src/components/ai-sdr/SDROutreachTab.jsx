@@ -1528,6 +1528,10 @@ const SDROutreachTab = () => {
                     <label style={labelStyle}>Company Name</label>
                     <input value={settingsDraft.sender_company || ''} onChange={e => setSettingsDraft(p => ({ ...p, sender_company: e.target.value }))} style={inputStyle} />
                   </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={labelStyle}>Postal Address (shown in email footer)</label>
+                    <input value={settingsDraft.postal_address || ''} onChange={e => setSettingsDraft(p => ({ ...p, postal_address: e.target.value }))} placeholder="123 Main St, Suite 4, City, Country" style={inputStyle} />
+                  </div>
                 </div>
               </div>
 

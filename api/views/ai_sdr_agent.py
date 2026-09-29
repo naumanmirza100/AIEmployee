@@ -1181,6 +1181,7 @@ def _serialize_campaign(c: SDRCampaign) -> dict:
         'sender_name': c.sender_name,
         'sender_title': c.sender_title,
         'sender_company': c.sender_company,
+        'postal_address': c.postal_address,
         'from_email': c.from_email,
         'smtp_host': c.smtp_host,
         'smtp_port': c.smtp_port,
@@ -1340,6 +1341,7 @@ def sdr_campaigns_list(request):
             sender_name=d.get('sender_name', ''),
             sender_title=d.get('sender_title', ''),
             sender_company=d.get('sender_company', ''),
+            postal_address=str(d.get('postal_address', ''))[:500],
             from_email=d.get('from_email', ''),
             smtp_host=d.get('smtp_host', ''),
             smtp_port=int(d.get('smtp_port', 587)),
@@ -1406,7 +1408,7 @@ def sdr_campaign_detail(request, campaign_id):
         try:
             d = request.data
             for field in ['name', 'description', 'status', 'sender_name', 'sender_title',
-                          'sender_company', 'from_email', 'smtp_host', 'smtp_username',
+                          'sender_company', 'postal_address', 'from_email', 'smtp_host', 'smtp_username',
                           'smtp_use_tls', 'imap_host', 'calendar_link', 'auto_check_replies']:
                 if field in d:
                     setattr(campaign, field, d[field])
@@ -1634,6 +1636,14 @@ def sdr_enroll_leads(request, campaign_id):
                 skipped_reasons.append(f"{lead.display_name}: already enrolled in this campaign")
                 continue
 
+            # Never enroll an address that unsubscribed or hard-bounced anywhere
+            # in this company.
+            from ai_sdr_agent.agents.outreach_agent import is_email_suppressed
+            if is_email_suppressed(company_user, lead.email):
+                skipped += 1
+                skipped_reasons.append(f"{lead.display_name}: unsubscribed or bounced address")
+                continue
+
             # Dedup by email address — prevents two different lead records with the
             # same email from both receiving outreach in the same campaign.
             lead_email = (lead.email or '').strip().lower()
@@ -1774,13 +1784,13 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
 
     # ── Not Interested → Stop ─────────────────────────────────────────────
     if action == 'stop':
-        enrollment.status = 'unsubscribed'
+        from ai_sdr_agent.agents.outreach_agent import apply_unsubscribe
         enrollment.replied_at = timezone.now()
         enrollment.reply_content = reply_text[:2000]
         enrollment.reply_sentiment = 'not_interested'
-        enrollment.save()
-        lead.status = 'disqualified'
-        lead.save(update_fields=['status'])
+        enrollment.save(update_fields=['replied_at', 'reply_content', 'reply_sentiment'])
+        # Opt the address out of every campaign, not just this one.
+        apply_unsubscribe(enrollment)
         logger.info(
             'SDR [NOT-INTERESTED] enrollment=%d unsubscribed, lead=%s disqualified',
             enrollment.id, lead.display_name,
@@ -1865,9 +1875,15 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
                 'category': category}
 
     # ── Neutral → Log and wait ────────────────────────────────────────────
+    # A real person answered but intent is unclear: stop automated follow-ups.
     enrollment.reply_content = reply_text[:2000]
     enrollment.reply_sentiment = 'neutral'
-    enrollment.save(update_fields=['reply_content', 'reply_sentiment'])
+    fields = ['reply_content', 'reply_sentiment']
+    if enrollment.status == 'active':
+        enrollment.status = 'replied'
+        enrollment.replied_at = timezone.now()
+        fields += ['status', 'replied_at']
+    enrollment.save(update_fields=fields)
     return {'action': 'wait', 'meeting_created': False, 'category': category}
 
 
@@ -2041,6 +2057,7 @@ def sdr_check_replies(request, campaign_id):
         )
 
         from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
+        from ai_sdr_agent.agents.outreach_agent import claim_reply, mark_bounced
         email_agent = EmailAssistantAgent(company=company_user.company)
         replies_found = _get_outreach_agent(company_user.company).check_inbox_for_replies(campaign, enrollments)
 
@@ -2053,15 +2070,18 @@ def sdr_check_replies(request, campaign_id):
             reply_text = r['reply_text']
             lead = enrollment.lead
 
-            # Skip only if meeting booked AND already properly classified by new code
+            if r.get('is_bounce'):
+                if enrollment.status != 'bounced' and claim_reply(enrollment, r):
+                    mark_bounced(enrollment, f"{r['sender_email']}: {(r.get('subject') or '')[:200]}")
+                continue
+
             already_has_meeting = SDRMeeting.objects.filter(enrollment=enrollment).exists()
-            already_classified = enrollment.reply_sentiment in (
-                'not_interested', 'out_of_office', 'wants_more_info'
-            )
             if enrollment.status == 'replied' and already_has_meeting:
                 continue
             if enrollment.status in ('unsubscribed',):
                 continue
+            if not claim_reply(enrollment, r):
+                continue   # this inbox message was already processed
 
             classification = email_agent.classify_reply(reply_text)
             result = _apply_reply_action(
@@ -2407,7 +2427,7 @@ def sdr_confirm_meeting(request, meeting_id):
 # ==========================================================================
 
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_http_methods
 
 
 def _booking_page_url(meeting):
@@ -2458,34 +2478,78 @@ def _approval_result_page(*, ok, title, heading, message, booking_url='', accent
     return HttpResponse(html, status=200 if ok else 200, content_type='text/html')
 
 
-@csrf_exempt
-@require_GET
-def sdr_meeting_lead_approve(request, approval_token):
-    """Lead clicks 'Yes, confirm this time'. Confirms the meeting, sends the
-    confirmation email, and shows a self-contained success page (no external
-    redirect — so it works even if the frontend/ngrok is down)."""
-    from django.http import HttpResponse
+def _confirm_action_page(*, title, heading, message, button_label, accent='#16a34a'):
+    """Tiny HTML page whose button POSTs back to the same URL.
 
+    Email security scanners and link previewers pre-fetch GET links, so a GET
+    must never change state - the lead has to press the button (a POST).
+    """
+    from django.http import HttpResponse
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title></head>
+<body style="margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0f172a;color:#e2e8f0;">
+  <div style="max-width:480px;margin:8vh auto;padding:40px 32px;background:#1e293b;border-radius:16px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.4);">
+    <h1 style="margin:0 0 12px;font-size:22px;color:#f8fafc;">{heading}</h1>
+    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#94a3b8;">{message}</p>
+    <form method="post" action="">
+      <button type="submit" style="padding:12px 26px;border:0;border-radius:8px;background:{accent};color:#fff;font-size:15px;font-weight:600;cursor:pointer;">{button_label}</button>
+    </form>
+  </div>
+</body></html>"""
+    return HttpResponse(html, content_type='text/html')
+
+
+_LINK_EXPIRED_PAGE = dict(
+    ok=False, accent='#dc2626',
+    title='Link expired',
+    heading='This link is no longer valid',
+    message='The meeting link is invalid or has expired. Please reply to the original email and we will help you reschedule.',
+)
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def sdr_meeting_lead_approve(request, approval_token):
+    """Lead confirms the proposed meeting time.
+
+    GET only shows a confirm button (scanners pre-fetch links, so GET must not
+    change state); the POST does the work. The status change is one atomic
+    UPDATE, so a double click or a scanner racing the lead confirms - and
+    emails - exactly once.
+    """
     try:
         meeting = SDRMeeting.objects.select_related('lead', 'enrollment__campaign').get(
             approval_token=approval_token
         )
     except SDRMeeting.DoesNotExist:
-        return _approval_result_page(
-            ok=False, accent='#dc2626',
-            title='Link expired',
-            heading='This link is no longer valid',
-            message='The meeting link is invalid or has expired. Please reply to the original email and we will help you reschedule.',
+        return _approval_result_page(**_LINK_EXPIRED_PAGE)
+
+    if request.method == 'GET':
+        if meeting.status == 'scheduled':
+            return _approval_result_page(
+                ok=True, accent='#16a34a',
+                title='Meeting confirmed',
+                heading="You're all set! 🎉",
+                message='This meeting is already confirmed. A confirmation email with the details is in your inbox.',
+                booking_url=_booking_page_url(meeting),
+            )
+        return _confirm_action_page(
+            title='Confirm meeting',
+            heading='Confirm this meeting time?',
+            message='Press the button below to confirm the proposed time.',
+            button_label='Yes, confirm this time',
         )
 
-    # Idempotent: if already confirmed, still show the success page (a lead may
-    # click Yes twice) rather than an error.
-    already = meeting.status not in ('awaiting_approval', 'pending')
-    if not already:
-        meeting.status = 'scheduled'
-        meeting.confirmed_at = timezone.now()
-        meeting.save(update_fields=['status', 'confirmed_at'])
+    # POST — claim the confirmation atomically. Only a proposed slot (awaiting
+    # approval, with a time set) can be confirmed; a lead who asked for another
+    # time, or a meeting with no time, must not flip to "scheduled".
+    claimed = SDRMeeting.objects.filter(
+        id=meeting.id, status='awaiting_approval', scheduled_at__isnull=False,
+    ).update(status='scheduled', confirmed_at=timezone.now())
 
+    if claimed:
         lead = meeting.lead
         lead.status = 'meeting_scheduled'
         lead.save(update_fields=['status'])
@@ -2493,23 +2557,79 @@ def sdr_meeting_lead_approve(request, approval_token):
         if meeting.enrollment and meeting.enrollment.campaign:
             try:
                 from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent
+                meeting.refresh_from_db()
                 MeetingSchedulingAgent(company=meeting.company_user.company).send_confirmation_email(
                     meeting.enrollment.campaign, meeting.lead, meeting
                 )
             except Exception as exc:
                 logger.warning("Confirmation email after approval failed for meeting %s: %s", meeting.id, exc)
+        return _approval_result_page(
+            ok=True, accent='#16a34a',
+            title='Meeting confirmed',
+            heading="You're all set! 🎉",
+            message=(
+                'Your meeting time is confirmed. A confirmation email with the '
+                'details is on its way to your inbox.'
+            ),
+            booking_url=_booking_page_url(meeting),
+        )
 
+    meeting.refresh_from_db()
+    if meeting.status == 'scheduled':
+        return _approval_result_page(
+            ok=True, accent='#16a34a',
+            title='Meeting confirmed',
+            heading="You're all set! 🎉",
+            message='This meeting is already confirmed. A confirmation email with the details is in your inbox.',
+            booking_url=_booking_page_url(meeting),
+        )
+    return _approval_result_page(
+        ok=True, accent='#7c3aed',
+        title='Time no longer proposed',
+        heading='This time is no longer available to confirm',
+        message='No time is currently proposed for this meeting. Please reply to the original email and we will find a time that works.',
+        booking_url=_booking_page_url(meeting),
+    )
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def sdr_unsubscribe(request, token):
+    """Public unsubscribe link put in every outbound campaign email.
+
+    GET shows a confirm button; POST unsubscribes. POST is also what mail clients
+    send for one-click unsubscribe (RFC 8058 List-Unsubscribe-Post), so both the
+    header and the visible link work. The address is opted out of every
+    campaign in the company, not just the one that emailed it.
+    """
+    from ai_sdr_agent.agents.outreach_agent import apply_unsubscribe, read_unsubscribe_token
+
+    enrollment_id = read_unsubscribe_token(token)
+    enrollment = None
+    if enrollment_id:
+        enrollment = (
+            SDRCampaignEnrollment.objects
+            .select_related('lead', 'campaign__company_user').filter(id=enrollment_id).first()
+        )
+    if enrollment is None:
+        return _approval_result_page(**_LINK_EXPIRED_PAGE)
+
+    if request.method == 'GET':
+        return _confirm_action_page(
+            title='Unsubscribe',
+            heading='Unsubscribe from these emails?',
+            message='You will no longer receive emails from us.',
+            button_label='Unsubscribe',
+            accent='#dc2626',
+        )
+
+    apply_unsubscribe(enrollment)
+    logger.info("SDR [UNSUBSCRIBE] enrollment=%d lead=%s", enrollment.id, enrollment.lead.email)
     return _approval_result_page(
         ok=True, accent='#16a34a',
-        title='Meeting confirmed',
-        heading="You're all set! 🎉",
-        message=(
-            'Your meeting time is confirmed. A confirmation email with the '
-            'details is on its way to your inbox.'
-            if not already else
-            'This meeting is already confirmed. A confirmation email with the details is in your inbox.'
-        ),
-        booking_url=_booking_page_url(meeting),
+        title='Unsubscribed',
+        heading="You've been unsubscribed",
+        message="You won't receive any more emails from us.",
     )
 
 
@@ -2529,13 +2649,9 @@ def sdr_meeting_lead_suggest(request, approval_token):
             message='The meeting link is invalid or has expired. Please reply to the original email and we will help you reschedule.',
         )
 
-    # Mark the proposed slot as declined so the SDR side knows to follow up.
-    # Only downgrade a meeting that was awaiting approval — never override a
-    # slot the lead already confirmed.
-    if meeting.status in ('awaiting_approval', 'pending'):
-        meeting.status = 'pending'
-        meeting.save(update_fields=['status'])
-
+    # GET must not change state: email scanners pre-fetch links, and downgrading
+    # the meeting here would make the "Yes" link stop working. The booking page
+    # accepts both pending and awaiting_approval, so nothing needs updating.
     booking_url = _booking_page_url(meeting)
     if booking_url:
         from django.http import HttpResponseRedirect
@@ -2673,7 +2789,7 @@ def sdr_check_all_replies(request):
     )
 
     from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-    from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+    from ai_sdr_agent.agents.outreach_agent import OutreachAgent, claim_reply, mark_bounced
 
     outreach_agent = OutreachAgent(company=company_user.company)
     email_agent = EmailAssistantAgent(company=company_user.company)
@@ -2700,9 +2816,18 @@ def sdr_check_all_replies(request):
                 reply_text = r['reply_text']
                 lead = enrollment.lead
 
+                if r.get('is_bounce'):
+                    if enrollment.status != 'bounced' and claim_reply(enrollment, r):
+                        mark_bounced(enrollment, f"{r['sender_email']}: {(r.get('subject') or '')[:200]}")
+                    continue
+
                 already_has_meeting = SDRMeeting.objects.filter(enrollment=enrollment).exists()
                 if enrollment.status == 'replied' and already_has_meeting:
                     continue
+                if enrollment.status == 'unsubscribed':
+                    continue
+                if not claim_reply(enrollment, r):
+                    continue   # already processed (by the scheduler or an earlier call)
 
                 classification = email_agent.classify_reply(reply_text)
                 result = _apply_reply_action(
