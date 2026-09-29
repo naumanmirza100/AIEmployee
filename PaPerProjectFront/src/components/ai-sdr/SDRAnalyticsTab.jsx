@@ -60,12 +60,12 @@ function FunnelBar({ stages }) {
       {stages.map((s, i) => (
         <div key={i}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-            <span style={{ fontSize: 12, color: '#9ca3af' }}>{s.stage}</span>
+            <span style={{ fontSize: 12, color: 'hsl(var(--pt-9ca3af))' }}>{s.stage}</span>
             <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600 }}>
               {s.count} <span style={{ color: '#4b5563', fontWeight: 400 }}>({pct(s.count, max)}%)</span>
             </span>
           </div>
-          <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>
+          <div style={{ height: 8, borderRadius: 4, background: 'hsl(var(--surface-invert) / 0.06)' }}>
             <div style={{
               height: '100%', borderRadius: 4,
               width: `${pct(s.count, max)}%`,
@@ -82,7 +82,7 @@ function FunnelBar({ stages }) {
 
 function MiniBar({ value, max, color }) {
   return (
-    <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)' }}>
+    <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'hsl(var(--surface-invert) / 0.06)' }}>
       <div style={{
         height: '100%', borderRadius: 3,
         width: `${max ? Math.min(100, (value / max) * 100) : 0}%`,
@@ -223,9 +223,9 @@ export default function SDRAnalyticsTab() {
           padding: '14px 18px', borderRadius: 10,
           background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)',
         }}>
-          <AlertTriangle size={18} style={{ color: '#f59e0b', flexShrink: 0 }} />
+          <AlertTriangle size={18} style={{ color: 'hsl(var(--pt-f59e0b))', flexShrink: 0 }} />
           <div>
-            <div style={{ color: '#fbbf24', fontWeight: 700, fontSize: 13 }}>
+            <div style={{ color: 'hsl(var(--pt-fbbf24))', fontWeight: 700, fontSize: 13 }}>
               Low Meeting Alert — only {m.meetings_week} meeting(s) this week (target: {m.meetings_alert_threshold})
             </div>
             <div style={{ color: '#92400e', fontSize: 12, marginTop: 2 }}>
@@ -242,7 +242,7 @@ export default function SDRAnalyticsTab() {
           <button onClick={load} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
             borderRadius: 8, border: '1px solid var(--line-1)', background: 'transparent',
-            color: '#9ca3af', fontSize: 12, cursor: 'pointer',
+            color: 'hsl(var(--pt-9ca3af))', fontSize: 12, cursor: 'pointer',
           }}>
             <RefreshCw size={13} /> Refresh
           </button>
@@ -291,7 +291,7 @@ export default function SDRAnalyticsTab() {
           {sectionTitle('Pipeline Funnel')}
           <FunnelBar stages={m.funnel} />
           <div style={{ marginTop: 16, display: 'flex', gap: 12, fontSize: 11, color: '#6b7280' }}>
-            <span>Reply rate: <strong style={{ color: '#4ade80' }}>{m.reply_rate_week}%</strong></span>
+            <span>Reply rate: <strong style={{ color: 'hsl(var(--pt-4ade80))' }}>{m.reply_rate_week}%</strong></span>
             <span>Meeting rate: <strong style={{ color: '#34d399' }}>{m.meeting_rate}%</strong></span>
           </div>
         </div>
@@ -333,16 +333,16 @@ export default function SDRAnalyticsTab() {
                 {m.campaign_rows.map((row, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
                     <td style={{ padding: '10px 10px', fontSize: 12, color: 'var(--text-soft)', fontWeight: 500 }}>{row.name}</td>
-                    <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: '#9ca3af' }}>{row.emails_sent}</td>
-                    <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: '#9ca3af' }}>{row.replies}</td>
+                    <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: 'hsl(var(--pt-9ca3af))' }}>{row.emails_sent}</td>
+                    <td style={{ padding: '10px 10px', textAlign: 'center', fontSize: 12, color: 'hsl(var(--pt-9ca3af))' }}>{row.replies}</td>
                     <td style={{ padding: '10px 10px', textAlign: 'center' }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#a78bfa' }}>{row.meetings}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'hsl(var(--pt-a78bfa))' }}>{row.meetings}</span>
                     </td>
                     <td style={{ padding: '10px 10px', textAlign: 'center' }}>
                       <span style={{
                         padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
                         background: row.reply_rate >= 10 ? 'rgba(74,222,128,0.12)' : 'rgba(107,114,128,0.12)',
-                        color: row.reply_rate >= 10 ? '#4ade80' : '#9ca3af',
+                        color: row.reply_rate >= 10 ? 'hsl(var(--pt-4ade80))' : '#9ca3af',
                       }}>{row.reply_rate}%</span>
                     </td>
                   </tr>
@@ -373,7 +373,7 @@ export default function SDRAnalyticsTab() {
                 return (
                   <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Icon size={13} style={{ color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, color: '#9ca3af', width: 36 }}>{label}</span>
+                    <span style={{ fontSize: 12, color: 'hsl(var(--pt-9ca3af))', width: 36 }}>{label}</span>
                     <MiniBar value={count} max={total} color={color} />
                     <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600, minWidth: 24, textAlign: 'right' }}>{count}</span>
                   </div>
@@ -393,7 +393,7 @@ export default function SDRAnalyticsTab() {
                   const cfg = SENTIMENT_CFG[key] || { label: key, color: '#9ca3af' };
                   return (
                     <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 11, color: '#9ca3af', width: 80, flexShrink: 0 }}>{cfg.label}</span>
+                      <span style={{ fontSize: 11, color: 'hsl(var(--pt-9ca3af))', width: 80, flexShrink: 0 }}>{cfg.label}</span>
                       <MiniBar value={count} max={totalSentiment} color={cfg.color} />
                       <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600, minWidth: 20, textAlign: 'right' }}>{count}</span>
                     </div>
@@ -414,7 +414,7 @@ export default function SDRAnalyticsTab() {
                   const cfg = SOURCE_CFG[key] || { label: key, color: '#9ca3af' };
                   return (
                     <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 11, color: '#9ca3af', width: 70, flexShrink: 0 }}>{cfg.label}</span>
+                      <span style={{ fontSize: 11, color: 'hsl(var(--pt-9ca3af))', width: 70, flexShrink: 0 }}>{cfg.label}</span>
                       <MiniBar value={count} max={totalSource} color={cfg.color} />
                       <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600, minWidth: 20, textAlign: 'right' }}>{count}</span>
                     </div>

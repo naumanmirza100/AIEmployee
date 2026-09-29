@@ -366,7 +366,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
             background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
-            borderRight: '1.5px solid rgba(255,255,255,0.10)',
+            borderRight: '1.5px solid hsl(var(--surface-invert) / 0.10)',
             boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
             borderTopLeftRadius: 16,
             borderBottomLeftRadius: 16,
@@ -576,14 +576,14 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                 }}
               />
               <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
-                <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
+                <Bot className="h-5 w-5" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
               </div>
               <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
                   Knowledge Q&A Agent
                   <span
                     className="text-[10px] rounded-full px-2.5 py-0.5 font-medium"
-                    style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}
+                    style={{ background: 'hsl(var(--brand-600) / 0.15)', color: 'hsl(var(--pt-a78bfa))' }}
                   >
                     AI-Powered
                   </span>
@@ -706,10 +706,10 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
               className="shrink-0"
               style={{
                 background: 'var(--panel-3)',
-                borderTop: '1px solid rgba(255,255,255,0.08)',
+                borderTop: '1px solid hsl(var(--surface-invert) / 0.08)',
               }}
             >
-              <div className="mx-4 my-3 rounded-xl px-3 py-3" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="mx-4 my-3 rounded-xl px-3 py-3" style={{ border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
                 {/* Top row: project select + mode side by side */}
                 <div className="flex items-center gap-2 mb-2">
                   <div data-tour-pm-kqa="project-select" className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -726,7 +726,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                       style={{
                         background: 'var(--sfc-111118)',
                         border: '1.5px solid rgba(139, 92, 246, 0.35)',
-                        color: '#e2e2f0',
+                        color: 'hsl(var(--pt-e2e2f0))',
                       }}
                     >
                       <SelectValue placeholder="All projects" />
@@ -735,7 +735,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                       style={{
                         background: 'var(--panel-4)',
                         border: '1px solid rgba(139, 92, 246, 0.25)',
-                        color: '#e2e2f0',
+                        color: 'hsl(var(--pt-e2e2f0))',
                       }}
                     >
                       <SelectItem value="all">General Questions</SelectItem>
@@ -759,11 +759,11 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                       style={{
                         background: 'var(--sfc-111118)',
                         border: '1.5px solid rgba(139, 92, 246, 0.35)',
-                        color: '#e2e2f0',
+                        color: 'hsl(var(--pt-e2e2f0))',
                       }}
                     >
                       <div className="flex items-center gap-1.5">
-                        <SelectedModeIcon className="h-3.5 w-3.5" style={{ color: '#a78bfa' }} />
+                        <SelectedModeIcon className="h-3.5 w-3.5" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
                         <SelectValue placeholder="Search" />
                       </div>
                     </SelectTrigger>
@@ -771,7 +771,7 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                       style={{
                         background: 'var(--panel-4)',
                         border: '1px solid rgba(139, 92, 246, 0.25)',
-                        color: '#e2e2f0',
+                        color: 'hsl(var(--pt-e2e2f0))',
                       }}
                     >
                       {INPUT_MODE_OPTIONS.map((mode) => {
@@ -810,8 +810,8 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                     className="min-h-[40px] resize-none flex-1 text-sm"
                     style={{
                       background: 'var(--sfc-0e0e14)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      color: '#e2e2f0',
+                      border: '1px solid hsl(var(--surface-invert) / 0.1)',
+                      color: 'hsl(var(--pt-e2e2f0))',
                     }}
                   />
                   <Button data-tour-pm-kqa="send" type="submit" disabled={loading} size="icon" className="h-[40px] w-10 shrink-0">

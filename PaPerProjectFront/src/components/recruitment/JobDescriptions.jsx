@@ -882,7 +882,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
           >
             {/* Header */}
             <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-6 pt-6 pb-4"
-              style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', borderBottom: '1px solid hsl(var(--surface-invert) / 0.06)' }}>
               <div className="flex items-center gap-3">
                 <div className="shrink-0 rounded-xl p-2.5" style={{ background: 'rgba(96,165,250,0.15)' }}>
                   <Users className="h-5 w-5 text-blue-400" />
@@ -917,7 +917,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
               ) : (
                 applications.map((app) => (
                   <div key={app.id} id={`REC-jobs-application-row-${app.id}`} data-testid={`REC-jobs-application-row-${app.id}`} className="rounded-xl overflow-hidden"
-                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
                     {/* Application Row */}
                     <div className="flex items-center gap-3 px-4 py-3">
                       <div className="flex-1 min-w-0">
@@ -932,7 +932,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                             </span>
                           ) : (
                             <span className="text-xs px-2 py-0.5 rounded-full font-medium text-white/40"
-                              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                              style={{ background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)' }}>
                               Pending AI
                             </span>
                           )}
@@ -990,31 +990,31 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                     {expandedApp === app.id && (
                       <div className="px-4 pb-4 pt-1 border-t border-white/5 grid grid-cols-2 gap-3">
                         {app.current_location && (
-                          <div className="rounded-lg px-3 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                          <div className="rounded-lg px-3 py-2" style={{ background: 'hsl(var(--surface-invert) / 0.03)' }}>
                             <p className="text-xs text-white/30 mb-0.5">Location</p>
                             <p className="text-sm text-white/70">{app.current_location}</p>
                           </div>
                         )}
                         {app.salary_expectation && (
-                          <div className="rounded-lg px-3 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                          <div className="rounded-lg px-3 py-2" style={{ background: 'hsl(var(--surface-invert) / 0.03)' }}>
                             <p className="text-xs text-white/30 mb-0.5">Salary Expectation</p>
                             <p className="text-sm text-white/70">{app.salary_expectation}</p>
                           </div>
                         )}
                         {app.education && (
-                          <div className="rounded-lg px-3 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                          <div className="rounded-lg px-3 py-2" style={{ background: 'hsl(var(--surface-invert) / 0.03)' }}>
                             <p className="text-xs text-white/30 mb-0.5">Education</p>
                             <p className="text-sm text-white/70">{app.education}</p>
                           </div>
                         )}
                         {app.previous_company && (
-                          <div className="rounded-lg px-3 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                          <div className="rounded-lg px-3 py-2" style={{ background: 'hsl(var(--surface-invert) / 0.03)' }}>
                             <p className="text-xs text-white/30 mb-0.5">Previous Company</p>
                             <p className="text-sm text-white/70">{app.previous_company}</p>
                           </div>
                         )}
                         {app.linkedin_url && (
-                          <div className="rounded-lg px-3 py-2 col-span-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                          <div className="rounded-lg px-3 py-2 col-span-2" style={{ background: 'hsl(var(--surface-invert) / 0.03)' }}>
                             <p className="text-xs text-white/30 mb-0.5">LinkedIn</p>
                             <a href={app.linkedin_url} target="_blank" rel="noopener noreferrer"
                               id={`REC-jobs-application-linkedin-link-${app.id}`}
@@ -1023,7 +1023,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                           </div>
                         )}
                         {app.cover_letter && (
-                          <div className="rounded-lg px-3 py-2 col-span-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                          <div className="rounded-lg px-3 py-2 col-span-2" style={{ background: 'hsl(var(--surface-invert) / 0.03)' }}>
                             <p className="text-xs text-white/30 mb-0.5">Cover Letter</p>
                             <p className="text-sm text-white/60 leading-relaxed line-clamp-4">{app.cover_letter}</p>
                           </div>
@@ -1053,7 +1053,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-3 px-6 pt-6 pb-4" style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-3 px-6 pt-6 pb-4" style={{ background: 'linear-gradient(135deg, var(--sfc-0d0d1a) 0%, var(--sfc-0a1020) 100%)', borderBottom: '1px solid hsl(var(--surface-invert) / 0.06)' }}>
               <div className="flex items-start gap-3 flex-1 min-w-0">
                 <div className="shrink-0 rounded-xl p-2.5 mt-0.5" style={{ background: 'rgba(167,139,250,0.15)' }}>
                   <Briefcase className="h-5 w-5 text-violet-400" />
@@ -1070,7 +1070,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                     {viewingJob.department && (
                       <span className="flex items-center gap-1 text-xs text-white/50"><Building2 className="h-3 w-3" />{viewingJob.department}</span>
                     )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${viewingJob.is_active ? 'text-emerald-400' : 'text-white/40'}`} style={{ background: viewingJob.is_active ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.06)', border: `1px solid ${viewingJob.is_active ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.1)'}` }}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${viewingJob.is_active ? 'text-emerald-400' : 'text-white/40'}`} style={{ background: viewingJob.is_active ? 'rgba(52,211,153,0.12)' : 'hsl(var(--surface-invert) / 0.06)', border: `1px solid ${viewingJob.is_active ? 'rgba(52,211,153,0.25)' : 'hsl(var(--surface-invert) / 0.1)'}` }}>
                       {viewingJob.is_active ? '● Active' : '○ Inactive'}
                     </span>
                   </div>
@@ -1088,7 +1088,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                   { label: 'Applications Open', value: viewingJob.application_open_date },
                   { label: 'Applications Close', value: viewingJob.application_close_date },
                 ].map(({ label, value }) => (
-                  <div key={label} className="rounded-lg px-4 py-3" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div key={label} className="rounded-lg px-4 py-3" style={{ background: 'hsl(var(--surface-invert) / 0.04)', border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
                     <p className="text-xs text-white/40 mb-1">{label}</p>
                     <p className="text-sm font-semibold text-white">
                       {value ? new Date(value + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
@@ -1111,7 +1111,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
             </div>
 
             {/* Footer actions */}
-            <div className="flex items-center justify-between gap-3 px-6 pb-6 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="flex items-center justify-between gap-3 px-6 pb-6 pt-2" style={{ borderTop: '1px solid hsl(var(--surface-invert) / 0.06)' }}>
               <button
                 id="REC-jobs-view-copy-link-btn"
                 data-testid="REC-jobs-view-copy-link-btn"
@@ -1123,7 +1123,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                   });
                 }}
                 className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-lg border transition-all"
-                style={{ background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
+                style={{ background: 'hsl(var(--surface-invert) / 0.04)', borderColor: 'hsl(var(--surface-invert) / 0.1)', color: 'hsl(var(--surface-invert) / 0.6)' }}
               >
                 {copiedJobId === viewingJob.id ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                 {copiedJobId === viewingJob.id ? 'Link Copied!' : 'Copy Application Link'}

@@ -63,7 +63,7 @@ const markdownComponents = {
   li: ({ children }) => (
     <li className="flex items-start gap-2.5 text-sm text-white/55 leading-relaxed p-0 m-0">
       <span className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 mt-0.5 text-[10px] font-bold"
-        style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b' }}
+        style={{ background: 'rgba(245,158,11,0.12)', color: 'hsl(var(--pt-f59e0b))' }}
       >•</span>
       <span className="flex-1">{children}</span>
     </li>
@@ -199,7 +199,7 @@ const SummaryDetailPage = () => {
               <h1 className="text-xl sm:text-2xl font-bold text-white">{summary.original_filename}</h1>
               {summary.document_category && (
                 <span className="text-[11px] px-3 py-1 rounded-full font-medium"
-                  style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa' }}>
+                  style={{ background: 'rgba(139,92,246,0.15)', color: 'hsl(var(--pt-a78bfa))' }}>
                   {summary.document_category}
                 </span>
               )}
@@ -230,7 +230,7 @@ const SummaryDetailPage = () => {
             { label: 'Created', value: formatDate(summary.created_at), icon: Calendar, color: '#f59e0b' },
             { label: 'By', value: summary.created_by || 'Unknown', icon: User, color: '#ec4899' },
           ].map((m, i) => (
-            <div key={i} id={`OPS-summarydetail-stat-${m.label.toLowerCase()}`} data-testid={`OPS-summarydetail-stat-${m.label.toLowerCase()}`} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <div key={i} id={`OPS-summarydetail-stat-${m.label.toLowerCase()}`} data-testid={`OPS-summarydetail-stat-${m.label.toLowerCase()}`} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
               <m.icon className="h-4 w-4 shrink-0" style={{ color: `${m.color}80` }} />
               <div className="min-w-0">
                 <p className="text-[10px] text-white/30 uppercase tracking-wider">{m.label}</p>
@@ -261,7 +261,7 @@ const SummaryDetailPage = () => {
             )}
             {summary.topics?.length > 0 && summary.topics.map((topic, i) => (
               <span key={i} id={`OPS-summarydetail-badge-topic-${i}`} data-testid={`OPS-summarydetail-badge-topic-${i}`} className="text-[11px] px-2.5 py-1.5 rounded-lg font-medium border border-white/[0.06]"
-                style={{ background: 'rgba(139,92,246,0.1)', color: '#c4b5fd' }}>
+                style={{ background: 'rgba(139,92,246,0.1)', color: 'hsl(var(--pt-c4b5fd))' }}>
                 {topic}
               </span>
             ))}
@@ -330,7 +330,7 @@ const SummaryDetailPage = () => {
               <div className="flex flex-wrap gap-2">
                 {summary.topics.map((topic, i) => (
                   <span key={i} id={`OPS-summarydetail-topic-chip-${i}`} data-testid={`OPS-summarydetail-topic-chip-${i}`} className="text-xs px-3 py-1.5 rounded-full font-medium border border-white/[0.06]"
-                    style={{ background: 'rgba(139,92,246,0.1)', color: '#c4b5fd' }}>
+                    style={{ background: 'rgba(139,92,246,0.1)', color: 'hsl(var(--pt-c4b5fd))' }}>
                     {topic}
                   </span>
                 ))}
@@ -445,7 +445,7 @@ const SummaryDetailPage = () => {
           </div>
           <div className="space-y-3">
             {summary.key_findings.map((finding, i) => (
-              <div key={i} id={`OPS-summarydetail-finding-row-${i}`} data-testid={`OPS-summarydetail-finding-row-${i}`} className="flex items-start gap-3 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <div key={i} id={`OPS-summarydetail-finding-row-${i}`} data-testid={`OPS-summarydetail-finding-row-${i}`} className="flex items-start gap-3 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
                 <div className="h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.12)' }}>
                   <span className="text-[11px] font-bold text-amber-400">{i + 1}</span>
                 </div>

@@ -62,7 +62,7 @@ const SkillGroup = ({ title, skills, icon, variant, showAll = false }) => {
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
         {icon}
-        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: icon.props.style?.color || '#a78bfa' }}>{title}</span>
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: icon.props.style?.color || 'hsl(var(--pt-a78bfa))' }}>{title}</span>
         <span className="text-xs text-white/25 ml-1">({skills.length})</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
@@ -116,7 +116,7 @@ const QualificationReasoning = ({ reasoning, exactMatchedSkills = [], relatedMat
   const fitNum   = roleFit    ? parseInt(roleFit)    : null;
 
   const Bar = ({ value, color }) => (
-    <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+    <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: 'hsl(var(--surface-invert) / 0.07)' }}>
       <div className="h-full rounded-full transition-all duration-700"
         style={{ width: `${Math.min(value, 100)}%`, background: color }} />
     </div>
@@ -161,19 +161,19 @@ const QualificationReasoning = ({ reasoning, exactMatchedSkills = [], relatedMat
         <div className="flex flex-wrap gap-2">
           {role && (
             <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full text-white/70"
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              style={{ background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)' }}>
               <Award className="h-3 w-3 text-violet-400" />{role}
             </span>
           )}
           {seniority && (
             <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full text-white/70"
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              style={{ background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)' }}>
               <TrendingUp className="h-3 w-3 text-blue-400" />{seniority}
             </span>
           )}
           {experience && (
             <span className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full text-white/70"
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              style={{ background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)' }}>
               <Clock className="h-3 w-3 text-amber-400" />{experience}
             </span>
           )}
@@ -185,7 +185,7 @@ const QualificationReasoning = ({ reasoning, exactMatchedSkills = [], relatedMat
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {matchPct != null && (
             <div className="rounded-xl p-3 space-y-2"
-              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-white/40">Job Requirements Match</span>
                 <span className="text-xs font-bold text-white">{matchPct}%</span>
@@ -195,7 +195,7 @@ const QualificationReasoning = ({ reasoning, exactMatchedSkills = [], relatedMat
           )}
           {confNum != null && (
             <div className="rounded-xl p-3 space-y-2"
-              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-white/40">AI Confidence</span>
                 <span className="text-xs font-bold text-white">{confNum}%</span>

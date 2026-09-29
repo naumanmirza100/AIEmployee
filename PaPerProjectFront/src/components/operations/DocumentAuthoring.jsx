@@ -900,7 +900,7 @@ const AuthoringOnboarding = ({ open, step, setStep, onClose }) => {
             onClick={() => setStep(i)}
             aria-label={`Step ${i + 1}`}
             className="h-1.5 rounded-full transition-all"
-            style={{ width: i === idx ? 18 : 6, backgroundColor: i === idx ? ACCENT : 'rgba(255,255,255,0.25)' }}
+            style={{ width: i === idx ? 18 : 6, backgroundColor: i === idx ? ACCENT : 'hsl(var(--surface-invert) / 0.25)' }}
           />
         ))}
       </div>

@@ -50,7 +50,7 @@ const contentMarkdownComponents = {
   li: ({ children }) => (
     <li className="flex items-start gap-2.5 text-sm text-white/65 leading-relaxed p-0 m-0">
       <span className="flex items-center justify-center h-4 w-4 rounded-full shrink-0 mt-1 text-[9px] font-bold"
-        style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b' }}
+        style={{ background: 'rgba(245,158,11,0.12)', color: 'hsl(var(--pt-f59e0b))' }}
       >•</span>
       <span className="flex-1">{children}</span>
     </li>
@@ -349,7 +349,7 @@ const DocumentDetailPage = () => {
             { label: 'Chunks', value: document.chunks_count || 0, icon: Layers, color: '#14b8a6' },
             { label: 'Uploaded', value: formatDate(document.created_at), icon: Calendar, color: '#f59e0b' },
           ].map((m, i) => (
-            <div key={i} id={`OPS-docdetail-stat-${m.label.toLowerCase()}`} data-testid={`OPS-docdetail-stat-${m.label.toLowerCase()}`} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <div key={i} id={`OPS-docdetail-stat-${m.label.toLowerCase()}`} data-testid={`OPS-docdetail-stat-${m.label.toLowerCase()}`} className="flex items-center gap-2.5 p-3 rounded-xl border border-white/[0.04]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
               <m.icon className="h-4 w-4 shrink-0" style={{ color: `${m.color}80` }} />
               <div className="min-w-0">
                 <p className="text-[10px] text-white/30 uppercase tracking-wider">{m.label}</p>
@@ -407,7 +407,7 @@ const DocumentDetailPage = () => {
               </div>
               <div className="space-y-2">
                 {document.key_insights.map((insight, i) => (
-                  <div key={i} id={`OPS-docdetail-insight-row-${i}`} data-testid={`OPS-docdetail-insight-row-${i}`} className="flex items-start gap-2.5 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <div key={i} id={`OPS-docdetail-insight-row-${i}`} data-testid={`OPS-docdetail-insight-row-${i}`} className="flex items-start gap-2.5 p-3 rounded-lg border border-white/[0.04]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
                     <div className="h-5 w-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: 'rgba(245,158,11,0.12)' }}>
                       <span className="text-[10px] font-bold text-amber-400">{i + 1}</span>
                     </div>
@@ -430,7 +430,7 @@ const DocumentDetailPage = () => {
                 { label: 'Text Chunks', value: document.chunks_count || 0 },
                 { label: 'Processed At', value: document.processed_at ? formatDateTime(document.processed_at) : 'N/A' },
               ].map((item, i) => (
-                <div key={i} id={`OPS-docdetail-processing-${item.label.toLowerCase().replace(/\s+/g, '-')}`} data-testid={`OPS-docdetail-processing-${item.label.toLowerCase().replace(/\s+/g, '-')}`} className="p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                <div key={i} id={`OPS-docdetail-processing-${item.label.toLowerCase().replace(/\s+/g, '-')}`} data-testid={`OPS-docdetail-processing-${item.label.toLowerCase().replace(/\s+/g, '-')}`} className="p-3 rounded-lg" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
                   <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">{item.label}</p>
                   <p className="text-sm text-white/70 font-medium">{item.value}</p>
                 </div>
@@ -512,7 +512,7 @@ const DocumentDetailPage = () => {
         <TabsContent id="OPS-docdetail-tabpanel-content" data-testid="OPS-docdetail-tabpanel-content" value="content" className="mt-6 space-y-4">
           {document.parsed_text ? (
             <div id="OPS-docdetail-content-card" data-testid="OPS-docdetail-content-card" className="rounded-xl border border-white/[0.06] overflow-hidden" style={{ background: 'rgba(0,0,0,0.15)' }}>
-              <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-white/30" />
                   <h4 className="text-xs font-semibold text-white/60">Extracted Content</h4>

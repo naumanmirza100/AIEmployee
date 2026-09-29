@@ -68,9 +68,9 @@ const TemplatePickerDialog = ({ open, value, onChange, onOpenChange }) => {
                 <div className="flex items-center gap-2 mb-1.5">
                   <div
                     className="w-7 h-7 rounded-md flex items-center justify-center"
-                    style={{ backgroundColor: active ? AUTHORING_ACCENT_SOFT : 'rgba(255,255,255,0.04)' }}
+                    style={{ backgroundColor: active ? AUTHORING_ACCENT_SOFT : 'hsl(var(--surface-invert) / 0.04)' }}
                   >
-                    <Icon className="h-3.5 w-3.5" style={{ color: active ? AUTHORING_ACCENT : 'rgba(255,255,255,0.7)' }} />
+                    <Icon className="h-3.5 w-3.5" style={{ color: active ? AUTHORING_ACCENT : 'hsl(var(--surface-invert) / 0.7)' }} />
                   </div>
                   <span className={`text-sm font-semibold ${active ? 'text-amber-200' : 'text-white/90'}`}>
                     {t.label}

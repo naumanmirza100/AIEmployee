@@ -92,7 +92,7 @@ const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
         <div style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 8 }}>
           Remove {meta.label}?
         </div>
-        <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 14, lineHeight: 1.6, marginBottom: 28 }}>
+        <p style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 14, lineHeight: 1.6, marginBottom: 28 }}>
           This will permanently disconnect your{' '}
           <strong style={{ color: '#f87171' }}>{meta.label}</strong> integration.
           All saved credentials will be deleted and lead syncing will stop.
@@ -100,8 +100,8 @@ const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button onClick={onCancel} disabled={deleting} style={{
-            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-            borderRadius: 8, padding: '9px 20px', color: '#d1d5db',
+            background: 'hsl(var(--surface-invert) / 0.06)', border: '1px solid hsl(var(--surface-invert) / 0.12)',
+            borderRadius: 8, padding: '9px 20px', color: 'hsl(var(--pt-d1d5db))',
             fontSize: 14, fontWeight: 500, cursor: 'pointer',
           }}>
             Cancel
@@ -190,19 +190,19 @@ function ConnectModal({ provider, onClose, onSaved }) {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
     }}>
-      <div style={{ ...card, width: 480, maxWidth: '95vw', background: 'hsl(var(--sfr-140a28) / 0.98)', border: '1px solid rgba(255,255,255,0.12)' }}>
+      <div style={{ ...card, width: 480, maxWidth: '95vw', background: 'hsl(var(--sfr-140a28) / 0.98)', border: '1px solid hsl(var(--surface-invert) / 0.12)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <span style={{ fontSize: 28 }}>{cfg.logo}</span>
           <div>
             <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Connect {cfg.label}</div>
-            <div style={{ color: '#9ca3af', fontSize: 13 }}>Enter your {cfg.label} credentials</div>
+            <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>Enter your {cfg.label} credentials</div>
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 24 }}>
           {cfg.fields.map(f => (
             <div key={f.key}>
-              <div style={{ color: '#d1d5db', fontSize: 13, marginBottom: 6 }}>{f.label}</div>
+              <div style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13, marginBottom: 6 }}>{f.label}</div>
               <input
                 style={inputStyle}
                 type={f.type || 'text'}
@@ -328,17 +328,17 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
         }}>
           <AlertCircle size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 1 }} />
           <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-            <div style={{ color: '#f59e0b', fontWeight: 700, marginBottom: 2 }}>
+            <div style={{ color: 'hsl(var(--pt-f59e0b))', fontWeight: 700, marginBottom: 2 }}>
               Contact limit reached — sync paused
             </div>
-            <div style={{ color: '#d1d5db' }}>
+            <div style={{ color: 'hsl(var(--pt-d1d5db))' }}>
               {cfg.label} won’t accept new records because the account is over its
               limit{integration.provider === 'hubspot' ? ' (free tier caps contacts at 1,000)' : ''}.
               New leads are saved locally and will sync automatically once you free
               up space or upgrade your {cfg.label} plan.
             </div>
             {integration.limit_message && (
-              <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 6, fontFamily: 'monospace' }}>
+              <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 11, marginTop: 6, fontFamily: 'monospace' }}>
                 {integration.limit_message}
               </div>
             )}
@@ -357,9 +357,9 @@ function IntegrationCard({ integration, onDelete, onRefresh }) {
           <div key={key} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
             borderRadius: 20, fontSize: 12,
-            background: integration[key] ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.04)',
+            background: integration[key] ? 'rgba(16,185,129,0.1)' : 'hsl(var(--surface-invert) / 0.04)',
             color: integration[key] ? '#10b981' : '#6b7280',
-            border: `1px solid ${integration[key] ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.06)'}`,
+            border: `1px solid ${integration[key] ? 'rgba(16,185,129,0.2)' : 'hsl(var(--surface-invert) / 0.06)'}`,
           }}>
             <Icon size={11} /> {label}
           </div>
@@ -399,7 +399,7 @@ function QueueStats({ stats }) {
           ...card, padding: '12px 20px', textAlign: 'center', minWidth: 90,
         }}>
           <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.value ?? 0}</div>
-          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>{s.label}</div>
+          <div style={{ fontSize: 12, color: 'hsl(var(--pt-9ca3af))', marginTop: 2 }}>{s.label}</div>
         </div>
       ))}
     </div>
@@ -460,7 +460,7 @@ const SDRCRMSyncTab = () => {
           <h2 style={{ color: '#fff', fontSize: 22, fontWeight: 700, margin: 0 }}>
             CRM & System Sync
           </h2>
-          <p style={{ color: '#9ca3af', fontSize: 14, margin: '6px 0 0' }}>
+          <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, margin: '6px 0 0' }}>
             Automatically save leads, emails, and meetings to your CRM.
           </p>
         </div>
@@ -473,7 +473,7 @@ const SDRCRMSyncTab = () => {
       {/* Queue Stats */}
       {queueStats && (
         <div>
-          <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Database size={13} /> Sync Queue Status
           </div>
           <QueueStats stats={queueStats} />
@@ -488,7 +488,7 @@ const SDRCRMSyncTab = () => {
 
       {/* Connected Integrations */}
       <div>
-        <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
           <CheckCircle2 size={13} /> Connected CRMs
         </div>
 
@@ -499,7 +499,7 @@ const SDRCRMSyncTab = () => {
         ) : integrations.length === 0 ? (
           <div style={{ ...card, textAlign: 'center', padding: 40 }}>
             <WifiOff size={32} color="#4b5563" style={{ margin: '0 auto 12px' }} />
-            <div style={{ color: '#9ca3af', fontSize: 15 }}>No CRM connected yet</div>
+            <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 15 }}>No CRM connected yet</div>
             <div style={{ color: '#6b7280', fontSize: 13, marginTop: 6 }}>
               Connect a CRM below to start syncing automatically.
             </div>
@@ -516,7 +516,7 @@ const SDRCRMSyncTab = () => {
       {/* Connect New CRM */}
       {availableProviders.length > 0 && (
         <div>
-          <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={13} /> Connect a CRM
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>

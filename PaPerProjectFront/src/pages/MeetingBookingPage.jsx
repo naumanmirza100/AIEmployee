@@ -77,14 +77,14 @@ function Calendar({ selectedDay, onSelect }) {
         <button
           onClick={prevMonth}
           disabled={isCurrentMonth}
-          style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, color: isCurrentMonth ? 'var(--line-1)' : '#9ca3af', padding: '6px 12px', cursor: isCurrentMonth ? 'default' : 'pointer', fontSize: 16, lineHeight: 1 }}
+          style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, color: isCurrentMonth ? 'var(--line-1)' : 'hsl(var(--pt-9ca3af))', padding: '6px 12px', cursor: isCurrentMonth ? 'default' : 'pointer', fontSize: 16, lineHeight: 1 }}
         >‹</button>
         <span style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 15 }}>
           {MONTH_NAMES[viewMonth]} {viewYear}
         </span>
         <button
           onClick={nextMonth}
-          style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, color: '#9ca3af', padding: '6px 12px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+          style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, color: 'hsl(var(--pt-9ca3af))', padding: '6px 12px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
         >›</button>
       </div>
 
@@ -245,7 +245,7 @@ export default function MeetingBookingPage() {
         <h1 style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 24, margin: '0 0 8px' }}>
           You're confirmed!
         </h1>
-        <p style={{ color: '#9ca3af', fontSize: 14, margin: '0 0 20px' }}>
+        <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, margin: '0 0 20px' }}>
           A confirmation email is on its way to you.
         </p>
 
@@ -326,7 +326,7 @@ export default function MeetingBookingPage() {
           </div>
         </div>
 
-        <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.65, marginBottom: 28 }}>
+        <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, lineHeight: 1.65, marginBottom: 28 }}>
           Hi <strong style={{ color: 'var(--text-soft)' }}>{info.lead_first_name || info.lead_name}</strong>,
           please pick a date and time below. Once you confirm, you'll receive a calendar invite.
         </p>
@@ -337,7 +337,7 @@ export default function MeetingBookingPage() {
           {/* Left: Calendar */}
           <div>
             <span style={sectionTitle}>Select a date</span>
-            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--sfc-1e1535)', borderRadius: 12, padding: '16px 14px' }}>
+            <div style={{ background: 'hsl(var(--surface-invert) / 0.02)', border: '1px solid var(--sfc-1e1535)', borderRadius: 12, padding: '16px 14px' }}>
               <Calendar
                 selectedDay={selectedDay}
                 onSelect={d => { setSelectedDay(d); setSelectedTime(null); }}
@@ -365,7 +365,7 @@ export default function MeetingBookingPage() {
           <div style={{ marginTop: 20, padding: '13px 16px', background: 'rgba(168,85,247,0.07)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 18 }}>📅</span>
             <div>
-              <p style={{ color: '#c084fc', fontWeight: 700, fontSize: 14, margin: 0 }}>
+              <p style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 700, fontSize: 14, margin: 0 }}>
                 {fmtDate(toLocalIso(selectedDay, selectedTime))}
               </p>
               <p style={{ color: '#6b7280', fontSize: 12, margin: '2px 0 0' }}>

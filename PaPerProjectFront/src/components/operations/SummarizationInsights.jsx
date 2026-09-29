@@ -163,7 +163,7 @@ const SummarizationInsights = () => {
           <p className="text-gray-400 text-sm mt-1">Upload any document and get an AI-powered comprehensive summary</p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant="outline" className="text-xs py-1 px-3 w-fit" style={{ borderColor: '#f59e0b40', color: '#f59e0b' }} id="OPS-summarization-count-badge" data-testid="OPS-summarization-count-badge">
+          <Badge variant="outline" className="text-xs py-1 px-3 w-fit" style={{ borderColor: '#f59e0b40', color: 'hsl(var(--pt-f59e0b))' }} id="OPS-summarization-count-badge" data-testid="OPS-summarization-count-badge">
             {summaries.length} {summaries.length === 1 ? 'Summary' : 'Summaries'}
           </Badge>
           <Button
@@ -297,7 +297,7 @@ const SummarizationInsights = () => {
               <div className="overflow-x-auto">
                 <table className="w-full text-left" id="OPS-summarization-table" data-testid="OPS-summarization-table">
                   <thead>
-                    <tr className="border-b border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <tr className="border-b border-white/[0.06]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
                       <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Document</th>
                       <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Format</th>
                       <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Size</th>

@@ -339,7 +339,7 @@ export default function MeetingScheduler() {
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
             background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
-            borderRight: '1.5px solid rgba(255,255,255,0.10)',
+            borderRight: '1.5px solid hsl(var(--surface-invert) / 0.10)',
             boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
             borderTopLeftRadius: 16, borderBottomLeftRadius: 16,
             backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
@@ -439,12 +439,12 @@ export default function MeetingScheduler() {
             <div className="flex items-center gap-3 min-w-0 w-full">
               <div style={{ width: '7px', height: '48px', borderRadius: '8px', background: 'linear-gradient(to bottom, hsl(var(--brand-accent)) 0%, #6a1b9a 60%, #18122B 100%)', marginLeft: '24px', marginRight: '18px', boxShadow: '0 0 8px 2px hsl(var(--brand-accent) / 0.27)' }} />
               <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
-                <CalendarPlus className="h-5 w-5" style={{ color: '#a78bfa' }} />
+                <CalendarPlus className="h-5 w-5" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
               </div>
               <div className="min-w-0 flex-1">
                 <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
                   Meeting Scheduler
-                  <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}>AI-Powered</span>
+                  <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: 'hsl(var(--pt-a78bfa))' }}>AI-Powered</span>
                 </CardTitle>
                 <CardDescription className="text-white/50 text-sm mt-0.5">
                   Schedule meetings with your team using natural language. Try: "Schedule a meeting with Sarah tomorrow at 2 PM"

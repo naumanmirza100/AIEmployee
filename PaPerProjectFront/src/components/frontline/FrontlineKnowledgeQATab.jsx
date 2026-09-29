@@ -120,7 +120,7 @@ export default function FrontlineKnowledgeQATab(props) {
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
             background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
-            borderRight: '1.5px solid rgba(255,255,255,0.10)',
+            borderRight: '1.5px solid hsl(var(--surface-invert) / 0.10)',
             boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
             borderTopLeftRadius: 16,
             borderBottomLeftRadius: 16,
@@ -309,12 +309,12 @@ export default function FrontlineKnowledgeQATab(props) {
                 }}
               />
               <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
-                <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
+                <Bot className="h-5 w-5" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
               </div>
               <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
                   Knowledge Q&A
-                  <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}>
+                  <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: 'hsl(var(--pt-a78bfa))' }}>
                     AI-Powered
                   </span>
                 </CardTitle>
@@ -497,9 +497,9 @@ export default function FrontlineKnowledgeQATab(props) {
               data-tour-qa="input"
               onSubmit={onAskQuestion}
               className="shrink-0"
-              style={{ background: 'var(--panel-3)', borderTop: '1px solid rgba(255,255,255,0.08)' }}
+              style={{ background: 'var(--panel-3)', borderTop: '1px solid hsl(var(--surface-invert) / 0.08)' }}
             >
-              <div className="mx-4 my-4 space-y-3 rounded-2xl px-4 py-4" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="mx-4 my-4 space-y-3 rounded-2xl px-4 py-4" style={{ border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
                 <div className="space-y-2" data-tour-qa="scope">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-muted-foreground">Answer from:</span>
@@ -649,7 +649,7 @@ export default function FrontlineKnowledgeQATab(props) {
                     rows={2}
                     disabled={answering}
                     className="min-h-[60px] resize-none flex-1"
-                    style={{ background: 'var(--sfc-0e0e14)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#e2e2f0' }}
+                    style={{ background: 'var(--sfc-0e0e14)', border: '1px solid hsl(var(--surface-invert) / 0.1)', color: 'hsl(var(--pt-e2e2f0))' }}
                   />
                   <Button type="submit" disabled={answering} size="icon" className="h-[60px] w-12 shrink-0">
                     {answering ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}

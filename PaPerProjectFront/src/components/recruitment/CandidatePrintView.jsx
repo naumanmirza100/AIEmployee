@@ -164,14 +164,14 @@ const CandidatePrintView = ({ open, onClose, records, jobs, jobFilter, decisionF
             </div>
 
             {/* Filters */}
-            <div className="flex flex-wrap gap-2 px-6 py-3" style={{ borderBottom: '1px solid #ede9fe', background: '#fdfbff' }}>
-              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#f5f0ff', color: '#4c1d95', border: '1px solid #ddd6fe' }}>
+            <div className="flex flex-wrap gap-2 px-6 py-3" style={{ borderBottom: '1px solid hsl(var(--pt-ede9fe))', background: '#fdfbff' }}>
+              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#f5f0ff', color: '#4c1d95', border: '1px solid hsl(var(--pt-ddd6fe))' }}>
                 Job: <strong>{selectedJob?.title || 'All Jobs'}</strong>
               </span>
-              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#f5f0ff', color: '#4c1d95', border: '1px solid #ddd6fe' }}>
+              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#f5f0ff', color: '#4c1d95', border: '1px solid hsl(var(--pt-ddd6fe))' }}>
                 Decision: <strong>{DECISION_LABEL[decisionFilter] || 'All'}</strong>
               </span>
-              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#f5f0ff', color: '#4c1d95', border: '1px solid #ddd6fe' }}>
+              <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ background: '#f5f0ff', color: '#4c1d95', border: '1px solid hsl(var(--pt-ddd6fe))' }}>
                 Showing: <strong>{records.length}</strong> of <strong>{total}</strong>
               </span>
             </div>
@@ -199,7 +199,7 @@ const CandidatePrintView = ({ open, onClose, records, jobs, jobFilter, decisionF
                   const score = fmtScore(record.qualification_confidence ?? record.role_fit_score);
                   const date = fmtDate(record.created_at);
                   return (
-                    <tr key={record.id} style={{ background: idx % 2 === 0 ? '#fff' : '#f9f6ff', borderBottom: '1px solid #ede9fe' }}>
+                    <tr key={record.id} style={{ background: idx % 2 === 0 ? '#fff' : '#f9f6ff', borderBottom: '1px solid hsl(var(--pt-ede9fe))' }}>
                       <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: 'hsl(var(--brand-600))' }}>{record.rank ?? idx + 1}</td>
                       <td style={{ padding: '9px 10px' }}>
                         <div style={{ fontWeight: 600, color: '#1a0a2e' }}>{fmt(p.name || record.file_name)}</div>

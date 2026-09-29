@@ -7,7 +7,10 @@
          These two blocks used to hold identical near-black values, so the app
          was dark-only and the tokens did nothing. */
       :root {
-        --background: 0 0% 100%;
+        /* A soft grey page so white cards read as raised against it. When
+           page and card were both pure white nothing had an edge and every
+           section blurred into the next. */
+        --background: 225 20% 96.5%;
         --foreground: 240 10% 8%;
         --card: 0 0% 100%;
         --card-foreground: 240 10% 8%;
@@ -73,43 +76,68 @@
         --c-violet-700: 251.4 91.3% 95.5%;    /* violet-100 #ede9fe */
         --c-violet-900: 250.0 100.0% 97.6%;   /* violet-50 #f5f3ff */
 
+        /* Pale text and border colours hardcoded in inline styles, which
+           beat any class and so survived the `white` remap. Light values
+           keep the hue and are darkened until they clear AA on white. */
+        --pt-4ade80: 141.9 69.2% 31.0%;
+        --pt-6ee7b7: 156.2 71.6% 30.9%;
+        --pt-93c5fd: 211.7 96.4% 47.4%;
+        --pt-9ca3af: 217.9 10.6% 47.9%;
+        --pt-a5b4fc: 229.7 93.5% 62.8%;
+        --pt-a78bfa: 255.1 91.7% 65.3%;
+        --pt-bfdbfe: 213.3 96.9% 48.3%;
+        --pt-c084fc: 270.0 95.2% 62.3%;
+        --pt-c4b5d4: 269.0 26.5% 53.1%;
+        --pt-c4b5fd: 252.5 94.7% 66.1%;
+        --pt-c7d2fe: 228.0 96.5% 61.8%;
+        --pt-d1d5db: 216.0 12.2% 47.9%;
+        --pt-d1fae5: 149.3 80.4% 29.0%;
+        --pt-ddd6fe: 250.5 95.2% 66.8%;
+        --pt-e2e2f0: 240.0 31.8% 57.4%;
+        --pt-ede9fe: 251.4 91.3% 65.5%;
+        --pt-f59e0b: 37.7 92.1% 33.2%;
+        --pt-fbbf24: 43.3 96.4% 30.3%;
+        --pt-fcd34d: 45.9 96.7% 29.5%;
+        --pt-fef3c7: 48.0 96.5% 27.8%;
+        --pt-ffffff: 0.0 0.0% 46.0%;
+
 
         /* Dark surface colours the dashboards wrote as rgba() inside inline
            styles, which no class can reach. Same treatment as the hex ones:
            the exact original under .dark, a same-hue near-white tint here. */
-        --sfr-241236: 264.0 21.7% 95.5%;
-        --sfr-5024b4: 260.0 25.4% 88.4%;
-        --sfr-3c1e5a: 266.7 25.7% 93.1%;
-        --sfr-020308: 210.0 25.0% 98.4%;
-        --sfr-2d1f4a: 257.1 22.6% 93.9%;
-        --sfr-18122b: 255.0 20.0% 96.1%;
-        --sfr-0f0a1f: 255.0 25.0% 96.9%;
-        --sfr-140828: 264.0 29.4% 96.7%;
-        --sfr-1e0a32: 276.0 23.8% 95.9%;
-        --sfr-40280a: 40.0 25.0% 95.3%;
-        --sfr-0a2540: 210.0 25.0% 95.3%;
-        --sfr-0e2747: 220.0 23.1% 94.9%;
-        --sfr-0a041c: 260.0 23.1% 97.5%;
-        --sfr-0e0a1a: 255.0 28.6% 97.3%;
-        --sfr-100626: 255.0 25.0% 96.9%;
-        --sfr-111118: 240.0 6.7% 97.1%;
-        --sfr-120c28: 255.0 22.2% 96.5%;
-        --sfr-4c4b4a: 0.0 0.0% 91.8%;
-        --sfr-080b1a: 225.0 28.6% 97.3%;
-        --sfr-0a0a1a: 240.0 28.6% 97.3%;
-        --sfr-0c0c12: 240.0 7.7% 97.5%;
-        --sfr-0e0a20: 255.0 25.0% 96.9%;
-        --sfr-140a28: 255.0 22.2% 96.5%;
-        --secondary: 240 5% 96%;
+        --sfr-241236: 270.0 10.0% 98.6%;
+        --sfr-5024b4: 258.3 10.0% 99.9%;
+        --sfr-3c1e5a: 270.0 10.0% 99.9%;
+        --sfr-020308: 230.0 10.0% 95.9%;
+        --sfr-2d1f4a: 259.5 10.0% 99.9%;
+        --sfr-18122b: 254.4 10.0% 98.1%;
+        --sfr-0f0a1f: 254.3 10.0% 97.3%;
+        --sfr-140828: 262.5 10.0% 97.6%;
+        --sfr-1e0a32: 270.0 10.0% 98.1%;
+        --sfr-40280a: 33.3 10.0% 98.7%;
+        --sfr-0a2540: 210.0 10.0% 98.7%;
+        --sfr-0e2747: 213.7 10.0% 99.2%;
+        --sfr-0a041c: 255.0 10.0% 96.9%;
+        --sfr-0e0a1a: 255.0 10.0% 97.1%;
+        --sfr-100626: 258.8 10.0% 97.4%;
+        --sfr-111118: 240.0 6.0% 97.3%;
+        --sfr-120c28: 252.9 10.0% 97.7%;
+        --sfr-4c4b4a: 30.0 0.5% 99.9%;
+        --sfr-080b1a: 230.0 10.0% 97.0%;
+        --sfr-0a0a1a: 240.0 10.0% 97.1%;
+        --sfr-0c0c12: 240.0 7.0% 96.8%;
+        --sfr-0e0a20: 250.9 10.0% 97.3%;
+        --sfr-140a28: 260.0 10.0% 97.7%;
+        --secondary: 225 16% 93%;
         --secondary-foreground: 240 10% 12%;
-        --muted: 240 5% 96%;
+        --muted: 225 16% 93.5%;
         --muted-foreground: 240 4% 40%;
-        --accent: 240 5% 94%;
+        --accent: 225 18% 91%;
         --accent-foreground: 240 10% 12%;
         --destructive: 0 72% 46%;
         --destructive-foreground: 0 0% 100%;
-        --border: 240 6% 88%;
-        --input: 240 6% 88%;
+        --border: 225 16% 86%;
+        --input: 225 16% 86%;
         --ring: 220.6 90% 61%;
         --radius: 0.5rem;
 
@@ -149,58 +177,58 @@
         /* Auto-derived from the dark panel hexes the dashboards hardcode in
            inline styles. Each keeps its original value under `.dark`; the light
            value here is the same hue lifted into a near-white tint. */
-        --sfc-0d0b1f: #f6f5f9;
-        --sfc-0f0a1f: #f6f5f9;
-        --sfc-0d0d1a: #f6f6f9;
-        --sfc-0e0e14: #f8f8f9;
-        --sfc-111118: #f7f7f8;
-        --sfc-0d0820: #f6f6f9;
-        --sfc-1a1030: #f3f2f7;
-        --sfc-231845: #efedf4;
-        --sfc-1a0a35: #f4f2f7;
-        --sfc-1e1535: #f2f1f6;
-        --sfc-020308: #fafbfc;
-        --sfc-07030f: #faf9fb;
-        --sfc-080b1a: #f6f7fa;
-        --sfc-0f0a20: #f6f5f9;
-        --sfc-0a0a1a: #f6f6fa;
-        --sfc-0a1929: #f4f6f8;
-        --sfc-0f0f23: #f4f4f8;
-        --sfc-1a1028: #f5f3f7;
-        --sfc-1c1030: #f4f2f7;
-        --sfc-1e1035: #f3f1f7;
-        --sfc-241638: #f2f0f5;
-        --sfc-0a0616: #f8f7fa;
-        --sfc-0e0820: #f7f6f9;
-        --sfc-12121a: #f6f6f8;
-        --sfc-1e3a5f: #e8ecf1;
-        --sfc-090c14: #f8f8fa;
-        --sfc-0b0716: #f8f7fa;
-        --sfc-0b0817: #f8f7fa;
-        --sfc-0c0816: #f8f7fa;
-        --sfc-0c0820: #f6f6f9;
-        --sfc-0d0b1a: #f7f6f9;
-        --sfc-0f1022: #f5f5f8;
-        --sfc-100a20: #f6f5f9;
-        --sfc-100b1e: #f6f6f9;
-        --sfc-140d26: #f5f4f8;
-        --sfc-160b2e: #f4f3f8;
-        --sfc-16162a: #f3f3f6;
-        --sfc-181030: #f3f2f7;
-        --sfc-1e1e38: #f0f0f4;
-        --sfc-14082a: #f6f4f8;
-        --sfc-0a1020: #f5f6f9;
-        --sfc-140830: #f4f3f8;
-        --sfc-0d1020: #f5f6f9;
-        --sfc-0a1628: #f4f6f8;
-        --sfc-120d24: #f5f4f8;
-        --sfc-07050f: #f9f9fb;
-        --sfc-14082c: #f5f4f8;
-        --sfc-160b28: #f6f4f8;
-        --sfc-1a0a2e: #f5f3f8;
-        --sfc-1a0e00: #fbf9f8;
-        --sfc-1a1a2e: #f2f2f5;
-        --sfc-1e0f38: #f3f1f6;
+        --sfc-0d0b1f: #f8f7f9;
+        --sfc-0f0a1f: #f8f7f9;
+        --sfc-0d0d1a: #f7f7f9;
+        --sfc-0e0e14: #f7f7f8;
+        --sfc-111118: #f8f8f8;
+        --sfc-0d0820: #f8f7f9;
+        --sfc-1a1030: #fafafb;
+        --sfc-231845: #fefefe;
+        --sfc-1a0a35: #fafafb;
+        --sfc-1e1535: #fcfbfc;
+        --sfc-020308: #f4f4f6;
+        --sfc-07030f: #f5f5f6;
+        --sfc-080b1a: #f6f7f8;
+        --sfc-0f0a20: #f8f7f9;
+        --sfc-0a0a1a: #f7f7f8;
+        --sfc-0a1929: #f9f9fa;
+        --sfc-0f0f23: #f8f8fa;
+        --sfc-1a1028: #faf9fa;
+        --sfc-1c1030: #fafafb;
+        --sfc-1e1035: #fbfbfc;
+        --sfc-241638: #fcfcfc;
+        --sfc-0a0616: #f6f6f7;
+        --sfc-0e0820: #f8f7f9;
+        --sfc-12121a: #f8f8f9;
+        --sfc-1e3a5f: #ffffff;
+        --sfc-090c14: #f6f6f8;
+        --sfc-0b0716: #f6f6f8;
+        --sfc-0b0817: #f6f6f8;
+        --sfc-0c0816: #f6f6f8;
+        --sfc-0c0820: #f7f7f9;
+        --sfc-0d0b1a: #f7f7f8;
+        --sfc-0f1022: #f8f8fa;
+        --sfc-100a20: #f8f7f9;
+        --sfc-100b1e: #f8f7f9;
+        --sfc-140d26: #f9f9fa;
+        --sfc-160b2e: #faf9fa;
+        --sfc-16162a: #fafafb;
+        --sfc-181030: #fafafb;
+        --sfc-1e1e38: #fdfdfd;
+        --sfc-14082a: #f9f8fa;
+        --sfc-0a1020: #f7f8f9;
+        --sfc-140830: #f9f9fa;
+        --sfc-0d1020: #f8f8f9;
+        --sfc-0a1628: #f8f9fa;
+        --sfc-120d24: #f9f8fa;
+        --sfc-07050f: #f5f5f7;
+        --sfc-14082c: #f9f9fa;
+        --sfc-160b28: #f9f9fa;
+        --sfc-1a0a2e: #faf9fa;
+        --sfc-1a0e00: #f7f6f6;
+        --sfc-1a1a2e: #fbfbfc;
+        --sfc-1e0f38: #fbfbfc;
 
         /* The dashboards paint these two gradients through inline styles, which
            no `dark:` class can reach — so they are variables the inline style
@@ -273,6 +301,28 @@
         --c-slate-300: 212.7 26.8% 83.9%;     /* slate-300 #cbd5e1 */
         --c-violet-700: 263.4 70.0% 50.4%;    /* violet-700 #6d28d9 */
         --c-violet-900: 263.5 67.4% 34.9%;    /* violet-900 #4c1d95 */
+
+        --pt-4ade80: 141.9 69.2% 58.0%;
+        --pt-6ee7b7: 156.2 71.6% 66.9%;
+        --pt-93c5fd: 211.7 96.4% 78.4%;
+        --pt-9ca3af: 217.9 10.6% 64.9%;
+        --pt-a5b4fc: 229.7 93.5% 81.8%;
+        --pt-a78bfa: 255.1 91.7% 76.3%;
+        --pt-bfdbfe: 213.3 96.9% 87.3%;
+        --pt-c084fc: 270.0 95.2% 75.3%;
+        --pt-c4b5d4: 269.0 26.5% 77.1%;
+        --pt-c4b5fd: 252.5 94.7% 85.1%;
+        --pt-c7d2fe: 228.0 96.5% 88.8%;
+        --pt-d1d5db: 216.0 12.2% 83.9%;
+        --pt-d1fae5: 149.3 80.4% 90.0%;
+        --pt-ddd6fe: 250.5 95.2% 91.8%;
+        --pt-e2e2f0: 240.0 31.8% 91.4%;
+        --pt-ede9fe: 251.4 91.3% 95.5%;
+        --pt-f59e0b: 37.7 92.1% 50.2%;
+        --pt-fbbf24: 43.3 96.4% 56.3%;
+        --pt-fcd34d: 45.9 96.7% 64.5%;
+        --pt-fef3c7: 48.0 96.5% 88.8%;
+        --pt-ffffff: 0.0 0.0% 100.0%;
 
 
         --sfr-241236: 270.0 50.0% 14.1%;

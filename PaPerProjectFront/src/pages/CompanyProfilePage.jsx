@@ -148,10 +148,10 @@ const CompanyProfilePage = () => {
 
           {/* ── Identity banner ── */}
           <div className="relative overflow-hidden rounded-3xl border border-white/[0.08] p-6 sm:p-8"
-               style={{ background: 'linear-gradient(120deg, hsl(var(--brand-600) / 0.16), rgba(79,70,229,0.06) 45%, rgba(255,255,255,0.02))' }}>
+               style={{ background: 'linear-gradient(120deg, hsl(var(--brand-600) / 0.16), rgba(79,70,229,0.06) 45%, hsl(var(--surface-invert) / 0.02))' }}>
             {/* soft grid texture */}
             <div className="pointer-events-none absolute inset-0 opacity-[0.15]"
-                 style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.35) 1px, transparent 1px)', backgroundSize: '44px 44px', maskImage: 'radial-gradient(circle at 30% 20%, black, transparent 70%)' }} />
+                 style={{ backgroundImage: 'linear-gradient(hsl(var(--surface-invert) / .35) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--surface-invert) / .35) 1px, transparent 1px)', backgroundSize: '44px 44px', maskImage: 'radial-gradient(circle at 30% 20%, black, transparent 70%)' }} />
             <div className="relative flex flex-col sm:flex-row sm:items-center gap-5">
               {/* Monogram */}
               <div className="h-20 w-20 sm:h-24 sm:w-24 rounded-2xl flex items-center justify-center text-white font-extrabold text-4xl select-none shrink-0"
@@ -198,7 +198,7 @@ const CompanyProfilePage = () => {
 
             {/* Stat strip */}
             <div className="relative mt-6 grid grid-cols-2 sm:grid-cols-3 gap-px rounded-xl overflow-hidden border border-white/[0.06]"
-                 style={{ background: 'rgba(255,255,255,0.06)' }}>
+                 style={{ background: 'hsl(var(--surface-invert) / 0.06)' }}>
               {[
                 { icon: UserIcon, label: 'Signed in as', value: u.fullName || u.email },
                 { icon: ShieldCheck, label: 'Role', value: (u.role || 'admin'), cap: true },
@@ -375,7 +375,7 @@ const IntegrationsTab = () => {
 
       {/* Placeholder for future integrations — keeps the grid balanced and hints at more */}
       <div className="rounded-2xl border border-dashed border-white/[0.08] p-5 flex flex-col items-center justify-center text-center min-h-[150px]"
-           style={{ background: 'rgba(255,255,255,0.015)' }}>
+           style={{ background: 'hsl(var(--surface-invert) / 0.015)' }}>
         <Plug className="h-6 w-6 text-white/25 mb-2" />
         <p className="text-sm text-white/40">More integrations coming soon</p>
       </div>

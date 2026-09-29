@@ -530,7 +530,7 @@ const AiInterviewQuestions = () => {
         style={{
           minWidth: showChatHistory ? '16rem' : '0',
           background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
-          borderRight: '1.5px solid rgba(255,255,255,0.10)',
+          borderRight: '1.5px solid hsl(var(--surface-invert) / 0.10)',
           boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
           borderTopLeftRadius: 16,
           borderBottomLeftRadius: 16,
@@ -723,12 +723,12 @@ const AiInterviewQuestions = () => {
               boxShadow: '0 0 8px 2px hsl(var(--brand-accent) / 0.27)',
             }} />
             <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
-              <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
+              <Bot className="h-5 w-5" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
             </div>
             <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
                 Recruitment Research Assistance
-                <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}>AI-Powered</span>
+                <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: 'hsl(var(--pt-a78bfa))' }}>AI-Powered</span>
               </CardTitle>
               <CardDescription className="text-white/50 text-sm mt-0.5">
                 Ask anything about candidates, jobs, interview plans, and recruitment performance.
@@ -761,10 +761,10 @@ const AiInterviewQuestions = () => {
             {currentMessages.length === 0 && !loading && (
               <div id="REC-aiquestions-messages-empty" data-testid="REC-aiquestions-messages-empty" className="flex flex-col items-center justify-center min-h-[420px] text-center px-4">
                 <div className="h-20 w-20 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'hsl(var(--brand-600) / 0.12)' }}>
-                  <Bot className="h-10 w-10" style={{ color: '#a78bfa' }} />
+                  <Bot className="h-10 w-10" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
                 </div>
                 <h2 className="text-3xl font-semibold tracking-tight text-white">Ready to Research?</h2>
-                <p className="mt-3 max-w-lg" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                <p className="mt-3 max-w-lg" style={{ color: 'hsl(var(--surface-invert) / 0.45)' }}>
                   Ask about hiring trends, candidate insights, role fit, and recruitment optimization.
                 </p>
                 <div className="grid grid-cols-2 gap-3 mt-8 w-full max-w-md">
@@ -778,11 +778,11 @@ const AiInterviewQuestions = () => {
                         type="button"
                         onClick={() => setQuestion(topic.prompt)}
                         className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-left transition-all duration-200 text-white/90 hover:text-white"
-                        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+                        style={{ background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.08)' }}
                         onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.borderColor = 'rgba(139,92,246,0.3)'; }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
                       >
-                        <TopicIcon className="h-5 w-5 shrink-0" style={{ color: '#a78bfa' }} />
+                        <TopicIcon className="h-5 w-5 shrink-0" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
                         {topic.label}
                       </button>
                     );
@@ -920,7 +920,7 @@ const AiInterviewQuestions = () => {
                   )}
                 </div>
                 {msg.ts && (
-                  <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '3px', paddingLeft: msg.role === 'user' ? 0 : '4px', paddingRight: msg.role === 'user' ? '4px' : 0 }}>
+                  <span style={{ fontSize: '0.7rem', color: 'hsl(var(--surface-invert) / 0.3)', marginTop: '3px', paddingLeft: msg.role === 'user' ? 0 : '4px', paddingRight: msg.role === 'user' ? '4px' : 0 }}>
                     {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 )}
@@ -929,8 +929,8 @@ const AiInterviewQuestions = () => {
             {loading && (
               <div id="REC-aiquestions-messages-loading" data-testid="REC-aiquestions-messages-loading" className="flex justify-start">
                 <div className="rounded-2xl px-4 py-3 flex items-center gap-2" style={{ background: 'hsl(var(--sfr-120c28) / 0.97)', border: '1px solid rgba(167,139,250,0.2)' }}>
-                  <Loader2 className="h-4 w-4 animate-spin" style={{ color: '#a78bfa' }} />
-                  <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }}>Analyzing...</span>
+                  <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
+                  <span style={{ fontSize: '0.85rem', color: 'hsl(var(--surface-invert) / 0.6)' }}>Analyzing...</span>
                 </div>
               </div>
             )}
@@ -956,7 +956,7 @@ const AiInterviewQuestions = () => {
                 className="mx-4 mb-4 flex items-center gap-2.5 rounded-[28px] px-2.5 py-2.5"
                 style={{
                   background: 'var(--panel-3)',
-                  border: '1.5px solid rgba(255,255,255,0.08)',
+                  border: '1.5px solid hsl(var(--surface-invert) / 0.08)',
                   boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
                 }}
               >
@@ -970,11 +970,11 @@ const AiInterviewQuestions = () => {
                     background: 'var(--sfc-111118)',
                     border: '1.5px solid rgba(139, 92, 246, 0.55)',
                     boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
-                    color: '#e2e2f0',
+                    color: 'hsl(var(--pt-e2e2f0))',
                   }}
                 >
                   <div className="flex items-center gap-2">
-                    <SelectedModeIcon className="h-4 w-4" style={{ color: '#a78bfa' }} />
+                    <SelectedModeIcon className="h-4 w-4" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
                     <SelectValue placeholder="Search" />
                   </div>
                 </SelectTrigger>
@@ -984,7 +984,7 @@ const AiInterviewQuestions = () => {
                   style={{
                     background: 'var(--panel-4)',
                     border: '1px solid rgba(139, 92, 246, 0.25)',
-                    color: '#e2e2f0',
+                    color: 'hsl(var(--pt-e2e2f0))',
                   }}
                 >
                   {INPUT_MODE_OPTIONS.map((mode) => {
@@ -1013,7 +1013,7 @@ const AiInterviewQuestions = () => {
                 style={{
                   background: 'var(--sfc-0e0e14)',
                   boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  border: '1px solid hsl(var(--surface-invert) / 0.1)',
                   borderLeftColor: 'rgba(139, 92, 246, 0.45)',
                 }}
               >
@@ -1027,7 +1027,7 @@ const AiInterviewQuestions = () => {
                   rows={1}
                   disabled={loading}
                   className="recruit-dark-input flex-1 w-full min-h-[44px] h-11 max-h-32 resize-none border-0 bg-transparent text-sm py-3 px-4 focus-visible:ring-0 focus-visible:ring-offset-0"
-                  style={{ color: 'rgba(255,255,255,0.85)', }}
+                  style={{ color: 'hsl(var(--surface-invert) / 0.85)', }}
                 />
               </div>
 
@@ -1042,7 +1042,7 @@ const AiInterviewQuestions = () => {
                 style={{
                   background: 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, #6d28d9 50%, #5b21b6 100%)',
                   boxShadow: '0 0 16px hsl(var(--brand-600) / 0.35), 0 2px 8px rgba(0,0,0,0.3)',
-                  color: '#ffffff',
+                  color: 'hsl(var(--pt-ffffff))',
                 }}
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
