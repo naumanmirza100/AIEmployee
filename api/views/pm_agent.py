@@ -836,7 +836,10 @@ def project_pilot(request):
         # `project_pilot_confirm` below. Leaving a gap blank stays allowed —
         # they just have to say so rather than find out afterwards.
         if not _is_true(request.data.get("confirm")):
-            gaps = drafts.inspect(actions, available_users)
+            # `project` is the existing one the user scoped the pilot to, if
+            # any; its dates bound the suggested task deadlines.
+            gaps = drafts.inspect(actions, available_users,
+                                  today=timezone.localdate(), project=project)
             if gaps["needs_input"]:
                 return Response(
                     {
