@@ -191,3 +191,10 @@ MDS/
 .playwright-mcp/
 sheet-*.png
 sort-*.png
+
+# Celery SQLite broker/results: local dev runtime state (the server uses Redis)
+celery_broker.db
+celery_results.db
+
+# Frontend build zipped for upload to Hostinger; rebuild it with npm run build
+frontend-dist.zip
