@@ -102,7 +102,7 @@ const HRAgentPage = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Button onClick={() => navigate('/')} className="w-full">
+              <Button onClick={() => navigate('/#ai-modules?agent=hr_agent')} className="w-full">
                 Go to Home Page to Purchase
               </Button>
               <Button onClick={() => navigate('/company/dashboard')} variant="outline" className="w-full">

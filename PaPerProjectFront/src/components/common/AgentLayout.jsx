@@ -140,7 +140,13 @@ const AgentLayout = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button onClick={() => navigate('/')} className="w-full">
+            {/* Deep link straight to this agent's card on the landing page rather
+                than dropping the visitor at the top of it — HomePage scrolls to
+                the section and ModuleCardsSection rings the matching card. */}
+            <Button
+              onClick={() => navigate(`/#ai-modules${meta.moduleKey ? `?agent=${encodeURIComponent(meta.moduleKey)}` : ''}`)}
+              className="w-full"
+            >
               Go to Home Page to Purchase
             </Button>
             <Button onClick={() => navigate('/company/dashboard')} variant="outline" className="w-full">
