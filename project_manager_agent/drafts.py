@@ -136,6 +136,33 @@ def inspect(actions, available_users=None):
     }
 
 
+def chat_text(actions, answer=None):
+    """The sentence to show above the gap form.
+
+    The agent's `answer` is often not prose at all but the JSON the actions
+    were parsed out of. Passed through, it put a screen of raw JSON in the chat
+    above the form. Use it only when it reads as a sentence; otherwise say in
+    plain words what is about to be created.
+    """
+    text = (answer or '').strip()
+    if text and text[0] not in '[{' and '"action"' not in text:
+        return text
+
+    counts = {'create_project': 0, 'create_task': 0}
+    for action in actions or []:
+        if isinstance(action, dict) and action.get('action') in counts:
+            counts[action['action']] += 1
+
+    parts = []
+    for kind, noun in (('create_project', 'project'), ('create_task', 'task')):
+        n = counts[kind]
+        if n:
+            parts.append('%d %s%s' % (n, noun, '' if n == 1 else 's'))
+    what = ' and '.join(parts) or 'this'
+    return ("Here's the plan: %s. A few details are missing — fill in what you "
+            "know below, then confirm." % what)
+
+
 def apply_answers(actions, answers):
     """Merge the user's form answers back onto the proposed actions.
 

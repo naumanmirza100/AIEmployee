@@ -840,7 +840,11 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                         if (looksLikeJson) return null;
                         return <p className="text-sm whitespace-pre-wrap">{a}</p>;
                       })()}
-                      {!(msg.responseData?.answer && typeof msg.responseData.answer === 'string' && !msg.responseData.answer.trim().startsWith('[') && !msg.responseData.answer.trim().startsWith('{')) && !(msg.responseData?.action_results?.length > 0) && msg.content && (
+                      {/* Fallback to the raw message text — but never for a draft awaiting
+                          details: its content can be the agent's JSON, and the gap form
+                          below already explains itself. Also covers drafts saved in chat
+                          history before the backend started sending a readable sentence. */}
+                      {!msg.responseData?.needs_input && !(msg.responseData?.answer && typeof msg.responseData.answer === 'string' && !msg.responseData.answer.trim().startsWith('[') && !msg.responseData.answer.trim().startsWith('{')) && !(msg.responseData?.action_results?.length > 0) && msg.content && (
                         <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                       )}
                       {(msg.responseData?.action_results?.length > 0) && (

@@ -842,7 +842,9 @@ def project_pilot(request):
                     {
                         "status": "needs_input",
                         "data": {
-                            "answer": result.get("answer") or "",
+                            # Not the raw `answer`: that is usually the JSON the
+                            # actions came from, and it rendered as a wall of code.
+                            "answer": drafts.chat_text(actions, result.get("answer")),
                             "actions": actions,
                             "project_id": project.id if project else None,
                             **gaps,
