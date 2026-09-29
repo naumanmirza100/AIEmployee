@@ -96,6 +96,19 @@ class HRMeetingDetailsTests(HRTestCase):
         self.assertIn('who should attend, when it should be and how long it should last',
                       data['reply'])
 
+    def test_a_bare_request_gets_the_form_even_if_the_model_says_clarify(self):
+        # The model likes to answer an incomplete request in prose
+        # ("Sure — who with, and when?"), which showed no form.
+        data = self.ask('Schedule a meeting', intent='clarify', reply='Who with, and when?')
+        self.assertEqual(data['action'], 'needs_input')
+        self.assertEqual(data['missing'], ['attendees', 'time', 'duration'])
+
+    def test_clarify_is_left_alone_when_it_is_not_a_new_meeting(self):
+        for message in ('Reschedule my meeting with Ali Staff', 'What meetings do I have?'):
+            with self.subTest(message=message):
+                data = self.ask(message, intent='clarify', reply='Which one?')
+                self.assertEqual((data['action'], data['reply']), ('clarify', 'Which one?'))
+
     def test_a_missing_time_offers_free_weekday_slots(self):
         data = self.ask('Schedule a 1:1 with Ali Staff for 30 minutes')
         self.assertEqual(data['missing'], ['time'])

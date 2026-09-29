@@ -2167,6 +2167,15 @@ def _hr_people(company, participant_employee_ids, organizer_employee_id=None):
 
 _HR_DURATION_CHOICES = [15, 30, 45, 60, 90, 120]
 
+# "schedule / book / set up / arrange ... a meeting / 1:1 / interview ...".
+# `\bschedule` deliberately misses "reschedule", which is an update.
+_HR_NEW_MEETING_RE = re.compile(
+    r"\b(?:schedule|book|set\s*up|arrange|organi[sz]e|plan)\b.*?"
+    r"\b(?:meeting|meet|1:1|1-1|one[-\s]on[-\s]one|call|interview|review|session|"
+    r"check[-\s]?in|sync|catch[-\s]?up|hearing|orientation|onboarding|consult\w*)\b",
+    re.IGNORECASE,
+)
+
 
 def _hr_slot_options(people, duration, tz_name, days=3, per_day=4):
     """Free start times for `people` (logins) on the next few weekdays, as
@@ -3494,6 +3503,12 @@ def hr_meeting_schedule(request):
                 }})
 
         intent = (parsed.get('intent') or 'clarify').lower()
+        # An incomplete request ("schedule a meeting") is exactly what the
+        # details form is for, but the model tends to call it 'clarify' and
+        # answer in prose, and then no form appears. A plain request to set
+        # up a meeting is a create, whatever the model says.
+        if intent == 'clarify' and _HR_NEW_MEETING_RE.search(message):
+            intent = 'create'
         meeting_payload = None
 
         # ---- Deterministic participant resolution ------------------------
