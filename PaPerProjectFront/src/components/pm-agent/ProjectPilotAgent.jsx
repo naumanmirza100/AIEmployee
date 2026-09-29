@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import PilotGapForm from './PilotGapForm';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -136,6 +137,41 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   // through the normal chat path; the LLM sees the previous confirmation
   // card (which lists the proposed tasks) in chat history and regenerates
   // actions accordingly.
+  // Apply a proposal the user filled in and confirmed. Tracks which message's
+  // card is in flight / finished so the chat can disable just that one rather
+  // than the whole conversation.
+  const [confirmingIndex, setConfirmingIndex] = useState(null);
+  const [confirmedIndexes, setConfirmedIndexes] = useState(() => new Set());
+
+  const confirmPilotDraft = async (messageIndex, draft, answers) => {
+    try {
+      setConfirmingIndex(messageIndex);
+      const response = await pmAgentService.projectPilotConfirm(draft.actions || [], answers);
+      if (response.status !== 'success') {
+        throw new Error(response.message || 'Failed to create');
+      }
+      const results = response.data?.action_results || [];
+      const failed = results.filter((r) => !r.success);
+      setConfirmedIndexes((prev) => new Set(prev).add(messageIndex));
+      toast({
+        title: failed.length ? 'Created with problems' : 'Created',
+        description: failed.length
+          ? `${results.length - failed.length} created, ${failed.length} failed: ${failed[0].error}`
+          : response.data?.answer || 'Done.',
+        variant: failed.length ? 'destructive' : undefined,
+      });
+      if (results.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: apiErrorMessage(error, 'Failed to create'),
+        variant: 'destructive',
+      });
+    } finally {
+      setConfirmingIndex(null);
+    }
+  };
+
   const submitPilotChat = async (followUpText, extraContent = '') => {
     if (!followUpText || !followUpText.trim()) return;
     const q = followUpText.trim();
@@ -144,6 +180,21 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     try {
       setLoading(true);
       const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      // The proposal is missing details we ask about. Show it as a form
+      // instead of applying it; PilotGapForm posts it back once confirmed.
+      if (response.status === 'needs_input') {
+        const data = response.data || {};
+        await addMessagePairToChat(
+          { role: 'user', content: q },
+          {
+            role: 'assistant',
+            content: data.answer || 'I need a few more details before I create this.',
+            responseData: { ...data, needs_input: true, project_id: projectId, project_title: projectTitle },
+          },
+          q,
+        );
+        return;
+      }
       if (response.status === 'success') {
         const data = response.data || response;
         const answerText = data.answer || '';
@@ -221,6 +272,21 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     try {
       setLoading(true);
       const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      // The proposal is missing details we ask about. Show it as a form
+      // instead of applying it; PilotGapForm posts it back once confirmed.
+      if (response.status === 'needs_input') {
+        const data = response.data || {};
+        await addMessagePairToChat(
+          { role: 'user', content: q },
+          {
+            role: 'assistant',
+            content: data.answer || 'I need a few more details before I create this.',
+            responseData: { ...data, needs_input: true, project_id: projectId, project_title: projectTitle },
+          },
+          q,
+        );
+        return;
+      }
       if (response.status === 'success') {
         const data = response.data || response;
         const answerText = data.answer || '';
@@ -473,14 +539,14 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       <div className="flex w-full max-w-full relative max-h-[calc(100vh-40px)]">
         <div
           data-tour-pm-pp="sidebar"
-          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
+          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_hsl(var(--sfr-5024b4) / 0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
-            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
-            borderRight: '1.5px solid rgba(255,255,255,0.10)',
-            boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
+            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
+            borderRight: '1.5px solid hsl(var(--surface-invert) / 0.10)',
+            boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
             borderTopLeftRadius: 16,
             borderBottomLeftRadius: 16,
             backdropFilter: 'blur(12px)',
@@ -492,7 +558,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             <div
               className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
               style={{
-                background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)',
+                background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)',
                 borderTopLeftRadius: 16,
               }}
             >
@@ -516,7 +582,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                   className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
                   style={{
                     border: '1.5px solid rgba(139,92,246,0.22)',
-                    background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                    background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)',
                     boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
                     backdropFilter: 'blur(4px)',
                     WebkitBackdropFilter: 'blur(4px)',
@@ -558,7 +624,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                   className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
                   style={{
                     border: '1.5px solid rgba(139,92,246,0.22)',
-                    background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)',
+                    background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)',
                     boxShadow: '0 1px 8px 0 rgba(139,92,246,0.08) inset',
                     backdropFilter: 'blur(4px)',
                     WebkitBackdropFilter: 'blur(4px)',
@@ -607,7 +673,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                 <div
                   className="p-2 space-y-1"
                   style={{
-                    background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)',
+                    background: 'linear-gradient(180deg, hsl(var(--sfr-241236) / 0.10) 0%, hsl(var(--sfr-18122b) / 0.18) 100%)',
                     borderRadius: 12,
                   }}
                 >
@@ -637,7 +703,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           boxShadow:
                             selectedChatId === c.id
                               ? '0 0 12px 0 rgba(139,92,246,0.18), 0 1.5px 0 0 rgba(120,80,255,0.10) inset'
-                              : '0 1px 2px 0 rgba(36,18,54,0.08) inset',
+                              : '0 1px 2px 0 hsl(var(--sfr-241236) / 0.08) inset',
                           borderWidth: 1.5,
                         }}
                       >
@@ -690,14 +756,14 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                 }}
               />
               <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
-                <Bot className="h-5 w-5" style={{ color: '#a78bfa' }} />
+                <Bot className="h-5 w-5" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
               </div>
               <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
                   Project Pilot Agent
                   <span
                     className="text-[10px] rounded-full px-2.5 py-0.5 font-medium"
-                    style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}
+                    style={{ background: 'hsl(var(--brand-600) / 0.15)', color: 'hsl(var(--pt-a78bfa))' }}
                   >
                     AI-Powered
                   </span>
@@ -774,7 +840,11 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                         if (looksLikeJson) return null;
                         return <p className="text-sm whitespace-pre-wrap">{a}</p>;
                       })()}
-                      {!(msg.responseData?.answer && typeof msg.responseData.answer === 'string' && !msg.responseData.answer.trim().startsWith('[') && !msg.responseData.answer.trim().startsWith('{')) && !(msg.responseData?.action_results?.length > 0) && msg.content && (
+                      {/* Fallback to the raw message text — but never for a draft awaiting
+                          details: its content can be the agent's JSON, and the gap form
+                          below already explains itself. Also covers drafts saved in chat
+                          history before the backend started sending a readable sentence. */}
+                      {!msg.responseData?.needs_input && !(msg.responseData?.answer && typeof msg.responseData.answer === 'string' && !msg.responseData.answer.trim().startsWith('[') && !msg.responseData.answer.trim().startsWith('{')) && !(msg.responseData?.action_results?.length > 0) && msg.content && (
                         <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                       )}
                       {(msg.responseData?.action_results?.length > 0) && (
@@ -870,6 +940,14 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           was ambiguous (no explicit "create" verb) or
                           duplicates an existing project. User picks how to
                           proceed via clickable options. */}
+                      {msg.responseData?.needs_input && (
+                        <PilotGapForm
+                          data={msg.responseData}
+                          busy={confirmingIndex === i}
+                          done={confirmedIndexes.has(i)}
+                          onConfirm={(answers) => confirmPilotDraft(i, msg.responseData, answers)}
+                        />
+                      )}
                       {msg.responseData?.confirmation_required && (() => {
                         const conf = msg.responseData.confirmation_required;
                         const similar = conf.similar_projects || [];
@@ -945,11 +1023,11 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
               className="shrink-0"
               style={{
                 background: 'var(--panel-3)',
-                borderTop: '1px solid rgba(255,255,255,0.08)',
+                borderTop: '1px solid hsl(var(--surface-invert) / 0.08)',
               }}
             >
             {/* Compact input area: project select + file upload + textarea */}
-            <div className="mx-4 my-3 rounded-xl px-3 py-3" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="mx-4 my-3 rounded-xl px-3 py-3" style={{ border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
             {/* Top row: project select + file upload side by side */}
             <div className="flex items-center gap-2 mb-2">
               <div data-tour-pm-pp="project-select" className="flex items-center gap-1.5 flex-1 min-w-0">

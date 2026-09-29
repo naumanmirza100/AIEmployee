@@ -295,12 +295,8 @@ const ModuleCard = ({
           ) : !isLoggedIn ? (
             <Button
               onClick={handleBuyClick}
-              className={cn(
-                "w-full group",
-                highlight 
-                  ? "bg-primary hover:bg-primary/90" 
-                  : "bg-secondary hover:bg-secondary/80"
-              )}
+              variant={highlight ? 'default' : 'secondary'}
+              className="w-full group"
               size="lg"
             >
               <Lock className="mr-2 h-4 w-4" />
@@ -310,12 +306,12 @@ const ModuleCard = ({
             <Button
               onClick={handleBuyClick}
               disabled={isPurchasing || isChecking || plansLoading || plans.length === 0}
-              className={cn(
-                "w-full group",
-                highlight
-                  ? "bg-primary hover:bg-primary/90"
-                  : "bg-secondary hover:bg-secondary/80"
-              )}
+              // Use the button's own variants rather than overriding just the
+              // background. Overriding `bg-` alone left the default variant's
+              // `text-primary-foreground` in place — white text on a near-white
+              // secondary fill, so the label vanished in light mode.
+              variant={highlight ? 'default' : 'secondary'}
+              className="w-full group"
               size="lg"
             >
               {isPurchasing ? (

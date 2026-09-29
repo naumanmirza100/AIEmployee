@@ -39,6 +39,7 @@ import {
   Sparkles, CheckCircle, XCircle, Clock, ArrowRightLeft,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
+import MeetingDraftForm from '@/components/common/MeetingDraftForm';
 import InfoHint from '../frontline/InfoHint';
 import { HR_HINTS } from './hrTutorialSteps';
 
@@ -216,7 +217,7 @@ export default function HRMeetingScheduler() {
     }
   };
 
-  const handleSend = async (overrideMsg = null) => {
+  const handleSend = async (overrideMsg = null, extra = {}) => {
     const msg = (typeof overrideMsg === 'string' ? overrideMsg : input).trim();
     if (!msg || loading) return;
     if (typeof overrideMsg !== 'string') setInput('');
@@ -234,7 +235,7 @@ export default function HRMeetingScheduler() {
     try {
       const history = (selectedChat?.messages || []).slice(-6)
         .map((m) => ({ role: m.role, content: m.content }));
-      const res = await hrAgentService.hrMeetingSchedule(msg, history);
+      const res = await hrAgentService.hrMeetingSchedule(msg, history, extra);
       const data = res?.data || {};
       const reply = data.reply || 'Done.';
 
@@ -248,6 +249,11 @@ export default function HRMeetingScheduler() {
           action: data.action,
           needsTime: !!data.needs_time,
           pendingIntent: data.pending_intent || null,
+          needsInput: !!data.needs_input,
+          draft: data.draft || null,
+          missing: data.missing || [],
+          options: data.options || null,
+          note: data.note || null,
         },
       };
       // Drop optimistic before persisting
@@ -485,18 +491,18 @@ export default function HRMeetingScheduler() {
         {/* SIDEBAR */}
         <div
           data-tour-hrmeet="sidebar"
-          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] overflow-hidden transition-all duration-300 ease-in-out ${
+          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_hsl(var(--sfr-5024b4) / 0.18)] overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
-            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
+            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
             backdropFilter: 'blur(12px)',
           }}
         >
           <div className="w-64 h-full flex flex-col">
             <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
-                 style={{ background: 'linear-gradient(180deg, rgba(60,30,90,0.22) 0%, rgba(36,18,54,0.85) 100%)' }}>
+                 style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)' }}>
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
                   <span className="text-base font-semibold text-white/90 tracking-wide">Meetings</span>
@@ -510,7 +516,7 @@ export default function HRMeetingScheduler() {
 
               {showSidebarSearch ? (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
-                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)' }}>
+                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)' }}>
                   <input autoFocus value={sidebarSearch} onChange={(e) => setSidebarSearch(e.target.value)}
                     placeholder="Search..." className="flex-1 bg-transparent outline-none text-white/90 text-sm px-2 py-1.5 placeholder-white/40" />
                   <button onClick={() => { setSidebarSearch(''); setShowSidebarSearch(false); }}
@@ -649,6 +655,27 @@ export default function HRMeetingScheduler() {
                             <>
                               <div className="prose prose-invert max-w-none"
                                    dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.content) }} />
+                              {msg.responseData?.needsInput && msg.responseData.draft && idx === currentMessages.length - 1 && (
+                                <MeetingDraftForm
+                                  draft={msg.responseData.draft}
+                                  missing={msg.responseData.missing}
+                                  options={msg.responseData.options || {}}
+                                  note={msg.responseData.note}
+                                  busy={loading}
+                                  onConfirm={(edited, iso) => {
+                                    const pretty = new Date(iso).toLocaleString(undefined, {
+                                      weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+                                    });
+                                    const who = (edited.invitee_names || []).join(', ');
+                                    // Readable line for the chat log; the booking itself is
+                                    // the reviewed draft, sent as data.
+                                    handleSend(`Book it: with ${who}, ${pretty}, ${edited.duration_minutes} minutes.`, {
+                                      pending_intent: edited,
+                                      proposed_time: iso,
+                                    });
+                                  }}
+                                />
+                              )}
                               {msg.responseData?.needsTime && idx === currentMessages.length - 1 && (
                                 <NeedsTimePicker
                                   pendingIntent={msg.responseData.pendingIntent}
@@ -663,7 +690,13 @@ export default function HRMeetingScheduler() {
                                     });
                                     const who = names.length ? ` with ${names.join(', ')}` : '';
                                     const dur = pi.duration_minutes ? ` for ${pi.duration_minutes} minutes` : '';
-                                    handleSend(`Schedule the meeting${who} on ${pretty} (${datetimeIso})${dur}.`);
+                                    // The sentence is only for the chat log; the time and the
+                                    // already-understood request go as data, so the backend
+                                    // finishes without re-parsing this line with the model.
+                                    handleSend(`Schedule the meeting${who} on ${pretty}${dur}.`, {
+                                      pending_intent: pi,
+                                      proposed_time: datetimeIso,
+                                    });
                                   }}
                                 />
                               )}
@@ -1138,12 +1171,11 @@ export default function HRMeetingScheduler() {
 // half-hour slot; caller re-submits the message via handleSend on confirm.
 function NeedsTimePicker({ pendingIntent, disabled, onConfirm }) {
   const [datetime, setDatetime] = useState(() => {
+    // 09:00 tomorrow — see the matching picker in pm-agent/MeetingScheduler.
+    // "This time tomorrow, rounded" rolled into midnight after about 23:30.
     const t = new Date();
     t.setDate(t.getDate() + 1);
-    t.setMinutes(t.getMinutes() < 30 ? 30 : 0);
-    if (t.getMinutes() === 0) t.setHours(t.getHours() + 1);
-    t.setSeconds(0);
-    t.setMilliseconds(0);
+    t.setHours(9, 0, 0, 0);
     // <input type="datetime-local"> wants local YYYY-MM-DDTHH:MM without seconds
     const pad = (n) => String(n).padStart(2, '0');
     return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;

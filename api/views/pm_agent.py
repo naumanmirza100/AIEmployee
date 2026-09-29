@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
+from project_manager_agent import drafts
 from project_manager_agent.models import (
     PMKnowledgeQAChat,
     PMKnowledgeQAChatMessage,
@@ -330,6 +331,13 @@ def _ensure_project_manager(user):
         return profile.is_project_manager()
     except Exception:
         return False
+
+
+def _is_true(value):
+    """Accept the several shapes a browser sends a boolean in."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 def _build_available_users(project_id=None, project=None, company_user=None):
@@ -814,6 +822,40 @@ def project_pilot(request):
             result["answer"] = ""
 
         logger.info(f"Processing {len(actions)} actions from project pilot agent")
+
+        # ---- Missing-detail check -------------------------------------------
+        # Before writing anything, check the agent actually filled in the
+        # details we insist on: who a task is for, and when things are due. It
+        # only knows what the user's sentence mentioned, so "make me a project
+        # for the rebuild" used to become a project with no deadline and a pile
+        # of unassigned tasks, with nothing said about it.
+        #
+        # When something is missing we return the proposal instead of applying
+        # it. The chat renders the gaps as a form; the user fills in what they
+        # want to and confirms, and the answers come back to
+        # `project_pilot_confirm` below. Leaving a gap blank stays allowed —
+        # they just have to say so rather than find out afterwards.
+        if not _is_true(request.data.get("confirm")):
+            # `project` is the existing one the user scoped the pilot to, if
+            # any; its dates bound the suggested task deadlines.
+            gaps = drafts.inspect(actions, available_users,
+                                  today=timezone.localdate(), project=project)
+            if gaps["needs_input"]:
+                return Response(
+                    {
+                        "status": "needs_input",
+                        "data": {
+                            # Not the raw `answer`: that is usually the JSON the
+                            # actions came from, and it rendered as a wall of code.
+                            "answer": drafts.chat_text(actions, result.get("answer")),
+                            "actions": actions,
+                            "project_id": project.id if project else None,
+                            **gaps,
+                        },
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
         
         # ---- Write phase ----------------------------------------------------
         # Same guarantee as project_manager_agent/project_pilot_pipeline.py: one
@@ -3230,6 +3272,133 @@ def _extract_text_from_file(file):
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
+def project_pilot_confirm(request):
+    """Create what `project_pilot` proposed, once the user has confirmed it.
+
+    `project_pilot` returns `status: needs_input` when the agent left out a
+    detail we insist on. The chat asks for those details and posts the whole
+    proposal back here with the answers merged in.
+
+    No model is called: the actions were already agreed, so re-asking would
+    risk getting a different plan than the one on screen. Only `create_project`
+    and `create_task` are accepted, because those are the only actions the gap
+    check can hold back — anything else never reaches this path and is ignored
+    rather than quietly executed.
+
+    Creation goes through the service layer, so this endpoint gets the same
+    validation, tenancy checks and audit entries as the dashboard's own create
+    buttons. A gap the user chose to leave blank stays blank; that is a
+    decision they have now made explicitly.
+
+    Body:
+        actions  list    the proposal exactly as it was handed out
+        answers  object  {action_index: {field: value}} from the form
+    """
+    company_user = request.user
+    if not company_user.can_access_project_manager_features():
+        return Response(
+            {"status": "error",
+             "message": "Access denied. Project manager or company user role required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    proposed = request.data.get("actions")
+    if not isinstance(proposed, list) or not proposed:
+        return Response(
+            {"status": "error", "message": "actions is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    actions = drafts.apply_answers(proposed, request.data.get("answers"))
+    actor = pm_services.DashboardActor(company_user, request)
+
+    action_results = []
+    created_project_id = None
+
+    # One transaction for the batch, a savepoint per action: a single bad row
+    # is reported and skipped without abandoning the rest or leaving the
+    # transaction unusable. Same shape as the write phase in `project_pilot`.
+    with transaction.atomic():
+        for action_data in actions:
+            if not isinstance(action_data, dict):
+                continue
+            kind = action_data.get("action")
+
+            if kind == "create_project":
+                try:
+                    with transaction.atomic():
+                        project = pm_services.create_project(actor, {
+                            "name": action_data.get("project_name") or action_data.get("name"),
+                            "description": action_data.get("description"),
+                            "priority": action_data.get("priority"),
+                            "status": action_data.get("status"),
+                            "deadline": action_data.get("deadline") or action_data.get("end_date"),
+                            "start_date": action_data.get("start_date"),
+                            # The chat already showed the name being created, so
+                            # a same-name project is not news worth a second dialog.
+                            "confirm_duplicate_name": True,
+                        })
+                    created_project_id = project.id
+                    action_results.append({
+                        "action": "create_project", "success": True,
+                        "project_id": project.id, "project_name": project.name,
+                    })
+                except pm_services.ServiceError as exc:
+                    action_results.append({
+                        "action": "create_project", "success": False, "error": str(exc),
+                    })
+
+            elif kind == "create_task":
+                try:
+                    with transaction.atomic():
+                        task = pm_services.create_task(actor, {
+                            # Tasks proposed alongside a new project have no
+                            # project_id yet; they belong to the one just made.
+                            "project_id": action_data.get("project_id") or created_project_id,
+                            "title": action_data.get("task_title") or action_data.get("title"),
+                            "description": action_data.get("task_description")
+                                           or action_data.get("description"),
+                            "priority": action_data.get("priority"),
+                            "status": action_data.get("status"),
+                            "assignee_id": action_data.get("assignee_id"),
+                            "due_date": action_data.get("due_date"),
+                            "estimated_hours": action_data.get("estimated_hours"),
+                        })
+                    action_results.append({
+                        "action": "create_task", "success": True,
+                        "task_id": task.id, "task_title": task.title,
+                        "project_id": task.project_id,
+                        "assignee_id": task.assignee_id,
+                    })
+                except pm_services.ServiceError as exc:
+                    action_results.append({
+                        "action": "create_task", "success": False, "error": str(exc),
+                    })
+
+    created = sum(1 for r in action_results if r.get("success"))
+    failed = len(action_results) - created
+    parts = []
+    if created:
+        parts.append(f"Created {created} item{'s' if created != 1 else ''}.")
+    if failed:
+        parts.append(f"{failed} could not be created.")
+
+    return Response(
+        {
+            "status": "success",
+            "data": {
+                "answer": " ".join(parts) or "Nothing to create.",
+                "action_results": action_results,
+                "created_project_id": created_project_id,
+            },
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
 @throttle_classes([PMLLMToolThrottle])
 def project_pilot_from_file(request):
     """
@@ -4321,12 +4490,24 @@ def meeting_schedule(request):
         agent.agent_key_name = 'project_manager_agent'
         agent.timezone_name = tz_name
         current_time = timezone.now().isoformat()
-        result = agent.process(
-            message=message,
-            company_users=project_users_list,
-            current_time=current_time,
-            organizer_id=company_user.id,
-        )
+
+        pending_intent = request.data.get("pending_intent")
+        picked_time = request.data.get("proposed_time")
+        if isinstance(pending_intent, dict) and picked_time:
+            # The user answered the "when?" question with the date picker.
+            # Who and how long were already understood, so finish from those
+            # values rather than asking the model to re-read a sentence built
+            # out of them — that round trip is what used to fail. Invitees are
+            # still re-checked against this company below, like any other.
+            result = agent.schedule_from_pending(
+                pending_intent, picked_time, company_users=project_users_list)
+        else:
+            result = agent.process(
+                message=message,
+                company_users=project_users_list,
+                current_time=current_time,
+                organizer_id=company_user.id,
+            )
 
         action = result.get("action")
         logger.info(f"[MEETING] Agent result: action={action}")
@@ -4620,6 +4801,14 @@ def meeting_schedule(request):
             payload["needs_time"] = True
         if result.get("pending_intent"):
             payload["pending_intent"] = result["pending_intent"]
+        # The details form: who / when / how long, whichever the user didn't
+        # say, plus a draft of everything they did. The form posts `draft`
+        # back as `pending_intent` with a `proposed_time`, which lands on the
+        # model-free path at the top of this view.
+        if result.get("needs_input"):
+            payload["needs_input"] = True
+            for key in ("draft", "missing", "options", "note"):
+                payload[key] = result.get(key)
         return Response({"status": "success", "data": payload}, status=status.HTTP_200_OK)
 
     except KeyServiceError:

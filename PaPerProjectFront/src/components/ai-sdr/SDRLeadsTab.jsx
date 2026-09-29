@@ -246,12 +246,12 @@ async function exportToPdf(leads, filename = 'leads') {
 // Shared styles
 // --------------------------------------------------------------------------
 const cardStyle = {
-  background: 'linear-gradient(135deg, rgba(15,10,31,0.95) 0%, rgba(20,8,40,0.95) 100%)',
+  background: 'linear-gradient(135deg, hsl(var(--sfr-0f0a1f) / 0.95) 0%, hsl(var(--sfr-140828) / 0.95) 100%)',
   border: '1px solid var(--line-1)', borderRadius: 12,
 };
 
 const inputStyle = {
-  background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)',
+  background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)',
   borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
@@ -288,9 +288,9 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
         style={{
           display: 'flex', alignItems: 'center', gap: 7,
           padding: '7px 12px', borderRadius: 9, cursor: 'pointer',
-          background: value ? `${selected?.color}15` : 'rgba(255,255,255,0.04)',
+          background: value ? `${selected?.color}15` : 'hsl(var(--surface-invert) / 0.04)',
           border: `1px solid ${value ? selected?.color + '60' : 'var(--line-1)'}`,
-          color: value ? selected?.color : '#9ca3af',
+          color: value ? selected?.color : 'hsl(var(--pt-9ca3af))',
           fontSize: 13, fontWeight: value ? 600 : 400,
           transition: 'all 0.15s', whiteSpace: 'nowrap',
           minWidth: fullWidth ? 'auto' : 120, width: fullWidth ? '100%' : 'auto',
@@ -320,7 +320,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
                   display: 'flex', alignItems: 'center', gap: 10,
                   width: '100%', padding: '9px 14px', border: 'none', cursor: 'pointer',
                   background: isSel ? `${opt.color}18` : 'transparent',
-                  borderBottom: idx < options.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                  borderBottom: idx < options.length - 1 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none',
                   transition: 'background 0.1s',
                 }}
                 onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
@@ -328,7 +328,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
               >
                 <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid var(--line-1)' }} />
                 {opt.Icon && <opt.Icon size={13} style={{ color: opt.color, flexShrink: 0 }} />}
-                <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: isSel ? opt.color : opt.key ? '#d1d5db' : '#6b7280', fontWeight: isSel ? 600 : 400 }}>{opt.label}</span>
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: isSel ? opt.color : opt.key ? 'hsl(var(--pt-d1d5db))' : '#6b7280', fontWeight: isSel ? 600 : 400 }}>{opt.label}</span>
                 {isSel && <CheckCircle size={13} style={{ color: opt.color, flexShrink: 0 }} />}
               </button>
             );
@@ -395,12 +395,12 @@ const ExportDropdown = ({ leads, selectedLeads, allLeadsOnPage }) => {
             { key: 'pdf',   Icon: FileText,        label: 'Export as PDF',           color: '#f43f5e' },
           ].map((opt, idx) => (
             <button key={opt.key} onClick={() => doExport(opt.key)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 16px', border: 'none', cursor: 'pointer', background: 'transparent', borderBottom: idx === 0 ? '1px solid rgba(255,255,255,0.04)' : 'none', transition: 'background 0.1s' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '11px 16px', border: 'none', cursor: 'pointer', background: 'transparent', borderBottom: idx === 0 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', transition: 'background 0.1s' }}
               onMouseEnter={e => { e.currentTarget.style.background = `${opt.color}12`; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
             >
               <opt.Icon size={15} style={{ color: opt.color, flexShrink: 0 }} />
-              <span style={{ color: '#d1d5db', fontSize: 13 }}>{opt.label}</span>
+              <span style={{ color: 'hsl(var(--pt-d1d5db))', fontSize: 13 }}>{opt.label}</span>
             </button>
           ))}
         </div>
@@ -468,7 +468,7 @@ const ICPProfilePanel = ({ onSaved }) => {
           {icp ? (
             <span style={{ color: '#10b981', fontSize: 12, padding: '2px 8px', borderRadius: 10, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>{icp.name}</span>
           ) : (
-            <span style={{ color: '#f59e0b', fontSize: 12 }}>Not configured — scoring won't work without this</span>
+            <span style={{ color: 'hsl(var(--pt-f59e0b))', fontSize: 12 }}>Not configured — scoring won't work without this</span>
           )}
         </div>
         <button onClick={() => setOpen(!open)} style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 8, padding: '5px 12px', color: '#a855f7', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -480,7 +480,7 @@ const ICPProfilePanel = ({ onSaved }) => {
       {icp && !open && (
         <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {[...(icp.industries || []), ...(icp.job_titles || [])].slice(0, 6).map(t => (
-            <span key={t} style={{ padding: '2px 8px', borderRadius: 10, fontSize: 11, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)', color: '#c4b5fd' }}>{t}</span>
+            <span key={t} style={{ padding: '2px 8px', borderRadius: 10, fontSize: 11, background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)', color: 'hsl(var(--pt-c4b5fd))' }}>{t}</span>
           ))}
         </div>
       )}
@@ -495,20 +495,20 @@ const ICPProfilePanel = ({ onSaved }) => {
             { k: 'keywords',   l: 'Keywords (comma-separated)',          p: 'B2B, startup, Series A, automation' },
           ].map(({ k, l, p }) => (
             <div key={k}>
-              <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 4 }}>{l}</label>
+              <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 4 }}>{l}</label>
               <input style={inputStyle} placeholder={p} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} />
             </div>
           ))}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             {[{ k: 'company_size_min', l: 'Min Employees', p: '10' }, { k: 'company_size_max', l: 'Max Employees', p: '500' }].map(({ k, l, p }) => (
               <div key={k}>
-                <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 4 }}>{l}</label>
+                <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 4 }}>{l}</label>
                 <input style={inputStyle} type="number" placeholder={p} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} />
               </div>
             ))}
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button onClick={() => setOpen(false)} style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '7px 16px', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+            <button onClick={() => setOpen(false)} style={{ background: 'none', border: '1px solid var(--line-1)', borderRadius: 8, padding: '7px 16px', color: 'hsl(var(--pt-9ca3af))', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
             <button onClick={handleSave} disabled={saving} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', border: 'none', borderRadius: 8, padding: '7px 20px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {saving ? <Loader2 size={12} className="animate-spin" /> : null} Save ICP
             </button>
@@ -530,11 +530,11 @@ const ScoreBar = ({ label, value, max, color, icon: Icon }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           {Icon && <Icon size={11} style={{ color }} />}
-          <span style={{ fontSize: 12, color: '#9ca3af' }}>{label}</span>
+          <span style={{ fontSize: 12, color: 'hsl(var(--pt-9ca3af))' }}>{label}</span>
         </div>
         <span style={{ fontSize: 12, color: 'var(--text-soft)', fontWeight: 600 }}>{value}/{max}</span>
       </div>
-      <div style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.06)' }}>
+      <div style={{ height: 5, borderRadius: 3, background: 'hsl(var(--surface-invert) / 0.06)' }}>
         <div style={{ height: '100%', borderRadius: 3, width: `${pct}%`, background: barColor, transition: 'width 0.4s ease' }} />
       </div>
     </div>
@@ -941,7 +941,7 @@ const SDRLeadsTab = () => {
           <div key={label} style={{ ...cardStyle, padding: '14px 16px', textAlign: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 4 }}>
               {Icon && <Icon size={13} style={{ color }} />}
-              <span style={{ color: '#9ca3af', fontSize: 12 }}>{label}</span>
+              <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12 }}>{label}</span>
             </div>
             <span style={{ color, fontSize: 26, fontWeight: 700 }}>{value}</span>
           </div>
@@ -964,13 +964,13 @@ const SDRLeadsTab = () => {
             </span>
           )}
           {stats.unscored > 0 && stats.unscored > (stats.qualifying || 0) && (
-            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`AI-qualify unscored lead(s) now`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: '#fbbf24', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
+            <Button onClick={handleQualifyAll} disabled={qualifyingAll} title={`AI-qualify unscored lead(s) now`} style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', color: 'hsl(var(--pt-fbbf24))', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px' }}>
               {qualifyingAll ? <Loader2 size={15} className="animate-spin" /> : <Brain size={15} />}
               Qualify now
             </Button>
           )}
           <div style={{ width: 1, height: 28, background: 'var(--line-1)' }} />
-          <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Upload size={14} /> Import CSV
           </Button>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
@@ -983,7 +983,7 @@ const SDRLeadsTab = () => {
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 18px', borderRadius: 12, background: 'linear-gradient(90deg, rgba(168,85,247,0.08), rgba(99,102,241,0.08))', border: '1px solid rgba(168,85,247,0.3)' }}>
-          <span style={{ color: '#c084fc', fontWeight: 700, fontSize: 14 }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''} selected</span>
+          <span style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 700, fontSize: 14 }}>{selectedIds.size} lead{selectedIds.size > 1 ? 's' : ''} selected</span>
           <div style={{ width: 1, height: 20, background: 'var(--line-1)' }} />
           <button onClick={() => setShowBulkDeleteConfirm(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#f87171', fontSize: 13, fontWeight: 600 }}>
             <Trash2 size={13} /> Delete {selectedIds.size} selected
@@ -1010,7 +1010,7 @@ const SDRLeadsTab = () => {
           {(() => {
             const totalActive = activeFiltersCount + (sortBy !== 'score_desc' ? 1 : 0);
             return (
-              <button onClick={() => setFiltersOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap', background: filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.5)' : 'var(--line-1)'}`, color: filtersOpen || totalActive > 0 ? '#c084fc' : '#9ca3af', fontSize: 13, fontWeight: totalActive > 0 ? 600 : 400 }}>
+              <button onClick={() => setFiltersOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap', background: filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.12)' : 'hsl(var(--surface-invert) / 0.04)', border: `1px solid ${filtersOpen || totalActive > 0 ? 'rgba(168,85,247,0.5)' : 'var(--line-1)'}`, color: filtersOpen || totalActive > 0 ? 'hsl(var(--pt-c084fc))' : '#9ca3af', fontSize: 13, fontWeight: totalActive > 0 ? 600 : 400 }}>
                 <SlidersHorizontal size={13} />
                 Filters
                 {totalActive > 0 && <span style={{ background: 'linear-gradient(135deg,#a855f7,#6366f1)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{totalActive}</span>}
@@ -1027,11 +1027,11 @@ const SDRLeadsTab = () => {
         </div>
 
         {filtersOpen && (
-          <div style={{ marginTop: 10, padding: '16px 16px 14px', background: 'linear-gradient(135deg,rgba(10,4,28,0.9),rgba(16,6,38,0.95))', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 11, boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06)' }}>
+          <div style={{ marginTop: 10, padding: '16px 16px 14px', background: 'linear-gradient(135deg,hsl(var(--sfr-0a041c) / 0.9),hsl(var(--sfr-100626) / 0.95))', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 11, boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06)' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
               <div>
                 <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Thermometer size={11} style={{ color: '#f59e0b' }} /> TEMPERATURE
+                  <Thermometer size={11} style={{ color: 'hsl(var(--pt-f59e0b))' }} /> TEMPERATURE
                 </div>
                 <FilterDropdown fullWidth label="All Temperatures" value={filterTemp} onChange={setFilterTemp}
                   options={[
@@ -1075,7 +1075,7 @@ const SDRLeadsTab = () => {
               </div>
               <div>
                 <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <ArrowUpDown size={11} style={{ color: '#a78bfa' }} /> SORT BY
+                  <ArrowUpDown size={11} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> SORT BY
                 </div>
                 <FilterDropdown fullWidth label="Sort by" value={sortBy} onChange={setSortBy} icon={ArrowUpDown}
                   options={[
@@ -1092,7 +1092,7 @@ const SDRLeadsTab = () => {
             {(() => {
               const totalActive = activeFiltersCount + (sortBy !== 'score_desc' ? 1 : 0);
               return totalActive > 0 ? (
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid hsl(var(--surface-invert) / 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <button onClick={() => { setFilterTemp(''); setFilterStatus(''); setFilterSource(''); setSortBy('score_desc'); }}
                     style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 8, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}>
                     <X size={11} /> Clear all
@@ -1106,10 +1106,10 @@ const SDRLeadsTab = () => {
 
         <div style={{ marginTop: 8, fontSize: 12, color: '#4b5563', display: 'flex', alignItems: 'center', gap: 8 }}>
           {loading
-            ? <span style={{ color: '#a78bfa' }}>Loading…</span>
+            ? <span style={{ color: 'hsl(var(--pt-a78bfa))' }}>Loading…</span>
             : <>
                 <span>Showing <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count === 0 ? 0 : ((pagination.page - 1) * pagination.page_size) + 1}–{Math.min(pagination.page * pagination.page_size, pagination.total_count)}</strong> of <strong style={{ color: 'var(--text-soft)' }}>{pagination.total_count.toLocaleString()}</strong> leads</span>
-                {(searchRaw || activeFiltersCount > 0) && <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: '#a78bfa', fontSize: 11 }}>filtered</span>}
+                {(searchRaw || activeFiltersCount > 0) && <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'hsl(var(--pt-a78bfa))', fontSize: 11 }}>filtered</span>}
               </>
           }
         </div>
@@ -1133,7 +1133,7 @@ const SDRLeadsTab = () => {
                 : 'Generate leads from Apollo.io / Apify, import a CSV, or add one manually to get started.'}
             </p>
             {(search || activeFiltersCount > 0) ? (
-              <Button onClick={() => { setSearchRaw(''); setFilterTemp(''); setFilterStatus(''); setFilterSource(''); }} variant="outline" style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>
+              <Button onClick={() => { setSearchRaw(''); setFilterTemp(''); setFilterStatus(''); setFilterSource(''); }} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>
                 Clear filters
               </Button>
             ) : (
@@ -1141,10 +1141,10 @@ const SDRLeadsTab = () => {
                 <Button onClick={openGenModal} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)) 0%,#a855f7 100%)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Zap size={15} /> Generate Leads
                 </Button>
-                <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => setCsvImport({})} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Upload size={15} /> Import CSV
                 </Button>
-                <Button onClick={() => setShowAddModal(true)} variant="outline" style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button onClick={() => setShowAddModal(true)} variant="outline" style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Plus size={15} /> Add Lead
                 </Button>
               </div>
@@ -1174,7 +1174,7 @@ const SDRLeadsTab = () => {
                 const confScore = lead.confidence_score;
                 return (
                   <tr key={lead.id}
-                    style={{ borderBottom: '1px solid rgba(45,31,74,0.4)', cursor: 'pointer', transition: 'background 0.15s', background: isChecked ? 'rgba(168,85,247,0.06)' : 'transparent' }}
+                    style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.4)', cursor: 'pointer', transition: 'background 0.15s', background: isChecked ? 'rgba(168,85,247,0.06)' : 'transparent' }}
                     onMouseEnter={e => { if (!isChecked) e.currentTarget.style.background = 'rgba(168,85,247,0.04)'; }}
                     onMouseLeave={e => { e.currentTarget.style.background = isChecked ? 'rgba(168,85,247,0.06)' : 'transparent'; }}
                   >
@@ -1188,7 +1188,7 @@ const SDRLeadsTab = () => {
                       <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>{lead.company_name}</div>
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
-                      <span style={{ color: '#9ca3af', fontSize: 13 }}>{lead.job_title || '—'}</span>
+                      <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>{lead.job_title || '—'}</span>
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
                       {lead.score != null ? (
@@ -1211,7 +1211,7 @@ const SDRLeadsTab = () => {
                           <Loader2 size={10} className="animate-spin" /> Qualifying…
                         </span>
                       ) : (
-                        <span title="This lead hasn't been AI-qualified yet — click the ✦ Qualify button to score it." style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b', whiteSpace: 'nowrap' }}>
+                        <span title="This lead hasn't been AI-qualified yet — click the ✦ Qualify button to score it." style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: 'hsl(var(--pt-f59e0b))', whiteSpace: 'nowrap' }}>
                           <AlertTriangle size={10} /> Not qualified
                         </span>
                       )}
@@ -1226,13 +1226,13 @@ const SDRLeadsTab = () => {
                       {confScore != null ? (
                         <ConfidenceBadge score={confScore} />
                       ) : hasFlags ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 8, fontSize: 11, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 8, fontSize: 11, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: 'hsl(var(--pt-f59e0b))' }}>
                           <AlertTriangle size={10} /> {(lead.data_quality_flags || []).length} flag{(lead.data_quality_flags || []).length > 1 ? 's' : ''}
                         </span>
                       ) : <span style={{ color: 'var(--line-1)', fontSize: 12 }}>—</span>}
                     </td>
                     <td style={{ padding: '13px 16px' }} onClick={() => setSelectedLead(lead)}>
-                      <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 11, background: 'rgba(255,255,255,0.05)', color: '#6b7280' }}>
+                      <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 11, background: 'hsl(var(--surface-invert) / 0.05)', color: '#6b7280' }}>
                         {SOURCE_LABELS[lead.source] || lead.source}
                       </span>
                     </td>
@@ -1241,11 +1241,11 @@ const SDRLeadsTab = () => {
                         {lead.score == null ? (
                           // Unscored → prominent amber "Qualify" so the user can
                           // score leads that auto-qualify skipped (e.g. AI tokens out).
-                          <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Qualify this lead with AI" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 6, padding: '5px 9px', cursor: 'pointer', color: '#fbbf24', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Qualify this lead with AI" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 6, padding: '5px 9px', cursor: 'pointer', color: 'hsl(var(--pt-fbbf24))', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
                             {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <><Brain size={12} /> Qualify</>}
                           </button>
                         ) : (
-                          <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Re-score with AI" style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: '#c084fc' }}>
+                          <button onClick={() => handleQualifyOne(lead)} disabled={qualifyingId === lead.id} title="Re-score with AI" style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', color: 'hsl(var(--pt-c084fc))' }}>
                             {qualifyingId === lead.id ? <Loader2 size={12} className="animate-spin" /> : <Brain size={12} />}
                           </button>
                         )}
@@ -1295,7 +1295,7 @@ const SDRLeadsTab = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
               <div>
                 <h2 style={{ color: 'var(--text-soft)', fontSize: 18, fontWeight: 700, margin: 0 }}>{selectedLead.full_name}</h2>
-                <p style={{ color: '#9ca3af', fontSize: 14, marginTop: 4 }}>
+                <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 14, marginTop: 4 }}>
                   {selectedLead.job_title}{selectedLead.company_name ? ` @ ${selectedLead.company_name}` : ''}
                 </p>
                 {selectedLead.confidence_score != null && (
@@ -1332,7 +1332,7 @@ const SDRLeadsTab = () => {
                       )}
                     </div>
                     {selectedLead.qualification_reasoning && (
-                      <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.5, margin: 0 }}>{selectedLead.qualification_reasoning}</p>
+                      <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, lineHeight: 1.5, margin: 0 }}>{selectedLead.qualification_reasoning}</p>
                     )}
                   </div>
                 </div>
@@ -1372,7 +1372,7 @@ const SDRLeadsTab = () => {
                   {selectedLead.key_strengths.map((s, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
                       <CheckCircle2 size={13} style={{ color: '#10b981', marginTop: 1, flexShrink: 0 }} />
-                      <span style={{ color: '#d1fae5', fontSize: 13, lineHeight: 1.4 }}>{s}</span>
+                      <span style={{ color: 'hsl(var(--pt-d1fae5))', fontSize: 13, lineHeight: 1.4 }}>{s}</span>
                     </div>
                   ))}
                 </div>
@@ -1386,8 +1386,8 @@ const SDRLeadsTab = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {selectedLead.concerns.map((c, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
-                      <AlertTriangle size={13} style={{ color: '#f59e0b', marginTop: 1, flexShrink: 0 }} />
-                      <span style={{ color: '#fef3c7', fontSize: 13, lineHeight: 1.4 }}>{c}</span>
+                      <AlertTriangle size={13} style={{ color: 'hsl(var(--pt-f59e0b))', marginTop: 1, flexShrink: 0 }} />
+                      <span style={{ color: 'hsl(var(--pt-fef3c7))', fontSize: 13, lineHeight: 1.4 }}>{c}</span>
                     </div>
                   ))}
                 </div>
@@ -1401,7 +1401,7 @@ const SDRLeadsTab = () => {
                   <Route size={13} style={{ color: '#60a5fa' }} />
                   <h4 style={{ color: '#60a5fa', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Recommended Outreach</h4>
                 </div>
-                <p style={{ color: '#bfdbfe', fontSize: 13, lineHeight: 1.5, margin: 0 }}>{selectedLead.outreach_strategy}</p>
+                <p style={{ color: 'hsl(var(--pt-bfdbfe))', fontSize: 13, lineHeight: 1.5, margin: 0 }}>{selectedLead.outreach_strategy}</p>
               </div>
             )}
 
@@ -1409,12 +1409,12 @@ const SDRLeadsTab = () => {
             {(selectedLead.data_quality_flags || []).length > 0 && (
               <div style={{ marginBottom: 20, padding: '10px 14px', borderRadius: 10, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                  <ShieldAlert size={13} style={{ color: '#f59e0b' }} />
-                  <h4 style={{ color: '#f59e0b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Data Quality Issues</h4>
+                  <ShieldAlert size={13} style={{ color: 'hsl(var(--pt-f59e0b))' }} />
+                  <h4 style={{ color: 'hsl(var(--pt-f59e0b))', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Data Quality Issues</h4>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {selectedLead.data_quality_flags.map((flag, i) => (
-                    <span key={i} style={{ color: '#fef3c7', fontSize: 12 }}>• {flag}</span>
+                    <span key={i} style={{ color: 'hsl(var(--pt-fef3c7))', fontSize: 12 }}>• {flag}</span>
                   ))}
                 </div>
               </div>
@@ -1427,7 +1427,7 @@ const SDRLeadsTab = () => {
                 {selectedLead.email && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Mail size={13} style={{ color: '#6b7280' }} />
-                    <a href={`mailto:${selectedLead.email}`} style={{ color: '#c084fc', fontSize: 13 }}>{selectedLead.email}</a>
+                    <a href={`mailto:${selectedLead.email}`} style={{ color: 'hsl(var(--pt-c084fc))', fontSize: 13 }}>{selectedLead.email}</a>
                     {selectedLead.email_bounced && <span style={{ fontSize: 11, color: '#f87171', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 4, padding: '1px 6px' }}>bounced</span>}
                   </div>
                 )}
@@ -1464,7 +1464,7 @@ const SDRLeadsTab = () => {
                 <h4 style={{ color: '#4b5563', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Technologies</h4>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {selectedLead.company_technologies.map(t => (
-                    <span key={t} style={{ padding: '3px 10px', borderRadius: 10, fontSize: 12, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: '#93c5fd' }}>{t}</span>
+                    <span key={t} style={{ padding: '3px 10px', borderRadius: 10, fontSize: 12, background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)', color: 'hsl(var(--pt-93c5fd))' }}>{t}</span>
                   ))}
                 </div>
               </div>
@@ -1477,7 +1477,7 @@ const SDRLeadsTab = () => {
                   {selectedLead.buying_signals.map((s, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                       <Sparkles size={12} style={{ color: '#10b981', marginTop: 2, flexShrink: 0 }} />
-                      <span style={{ color: '#d1fae5', fontSize: 13 }}>{s}</span>
+                      <span style={{ color: 'hsl(var(--pt-d1fae5))', fontSize: 13 }}>{s}</span>
                     </div>
                   ))}
                 </div>
@@ -1511,7 +1511,7 @@ const SDRLeadsTab = () => {
             <p style={{ color: '#6b7280', fontSize: 13 }}>You can undo this from the notification right after.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBulkDeleteConfirm(false)} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowBulkDeleteConfirm(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleBulkDelete} disabled={bulkDeleting} style={{ background: 'linear-gradient(90deg,#dc2626,#f43f5e)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {bulkDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
               {bulkDeleting ? 'Deleting…' : `Delete ${selectedIds.size}`}
@@ -1535,7 +1535,7 @@ const SDRLeadsTab = () => {
             <p style={{ color: '#6b7280', fontSize: 13 }}>You can undo this from the notification right after.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingDeleteLead(null)} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => setPendingDeleteLead(null)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={confirmDelete} disabled={deletingSingle} style={{ background: 'linear-gradient(90deg,#dc2626,#f43f5e)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {deletingSingle ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
               {deletingSingle ? 'Deleting…' : 'Delete'}
@@ -1555,7 +1555,7 @@ const SDRLeadsTab = () => {
           {/* STEP 1 — no file yet: show the expected column format + guidance */}
           {csvImport && !csvImport.file && (
             <div style={{ padding: '4px 0' }}>
-              <p style={{ fontSize: 13, color: '#c4b5d4', marginBottom: 12 }}>
+              <p style={{ fontSize: 13, color: 'hsl(var(--pt-c4b5d4))', marginBottom: 12 }}>
                 Your CSV needs a <b style={{ color: 'var(--text-soft)' }}>header row</b>. Put the columns in this order
                 (capitalisation and spacing don’t matter):
               </p>
@@ -1573,8 +1573,8 @@ const SDRLeadsTab = () => {
                   { n: 8, col: 'Phone',        req: false, ex: '+1 555 000 0000' },
                   { n: 9, col: 'LinkedIn URL', req: false, ex: 'https://linkedin.com/in/jane' },
                 ].map((r) => (
-                  <div key={r.n} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
-                    <span style={{ width: 22, height: 22, borderRadius: 6, background: 'rgba(168,85,247,0.15)', color: '#c084fc', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{r.n}</span>
+                  <div key={r.n} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
+                    <span style={{ width: 22, height: 22, borderRadius: 6, background: 'rgba(168,85,247,0.15)', color: 'hsl(var(--pt-c084fc))', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{r.n}</span>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-soft)', minWidth: 110 }}>{r.col}</span>
                     {r.req
                       ? <span style={{ fontSize: 10, fontWeight: 700, color: '#f87171', background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: 6, padding: '1px 7px' }}>Required</span>
@@ -1587,12 +1587,12 @@ const SDRLeadsTab = () => {
               {/* Example line */}
               <div style={{ background: 'var(--sfc-0b0716)', border: '1px solid var(--line-1)', borderRadius: 8, padding: '10px 12px', marginBottom: 14, overflowX: 'auto' }}>
                 <p style={{ fontSize: 10, color: '#6b7280', margin: '0 0 4px' }}>Example CSV</p>
-                <pre style={{ margin: 0, fontSize: 11, color: '#c4b5d4', fontFamily: 'monospace', whiteSpace: 'pre' }}>{`Full Name,Email,Job Title,Company,Industry,Employees,Location,Phone,LinkedIn URL
+                <pre style={{ margin: 0, fontSize: 11, color: 'hsl(var(--pt-c4b5d4))', fontFamily: 'monospace', whiteSpace: 'pre' }}>{`Full Name,Email,Job Title,Company,Industry,Employees,Location,Phone,LinkedIn URL
 Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://linkedin.com/in/jane`}</pre>
               </div>
 
               <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
-                Only <b style={{ color: '#c4b5d4' }}>Full Name</b> and <b style={{ color: '#c4b5d4' }}>Email</b> are required — the rest are optional. Duplicate emails are skipped automatically.
+                Only <b style={{ color: 'hsl(var(--pt-c4b5d4))' }}>Full Name</b> and <b style={{ color: 'hsl(var(--pt-c4b5d4))' }}>Email</b> are required — the rest are optional. Duplicate emails are skipped automatically.
               </p>
             </div>
           )}
@@ -1602,14 +1602,14 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             <div style={{ padding: '4px 0' }}>
               {/* Summary */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-                <span style={{ fontSize: 13, color: '#9ca3af', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13, color: 'hsl(var(--pt-9ca3af))', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <FileText size={14} /> {csvImport.file?.name}
                 </span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 20, padding: '3px 12px' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'hsl(var(--pt-4ade80))', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 20, padding: '3px 12px' }}>
                   {csvImport.total} lead{csvImport.total === 1 ? '' : 's'} to import
                 </span>
                 {csvImport.skippedEmpty > 0 && (
-                  <span style={{ fontSize: 12, color: '#9ca3af' }}>{csvImport.skippedEmpty} empty row{csvImport.skippedEmpty === 1 ? '' : 's'} skipped</span>
+                  <span style={{ fontSize: 12, color: 'hsl(var(--pt-9ca3af))' }}>{csvImport.skippedEmpty} empty row{csvImport.skippedEmpty === 1 ? '' : 's'} skipped</span>
                 )}
               </div>
 
@@ -1625,7 +1625,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                   </thead>
                   <tbody>
                     {csvImport.rows.slice(0, 10).map((row, ri) => (
-                      <tr key={ri} style={{ borderBottom: '1px solid rgba(45,31,74,0.5)' }}>
+                      <tr key={ri} style={{ borderBottom: '1px solid hsl(var(--sfr-2d1f4a) / 0.5)' }}>
                         {csvImport.columns.map((c) => (
                           <td key={c.key} style={{ padding: '8px 12px', color: row[c.key] ? 'var(--text-soft)' : '#4b5563', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {row[c.key] || '—'}
@@ -1647,7 +1647,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           <DialogFooter>
             {csvImport && !csvImport.file ? (
               <>
-                <Button variant="outline" onClick={downloadCsvTemplate} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Button variant="outline" onClick={downloadCsvTemplate} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Download size={14} /> Download template
                 </Button>
                 <Button onClick={() => fileInputRef.current?.click()} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1656,7 +1656,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               </>
             ) : (
               <>
-                <Button variant="outline" onClick={() => setCsvImport(null)} disabled={csvImporting} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+                <Button variant="outline" onClick={() => setCsvImport(null)} disabled={csvImporting} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
                 <Button onClick={handleCsvConfirm} disabled={csvImporting || !csvImport?.total} style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {csvImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                   {csvImporting ? 'Importing…' : `Import ${csvImport?.total || 0} leads`}
@@ -1687,13 +1687,13 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
               { k: 'linkedin_url',     l: 'LinkedIn URL', p: 'https://linkedin.com/in/…', span: true },
             ].map(({ k, l, p, span, type }) => (
               <div key={k} style={{ gridColumn: span ? '1 / -1' : undefined }}>
-                <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 4 }}>{l}</label>
+                <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 4 }}>{l}</label>
                 <input type={type || 'text'} placeholder={p} value={newLead[k]} onChange={e => setNewLead(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} />
               </div>
             ))}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); }} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setShowAddModal(false); setNewLead(BLANK_LEAD); }} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleAddLead} disabled={addingLead} style={{ background: 'linear-gradient(90deg,#f43f5e,#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               {addingLead ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
               Add Lead
@@ -1714,7 +1714,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '8px 0' }}>
             {/* Source selection */}
             <div>
-              <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 8 }}>Data Source</label>
+              <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 8 }}>Data Source</label>
               <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
                 {[
                   { key: 'apify',  label: 'Apify',     desc: 'Web scraping — LinkedIn & Google search', color: '#a855f7', paid: true },
@@ -1722,7 +1722,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                 ].map(s => (
                   <button key={s.key} onClick={() => setGenSource(s.key)} style={{
                     padding: '10px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-                    background: genSource === s.key ? `${s.color}22` : 'rgba(255,255,255,0.03)',
+                    background: genSource === s.key ? `${s.color}22` : 'hsl(var(--surface-invert) / 0.03)',
                     border: `1px solid ${genSource === s.key ? s.color : 'var(--line-1)'}`,
                     transition: 'all 0.2s',
                   }}>
@@ -1730,7 +1730,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                       <span style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 14 }}>{s.label}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {s.paid ? (
-                          <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(234,179,8,0.15)', color: '#fcd34d' }}>PAID API</span>
+                          <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(234,179,8,0.15)', color: 'hsl(var(--pt-fcd34d))' }}>PAID API</span>
                         ) : (
                           <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'rgba(16,185,129,0.15)', color: '#34d399' }}>FREE</span>
                         )}
@@ -1768,8 +1768,8 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             {/* ICP */}
             {icpProfiles.length > 1 && (
               <div>
-                <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 6 }}>ICP Profile</label>
-                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle, background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)' }}>
+                <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>ICP Profile</label>
+                <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle, background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)' }}>
                   {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active ? ' (Active)' : ''}</option>)}
                 </select>
               </div>
@@ -1782,7 +1782,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
 
             {/* Count */}
             <div>
-              <label style={{ color: '#9ca3af', fontSize: 12, display: 'block', marginBottom: 6 }}>
+              <label style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, display: 'block', marginBottom: 6 }}>
                 Number of Leads: <span style={{ color: '#a855f7', fontWeight: 700 }}>{genCount}</span>
               </label>
               <input type="range" min={5} max={50} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width: '100%', accentColor: '#a855f7' }} />
@@ -1798,17 +1798,17 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
           <div style={{ marginTop: 6, padding: '10px 12px', borderRadius: 10, background: 'hsl(var(--brand-600) / 0.06)', border: '1px solid var(--line-1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-soft)' }}>Already generated in Apify?</div>
-              <div style={{ fontSize: 11.5, color: '#9ca3af' }}>Import leads from your finished Apify runs (works on the free plan).</div>
+              <div style={{ fontSize: 11.5, color: 'hsl(var(--pt-9ca3af))' }}>Import leads from your finished Apify runs (works on the free plan).</div>
             </div>
             <button onClick={handleFetchApify} disabled={fetchingApify}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'hsl(var(--brand-600) / 0.15)', border: '1px solid rgba(168,85,247,0.35)', color: '#c4b5fd', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: fetchingApify ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'hsl(var(--brand-600) / 0.15)', border: '1px solid rgba(168,85,247,0.35)', color: 'hsl(var(--pt-c4b5fd))', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 600, cursor: fetchingApify ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
               {fetchingApify ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
               {fetchingApify ? 'Fetching…' : 'Fetch from Apify'}
             </button>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
             <Button onClick={handleGenerate}
               disabled={generating || icpProfiles.length === 0 || (sdrKeyStatus.loaded && !sdrKeyStatus[genSource])}
               style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1831,7 +1831,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             {showSetupGuide === 'apify' && (
               <>
                 <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)' }}>
-                  <span style={{ color: '#fcd34d', fontSize: 13, fontWeight: 600 }}>⚠️ Requires Apify paid plan ($49+/month)</span>
+                  <span style={{ color: 'hsl(var(--pt-fcd34d))', fontSize: 13, fontWeight: 600 }}>⚠️ Requires Apify paid plan ($49+/month)</span>
                 </div>
                 {[
                   { step: 1, title: 'Create account & upgrade', detail: 'Sign up at apify.com and upgrade to a paid plan (Starter $49/month) for enough credits.' },
@@ -1843,11 +1843,11 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                     <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', border: '1px solid hsl(var(--brand-600))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a855f7', fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
-                      {s.detail && <div style={{ color: '#9ca3af', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
+                      {s.detail && <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
                       {s.code && (
                         <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                           <code style={{ color: '#a855f7', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
-                          <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step ? '#4ade80' : '#6b7280' }}>
+                          <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step ? 'hsl(var(--pt-4ade80))' : '#6b7280' }}>
                             {copiedKey === s.step ? <CheckCircle size={13} /> : <Copy size={13} />}
                           </button>
                         </div>
@@ -1860,7 +1860,7 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
             {showSetupGuide === 'apollo' && (
               <>
                 <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)' }}>
-                  <span style={{ color: '#fcd34d', fontSize: 13, fontWeight: 600 }}>⚠️ Requires Apollo.io Basic plan ($49+/month)</span>
+                  <span style={{ color: 'hsl(var(--pt-fcd34d))', fontSize: 13, fontWeight: 600 }}>⚠️ Requires Apollo.io Basic plan ($49+/month)</span>
                 </div>
                 {[
                   { step: 1, title: 'Create & upgrade account', detail: 'Go to app.apollo.io and upgrade to Basic or higher — free plan does not include API People Search.' },
@@ -1872,11 +1872,11 @@ Jane Doe,jane@acme.com,VP Sales,Acme Corp,SaaS,150,"San Francisco, CA",,https://
                     <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: 'rgba(59,130,246,0.2)', border: '1px solid #3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60a5fa', fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{s.title}</div>
-                      {s.detail && <div style={{ color: '#9ca3af', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
+                      {s.detail && <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>}
                       {s.code && (
                         <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                           <code style={{ color: '#60a5fa', fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
-                          <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step + 10); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step + 10 ? '#4ade80' : '#6b7280' }}>
+                          <button onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step + 10); setTimeout(() => setCopiedKey(null), 2000); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step + 10 ? 'hsl(var(--pt-4ade80))' : '#6b7280' }}>
                             {copiedKey === s.step + 10 ? <CheckCircle size={13} /> : <Copy size={13} />}
                           </button>
                         </div>

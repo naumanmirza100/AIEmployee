@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import MeetingDraftForm from '@/components/common/MeetingDraftForm';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -147,7 +148,7 @@ export default function MeetingScheduler() {
     setTimeout(scrollToBottom, 100);
   };
 
-  const handleSend = async (overrideMsg = null) => {
+  const handleSend = async (overrideMsg = null, extra = {}) => {
     const msg = (typeof overrideMsg === 'string' ? overrideMsg : input).trim();
     if (!msg || loading) return;
     if (typeof overrideMsg !== 'string') setInput('');
@@ -163,7 +164,7 @@ export default function MeetingScheduler() {
     setTimeout(scrollToBottom, 50);
 
     try {
-      const res = await pmAgentService.meetingSchedule(msg);
+      const res = await pmAgentService.meetingSchedule(msg, extra);
       const data = res?.data?.data || res?.data || {};
       const response = data.response || data.message || 'Something went wrong. Please try again.';
 
@@ -176,6 +177,11 @@ export default function MeetingScheduler() {
           action: data.action,
           needsTime: !!data.needs_time,
           pendingIntent: data.pending_intent || null,
+          needsInput: !!data.needs_input,
+          draft: data.draft || null,
+          missing: data.missing || [],
+          options: data.options || null,
+          note: data.note || null,
         },
       };
 
@@ -333,14 +339,14 @@ export default function MeetingScheduler() {
         {/* ========== SIDEBAR ========== */}
         <div
           data-tour-pm-ms="sidebar"
-          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_rgba(80,36,180,0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
+          className={`shrink-0 rounded-xl border border-white/15 shadow-[0_2px_24px_0_hsl(var(--sfr-5024b4) / 0.18)] backdrop-blur-lg overflow-hidden transition-all duration-300 ease-in-out ${
             showChatHistory ? 'w-64 opacity-100 mr-4' : 'w-0 opacity-0 border-0 mr-0'
           }`}
           style={{
             minWidth: showChatHistory ? '16rem' : '0',
-            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, rgba(36,18,54,0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
-            borderRight: '1.5px solid rgba(255,255,255,0.10)',
-            boxShadow: '0 2px 24px 0 rgba(80, 36, 180, 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
+            background: 'linear-gradient(90deg, rgba(139,92,246,0.13) 0%, hsl(var(--sfr-241236) / 0.18) 18%, var(--panel-3) 55%, var(--panel-3) 100%)',
+            borderRight: '1.5px solid hsl(var(--surface-invert) / 0.10)',
+            boxShadow: '0 2px 24px 0 hsl(var(--sfr-5024b4) / 0.18), 0 0 0 1.5px rgba(120, 80, 255, 0.10) inset',
             borderTopLeftRadius: 16, borderBottomLeftRadius: 16,
             backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
             overflow: 'hidden',
@@ -348,7 +354,7 @@ export default function MeetingScheduler() {
         >
           <div className="w-64 h-full flex flex-col">
             <div className="px-3 pt-3 pb-2 border-b border-white/15 flex flex-col gap-2 shrink-0"
-              style={{ background: 'linear-gradient(180deg, rgba(60, 30, 90, 0.22) 0%, rgba(36, 18, 54, 0.85) 100%)', borderTopLeftRadius: 16 }}
+              style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)', borderTopLeftRadius: 16 }}
             >
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
@@ -362,7 +368,7 @@ export default function MeetingScheduler() {
               </div>
               {showSidebarSearch ? (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
-                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)' }}>
+                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)' }}>
                   <input autoFocus value={sidebarSearch} onChange={(e) => setSidebarSearch(e.target.value)}
                     placeholder="Search..." className="flex-1 bg-transparent outline-none border-0 text-white/90 text-sm px-2 py-1.5 placeholder-white/40" />
                   <button onClick={() => { setSidebarSearch(''); setShowSidebarSearch(false); }}
@@ -374,7 +380,7 @@ export default function MeetingScheduler() {
                 </div>
               ) : (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg w-full"
-                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.18) 100%)' }}>
+                  style={{ border: '1.5px solid rgba(139,92,246,0.22)', background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.18) 100%)' }}>
                   <span className="text-sm font-medium text-white/80 flex-1">Conversations</span>
                   <button title="Search" onClick={() => setShowSidebarSearch(true)}
                     className="h-7 w-7 flex items-center justify-center rounded-full border border-white/15 hover:border-violet-400/60 bg-black/20 hover:bg-violet-700/20 transition-all duration-150">
@@ -396,7 +402,7 @@ export default function MeetingScheduler() {
               ) : chats.length === 0 ? (
                 <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet. Send a request to start.</div>
               ) : (
-                <div className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, rgba(36, 18, 54, 0.10) 0%, rgba(24, 18, 43, 0.18) 100%)', borderRadius: 12 }}>
+                <div className="p-2 space-y-1" style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-241236) / 0.10) 0%, hsl(var(--sfr-18122b) / 0.18) 100%)', borderRadius: 12 }}>
                   {(() => {
                     const term = sidebarSearch.trim().toLowerCase();
                     const filtered = term
@@ -439,12 +445,12 @@ export default function MeetingScheduler() {
             <div className="flex items-center gap-3 min-w-0 w-full">
               <div style={{ width: '7px', height: '48px', borderRadius: '8px', background: 'linear-gradient(to bottom, hsl(var(--brand-accent)) 0%, #6a1b9a 60%, #18122B 100%)', marginLeft: '24px', marginRight: '18px', boxShadow: '0 0 8px 2px hsl(var(--brand-accent) / 0.27)' }} />
               <div className="h-10 w-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'hsl(var(--brand-600) / 0.15)' }}>
-                <CalendarPlus className="h-5 w-5" style={{ color: '#a78bfa' }} />
+                <CalendarPlus className="h-5 w-5" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
               </div>
               <div className="min-w-0 flex-1">
                 <CardTitle className="flex items-center gap-2 truncate text-white text-lg">
                   Meeting Scheduler
-                  <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: '#a78bfa' }}>AI-Powered</span>
+                  <span className="text-[10px] rounded-full px-2.5 py-0.5 font-medium" style={{ background: 'hsl(var(--brand-600) / 0.15)', color: 'hsl(var(--pt-a78bfa))' }}>AI-Powered</span>
                 </CardTitle>
                 <CardDescription className="text-white/50 text-sm mt-0.5">
                   Schedule meetings with your team using natural language. Try: "Schedule a meeting with Sarah tomorrow at 2 PM"
@@ -516,6 +522,27 @@ export default function MeetingScheduler() {
                         ) : (
                           <div>
                             <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: markdownToHtml(msg.content) }} />
+                            {msg.responseData?.needsInput && msg.responseData.draft && i === currentMessages.length - 1 && (
+                              <MeetingDraftForm
+                                draft={msg.responseData.draft}
+                                missing={msg.responseData.missing}
+                                options={msg.responseData.options || {}}
+                                note={msg.responseData.note}
+                                busy={loading}
+                                onConfirm={(edited, iso) => {
+                                  const pretty = new Date(iso).toLocaleString(undefined, {
+                                    weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+                                  });
+                                  const who = (edited.invitee_names || []).join(', ');
+                                  // Readable line for the chat log; the booking itself is
+                                  // the reviewed draft, sent as data.
+                                  handleSend(`Book it: with ${who}, ${pretty}, ${edited.duration_minutes} minutes.`, {
+                                    pending_intent: edited,
+                                    proposed_time: iso,
+                                  });
+                                }}
+                              />
+                            )}
                             {msg.responseData?.needsTime && i === currentMessages.length - 1 && (
                               <NeedsTimePicker
                                 pendingIntent={msg.responseData.pendingIntent}
@@ -530,7 +557,14 @@ export default function MeetingScheduler() {
                                   });
                                   const who = names.length ? ` with ${names.join(', ')}` : '';
                                   const dur = pi.duration_minutes ? ` for ${pi.duration_minutes} minutes` : '';
-                                  handleSend(`Schedule the meeting${who} on ${pretty} (${datetimeIso})${dur}.`);
+                                  // The sentence is only for the chat log. The time and the
+                                  // already-understood request go as data, so the backend
+                                  // finishes without asking the model to re-parse this line
+                                  // (which is what used to fail).
+                                  handleSend(`Schedule the meeting${who} on ${pretty}${dur}.`, {
+                                    pending_intent: pi,
+                                    proposed_time: datetimeIso,
+                                  });
                                 }}
                               />
                             )}
@@ -781,12 +815,12 @@ export default function MeetingScheduler() {
 // remember the previous turn.
 function NeedsTimePicker({ pendingIntent, disabled, onConfirm }) {
   const [datetime, setDatetime] = useState(() => {
+    // Default to 09:00 tomorrow — the start of the working day, and the first
+    // slot the agent suggests. It used to be "this time tomorrow, rounded to
+    // the half hour", which after about 23:30 rolled into a midnight meeting.
     const t = new Date();
     t.setDate(t.getDate() + 1);
-    t.setMinutes(t.getMinutes() < 30 ? 30 : 0);
-    if (t.getMinutes() === 0) t.setHours(t.getHours() + 1);
-    t.setSeconds(0);
-    t.setMilliseconds(0);
+    t.setHours(9, 0, 0, 0);
     const pad = (n) => String(n).padStart(2, '0');
     return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
   });

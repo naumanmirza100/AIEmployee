@@ -7,7 +7,10 @@
          These two blocks used to hold identical near-black values, so the app
          was dark-only and the tokens did nothing. */
       :root {
-        --background: 0 0% 100%;
+        /* A soft grey page so white cards read as raised against it. When
+           page and card were both pure white nothing had an edge and every
+           section blurred into the next. */
+        --background: 225 20% 96.5%;
         --foreground: 240 10% 8%;
         --card: 0 0% 100%;
         --card-foreground: 240 10% 8%;
@@ -18,18 +21,123 @@
         --primary: 220.6 90% 61%;
         --primary-foreground: 0 0% 100%;
         --brand-600: 220.6 90% 61%;
-        /* Lighter half of the brand gradients (was the fixed hsl(var(--brand-accent))). */
+        /* Lighter half of the brand gradients (was the fixed #a259ff). */
         --brand-accent: 214 100% 71%;
-        --secondary: 240 5% 96%;
+
+        /* Accent shades chosen for a dark page. The pale ones (100-400)
+           are text and vanish on white; the deep ones (700-900) are fills
+           and stay as dark blocks. Each flips to a shade from the other
+           end of its own family, so contrast inverts with the theme while
+           the hue is preserved. Generated from Tailwind's own palette. */
+        --c-violet-100: 263.4 69.3% 42.2%;    /* violet-800 #5b21b6 */
+        --c-violet-200: 263.4 70.0% 50.4%;    /* violet-700 #6d28d9 */
+        --c-violet-300: 262.1 83.3% 57.8%;    /* violet-600 #7c3aed */
+        --c-violet-400: 262.1 83.3% 57.8%;    /* violet-600 #7c3aed */
+        --c-amber-100: 22.7 82.5% 31.4%;      /* amber-800 #92400e */
+        --c-amber-200: 26.0 90.5% 37.1%;      /* amber-700 #b45309 */
+        --c-amber-300: 26.0 90.5% 37.1%;      /* amber-700 #b45309 */
+        --c-amber-400: 26.0 90.5% 37.1%;      /* amber-700 #b45309 */
+        --c-emerald-100: 163.1 88.1% 19.8%;   /* emerald-800 #065f46 */
+        --c-emerald-200: 162.9 93.5% 24.3%;   /* emerald-700 #047857 */
+        --c-emerald-300: 162.9 93.5% 24.3%;   /* emerald-700 #047857 */
+        --c-red-100: 0.0 70.0% 35.3%;         /* red-800 #991b1b */
+        --c-red-200: 0.0 73.7% 41.8%;         /* red-700 #b91c1c */
+        --c-red-300: 0.0 72.2% 50.6%;         /* red-600 #dc2626 */
+        --c-rose-100: 343.4 79.7% 34.7%;      /* rose-800 #9f1239 */
+        --c-rose-200: 345.3 82.7% 40.8%;      /* rose-700 #be123c */
+        --c-rose-300: 346.8 77.2% 49.8%;      /* rose-600 #e11d48 */
+        --c-cyan-100: 194.4 69.6% 27.1%;      /* cyan-800 #155e75 */
+        --c-cyan-200: 192.9 82.3% 31.0%;      /* cyan-700 #0e7490 */
+        --c-cyan-300: 192.9 82.3% 31.0%;      /* cyan-700 #0e7490 */
+        --c-sky-100: 201.0 90.0% 27.5%;       /* sky-800 #075985 */
+        --c-sky-200: 201.3 96.3% 32.2%;       /* sky-700 #0369a1 */
+        --c-sky-300: 201.3 96.3% 32.2%;       /* sky-700 #0369a1 */
+        --c-blue-200: 224.3 76.3% 48.0%;      /* blue-700 #1d4ed8 */
+        --c-blue-300: 221.2 83.2% 53.3%;      /* blue-600 #2563eb */
+        --c-fuchsia-100: 295.4 70.2% 32.9%;   /* fuchsia-800 #86198f */
+        --c-fuchsia-200: 294.7 72.4% 39.8%;   /* fuchsia-700 #a21caf */
+        --c-fuchsia-300: 293.4 69.5% 48.8%;   /* fuchsia-600 #c026d3 */
+        --c-purple-100: 272.9 67.2% 39.4%;    /* purple-800 #6b21a8 */
+        --c-purple-200: 272.1 71.7% 47.1%;    /* purple-700 #7e22ce */
+        --c-purple-300: 271.5 81.3% 55.9%;    /* purple-600 #9333ea */
+        --c-indigo-100: 243.7 54.5% 41.4%;    /* indigo-800 #3730a3 */
+        --c-indigo-300: 243.4 75.4% 58.6%;    /* indigo-600 #4f46e5 */
+        --c-yellow-200: 35.5 91.7% 32.9%;     /* yellow-700 #a16207 */
+        --c-yellow-300: 35.5 91.7% 32.9%;     /* yellow-700 #a16207 */
+        --c-yellow-400: 35.5 91.7% 32.9%;     /* yellow-700 #a16207 */
+        --c-orange-300: 17.5 88.3% 40.4%;     /* orange-700 #c2410c */
+        --c-green-300: 142.4 71.8% 29.2%;     /* green-700 #15803d */
+        --c-teal-200: 175.3 77.4% 26.1%;      /* teal-700 #0f766e */
+        --c-teal-300: 175.3 77.4% 26.1%;      /* teal-700 #0f766e */
+        --c-pink-300: 333.3 71.4% 50.6%;      /* pink-600 #db2777 */
+        --c-gray-100: 215.0 27.9% 16.9%;      /* gray-800 #1f2937 */
+        --c-gray-300: 215.0 13.8% 34.1%;      /* gray-600 #4b5563 */
+        --c-slate-300: 215.3 19.3% 34.5%;     /* slate-600 #475569 */
+        --c-violet-700: 251.4 91.3% 95.5%;    /* violet-100 #ede9fe */
+        --c-violet-900: 250.0 100.0% 97.6%;   /* violet-50 #f5f3ff */
+
+        /* Pale text and border colours hardcoded in inline styles, which
+           beat any class and so survived the `white` remap. Light values
+           keep the hue and are darkened until they clear AA on white. */
+        --pt-4ade80: 141.9 69.2% 31.0%;
+        --pt-6ee7b7: 156.2 71.6% 30.9%;
+        --pt-93c5fd: 211.7 96.4% 47.4%;
+        --pt-9ca3af: 217.9 10.6% 47.9%;
+        --pt-a5b4fc: 229.7 93.5% 62.8%;
+        --pt-a78bfa: 255.1 91.7% 65.3%;
+        --pt-bfdbfe: 213.3 96.9% 48.3%;
+        --pt-c084fc: 270.0 95.2% 62.3%;
+        --pt-c4b5d4: 269.0 26.5% 53.1%;
+        --pt-c4b5fd: 252.5 94.7% 66.1%;
+        --pt-c7d2fe: 228.0 96.5% 61.8%;
+        --pt-d1d5db: 216.0 12.2% 47.9%;
+        --pt-d1fae5: 149.3 80.4% 29.0%;
+        --pt-ddd6fe: 250.5 95.2% 66.8%;
+        --pt-e2e2f0: 240.0 31.8% 57.4%;
+        --pt-ede9fe: 251.4 91.3% 65.5%;
+        --pt-f59e0b: 37.7 92.1% 33.2%;
+        --pt-fbbf24: 43.3 96.4% 30.3%;
+        --pt-fcd34d: 45.9 96.7% 29.5%;
+        --pt-fef3c7: 48.0 96.5% 27.8%;
+        --pt-ffffff: 0.0 0.0% 46.0%;
+
+
+        /* Dark surface colours the dashboards wrote as rgba() inside inline
+           styles, which no class can reach. Same treatment as the hex ones:
+           the exact original under .dark, a same-hue near-white tint here. */
+        --sfr-241236: 270.0 10.0% 98.6%;
+        --sfr-5024b4: 258.3 10.0% 99.9%;
+        --sfr-3c1e5a: 270.0 10.0% 99.9%;
+        --sfr-020308: 230.0 10.0% 95.9%;
+        --sfr-2d1f4a: 259.5 10.0% 99.9%;
+        --sfr-18122b: 254.4 10.0% 98.1%;
+        --sfr-0f0a1f: 254.3 10.0% 97.3%;
+        --sfr-140828: 262.5 10.0% 97.6%;
+        --sfr-1e0a32: 270.0 10.0% 98.1%;
+        --sfr-40280a: 33.3 10.0% 98.7%;
+        --sfr-0a2540: 210.0 10.0% 98.7%;
+        --sfr-0e2747: 213.7 10.0% 99.2%;
+        --sfr-0a041c: 255.0 10.0% 96.9%;
+        --sfr-0e0a1a: 255.0 10.0% 97.1%;
+        --sfr-100626: 258.8 10.0% 97.4%;
+        --sfr-111118: 240.0 6.0% 97.3%;
+        --sfr-120c28: 252.9 10.0% 97.7%;
+        --sfr-4c4b4a: 30.0 0.5% 99.9%;
+        --sfr-080b1a: 230.0 10.0% 97.0%;
+        --sfr-0a0a1a: 240.0 10.0% 97.1%;
+        --sfr-0c0c12: 240.0 7.0% 96.8%;
+        --sfr-0e0a20: 250.9 10.0% 97.3%;
+        --sfr-140a28: 260.0 10.0% 97.7%;
+        --secondary: 225 16% 93%;
         --secondary-foreground: 240 10% 12%;
-        --muted: 240 5% 96%;
+        --muted: 225 16% 93.5%;
         --muted-foreground: 240 4% 40%;
-        --accent: 240 5% 94%;
+        --accent: 225 18% 91%;
         --accent-foreground: 240 10% 12%;
         --destructive: 0 72% 46%;
         --destructive-foreground: 0 0% 100%;
-        --border: 240 6% 88%;
-        --input: 240 6% 88%;
+        --border: 225 16% 86%;
+        --input: 225 16% 86%;
         --ring: 220.6 90% 61%;
         --radius: 0.5rem;
 
@@ -69,58 +177,58 @@
         /* Auto-derived from the dark panel hexes the dashboards hardcode in
            inline styles. Each keeps its original value under `.dark`; the light
            value here is the same hue lifted into a near-white tint. */
-        --sfc-0d0b1f: #f6f5f9;
-        --sfc-0f0a1f: #f6f5f9;
-        --sfc-0d0d1a: #f6f6f9;
-        --sfc-0e0e14: #f8f8f9;
-        --sfc-111118: #f7f7f8;
-        --sfc-0d0820: #f6f6f9;
-        --sfc-1a1030: #f3f2f7;
-        --sfc-231845: #efedf4;
-        --sfc-1a0a35: #f4f2f7;
-        --sfc-1e1535: #f2f1f6;
-        --sfc-020308: #fafbfc;
-        --sfc-07030f: #faf9fb;
-        --sfc-080b1a: #f6f7fa;
-        --sfc-0f0a20: #f6f5f9;
-        --sfc-0a0a1a: #f6f6fa;
-        --sfc-0a1929: #f4f6f8;
-        --sfc-0f0f23: #f4f4f8;
-        --sfc-1a1028: #f5f3f7;
-        --sfc-1c1030: #f4f2f7;
-        --sfc-1e1035: #f3f1f7;
-        --sfc-241638: #f2f0f5;
-        --sfc-0a0616: #f8f7fa;
-        --sfc-0e0820: #f7f6f9;
-        --sfc-12121a: #f6f6f8;
-        --sfc-1e3a5f: #e8ecf1;
-        --sfc-090c14: #f8f8fa;
-        --sfc-0b0716: #f8f7fa;
-        --sfc-0b0817: #f8f7fa;
-        --sfc-0c0816: #f8f7fa;
-        --sfc-0c0820: #f6f6f9;
-        --sfc-0d0b1a: #f7f6f9;
-        --sfc-0f1022: #f5f5f8;
-        --sfc-100a20: #f6f5f9;
-        --sfc-100b1e: #f6f6f9;
-        --sfc-140d26: #f5f4f8;
-        --sfc-160b2e: #f4f3f8;
-        --sfc-16162a: #f3f3f6;
-        --sfc-181030: #f3f2f7;
-        --sfc-1e1e38: #f0f0f4;
-        --sfc-14082a: #f6f4f8;
-        --sfc-0a1020: #f5f6f9;
-        --sfc-140830: #f4f3f8;
-        --sfc-0d1020: #f5f6f9;
-        --sfc-0a1628: #f4f6f8;
-        --sfc-120d24: #f5f4f8;
-        --sfc-07050f: #f9f9fb;
-        --sfc-14082c: #f5f4f8;
-        --sfc-160b28: #f6f4f8;
-        --sfc-1a0a2e: #f5f3f8;
-        --sfc-1a0e00: #fbf9f8;
-        --sfc-1a1a2e: #f2f2f5;
-        --sfc-1e0f38: #f3f1f6;
+        --sfc-0d0b1f: #f8f7f9;
+        --sfc-0f0a1f: #f8f7f9;
+        --sfc-0d0d1a: #f7f7f9;
+        --sfc-0e0e14: #f7f7f8;
+        --sfc-111118: #f8f8f8;
+        --sfc-0d0820: #f8f7f9;
+        --sfc-1a1030: #fafafb;
+        --sfc-231845: #fefefe;
+        --sfc-1a0a35: #fafafb;
+        --sfc-1e1535: #fcfbfc;
+        --sfc-020308: #f4f4f6;
+        --sfc-07030f: #f5f5f6;
+        --sfc-080b1a: #f6f7f8;
+        --sfc-0f0a20: #f8f7f9;
+        --sfc-0a0a1a: #f7f7f8;
+        --sfc-0a1929: #f9f9fa;
+        --sfc-0f0f23: #f8f8fa;
+        --sfc-1a1028: #faf9fa;
+        --sfc-1c1030: #fafafb;
+        --sfc-1e1035: #fbfbfc;
+        --sfc-241638: #fcfcfc;
+        --sfc-0a0616: #f6f6f7;
+        --sfc-0e0820: #f8f7f9;
+        --sfc-12121a: #f8f8f9;
+        --sfc-1e3a5f: #ffffff;
+        --sfc-090c14: #f6f6f8;
+        --sfc-0b0716: #f6f6f8;
+        --sfc-0b0817: #f6f6f8;
+        --sfc-0c0816: #f6f6f8;
+        --sfc-0c0820: #f7f7f9;
+        --sfc-0d0b1a: #f7f7f8;
+        --sfc-0f1022: #f8f8fa;
+        --sfc-100a20: #f8f7f9;
+        --sfc-100b1e: #f8f7f9;
+        --sfc-140d26: #f9f9fa;
+        --sfc-160b2e: #faf9fa;
+        --sfc-16162a: #fafafb;
+        --sfc-181030: #fafafb;
+        --sfc-1e1e38: #fdfdfd;
+        --sfc-14082a: #f9f8fa;
+        --sfc-0a1020: #f7f8f9;
+        --sfc-140830: #f9f9fa;
+        --sfc-0d1020: #f8f8f9;
+        --sfc-0a1628: #f8f9fa;
+        --sfc-120d24: #f9f8fa;
+        --sfc-07050f: #f5f5f7;
+        --sfc-14082c: #f9f9fa;
+        --sfc-160b28: #f9f9fa;
+        --sfc-1a0a2e: #faf9fa;
+        --sfc-1a0e00: #f7f6f6;
+        --sfc-1a1a2e: #fbfbfc;
+        --sfc-1e0f38: #fbfbfc;
 
         /* The dashboards paint these two gradients through inline styles, which
            no `dark:` class can reach — so they are variables the inline style
@@ -144,8 +252,102 @@
         --primary: 262.1 83.3% 57.8%;
         --primary-foreground: 210 40% 98%;
         --brand-600: 262.1 83.3% 57.8%;
-        /* hsl(var(--brand-accent)) — unchanged. */
+        /* #a259ff — unchanged. */
         --brand-accent: 270 100% 63%;
+
+        --c-violet-100: 251.4 91.3% 95.5%;    /* violet-100 #ede9fe */
+        --c-violet-200: 250.5 95.2% 91.8%;    /* violet-200 #ddd6fe */
+        --c-violet-300: 252.5 94.7% 85.1%;    /* violet-300 #c4b5fd */
+        --c-violet-400: 255.1 91.7% 76.3%;    /* violet-400 #a78bfa */
+        --c-amber-100: 48.0 96.5% 88.8%;      /* amber-100 #fef3c7 */
+        --c-amber-200: 48.0 96.6% 76.7%;      /* amber-200 #fde68a */
+        --c-amber-300: 45.9 96.7% 64.5%;      /* amber-300 #fcd34d */
+        --c-amber-400: 43.3 96.4% 56.3%;      /* amber-400 #fbbf24 */
+        --c-emerald-100: 149.3 80.4% 90.0%;   /* emerald-100 #d1fae5 */
+        --c-emerald-200: 152.4 76.0% 80.4%;   /* emerald-200 #a7f3d0 */
+        --c-emerald-300: 156.2 71.6% 66.9%;   /* emerald-300 #6ee7b7 */
+        --c-red-100: 0.0 93.3% 94.1%;         /* red-100 #fee2e2 */
+        --c-red-200: 0.0 96.3% 89.4%;         /* red-200 #fecaca */
+        --c-red-300: 0.0 93.5% 81.8%;         /* red-300 #fca5a5 */
+        --c-rose-100: 355.6 100.0% 94.7%;     /* rose-100 #ffe4e6 */
+        --c-rose-200: 352.7 96.1% 90.0%;      /* rose-200 #fecdd3 */
+        --c-rose-300: 352.6 95.7% 81.8%;      /* rose-300 #fda4af */
+        --c-cyan-100: 185.1 95.9% 90.4%;      /* cyan-100 #cffafe */
+        --c-cyan-200: 186.2 93.5% 81.8%;      /* cyan-200 #a5f3fc */
+        --c-cyan-300: 187.0 92.4% 69.0%;      /* cyan-300 #67e8f9 */
+        --c-sky-100: 204.0 93.8% 93.7%;       /* sky-100 #e0f2fe */
+        --c-sky-200: 200.6 94.4% 86.1%;       /* sky-200 #bae6fd */
+        --c-sky-300: 199.4 95.5% 73.9%;       /* sky-300 #7dd3fc */
+        --c-blue-200: 213.3 96.9% 87.3%;      /* blue-200 #bfdbfe */
+        --c-blue-300: 211.7 96.4% 78.4%;      /* blue-300 #93c5fd */
+        --c-fuchsia-100: 287.0 100.0% 95.5%;  /* fuchsia-100 #fae8ff */
+        --c-fuchsia-200: 288.3 95.8% 90.6%;   /* fuchsia-200 #f5d0fe */
+        --c-fuchsia-300: 291.1 93.1% 82.9%;   /* fuchsia-300 #f0abfc */
+        --c-purple-100: 268.7 100.0% 95.5%;   /* purple-100 #f3e8ff */
+        --c-purple-200: 268.6 100.0% 91.8%;   /* purple-200 #e9d5ff */
+        --c-purple-300: 269.2 97.4% 85.1%;    /* purple-300 #d8b4fe */
+        --c-indigo-100: 226.5 100.0% 93.9%;   /* indigo-100 #e0e7ff */
+        --c-indigo-300: 229.7 93.5% 81.8%;    /* indigo-300 #a5b4fc */
+        --c-yellow-200: 52.8 98.3% 76.9%;     /* yellow-200 #fef08a */
+        --c-yellow-300: 50.4 97.8% 63.5%;     /* yellow-300 #fde047 */
+        --c-yellow-400: 47.9 95.8% 53.1%;     /* yellow-400 #facc15 */
+        --c-orange-300: 30.7 97.2% 72.4%;     /* orange-300 #fdba74 */
+        --c-green-300: 141.7 76.6% 73.1%;     /* green-300 #86efac */
+        --c-teal-200: 168.4 83.8% 78.2%;      /* teal-200 #99f6e4 */
+        --c-teal-300: 170.6 76.9% 64.3%;      /* teal-300 #5eead4 */
+        --c-pink-300: 327.4 87.1% 81.8%;      /* pink-300 #f9a8d4 */
+        --c-gray-100: 220.0 14.3% 95.9%;      /* gray-100 #f3f4f6 */
+        --c-gray-300: 216.0 12.2% 83.9%;      /* gray-300 #d1d5db */
+        --c-slate-300: 212.7 26.8% 83.9%;     /* slate-300 #cbd5e1 */
+        --c-violet-700: 263.4 70.0% 50.4%;    /* violet-700 #6d28d9 */
+        --c-violet-900: 263.5 67.4% 34.9%;    /* violet-900 #4c1d95 */
+
+        --pt-4ade80: 141.9 69.2% 58.0%;
+        --pt-6ee7b7: 156.2 71.6% 66.9%;
+        --pt-93c5fd: 211.7 96.4% 78.4%;
+        --pt-9ca3af: 217.9 10.6% 64.9%;
+        --pt-a5b4fc: 229.7 93.5% 81.8%;
+        --pt-a78bfa: 255.1 91.7% 76.3%;
+        --pt-bfdbfe: 213.3 96.9% 87.3%;
+        --pt-c084fc: 270.0 95.2% 75.3%;
+        --pt-c4b5d4: 269.0 26.5% 77.1%;
+        --pt-c4b5fd: 252.5 94.7% 85.1%;
+        --pt-c7d2fe: 228.0 96.5% 88.8%;
+        --pt-d1d5db: 216.0 12.2% 83.9%;
+        --pt-d1fae5: 149.3 80.4% 90.0%;
+        --pt-ddd6fe: 250.5 95.2% 91.8%;
+        --pt-e2e2f0: 240.0 31.8% 91.4%;
+        --pt-ede9fe: 251.4 91.3% 95.5%;
+        --pt-f59e0b: 37.7 92.1% 50.2%;
+        --pt-fbbf24: 43.3 96.4% 56.3%;
+        --pt-fcd34d: 45.9 96.7% 64.5%;
+        --pt-fef3c7: 48.0 96.5% 88.8%;
+        --pt-ffffff: 0.0 0.0% 100.0%;
+
+
+        --sfr-241236: 270.0 50.0% 14.1%;
+        --sfr-5024b4: 258.3 66.7% 42.4%;
+        --sfr-3c1e5a: 270.0 50.0% 23.5%;
+        --sfr-020308: 230.0 60.0% 2.0%;
+        --sfr-2d1f4a: 259.5 41.0% 20.6%;
+        --sfr-18122b: 254.4 41.0% 12.0%;
+        --sfr-0f0a1f: 254.3 51.2% 8.0%;
+        --sfr-140828: 262.5 66.7% 9.4%;
+        --sfr-1e0a32: 270.0 66.7% 11.8%;
+        --sfr-40280a: 33.3 73.0% 14.5%;
+        --sfr-0a2540: 210.0 73.0% 14.5%;
+        --sfr-0e2747: 213.7 67.1% 16.7%;
+        --sfr-0a041c: 255.0 75.0% 6.3%;
+        --sfr-0e0a1a: 255.0 44.4% 7.1%;
+        --sfr-100626: 258.8 72.7% 8.6%;
+        --sfr-111118: 240.0 17.1% 8.0%;
+        --sfr-120c28: 252.9 53.8% 10.2%;
+        --sfr-4c4b4a: 30.0 1.3% 29.4%;
+        --sfr-080b1a: 230.0 52.9% 6.7%;
+        --sfr-0a0a1a: 240.0 44.4% 7.1%;
+        --sfr-0c0c12: 240.0 20.0% 5.9%;
+        --sfr-0e0a20: 250.9 52.4% 8.2%;
+        --sfr-140a28: 260.0 60.0% 9.8%;
         --secondary: 0 0% 14.9%;
         --secondary-foreground: 0 0% 98%;
         --muted: 0 0% 14.9%;

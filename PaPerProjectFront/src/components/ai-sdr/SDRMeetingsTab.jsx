@@ -95,9 +95,9 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
           borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
           minWidth: fullWidth ? 'auto' : 130,
           width: fullWidth ? '100%' : 'auto',
-          background: value ? `${selected?.color}15` : 'rgba(255,255,255,0.04)',
+          background: value ? `${selected?.color}15` : 'hsl(var(--surface-invert) / 0.04)',
           border: `1px solid ${value ? selected?.color + '60' : 'var(--line-1)'}`,
-          color: value ? selected?.color : '#9ca3af',
+          color: value ? selected?.color : 'hsl(var(--pt-9ca3af))',
           fontSize: 13, fontWeight: value ? 600 : 400, transition: 'all 0.15s',
         }}
       >
@@ -123,7 +123,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                   padding: '9px 14px', border: 'none', cursor: 'pointer',
                   background: isSel ? `${opt.color}18` : 'transparent',
-                  borderBottom: idx < options.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                  borderBottom: idx < options.length - 1 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none',
                   transition: 'background 0.1s',
                 }}
                 onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
@@ -131,7 +131,7 @@ const FilterDropdown = ({ label, value, options, onChange, icon: LabelIcon, full
               >
                 <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: opt.key ? opt.color : 'transparent', border: opt.key ? `2px solid ${opt.color}` : '2px solid var(--line-1)' }} />
                 {opt.Icon && <opt.Icon size={13} style={{ color: opt.color, flexShrink: 0 }} />}
-                <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: isSel ? opt.color : opt.key ? '#d1d5db' : '#6b7280', fontWeight: isSel ? 600 : 400 }}>
+                <span style={{ flex: 1, textAlign: 'left', fontSize: 13, color: isSel ? opt.color : opt.key ? 'hsl(var(--pt-d1d5db))' : '#6b7280', fontWeight: isSel ? 600 : 400 }}>
                   {opt.label}
                 </span>
                 {isSel && <CheckCircle size={13} style={{ color: opt.color, flexShrink: 0 }} />}
@@ -179,7 +179,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Sparkles size={13} color="#a855f7" />
-          <span style={{ color: '#c084fc', fontWeight: 700, fontSize: 13 }}>AI Prep Notes</span>
+          <span style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 700, fontSize: 13 }}>AI Prep Notes</span>
           {notes.opportunity_score && (
             <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', borderRadius: 6, padding: '1px 8px', fontSize: 11, fontWeight: 600 }}>
               {notes.opportunity_score}/10
@@ -194,7 +194,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
 
       {notes.key_insight && (
         <div style={{ background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.18)', borderRadius: 8, padding: '8px 12px' }}>
-          <span style={{ color: '#fbbf24', fontSize: 11, fontWeight: 700 }}>KEY INSIGHT  </span>
+          <span style={{ color: 'hsl(var(--pt-fbbf24))', fontSize: 11, fontWeight: 700 }}>KEY INSIGHT  </span>
           <span style={{ color: 'var(--text-soft)', fontSize: 13 }}>{notes.key_insight}</span>
         </div>
       )}
@@ -206,7 +206,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
             {notes.talking_points.map((p, i) => (
               <div key={i} style={{ display: 'flex', gap: 7, marginBottom: 5 }}>
                 <span style={{ color: '#a855f7', fontSize: 11 }}>▸</span>
-                <span style={{ color: '#c4b5d4', fontSize: 12, lineHeight: 1.5 }}>{p}</span>
+                <span style={{ color: 'hsl(var(--pt-c4b5d4))', fontSize: 12, lineHeight: 1.5 }}>{p}</span>
               </div>
             ))}
           </div>
@@ -217,7 +217,7 @@ function PrepNotesPanel({ notes, loading, onRegenerate }) {
             {notes.questions_to_ask.map((q, i) => (
               <div key={i} style={{ display: 'flex', gap: 7, marginBottom: 5 }}>
                 <span style={{ color: '#6366f1', fontSize: 11 }}>?</span>
-                <span style={{ color: '#c4b5d4', fontSize: 12, lineHeight: 1.5 }}>{q}</span>
+                <span style={{ color: 'hsl(var(--pt-c4b5d4))', fontSize: 12, lineHeight: 1.5 }}>{q}</span>
               </div>
             ))}
           </div>
@@ -311,7 +311,7 @@ function SearchFieldDropdown({ value, onChange, fields }) {
             const isSel = f.key === value;
             return (
               <button key={f.key} type="button" onClick={() => { onChange(f.key); setOpen(false); }}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none', borderBottom: i < fields.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none', cursor: 'pointer', background: isSel ? 'rgba(168,85,247,0.12)' : 'transparent', color: isSel ? '#a855f7' : '#c4b5d4', fontSize: 13, fontWeight: isSel ? 600 : 400, transition: 'background 0.1s', textAlign: 'left' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 14px', border: 'none', borderBottom: i < fields.length - 1 ? '1px solid hsl(var(--surface-invert) / 0.04)' : 'none', cursor: 'pointer', background: isSel ? 'rgba(168,85,247,0.12)' : 'transparent', color: isSel ? '#a855f7' : '#c4b5d4', fontSize: 13, fontWeight: isSel ? 600 : 400, transition: 'background 0.1s', textAlign: 'left' }}
                 onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
                 onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}>
                 {isSel && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#a855f7', flexShrink: 0 }} />}
@@ -621,7 +621,7 @@ function ConfirmModal({ meeting, onClose, onConfirmed }) {
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          <Button variant="outline" onClick={onClose} style={{ border: '1px solid var(--line-1)', color: '#9ca3af', borderRadius: 8 }}>Cancel</Button>
+          <Button variant="outline" onClick={onClose} style={{ border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8 }}>Cancel</Button>
 
           {/* Option 1: Ask lead first */}
           <Button onClick={() => handleConfirm(true)} disabled={saving || !selDate || !selTime}
@@ -716,12 +716,12 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
                 <AlertCircle size={18} style={{ color: '#a855f7', flexShrink: 0 }} />
                 <h4 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 15, margin: 0 }}>Meeting hasn't started yet</h4>
               </div>
-              <p style={{ color: '#9ca3af', fontSize: 13, lineHeight: 1.6, margin: '0 0 6px' }}>
-                Starts in <strong style={{ color: '#c084fc' }}>{earlyWarning.timeLeft}</strong>. Are you sure you want to "{earlyWarning.label}" now?
+              <p style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13, lineHeight: 1.6, margin: '0 0 6px' }}>
+                Starts in <strong style={{ color: 'hsl(var(--pt-c084fc))' }}>{earlyWarning.timeLeft}</strong>. Are you sure you want to "{earlyWarning.label}" now?
               </p>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
                 <button onClick={() => setEarlyWarning(null)}
-                  style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid var(--line-1)', background: 'transparent', color: '#9ca3af', cursor: 'pointer', fontSize: 13 }}>
+                  style={{ padding: '7px 16px', borderRadius: 8, border: '1px solid var(--line-1)', background: 'transparent', color: 'hsl(var(--pt-9ca3af))', cursor: 'pointer', fontSize: 13 }}>
                   Cancel
                 </button>
                 <button onClick={() => { doStatus(earlyWarning.status); setEarlyWarning(null); }}
@@ -744,7 +744,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             )}
             {local.status === 'pending' && (
               <button disabled={actionLoading === 'resend'}
-                style={{ ...btnBase, background: 'rgba(168,85,247,0.12)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)' }}
+                style={{ ...btnBase, background: 'rgba(168,85,247,0.12)', color: 'hsl(var(--pt-c084fc))', border: '1px solid rgba(168,85,247,0.25)' }}
                 onClick={() => act('resend', 'Scheduling email resent', () => resendSchedulingEmail(local.id))}>
                 {actionLoading === 'resend' ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Resend Scheduling Email
               </button>
@@ -759,7 +759,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
             {local.status === 'scheduled' && (
               <>
                 <button disabled={!!actionLoading}
-                  style={{ ...btnBase, background: 'rgba(107,114,128,0.12)', color: '#9ca3af', border: '1px solid var(--line-1)' }}
+                  style={{ ...btnBase, background: 'rgba(107,114,128,0.12)', color: 'hsl(var(--pt-9ca3af))', border: '1px solid var(--line-1)' }}
                   onClick={() => handleStatus('completed')}>
                   {actionLoading === 'status_completed' ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Mark Completed
                 </button>
@@ -817,7 +817,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
               <span style={{ fontSize: 18 }}>📨</span>
               <div>
                 <p style={{ margin: 0, color: '#818cf8', fontSize: 12, fontWeight: 700 }}>WAITING FOR LEAD RESPONSE</p>
-                <p style={{ margin: '2px 0 0', color: '#9ca3af', fontSize: 12 }}>
+                <p style={{ margin: '2px 0 0', color: 'hsl(var(--pt-9ca3af))', fontSize: 12 }}>
                   Approval email was sent. Lead will confirm or suggest another time.
                   {local.scheduled_at && <> Proposed time: <strong style={{ color: 'var(--text-soft)' }}>{fmt(local.scheduled_at)}</strong></>}
                 </p>
@@ -829,7 +829,7 @@ function ExpandedRow({ meeting, colSpan, onUpdated }) {
           {local.reply_snippet && (
             <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 8, padding: '8px 12px', marginBottom: 14 }}>
               <span style={{ color: '#818cf8', fontSize: 11, fontWeight: 700 }}>LEAD'S REPLY  </span>
-              <span style={{ color: '#9ca3af', fontSize: 12, fontStyle: 'italic' }}>"{local.reply_snippet}"</span>
+              <span style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, fontStyle: 'italic' }}>"{local.reply_snippet}"</span>
             </div>
           )}
 
@@ -989,7 +989,7 @@ const SDRMeetingsTab = () => {
             <h2 style={{ color: 'var(--text-soft)', fontWeight: 800, fontSize: 20, margin: 0 }}>Meeting Scheduler</h2>
             <p style={{ color: '#4b5563', fontSize: 12, margin: '3px 0 0' }}>
               {total} meeting{total !== 1 ? 's' : ''} · {pending} pending · {scheduled} scheduled
-              {!activeOnly && <span style={{ color: '#f59e0b', marginLeft: 8 }}>· showing all campaigns</span>}
+              {!activeOnly && <span style={{ color: 'hsl(var(--pt-f59e0b))', marginLeft: 8 }}>· showing all campaigns</span>}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1094,9 +1094,9 @@ const SDRMeetingsTab = () => {
                     style={{
                       display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px',
                       borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
-                      background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'rgba(255,255,255,0.04)',
+                      background: filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.12)' : 'hsl(var(--surface-invert) / 0.04)',
                       border: `1px solid ${filtersOpen || mTotalActive > 0 ? 'rgba(168,85,247,0.5)' : 'var(--line-1)'}`,
-                      color: filtersOpen || mTotalActive > 0 ? '#c084fc' : '#9ca3af',
+                      color: filtersOpen || mTotalActive > 0 ? 'hsl(var(--pt-c084fc))' : '#9ca3af',
                       fontSize: 13, fontWeight: mTotalActive > 0 ? 600 : 400, transition: 'all 0.15s',
                     }}
                   >
@@ -1141,7 +1141,7 @@ const SDRMeetingsTab = () => {
             <div style={{
               marginTop: 10,
               padding: '16px 16px 14px',
-              background: 'linear-gradient(135deg,rgba(10,4,28,0.92),rgba(16,6,38,0.95))',
+              background: 'linear-gradient(135deg,hsl(var(--sfr-0a041c) / 0.92),hsl(var(--sfr-100626) / 0.95))',
               border: '1px solid rgba(168,85,247,0.2)',
               borderRadius: 11,
               boxShadow: 'inset 0 1px 0 rgba(168,85,247,0.06), 0 4px 20px rgba(0,0,0,0.3)',
@@ -1172,7 +1172,7 @@ const SDRMeetingsTab = () => {
                 {/* Temperature */}
                 <div>
                   <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <Thermometer size={11} style={{ color: '#f59e0b' }} /> LEAD TEMP
+                    <Thermometer size={11} style={{ color: 'hsl(var(--pt-f59e0b))' }} /> LEAD TEMP
                   </div>
                   <FilterDropdown fullWidth
                     label="All Temps"
@@ -1211,7 +1211,7 @@ const SDRMeetingsTab = () => {
                 {/* Sort */}
                 <div>
                   <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <ArrowUpDown size={11} style={{ color: '#a78bfa' }} /> SORT BY
+                    <ArrowUpDown size={11} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> SORT BY
                   </div>
                   <FilterDropdown fullWidth
                     label="Sort by"
@@ -1227,7 +1227,7 @@ const SDRMeetingsTab = () => {
               {/* {(() => {
                 const mTotalActive = [statusFilter, tempFilter, campaignFilter].filter(Boolean).length + (sortBy !== 'created_desc' ? 1 : 0);
                 return mTotalActive > 0 ? (
-                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid hsl(var(--surface-invert) / 0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <button
                       onClick={() => { setStatusFilter(''); setTempFilter(''); setCampaignFilter(''); setSortBy('created_desc'); }}
                       style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 8, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.25)', color: '#f87171', fontSize: 12, cursor: 'pointer' }}
@@ -1244,7 +1244,7 @@ const SDRMeetingsTab = () => {
           {/* Result summary */}
           <div style={{ marginTop: 8, fontSize: 12, color: '#4b5563', display: 'flex', alignItems: 'center', gap: 8 }}>
             {loading
-              ? <span style={{ color: '#a78bfa' }}>Loading…</span>
+              ? <span style={{ color: 'hsl(var(--pt-a78bfa))' }}>Loading…</span>
               : <>
                   <span>
                     Showing <strong style={{ color: 'var(--text-soft)' }}>
@@ -1252,7 +1252,7 @@ const SDRMeetingsTab = () => {
                     </strong> of <strong style={{ color: 'var(--text-soft)' }}>{data.total}</strong> meetings
                   </span>
                   {(searchRaw || statusFilter || tempFilter || campaignFilter) && (
-                    <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: '#a78bfa', fontSize: 11 }}>
+                    <span style={{ padding: '1px 8px', borderRadius: 10, background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)', color: 'hsl(var(--pt-a78bfa))', fontSize: 11 }}>
                       filtered
                     </span>
                   )}
@@ -1325,7 +1325,7 @@ const SDRMeetingsTab = () => {
 
                       {/* Company */}
                       <td style={td}>
-                        <div style={{ color: '#c4b5d4', fontSize: 13 }}>{m.lead_company || '—'}</div>
+                        <div style={{ color: 'hsl(var(--pt-c4b5d4))', fontSize: 13 }}>{m.lead_company || '—'}</div>
                         {m.lead_job_title && <div style={{ color: '#4b5563', fontSize: 11 }}>{m.lead_job_title}</div>}
                       </td>
 
@@ -1348,7 +1348,7 @@ const SDRMeetingsTab = () => {
 
                       {/* Scheduled */}
                       <td style={td}>
-                        <div style={{ color: m.scheduled_at ? '#c4b5d4' : '#374151', fontSize: 12 }}>
+                        <div style={{ color: m.scheduled_at ? 'hsl(var(--pt-c4b5d4))' : '#374151', fontSize: 12 }}>
                           {m.scheduled_at ? fmt(m.scheduled_at) : 'Not confirmed'}
                         </div>
                         {m.duration_minutes && m.scheduled_at && (

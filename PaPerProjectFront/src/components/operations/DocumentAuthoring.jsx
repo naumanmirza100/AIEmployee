@@ -551,7 +551,7 @@ const DocumentAuthoring = () => {
     <div
       className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)]"
       style={{
-        background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, rgba(64,40,10,0.55) 100%)',
+        background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, hsl(var(--sfr-40280a) / 0.55) 100%)',
       }}
     >
       <div className="flex w-full max-w-full relative" style={{ height: 'calc(100vh - 120px)', minHeight: 680 }}>
@@ -900,7 +900,7 @@ const AuthoringOnboarding = ({ open, step, setStep, onClose }) => {
             onClick={() => setStep(i)}
             aria-label={`Step ${i + 1}`}
             className="h-1.5 rounded-full transition-all"
-            style={{ width: i === idx ? 18 : 6, backgroundColor: i === idx ? ACCENT : 'rgba(255,255,255,0.25)' }}
+            style={{ width: i === idx ? 18 : 6, backgroundColor: i === idx ? ACCENT : 'hsl(var(--surface-invert) / 0.25)' }}
           />
         ))}
       </div>

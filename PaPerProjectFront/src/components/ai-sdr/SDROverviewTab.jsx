@@ -46,12 +46,12 @@ const SOURCE_LABELS = {
 // Style helpers
 // ---------------------------------------------------------------------------
 const card = {
-  background: 'linear-gradient(135deg,rgba(15,10,31,0.95) 0%,rgba(20,8,40,0.95) 100%)',
+  background: 'linear-gradient(135deg,hsl(var(--sfr-0f0a1f) / 0.95) 0%,hsl(var(--sfr-140828) / 0.95) 100%)',
   border: '1px solid var(--line-1)', borderRadius: 12,
 };
 
 const inputStyle = {
-  background: 'rgba(30,10,50,0.6)', border: '1px solid var(--line-1)',
+  background: 'hsl(var(--sfr-1e0a32) / 0.6)', border: '1px solid var(--line-1)',
   borderRadius: 8, padding: '8px 12px', color: 'var(--text-soft)',
   outline: 'none', fontSize: 14, width: '100%', boxSizing: 'border-box',
 };
@@ -95,7 +95,7 @@ function KPICard({ Icon, label, value, sub, color, trendData, onClick }) {
 
 function MiniBar({ value, max, color }) {
   return (
-    <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.07)' }}>
+    <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'hsl(var(--surface-invert) / 0.07)' }}>
       <div style={{ height: '100%', borderRadius: 3, minWidth: value > 0 ? 3 : 0, width: `${max ? Math.min(100, (value / max) * 100) : 0}%`, background: color, transition: 'width 0.5s' }} />
     </div>
   );
@@ -104,7 +104,7 @@ function MiniBar({ value, max, color }) {
 function SectionTitle({ children, action }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-      <span style={{ fontSize: 14, fontWeight: 700, color: '#c4b5fd', letterSpacing: '0.01em' }}>{children}</span>
+      <span style={{ fontSize: 14, fontWeight: 700, color: 'hsl(var(--pt-c4b5fd))', letterSpacing: '0.01em' }}>{children}</span>
       {action}
     </div>
   );
@@ -137,12 +137,12 @@ function SetupGuideContent({ which, copiedKey, setCopiedKey }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '4px 0 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)' }}>
         <span>⚠️</span>
-        <span style={{ color: '#fcd34d', fontSize: 13, fontWeight: 600 }}>
+        <span style={{ color: 'hsl(var(--pt-fcd34d))', fontSize: 13, fontWeight: 600 }}>
           {which === 'apify' ? 'Apify requires a paid plan for production-level lead scraping' : 'Apollo People Search API requires a PAID plan ($49+/month)'}
         </span>
       </div>
       {which === 'apollo' && (
-        <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid var(--line-1)', color: '#9ca3af', fontSize: 12 }}>
+        <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(168,85,247,0.06)', border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', fontSize: 12 }}>
           💡 <strong style={{ color: 'var(--text-soft)' }}>Recommendation:</strong> Use <strong style={{ color: '#a855f7' }}>Apify</strong> for lead generation if you don't have a paid Apollo plan.
         </div>
       )}
@@ -151,15 +151,15 @@ function SetupGuideContent({ which, copiedKey, setCopiedKey }) {
           <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', background: accentBg, border: `1px solid ${accent}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: accent, fontSize: 12, fontWeight: 700, marginTop: 2 }}>{s.step}</div>
           <div style={{ flex: 1 }}>
             <div style={{ color: 'var(--text-soft)', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{s.title}</div>
-            <div style={{ color: '#9ca3af', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>
+            <div style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 12, lineHeight: 1.5 }}>{s.detail}</div>
             {s.link && <a href={s.link} target="_blank" rel="noreferrer" style={{ color: accent, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}><ExternalLink size={11} />{s.linkLabel}</a>}
-            {s.note && <div style={{ marginTop: 4, padding: '4px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', color: '#6b7280', fontSize: 11, fontFamily: 'monospace' }}>{s.note}</div>}
+            {s.note && <div style={{ marginTop: 4, padding: '4px 8px', borderRadius: 6, background: 'hsl(var(--surface-invert) / 0.04)', color: '#6b7280', fontSize: 11, fontFamily: 'monospace' }}>{s.note}</div>}
             {s.code && (
               <div style={{ marginTop: 6, padding: '8px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--sfc-1e1035)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <code style={{ color: accent, fontSize: 11, flex: 1, wordBreak: 'break-all' }}>{s.code}</code>
                 <button
                   onClick={() => { navigator.clipboard.writeText(s.code); setCopiedKey(s.step); setTimeout(() => setCopiedKey(null), 2000); }}
-                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step ? '#4ade80' : '#6b7280', flexShrink: 0 }}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: copiedKey === s.step ? 'hsl(var(--pt-4ade80))' : '#6b7280', flexShrink: 0 }}
                 >
                   {copiedKey === s.step ? <CheckCircle size={13} /> : <Copy size={13} />}
                 </button>
@@ -287,7 +287,7 @@ export default function SDROverviewTab() {
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 320, gap: 12 }}>
-        <Loader2 size={32} style={{ color: '#a78bfa', animation: 'spin 1s linear infinite' }} />
+        <Loader2 size={32} style={{ color: 'hsl(var(--pt-a78bfa))', animation: 'spin 1s linear infinite' }} />
         <span style={{ color: '#6b7280', fontSize: 14 }}>Loading dashboard…</span>
         <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
       </div>
@@ -301,8 +301,8 @@ export default function SDROverviewTab() {
       {/* Alert banner */}
       {lowAlert && (
         <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 10, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <AlertTriangle size={16} style={{ color: '#f59e0b', flexShrink: 0 }} />
-          <span style={{ fontSize: 13, color: '#fcd34d' }}>
+          <AlertTriangle size={16} style={{ color: 'hsl(var(--pt-f59e0b))', flexShrink: 0 }} />
+          <span style={{ fontSize: 13, color: 'hsl(var(--pt-fcd34d))' }}>
             <strong>Low meetings alert:</strong> Only <strong>{meetWeek}</strong> meeting(s) this week — below target of {alertThresh}. Review reply rates or adjust email sequences.
           </span>
         </div>
@@ -335,13 +335,13 @@ export default function SDROverviewTab() {
             onClick={openGenModal}
             style={{
               display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px',
-              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+              background: 'hsl(var(--surface-invert) / 0.04)', border: '1px solid hsl(var(--surface-invert) / 0.1)',
               borderRadius: 9, color: 'var(--text-soft)', fontSize: 13, cursor: 'pointer', transition: 'all 0.2s',
             }}
             onMouseEnter={e => { e.currentTarget.style.borderColor = '#a78bfa'; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
           >
-            <Brain size={14} style={{ color: '#a78bfa' }} /> Research Leads
+            <Brain size={14} style={{ color: 'hsl(var(--pt-a78bfa))' }} /> Research Leads
           </button>
 
           {/* Other actions */}
@@ -353,8 +353,8 @@ export default function SDROverviewTab() {
             <button key={key} disabled={!!actionBusy} onClick={() => runAction(key, fn, `${label} complete`)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px',
-                background: actionBusy === key ? `${color}22` : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${actionBusy === key ? color : 'rgba(255,255,255,0.1)'}`,
+                background: actionBusy === key ? `${color}22` : 'hsl(var(--surface-invert) / 0.04)',
+                border: `1px solid ${actionBusy === key ? color : 'hsl(var(--surface-invert) / 0.1)'}`,
                 borderRadius: 9, color: 'var(--text-soft)', fontSize: 13,
                 cursor: actionBusy ? 'not-allowed' : 'pointer', transition: 'all 0.2s',
                 opacity: actionBusy && actionBusy !== key ? 0.5 : 1,
@@ -378,18 +378,18 @@ export default function SDROverviewTab() {
         <div style={{ ...card, padding: '14px 18px' }}>
           <SectionTitle>
             🔥 Top Hot Leads
-            <button onClick={() => navigate('/ai-sdr/leads')} style={{ display:'flex',alignItems:'center',gap:4,fontSize:12,color:'#a78bfa',background:'none',border:'none',cursor:'pointer' }}>
+            <button onClick={() => navigate('/ai-sdr/leads')} style={{ display:'flex',alignItems:'center',gap:4,fontSize:12,color:'hsl(var(--pt-a78bfa))',background:'none',border:'none',cursor:'pointer' }}>
               View all <ChevronRight size={13} />
             </button>
           </SectionTitle>
           {hotLeads.length === 0 ? (
             <div style={{ textAlign:'center',padding:'24px 0',color:'#4b5563',fontSize:13 }}>
-              No hot leads yet — click <strong style={{ color:'#a78bfa' }}>Research Leads</strong> above
+              No hot leads yet — click <strong style={{ color:'hsl(var(--pt-a78bfa))' }}>Research Leads</strong> above
             </div>
           ) : (
             <div style={{ display:'flex',flexDirection:'column',gap:8 }}>
               {hotLeads.map(lead => (
-                <div key={lead.id} style={{ display:'flex',alignItems:'center',gap:12,background:'rgba(255,255,255,0.03)',borderRadius:9,padding:'10px 12px',border:'1px solid rgba(255,255,255,0.06)' }}>
+                <div key={lead.id} style={{ display:'flex',alignItems:'center',gap:12,background:'hsl(var(--surface-invert) / 0.03)',borderRadius:9,padding:'10px 12px',border:'1px solid hsl(var(--surface-invert) / 0.06)' }}>
                   <div style={{ width:38,height:38,borderRadius:10,flexShrink:0,background:`${SCORE_COLOR(lead.score)}18`,border:`1px solid ${SCORE_COLOR(lead.score)}40`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:SCORE_COLOR(lead.score) }}>
                     {lead.score ?? '—'}
                   </div>
@@ -424,12 +424,12 @@ export default function SDROverviewTab() {
                 {funnel.map((s,i) => (
                   <div key={i}>
                     <div style={{ display:'flex',justifyContent:'space-between',marginBottom:4 }}>
-                      <span style={{ fontSize:12,color:'#9ca3af' }}>{s.stage}</span>
+                      <span style={{ fontSize:12,color:'hsl(var(--pt-9ca3af))' }}>{s.stage}</span>
                       <span style={{ fontSize:12,color:'var(--text-soft)',fontWeight:600 }}>
                         {s.count}<span style={{ fontSize:10,color:'#4b5563',fontWeight:400 }}> ({pct(s.count,funnel[0]?.count??1)}%)</span>
                       </span>
                     </div>
-                    <div style={{ height:7,borderRadius:4,background:'rgba(255,255,255,0.06)' }}>
+                    <div style={{ height:7,borderRadius:4,background:'hsl(var(--surface-invert) / 0.06)' }}>
                       <div style={{ height:'100%',borderRadius:4,width:`${pct(s.count,funnel[0]?.count??1)}%`,background:s.color,transition:'width 0.6s ease',minWidth:s.count>0?4:0 }} />
                     </div>
                   </div>
@@ -476,24 +476,24 @@ export default function SDROverviewTab() {
         <div style={{ ...card,padding:'14px 18px' }}>
           <SectionTitle>
             🚀 Active Campaigns
-            <button onClick={() => navigate('/ai-sdr/outreach')} style={{ display:'flex',alignItems:'center',gap:4,fontSize:12,color:'#a78bfa',background:'none',border:'none',cursor:'pointer' }}>Manage <ChevronRight size={13} /></button>
+            <button onClick={() => navigate('/ai-sdr/outreach')} style={{ display:'flex',alignItems:'center',gap:4,fontSize:12,color:'hsl(var(--pt-a78bfa))',background:'none',border:'none',cursor:'pointer' }}>Manage <ChevronRight size={13} /></button>
           </SectionTitle>
           {campaignRows.length === 0
             ? <div style={{ color:'#4b5563',fontSize:12,textAlign:'center',paddingTop:20 }}>No active campaigns</div>
             : <div style={{ display:'flex',flexDirection:'column',gap:10 }}>
                 {campaignRows.map(c => (
-                  <div key={c.id} style={{ background:'rgba(255,255,255,0.03)',borderRadius:9,padding:'10px 12px',border:'1px solid rgba(255,255,255,0.06)' }}>
+                  <div key={c.id} style={{ background:'hsl(var(--surface-invert) / 0.03)',borderRadius:9,padding:'10px 12px',border:'1px solid hsl(var(--surface-invert) / 0.06)' }}>
                     <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:7 }}>
                       <span style={{ fontSize:13,fontWeight:600,color:'var(--text-soft)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'55%' }}>{c.name}</span>
                       <div style={{ display:'flex',gap:10,fontSize:11,color:'#6b7280' }}>
                         <span>{c.emails_sent} <span style={{ color:'#4b5563' }}>sent</span></span>
-                        <span style={{ color:'#4ade80' }}>{c.replies} <span style={{ color:'#4b5563' }}>replies</span></span>
+                        <span style={{ color:'hsl(var(--pt-4ade80))' }}>{c.replies} <span style={{ color:'#4b5563' }}>replies</span></span>
                         <span style={{ color:'#34d399',fontWeight:600 }}>{c.meetings} mtg</span>
                       </div>
                     </div>
                     <div style={{ display:'flex',alignItems:'center',gap:8 }}>
                       <MiniBar value={c.emails_sent} max={maxCampEmails} color="#60a5fa" />
-                      <span style={{ fontSize:10,color:'#a78bfa',fontWeight:600,whiteSpace:'nowrap' }}>{c.reply_rate}% reply</span>
+                      <span style={{ fontSize:10,color:'hsl(var(--pt-a78bfa))',fontWeight:600,whiteSpace:'nowrap' }}>{c.reply_rate}% reply</span>
                     </div>
                   </div>
                 ))}
@@ -539,14 +539,14 @@ export default function SDROverviewTab() {
                     <span style={{ display:'flex',alignItems:'center',gap:5,fontSize:12,color:cfg.color }}><cfg.Icon size={12} />{cfg.label}</span>
                     <span style={{ fontSize:12,fontWeight:700,color:cfg.color }}>{cnt}</span>
                   </div>
-                  <div style={{ height:6,borderRadius:3,background:'rgba(255,255,255,0.06)' }}>
+                  <div style={{ height:6,borderRadius:3,background:'hsl(var(--surface-invert) / 0.06)' }}>
                     <div style={{ height:'100%',borderRadius:3,background:cfg.color,transition:'width 0.5s',width:`${pct(cnt,maxC)}%`,minWidth:cnt>0?4:0 }} />
                   </div>
                 </div>
               );
             })}
             {(stats.unscored??0)>0 && (
-              <div style={{ display:'flex',justifyContent:'space-between',marginTop:4,paddingTop:8,borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+              <div style={{ display:'flex',justifyContent:'space-between',marginTop:4,paddingTop:8,borderTop:'1px solid hsl(var(--surface-invert) / 0.07)' }}>
                 <span style={{ fontSize:11,color:'#4b5563' }}>Unscored</span>
                 <span style={{ fontSize:11,color:'#4b5563',fontWeight:600 }}>{stats.unscored}</span>
               </div>
@@ -604,7 +604,7 @@ export default function SDROverviewTab() {
 
             {/* Source selector */}
             <div>
-              <label style={{ color:'#9ca3af',fontSize:12,display:'block',marginBottom:8 }}>Source</label>
+              <label style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12,display:'block',marginBottom:8 }}>Source</label>
               <div style={{ display:'flex',gap:8 }}>
                 {[
                   { key:'apify',  label:'⚡ Apify',    desc:'Web scraping — LinkedIn & Google', color:'#a855f7' },
@@ -612,14 +612,14 @@ export default function SDROverviewTab() {
                 ].map(s => (
                   <button key={s.key} onClick={() => setGenSource(s.key)} style={{
                     flex:1, padding:'10px 14px', borderRadius:10, cursor:'pointer', textAlign:'left',
-                    background: genSource===s.key ? `${s.color}22` : 'rgba(255,255,255,0.03)',
+                    background: genSource===s.key ? `${s.color}22` : 'hsl(var(--surface-invert) / 0.03)',
                     border: `1px solid ${genSource===s.key ? s.color : 'var(--line-1)'}`,
                     transition:'all 0.2s',
                   }}>
                     <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center' }}>
                       <span style={{ color:'var(--text-soft)',fontWeight:600,fontSize:14 }}>{s.label}</span>
                       <div style={{ display:'flex',alignItems:'center',gap:5 }}>
-                        <span style={{ fontSize:10,padding:'1px 6px',borderRadius:4,background:'rgba(234,179,8,0.15)',color:'#fcd34d' }}>PAID</span>
+                        <span style={{ fontSize:10,padding:'1px 6px',borderRadius:4,background:'rgba(234,179,8,0.15)',color:'hsl(var(--pt-fcd34d))' }}>PAID</span>
                         <span
                           title="How to Connect"
                           onClick={e => { e.stopPropagation(); setShowSetupGuide(s.key); }}
@@ -640,7 +640,7 @@ export default function SDROverviewTab() {
             {/* ICP Profile selector */}
             {icpProfiles.length > 1 && (
               <div>
-                <label style={{ color:'#9ca3af',fontSize:12,display:'block',marginBottom:6 }}>ICP Profile</label>
+                <label style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12,display:'block',marginBottom:6 }}>ICP Profile</label>
                 <select value={genIcpId} onChange={e => setGenIcpId(e.target.value)} style={{ ...inputStyle }}>
                   {icpProfiles.map(p => <option key={p.id} value={p.id}>{p.name}{p.is_active?' (Active)':''}</option>)}
                 </select>
@@ -648,7 +648,7 @@ export default function SDROverviewTab() {
             )}
             {icpProfiles.length === 1 && (
               <div style={{ padding:'8px 12px',borderRadius:8,background:'rgba(168,85,247,0.08)',border:'1px solid var(--line-1)' }}>
-                <span style={{ color:'#9ca3af',fontSize:12 }}>ICP: </span>
+                <span style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12 }}>ICP: </span>
                 <span style={{ color:'var(--text-soft)',fontSize:13,fontWeight:600 }}>{icpProfiles[0].name}</span>
               </div>
             )}
@@ -660,7 +660,7 @@ export default function SDROverviewTab() {
 
             {/* Count slider */}
             <div>
-              <label style={{ color:'#9ca3af',fontSize:12,display:'block',marginBottom:6 }}>
+              <label style={{ color:'hsl(var(--pt-9ca3af))',fontSize:12,display:'block',marginBottom:6 }}>
                 Number of Leads: <span style={{ color:'#a855f7',fontWeight:700 }}>{genCount}</span>
               </label>
               <input type="range" min={5} max={50} step={5} value={genCount} onChange={e => setGenCount(Number(e.target.value))} style={{ width:'100%',accentColor:'#a855f7' }} />
@@ -672,7 +672,7 @@ export default function SDROverviewTab() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border:'1px solid var(--line-1)',color:'#9ca3af',borderRadius:8 }}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowGenModal(false)} style={{ border:'1px solid var(--line-1)',color:'hsl(var(--pt-9ca3af))',borderRadius:8 }}>Cancel</Button>
             <Button onClick={handleGenerate} disabled={generating || icpProfiles.length === 0} style={{ background:'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)',color:'#fff',border:'none',borderRadius:8,fontWeight:600,display:'flex',alignItems:'center',gap:6 }}>
               {generating ? <Loader2 size={13} style={{ animation:'spin 1s linear infinite' }} /> : <Zap size={13} />}
               {generating ? 'Generating...' : `Generate ${genCount} Leads`}

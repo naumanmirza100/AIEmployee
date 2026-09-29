@@ -105,7 +105,7 @@ const OperationsAgentPage = () => {
             </CardHeader>
             <CardContent className="space-y-4">
               <Button
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/#ai-modules?agent=operations_agent')}
                 className="w-full"
               >
                 Go to Home Page to Purchase

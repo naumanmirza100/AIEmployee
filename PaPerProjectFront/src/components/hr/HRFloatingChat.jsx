@@ -472,7 +472,7 @@ const HRFloatingChat = () => {
             className="relative h-14 w-14 rounded-full flex items-center justify-center text-white shadow-2xl hover:scale-110 active:scale-95 transition-transform"
             style={{
               background: 'linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)',
-              boxShadow: '0 12px 32px 0 rgba(139, 92, 246, 0.55), 0 0 0 1px rgba(255,255,255,0.08) inset',
+              boxShadow: '0 12px 32px 0 rgba(139, 92, 246, 0.55), 0 0 0 1px hsl(var(--surface-invert) / 0.08) inset',
             }}
           >
             <span aria-hidden="true" className="absolute inset-0 rounded-full"

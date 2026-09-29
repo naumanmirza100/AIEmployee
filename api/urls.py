@@ -239,6 +239,8 @@ urlpatterns = [
     # Project Manager AI Agent endpoints (token-auth friendly)
     re_path(r'^project-manager/ai/project-pilot/?$', pm_agent.project_pilot, name='pm_project_pilot'),
     re_path(r'^project-manager/ai/project-pilot/upload-file/?$', pm_agent.project_pilot_from_file, name='pm_project_pilot_from_file'),
+    # Applies a proposal the user has reviewed and filled the gaps in.
+    re_path(r'^project-manager/ai/project-pilot/confirm/?$', pm_agent.project_pilot_confirm, name='pm_project_pilot_confirm'),
     re_path(r'^project-manager/ai/project-pilot/jobs/(?P<job_id>\d+)/status/?$', pm_agent.project_pilot_job_status, name='pm_project_pilot_job_status'),
     re_path(r'^project-manager/ai/task-prioritization/?$', pm_agent.task_prioritization, name='pm_task_prioritization'),
     re_path(r'^project-manager/ai/generate-subtasks/?$', pm_agent.generate_subtasks, name='pm_generate_subtasks'),

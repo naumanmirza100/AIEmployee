@@ -82,7 +82,7 @@ const KeyField = ({ label, value, placeholder, hint, isSet, onChange, link, link
         <span style={{
           fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
           background: isSet ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.12)',
-          color: isSet ? '#4ade80' : '#f87171',
+          color: isSet ? 'hsl(var(--pt-4ade80))' : '#f87171',
           border: `1px solid ${isSet ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.25)'}`,
         }}>
           {isSet ? '✓ Set' : '✗ Not Set'}
@@ -102,7 +102,7 @@ const KeyField = ({ label, value, placeholder, hint, isSet, onChange, link, link
           onClick={() => setShow(v => !v)}
           style={{
             position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-            background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)',
+            background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--surface-invert) / 0.4)',
             padding: 0,
           }}
         >
@@ -136,7 +136,7 @@ const Section = ({ icon: Icon, title, subtitle, badge, children, defaultOpen = t
         style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
       >
         <div style={{ ...sectionHeader, marginBottom: open ? 20 : 0, paddingBottom: open ? 12 : 0,
-          borderBottom: open ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
+          borderBottom: open ? '1px solid hsl(var(--surface-invert) / 0.06)' : 'none' }}>
           <div style={{
             width: 36, height: 36, borderRadius: 10,
             background: 'linear-gradient(135deg,#a855f720,#ec489920)',
@@ -151,14 +151,14 @@ const Section = ({ icon: Icon, title, subtitle, badge, children, defaultOpen = t
               {badge && (
                 <span style={{
                   fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
-                  background: 'rgba(168,85,247,0.15)', color: '#c084fc',
+                  background: 'rgba(168,85,247,0.15)', color: 'hsl(var(--pt-c084fc))',
                   border: '1px solid rgba(168,85,247,0.3)',
                 }}>
                   {badge}
                 </span>
               )}
             </div>
-            <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 2 }}>{subtitle}</p>
+            <p style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 12, marginTop: 2 }}>{subtitle}</p>
           </div>
           {open ? <ChevronUp size={16} color="rgba(255,255,255,0.4)" /> : <ChevronDown size={16} color="rgba(255,255,255,0.4)" />}
         </div>
@@ -222,7 +222,7 @@ const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
         <div style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 8 }}>
           Remove {cfg.label}?
         </div>
-        <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 14, lineHeight: 1.6, marginBottom: 28 }}>
+        <p style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 14, lineHeight: 1.6, marginBottom: 28 }}>
           This will permanently disconnect your <strong style={{ color: '#f87171' }}>{cfg.label}</strong> integration.
           All saved credentials will be deleted and lead syncing will stop.
         </p>
@@ -232,8 +232,8 @@ const ConfirmDeleteModal = ({ provider, onConfirm, onCancel, deleting }) => {
             onClick={onCancel}
             disabled={deleting}
             style={{
-              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 8, padding: '9px 20px', color: '#d1d5db',
+              background: 'hsl(var(--surface-invert) / 0.06)', border: '1px solid hsl(var(--surface-invert) / 0.12)',
+              borderRadius: 8, padding: '9px 20px', color: 'hsl(var(--pt-d1d5db))',
               fontSize: 14, fontWeight: 500, cursor: 'pointer',
             }}>
             Cancel
@@ -318,7 +318,7 @@ const CRMIntegrationCard = ({ integration, onRefresh }) => {
           deleting={deleting}
         />
       )}
-    <div style={{ marginBottom: 20, padding: 18, borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${cfg.color}33` }}>
+    <div style={{ marginBottom: 20, padding: 18, borderRadius: 10, background: 'hsl(var(--surface-invert) / 0.03)', border: `1px solid ${cfg.color}33` }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -358,7 +358,7 @@ const CRMIntegrationCard = ({ integration, onRefresh }) => {
             {f.secret && (
               <button type="button" onClick={() => setShow(p => ({ ...p, [f.key]: !p[f.key] }))}
                 style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', padding: 0 }}>
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--surface-invert) / 0.4)', padding: 0 }}>
                 {show[f.key] ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             )}
@@ -369,8 +369,8 @@ const CRMIntegrationCard = ({ integration, onRefresh }) => {
       {/* Actions */}
       <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
         <button onClick={handlePing} disabled={pinging}
-          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 7, padding: '7px 14px', color: '#d1d5db', fontSize: 12, cursor: 'pointer',
+          style={{ background: 'hsl(var(--surface-invert) / 0.06)', border: '1px solid hsl(var(--surface-invert) / 0.1)',
+            borderRadius: 7, padding: '7px 14px', color: 'hsl(var(--pt-d1d5db))', fontSize: 12, cursor: 'pointer',
             display: 'flex', alignItems: 'center', gap: 5 }}>
           {pinging ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Wifi size={12} />}
           Test Connection
@@ -416,13 +416,13 @@ const CRMConnectForm = ({ provider, onSaved }) => {
   };
 
   return (
-    <div style={{ marginBottom: 12, borderRadius: 10, border: '1px solid rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+    <div style={{ marginBottom: 12, borderRadius: 10, border: '1px solid hsl(var(--surface-invert) / 0.07)', overflow: 'hidden' }}>
       <button onClick={() => setOpen(v => !v)}
-        style={{ width: '100%', background: 'rgba(255,255,255,0.02)', border: 'none', cursor: 'pointer',
+        style={{ width: '100%', background: 'hsl(var(--surface-invert) / 0.02)', border: 'none', cursor: 'pointer',
           padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 20 }}>{cfg.logo}</span>
-          <span style={{ color: '#d1d5db', fontWeight: 600, fontSize: 14 }}>{cfg.label}</span>
+          <span style={{ color: 'hsl(var(--pt-d1d5db))', fontWeight: 600, fontSize: 14 }}>{cfg.label}</span>
           <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 20,
             background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
             Not connected
@@ -435,7 +435,7 @@ const CRMConnectForm = ({ provider, onSaved }) => {
       </button>
 
       {open && (
-        <div style={{ padding: '14px 16px 16px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ padding: '14px 16px 16px', borderTop: '1px solid hsl(var(--surface-invert) / 0.06)' }}>
           {cfg.fields.map(f => (
             <div key={f.key} style={{ marginBottom: 12 }}>
               <label style={{ ...labelStyle, fontSize: 12 }}>{f.label}</label>
@@ -450,7 +450,7 @@ const CRMConnectForm = ({ provider, onSaved }) => {
                 {f.secret && (
                   <button type="button" onClick={() => setShow(p => ({ ...p, [f.key]: !p[f.key] }))}
                     style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                      background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', padding: 0 }}>
+                      background: 'none', border: 'none', cursor: 'pointer', color: 'hsl(var(--surface-invert) / 0.4)', padding: 0 }}>
                     {show[f.key] ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 )}
@@ -553,11 +553,11 @@ const GoogleMeetCard = () => {
               <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 16, margin: 0 }}>Google Meet</h3>
               {connected
                 ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#34d399', fontSize: 11, fontWeight: 600, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 20, padding: '2px 10px' }}><Wifi size={11} /> Connected</span>
-                : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: 600, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 20, padding: '2px 10px' }}><WifiOff size={11} /> Not connected</span>}
+                : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'hsl(var(--surface-invert) / 0.4)', fontSize: 11, fontWeight: 600, background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)', borderRadius: 20, padding: '2px 10px' }}><WifiOff size={11} /> Not connected</span>}
             </div>
-            <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13, margin: '6px 0 0', maxWidth: 460, lineHeight: 1.5 }}>
+            <p style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 13, margin: '6px 0 0', maxWidth: 460, lineHeight: 1.5 }}>
               {connected
-                ? <>Connected as <span style={{ color: 'rgba(255,255,255,0.8)' }}>{status?.googleEmail || 'your Google account'}</span>. New meetings generate a <b style={{ color: 'var(--text-soft)' }}>Google Meet</b> link automatically.</>
+                ? <>Connected as <span style={{ color: 'hsl(var(--surface-invert) / 0.8)' }}>{status?.googleEmail || 'your Google account'}</span>. New meetings generate a <b style={{ color: 'var(--text-soft)' }}>Google Meet</b> link automatically.</>
                 : <>Connect your Google account so meeting invites use <b style={{ color: 'var(--text-soft)' }}>Google Meet</b> instead of the default <b style={{ color: 'var(--text-soft)' }}>Jitsi</b> link.</>}
             </p>
           </div>
@@ -574,7 +574,7 @@ const GoogleMeetCard = () => {
           ) : (
             <button onClick={handleConnect} disabled={busy || !configured}
               title={!configured ? 'Google integration is not configured on the server.' : ''}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: configured ? 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)' : 'rgba(255,255,255,0.06)', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: (busy || !configured) ? 'default' : 'pointer', opacity: (busy || !configured) ? 0.5 : 1 }}>
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: configured ? 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)' : 'hsl(var(--surface-invert) / 0.06)', border: 'none', color: '#fff', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: (busy || !configured) ? 'default' : 'pointer', opacity: (busy || !configured) ? 0.5 : 1 }}>
               {busy ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Link2 size={14} />} Connect with Google
             </button>
           )}
@@ -584,7 +584,7 @@ const GoogleMeetCard = () => {
       {!configured && !loading && (
         <div style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <AlertCircle size={15} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
-          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
+          <p style={{ color: 'hsl(var(--surface-invert) / 0.6)', fontSize: 12, margin: 0, lineHeight: 1.5 }}>
             Google integration isn’t configured on the server yet. Meetings will use Jitsi links until an administrator sets it up.
           </p>
         </div>
@@ -692,7 +692,7 @@ const SDRSettingsTab = () => {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 80 }}>
         <Loader2 size={28} color="#a855f7" style={{ animation: 'spin 1s linear infinite' }} />
-        <span style={{ color: 'rgba(255,255,255,0.5)', marginLeft: 12 }}>Loading settings…</span>
+        <span style={{ color: 'hsl(var(--surface-invert) / 0.5)', marginLeft: 12 }}>Loading settings…</span>
       </div>
     );
   }
@@ -730,14 +730,14 @@ const SDRSettingsTab = () => {
       {/* ── Left sidebar ── */}
       <div style={{
         width: 210, flexShrink: 0,
-        background: 'rgba(255,255,255,0.02)',
-        border: '1px solid rgba(255,255,255,0.07)',
+        background: 'hsl(var(--surface-invert) / 0.02)',
+        border: '1px solid hsl(var(--surface-invert) / 0.07)',
         borderRadius: 14, padding: 10,
       }}>
         {/* Header */}
-        <div style={{ padding: '8px 10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 8 }}>
+        <div style={{ padding: '8px 10px 14px', borderBottom: '1px solid hsl(var(--surface-invert) / 0.06)', marginBottom: 8 }}>
           <div style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>SDR Settings</div>
-          <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 2 }}>Per-account credentials</div>
+          <div style={{ color: 'hsl(var(--surface-invert) / 0.35)', fontSize: 11, marginTop: 2 }}>Per-account credentials</div>
         </div>
 
         {SIDE_TABS.map(tab => {
@@ -758,16 +758,16 @@ const SDRSettingsTab = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                  background: active ? 'linear-gradient(135deg,#a855f7,#ec4899)' : 'rgba(255,255,255,0.06)',
+                  background: active ? 'linear-gradient(135deg,#a855f7,#ec4899)' : 'hsl(var(--surface-invert) / 0.06)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   <Icon size={15} color={active ? '#fff' : 'rgba(255,255,255,0.4)'} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: active ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: active ? 700 : 500, fontSize: 13 }}>
+                  <div style={{ color: active ? '#fff' : 'hsl(var(--surface-invert) / 0.65)', fontWeight: active ? 700 : 500, fontSize: 13 }}>
                     {tab.label}
                   </div>
-                  <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ color: 'hsl(var(--surface-invert) / 0.3)', fontSize: 11, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {tab.sublabel}
                   </div>
                 </div>
@@ -788,10 +788,10 @@ const SDRSettingsTab = () => {
         })}
 
         {/* Refresh at bottom */}
-        <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: 8, paddingTop: 10 }}>
+        <div style={{ borderTop: '1px solid hsl(var(--surface-invert) / 0.06)', marginTop: 8, paddingTop: 10 }}>
           <button onClick={fetchSettings} style={{
             width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-            color: 'rgba(255,255,255,0.35)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
+            color: 'hsl(var(--surface-invert) / 0.35)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
             padding: '6px 12px', borderRadius: 8,
           }}>
             <RefreshCw size={13} /> Refresh
@@ -816,17 +816,17 @@ const SDRSettingsTab = () => {
                 ? <CheckCircle2 size={18} color="#4ade80" />
                 : <AlertCircle size={18} color="#fbbf24" />}
               <div style={{ flex: 1 }}>
-                <p style={{ color: (apolloSet || apifySet) ? '#4ade80' : '#fbbf24', fontWeight: 600, fontSize: 13, marginBottom: 2 }}>
+                <p style={{ color: (apolloSet || apifySet) ? 'hsl(var(--pt-4ade80))' : '#fbbf24', fontWeight: 600, fontSize: 13, marginBottom: 2 }}>
                   {(apolloSet || apifySet) ? 'Lead sources configured' : 'No lead sources configured'}
                 </p>
-                <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
+                <p style={{ color: 'hsl(var(--surface-invert) / 0.4)', fontSize: 12 }}>
                   {(apolloSet || apifySet)
                     ? `Active: ${[apolloSet && 'Apollo.io', apifySet && 'Apify'].filter(Boolean).join(' · ')}`
                     : 'Add an Apollo or Apify key to enable lead generation.'}
                 </p>
               </div>
               {lastUpdated && (
-                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 11, color: 'hsl(var(--surface-invert) / 0.25)', whiteSpace: 'nowrap' }}>
                   Updated {new Date(lastUpdated).toLocaleDateString()}
                 </span>
               )}
@@ -853,7 +853,7 @@ const SDRSettingsTab = () => {
                 link="https://console.apify.com/account/integrations" linkLabel="Get token"
               />
               <div style={{ marginBottom: 4 }}>
-                <label style={labelStyle}>Apify Actor ID <span style={{ fontWeight: 400, color: 'rgba(255,255,255,0.3)' }}>(optional)</span></label>
+                <label style={labelStyle}>Apify Actor ID <span style={{ fontWeight: 400, color: 'hsl(var(--surface-invert) / 0.3)' }}>(optional)</span></label>
                 <input
                   type="text" value={apifyActor} onChange={e => setApifyActor(e.target.value)}
                   placeholder="e.g. curious_coder/linkedin-people-search-scraper"
@@ -868,12 +868,12 @@ const SDRSettingsTab = () => {
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <Settings size={16} color="#a855f7" style={{ marginTop: 2, flexShrink: 0 }} />
                 <div>
-                  <p style={{ color: '#c084fc', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>How lead sources work</p>
-                  <ul style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, lineHeight: 1.8, paddingLeft: 16 }}>
-                    <li><strong style={{ color: '#c084fc' }}>Apollo</strong> — real emails, job titles, company data</li>
-                    <li><strong style={{ color: '#c084fc' }}>Apify</strong> — LinkedIn scraping; great coverage</li>
+                  <p style={{ color: 'hsl(var(--pt-c084fc))', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>How lead sources work</p>
+                  <ul style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 12, lineHeight: 1.8, paddingLeft: 16 }}>
+                    <li><strong style={{ color: 'hsl(var(--pt-c084fc))' }}>Apollo</strong> — real emails, job titles, company data</li>
+                    <li><strong style={{ color: 'hsl(var(--pt-c084fc))' }}>Apify</strong> — LinkedIn scraping; great coverage</li>
                   </ul>
-                  <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, marginTop: 8 }}>
+                  <p style={{ color: 'hsl(var(--surface-invert) / 0.3)', fontSize: 11, marginTop: 8 }}>
                     Apollo is tried first, then Apify. You can also choose the source manually.
                   </p>
                 </div>
@@ -898,7 +898,7 @@ const SDRSettingsTab = () => {
             {/* Header */}
             <div style={{ marginBottom: 20 }}>
               <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 4 }}>CRM Integrations</h3>
-              <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>
+              <p style={{ color: 'hsl(var(--surface-invert) / 0.4)', fontSize: 13 }}>
                 Connect your CRM to automatically sync leads, emails, and meetings.
               </p>
             </div>
@@ -915,7 +915,7 @@ const SDRSettingsTab = () => {
 
             {crmIntegrations.length === 0 && (
               <div style={{ ...card, background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', marginTop: 8, padding: '14px 18px' }}>
-                <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+                <p style={{ color: 'hsl(var(--surface-invert) / 0.3)', fontSize: 12 }}>
                   No CRM connected yet. Click a provider above to get started.
                 </p>
               </div>
@@ -928,7 +928,7 @@ const SDRSettingsTab = () => {
           <div>
             <div style={{ marginBottom: 20 }}>
               <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Meeting Links</h3>
-              <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>
+              <p style={{ color: 'hsl(var(--surface-invert) / 0.4)', fontSize: 13 }}>
                 Choose how video links are generated for meetings you schedule with leads.
               </p>
             </div>
@@ -938,15 +938,15 @@ const SDRSettingsTab = () => {
             {/* Jitsi (default) — informational */}
             <div style={{ ...card, marginTop: 16, opacity: 0.9 }}>
               <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <Link2 size={20} color="rgba(255,255,255,0.5)" />
                 </div>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 16, margin: 0 }}>Jitsi</h3>
-                    <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 20, padding: '2px 10px' }}>Default</span>
+                    <span style={{ color: 'hsl(var(--surface-invert) / 0.5)', fontSize: 11, fontWeight: 600, background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.1)', borderRadius: 20, padding: '2px 10px' }}>Default</span>
                   </div>
-                  <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13, margin: '6px 0 0', maxWidth: 460, lineHeight: 1.5 }}>
+                  <p style={{ color: 'hsl(var(--surface-invert) / 0.45)', fontSize: 13, margin: '6px 0 0', maxWidth: 460, lineHeight: 1.5 }}>
                     Used automatically when Google isn’t connected. No setup needed — a unique room is created for each meeting.
                   </p>
                 </div>

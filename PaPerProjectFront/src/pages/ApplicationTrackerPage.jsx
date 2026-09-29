@@ -125,7 +125,7 @@ function StepIcon({ done, active }) {
     );
   return (
     <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-      style={{ background: 'rgba(255,255,255,0.04)', border: '2px solid rgba(255,255,255,0.1)' }}>
+      style={{ background: 'hsl(var(--surface-invert) / 0.04)', border: '2px solid hsl(var(--surface-invert) / 0.1)' }}>
       <div className="w-2.5 h-2.5 rounded-full bg-white/20" />
     </div>
   );
@@ -145,7 +145,7 @@ function Timeline({ steps }) {
                 style={{
                   background: step.done
                     ? 'linear-gradient(to bottom, #10b981, rgba(16,185,129,0.3))'
-                    : 'rgba(255,255,255,0.08)',
+                    : 'hsl(var(--surface-invert) / 0.08)',
                 }}
               />
             )}
@@ -228,7 +228,7 @@ function InterviewCard({ interview, backendBase }) {
       )}
 
       {interview.outcome && (
-        <div className="pt-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+        <div className="pt-2 border-t" style={{ borderColor: 'hsl(var(--surface-invert) / 0.08)' }}>
           <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Outcome</p>
           <p className="text-sm font-semibold capitalize"
             style={{ color: interview.outcome === 'passed' ? '#34d399' : interview.outcome === 'failed' ? '#f87171' : '#fbbf24' }}>
@@ -328,7 +328,7 @@ export default function ApplicationTrackerPage() {
         {/* ── Candidate + Job card ── */}
         <div
           className="rounded-2xl p-5"
-          style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid rgba(255,255,255,0.07)' }}
+          style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}
         >
           {/* Job header */}
           <div className="flex items-start gap-3 pb-4 border-b border-white/[0.06] mb-4">
@@ -352,7 +352,7 @@ export default function ApplicationTrackerPage() {
                 {job.department && (
                   <span
                     className="text-xs px-2 py-0.5 rounded-full"
-                    style={{ background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.2)' }}
+                    style={{ background: 'rgba(99,102,241,0.12)', color: 'hsl(var(--pt-a5b4fc))', border: '1px solid rgba(99,102,241,0.2)' }}
                   >
                     {job.department}
                   </span>
@@ -388,7 +388,7 @@ export default function ApplicationTrackerPage() {
         {/* ── Timeline card ── */}
         <div
           className="rounded-2xl p-5"
-          style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid rgba(255,255,255,0.07)' }}
+          style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}
         >
           <p className="text-xs font-bold text-white/30 uppercase tracking-wider mb-5">Application Journey</p>
           <Timeline steps={steps} />
@@ -398,7 +398,7 @@ export default function ApplicationTrackerPage() {
         {interview && (
           <div
             className="rounded-2xl p-5"
-            style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid rgba(255,255,255,0.07)' }}
+            style={{ background: 'var(--sfc-1a1a2e)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}
           >
             <InterviewCard interview={interview} backendBase={backendBase} />
           </div>

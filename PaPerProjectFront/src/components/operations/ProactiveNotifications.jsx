@@ -202,7 +202,7 @@ const ProactiveNotifications = () => {
       data-testid="OPS-notifications-root"
       className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)] p-5 sm:p-6"
       style={{
-        background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, rgba(64,40,10,0.55) 100%)',
+        background: 'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, hsl(var(--sfr-40280a) / 0.55) 100%)',
       }}
     >
       {/* Header */}
@@ -213,9 +213,9 @@ const ProactiveNotifications = () => {
             style={{ backgroundColor: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.28)' }}
           >
             {totalUnread > 0 ? (
-              <BellRing className="h-5 w-5" style={{ color: '#f59e0b' }} />
+              <BellRing className="h-5 w-5" style={{ color: 'hsl(var(--pt-f59e0b))' }} />
             ) : (
-              <Bell className="h-5 w-5" style={{ color: '#f59e0b' }} />
+              <Bell className="h-5 w-5" style={{ color: 'hsl(var(--pt-f59e0b))' }} />
             )}
             {totalUnread > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-pure-white text-[10px] font-bold flex items-center justify-center">
@@ -304,7 +304,7 @@ const ProactiveNotifications = () => {
       {/* Body */}
       {loading ? (
         <div id="OPS-notifications-loading" data-testid="OPS-notifications-loading" className="flex items-center justify-center py-16 text-white/50 text-sm">
-          <Loader2 className="h-5 w-5 animate-spin mr-2" style={{ color: '#f59e0b' }} />
+          <Loader2 className="h-5 w-5 animate-spin mr-2" style={{ color: 'hsl(var(--pt-f59e0b))' }} />
           Loading notifications...
         </div>
       ) : grouped.length === 0 ? (

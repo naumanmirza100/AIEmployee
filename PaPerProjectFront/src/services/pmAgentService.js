@@ -27,6 +27,31 @@ export const projectPilot = async (question, projectId = null, chatHistory = nul
 };
 
 /**
+ * Apply a Project Pilot proposal the user has reviewed.
+ *
+ * `projectPilot` answers with status 'needs_input' when the agent left out a
+ * detail we ask for — who a task is for, when something is due. The chat shows
+ * a form; this posts the same proposal back with the answers filled in.
+ *
+ * The actions are sent verbatim rather than re-asking the model, so what gets
+ * created is exactly what the user saw and agreed to.
+ *
+ * @param {Array}  actions  the proposal, exactly as it was received
+ * @param {object} answers  {actionIndex: {field: value}} from the form
+ */
+export const projectPilotConfirm = async (actions, answers = {}) => {
+  try {
+    return await companyApi.post('/project-manager/ai/project-pilot/confirm', {
+      actions,
+      answers,
+    });
+  } catch (error) {
+    console.error('Project Pilot confirm error:', error);
+    throw error;
+  }
+};
+
+/**
  * Task Prioritization Agent
  * @param {string} action - 'prioritize' | 'order' | 'bottlenecks' | 'delegation'
  * @param {number|null} projectId - Optional project ID
@@ -462,11 +487,18 @@ const browserTimezone = () => {
   }
 };
 
-export const meetingSchedule = async (message) => {
+/**
+ * @param {string} message  what the user typed, or a readable summary of a picker answer
+ * @param {object} extra    structured answers. `{ pending_intent, proposed_time }`
+ *                          finishes a "when should it happen?" question directly,
+ *                          without the model re-reading `message`.
+ */
+export const meetingSchedule = async (message, extra = {}) => {
   try {
     const response = await companyApi.post('/project-manager/ai/meetings/schedule', {
       message,
       timezone: browserTimezone(),
+      ...extra,
     });
     return response;
   } catch (error) {
@@ -607,6 +639,7 @@ export const deleteNotificationTemplate = async (templateId) => {
 
 export default {
   projectPilot,
+  projectPilotConfirm,
   projectPilotFromFile,
   getProjectPilotJobStatus,
   taskPrioritization,

@@ -84,23 +84,23 @@ function MiniTimeline({ appStatus, interview }) {
             <div className="flex flex-col items-center gap-1">
               <div className="w-6 h-6 rounded-full flex items-center justify-center"
                 style={{
-                  background: state === 'done' ? '#10b981' : state === 'active' ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.06)',
+                  background: state === 'done' ? '#10b981' : state === 'active' ? 'rgba(99,102,241,0.3)' : 'hsl(var(--surface-invert) / 0.06)',
                   border: state === 'active' ? '2px solid #6366f1' : '2px solid transparent',
                 }}>
                 {state === 'done'
                   ? <CheckCircle2 className="w-3.5 h-3.5 text-white" />
                   : <div className="w-1.5 h-1.5 rounded-full"
-                      style={{ background: state === 'active' ? '#818cf8' : 'rgba(255,255,255,0.2)' }} />
+                      style={{ background: state === 'active' ? '#818cf8' : 'hsl(var(--surface-invert) / 0.2)' }} />
                 }
               </div>
               <span className="text-[9px] whitespace-nowrap"
-                style={{ color: state === 'done' ? '#6ee7b7' : state === 'active' ? '#a5b4fc' : 'rgba(255,255,255,0.2)' }}>
+                style={{ color: state === 'done' ? 'hsl(var(--pt-6ee7b7))' : state === 'active' ? '#a5b4fc' : 'hsl(var(--surface-invert) / 0.2)' }}>
                 {step.label}
               </span>
             </div>
             {i < STEPS.length - 1 && (
               <div className="flex-1 h-px mx-1 mb-4" style={{ minWidth:12,
-                background: state === 'done' ? '#10b981' : 'rgba(255,255,255,0.08)' }} />
+                background: state === 'done' ? '#10b981' : 'hsl(var(--surface-invert) / 0.08)' }} />
             )}
           </React.Fragment>
         );
@@ -113,7 +113,7 @@ function MiniTimeline({ appStatus, interview }) {
 function DetailRow({ icon: Icon, label, value, link }) {
   if (!value) return null;
   return (
-    <div className="flex items-start gap-3 py-2.5 border-b" style={{ borderColor:'rgba(255,255,255,0.05)' }}>
+    <div className="flex items-start gap-3 py-2.5 border-b" style={{ borderColor:'hsl(var(--surface-invert) / 0.05)' }}>
       <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
         style={{ background:'rgba(99,102,241,0.1)' }}>
         <Icon className="w-3.5 h-3.5 text-indigo-400" />
@@ -162,7 +162,7 @@ function SubmissionModal({ item, onClose }) {
       >
         {/* Modal header */}
         <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b shrink-0"
-          style={{ borderColor:'rgba(255,255,255,0.07)' }}>
+          style={{ borderColor:'hsl(var(--surface-invert) / 0.07)' }}>
           <div>
             <h2 className="font-bold text-white text-lg leading-tight">{job.title}</h2>
             <div className="flex flex-wrap items-center gap-2 mt-1">
@@ -257,7 +257,7 @@ function SubmissionModal({ item, onClose }) {
             <DetailRow icon={Link2}         label="Other Links"      value={app.other_links} />
             {/* CV file row — download/view button */}
             {app.cv_file_name && (
-              <div className="flex items-start gap-3 py-2.5 border-b" style={{ borderColor:'rgba(255,255,255,0.05)' }}>
+              <div className="flex items-start gap-3 py-2.5 border-b" style={{ borderColor:'hsl(var(--surface-invert) / 0.05)' }}>
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
                   style={{ background:'rgba(99,102,241,0.1)' }}>
                   <FileText className="w-3.5 h-3.5 text-indigo-400" />
@@ -273,7 +273,7 @@ function SubmissionModal({ item, onClose }) {
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-                          style={{ background:'rgba(99,102,241,0.2)', color:'#a5b4fc', border:'1px solid rgba(99,102,241,0.3)' }}
+                          style={{ background:'rgba(99,102,241,0.2)', color:'hsl(var(--pt-a5b4fc))', border:'1px solid rgba(99,102,241,0.3)' }}
                         >
                           <ExternalLink className="w-3 h-3" />View
                         </a>
@@ -294,7 +294,7 @@ function SubmissionModal({ item, onClose }) {
           </div>
 
           {app.cover_letter && (
-            <div className="rounded-xl p-4" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+            <div className="rounded-xl p-4" style={{ background:'hsl(var(--surface-invert) / 0.03)', border:'1px solid hsl(var(--surface-invert) / 0.07)' }}>
               <p className="text-[10px] font-bold text-white/30 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                 <MessageSquare className="w-3.5 h-3.5" />Cover Letter
               </p>
@@ -308,7 +308,7 @@ function SubmissionModal({ item, onClose }) {
 
         {/* Modal footer */}
         <div className="flex items-center justify-between gap-3 px-6 py-4 border-t shrink-0"
-          style={{ borderColor:'rgba(255,255,255,0.07)', background:'rgba(255,255,255,0.02)' }}>
+          style={{ borderColor:'hsl(var(--surface-invert) / 0.07)', background:'hsl(var(--surface-invert) / 0.02)' }}>
           {trackUrl
             ? <Link to={trackUrl} onClick={onClose}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-colors"
@@ -319,7 +319,7 @@ function SubmissionModal({ item, onClose }) {
           }
           <button onClick={onClose}
             className="px-5 py-2 rounded-xl text-xs font-semibold text-white/50 hover:text-white/80 transition-colors"
-            style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)' }}>
+            style={{ background:'hsl(var(--surface-invert) / 0.05)', border:'1px solid hsl(var(--surface-invert) / 0.1)' }}>
             Close
           </button>
         </div>
@@ -336,7 +336,7 @@ function AppCard({ item, idx, onViewDetails }) {
 
   return (
     <div className="rounded-2xl overflow-hidden transition-all duration-200"
-      style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+      style={{ background:'hsl(var(--surface-invert) / 0.03)', border:'1px solid hsl(var(--surface-invert) / 0.07)' }}>
 
       {/* ── Card top strip by status ── */}
       <div className="h-1" style={{ background: `linear-gradient(90deg,${sc.dot},transparent)` }} />
@@ -364,7 +364,7 @@ function AppCard({ item, idx, onViewDetails }) {
                 )}
                 {job.type && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-                    style={{ background:'rgba(255,255,255,0.06)', color:'rgba(255,255,255,0.5)' }}>
+                    style={{ background:'hsl(var(--surface-invert) / 0.06)', color:'hsl(var(--surface-invert) / 0.5)' }}>
                     {job.type}
                   </span>
                 )}
@@ -416,7 +416,7 @@ function AppCard({ item, idx, onViewDetails }) {
         <div className="flex items-center gap-2">
           <button onClick={onViewDetails}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-colors"
-            style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.5)' }}>
+            style={{ background:'hsl(var(--surface-invert) / 0.04)', border:'1px solid hsl(var(--surface-invert) / 0.1)', color:'hsl(var(--surface-invert) / 0.5)' }}>
             <FileText className="w-3.5 h-3.5" />View My Submission
           </button>
           {trackUrl && (
@@ -517,7 +517,7 @@ function EmailEntryPage() {
       </div>
 
       {/* Header */}
-      <nav className="relative z-10 flex items-center justify-between px-6 py-5 border-b" style={{ borderColor:'rgba(255,255,255,0.06)' }}>
+      <nav className="relative z-10 flex items-center justify-between px-6 py-5 border-b" style={{ borderColor:'hsl(var(--surface-invert) / 0.06)' }}>
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center"
             style={{ background:'linear-gradient(135deg,#6366f1,#4f46e5)' }}>
@@ -554,7 +554,7 @@ function EmailEntryPage() {
                 </p>
               </div>
               <div className="rounded-2xl p-5 text-left space-y-3"
-                style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)' }}>
+                style={{ background:'hsl(var(--surface-invert) / 0.03)', border:'1px solid hsl(var(--surface-invert) / 0.08)' }}>
                 {[
                   ['📬','Check your email for a message from us'],
                   ['🔗','Click the "View My Applications" link'],
@@ -578,7 +578,7 @@ function EmailEntryPage() {
               {/* Heading */}
               <div className="text-center space-y-3">
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium mb-2"
-                  style={{ background:'rgba(99,102,241,0.15)', color:'#a5b4fc', border:'1px solid rgba(99,102,241,0.25)' }}>
+                  style={{ background:'rgba(99,102,241,0.15)', color:'hsl(var(--pt-a5b4fc))', border:'1px solid rgba(99,102,241,0.25)' }}>
                   <Shield className="w-3 h-3" />Secure Access — No Password Needed
                 </div>
                 <h1 className="text-3xl sm:text-4xl font-bold text-white leading-tight">
@@ -594,7 +594,7 @@ function EmailEntryPage() {
 
               {/* Card */}
               <div className="rounded-2xl p-7 space-y-5"
-                style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.09)', backdropFilter:'blur(12px)' }}>
+                style={{ background:'hsl(var(--surface-invert) / 0.04)', border:'1px solid hsl(var(--surface-invert) / 0.09)', backdropFilter:'blur(12px)' }}>
                 <form onSubmit={submit} className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
@@ -610,8 +610,8 @@ function EmailEntryPage() {
                         placeholder="you@example.com"
                         className="w-full pl-10 pr-4 py-3.5 rounded-xl text-sm text-white placeholder-white/25 outline-none transition-all"
                         style={{
-                          background:'rgba(255,255,255,0.06)',
-                          border: error ? '1px solid rgba(239,68,68,0.6)' : '1px solid rgba(255,255,255,0.1)',
+                          background:'hsl(var(--surface-invert) / 0.06)',
+                          border: error ? '1px solid rgba(239,68,68,0.6)' : '1px solid hsl(var(--surface-invert) / 0.1)',
                         }}
                         onFocus={e => { if (!error) e.target.style.borderColor = 'rgba(99,102,241,0.7)'; e.target.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.1)'; }}
                         onBlur={e => { if (!error) e.target.style.borderColor = 'rgba(255,255,255,0.1)'; e.target.style.boxShadow = 'none'; }}
@@ -635,9 +635,9 @@ function EmailEntryPage() {
                 </form>
 
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 h-px" style={{ background:'rgba(255,255,255,0.07)' }} />
+                  <div className="flex-1 h-px" style={{ background:'hsl(var(--surface-invert) / 0.07)' }} />
                   <span className="text-xs text-white/20">or</span>
-                  <div className="flex-1 h-px" style={{ background:'rgba(255,255,255,0.07)' }} />
+                  <div className="flex-1 h-px" style={{ background:'hsl(var(--surface-invert) / 0.07)' }} />
                 </div>
 
                 <p className="text-center text-xs text-white/30 leading-relaxed">
@@ -751,7 +751,7 @@ function PortalDashboard({ token }) {
 
       {/* ── Nav ── */}
       <nav className="relative z-20 sticky top-0 flex items-center justify-between px-5 py-4 border-b"
-        style={{ background:'rgba(8,11,26,0.85)', borderColor:'rgba(255,255,255,0.07)', backdropFilter:'blur(16px)' }}>
+        style={{ background:'hsl(var(--sfr-080b1a) / 0.85)', borderColor:'hsl(var(--surface-invert) / 0.07)', backdropFilter:'blur(16px)' }}>
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center"
             style={{ background:'linear-gradient(135deg,#6366f1,#4f46e5)' }}>
@@ -761,7 +761,7 @@ function PortalDashboard({ token }) {
         </div>
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex items-center gap-2 text-xs text-white/40 px-3 py-1.5 rounded-full"
-            style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)' }}>
+            style={{ background:'hsl(var(--surface-invert) / 0.05)', border:'1px solid hsl(var(--surface-invert) / 0.08)' }}>
             <Mail className="w-3.5 h-3.5" />{email}
           </div>
           <button onClick={() => load(true)} disabled={refreshing}
@@ -808,14 +808,14 @@ function PortalDashboard({ token }) {
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all"
                 style={{
-                  background: isActive ? 'rgba(99,102,241,0.2)'  : 'rgba(255,255,255,0.04)',
-                  border:     isActive ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.08)',
-                  color:      isActive ? '#a5b4fc' : 'rgba(255,255,255,0.35)',
+                  background: isActive ? 'rgba(99,102,241,0.2)'  : 'hsl(var(--surface-invert) / 0.04)',
+                  border:     isActive ? '1px solid rgba(99,102,241,0.4)' : '1px solid hsl(var(--surface-invert) / 0.08)',
+                  color:      isActive ? 'hsl(var(--pt-a5b4fc))' : 'hsl(var(--surface-invert) / 0.35)',
                 }}>
                 {tab.label}
                 {count > 0 && (
                   <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold"
-                    style={{ background: isActive ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.08)', color: isActive ? '#c7d2fe' : 'rgba(255,255,255,0.3)' }}>
+                    style={{ background: isActive ? 'rgba(99,102,241,0.3)' : 'hsl(var(--surface-invert) / 0.08)', color: isActive ? 'hsl(var(--pt-c7d2fe))' : 'hsl(var(--surface-invert) / 0.3)' }}>
                     {count}
                   </span>
                 )}
@@ -827,7 +827,7 @@ function PortalDashboard({ token }) {
         {/* ── Application cards ── */}
         {filtered.length === 0 ? (
           <div className="text-center py-16 rounded-2xl"
-            style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)' }}>
+            style={{ background:'hsl(var(--surface-invert) / 0.02)', border:'1px solid hsl(var(--surface-invert) / 0.06)' }}>
             <Briefcase className="w-10 h-10 text-white/15 mx-auto mb-3" />
             <p className="text-white/30 text-sm">No applications in this category.</p>
           </div>

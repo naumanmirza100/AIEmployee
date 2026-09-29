@@ -58,6 +58,23 @@ class HRTestCase(TestCase):
             employment_status='active',
         )
 
+    @staticmethod
+    def employee_with_login(username, full_name, company, created_by):
+        """An employee who can be invited to meetings: their login is an
+        auth user whose profile belongs to `company`."""
+        from django.contrib.auth import get_user_model
+        from core.models import UserProfile
+        user = get_user_model().objects.create_user(
+            username=username, password='x', email=f'{username}@test.local')
+        UserProfile.objects.update_or_create(user=user, defaults={
+            'company': company, 'created_by_company_user': created_by, 'role': 'team_member'})
+        # hr_agent.signals creates the Employee row for a new employee login;
+        # take that one rather than colliding with it.
+        employee, _ = Employee.objects.update_or_create(
+            company=company, work_email=f'{username}@test.local',
+            defaults={'user': user, 'full_name': full_name, 'employment_status': 'active'})
+        return employee
+
     def buy_module(self, company, module='hr_agent'):
         return CompanyModulePurchase.objects.create(
             company=company, module_name=module, status='active', is_complimentary=True)

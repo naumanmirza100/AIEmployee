@@ -1325,7 +1325,7 @@ const MarketingQA = () => {
           sidebarOpen ? "w-80" : "w-16"
         )}
       >
-        <div className="px-3 pt-3 pb-2 border-b border-violet-500/20 flex flex-col gap-2" style={{ background: 'linear-gradient(180deg, rgba(60,30,90,0.22) 0%, rgba(36,18,54,0.85) 100%)' }}>
+        <div className="px-3 pt-3 pb-2 border-b border-violet-500/20 flex flex-col gap-2" style={{ background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)' }}>
           <div className="flex items-center justify-between">
             <AnimatePresence mode="wait">
               {sidebarOpen ? (
@@ -1383,7 +1383,7 @@ const MarketingQA = () => {
             </div>
           </div>
           {sidebarOpen && showSidebarSearch && (
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg" style={{ border: '1.5px solid rgba(139,92,246,0.30)', background: 'rgba(80,36,180,0.12)' }}>
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg" style={{ border: '1.5px solid rgba(139,92,246,0.30)', background: 'hsl(var(--sfr-5024b4) / 0.12)' }}>
               <Search className="h-3.5 w-3.5 text-violet-400 shrink-0" />
               <input
                 autoFocus
@@ -1821,14 +1821,14 @@ const MarketingQA = () => {
                 <div
                   className="absolute inset-0 rounded-[28px] pointer-events-none"
                   style={{
-                    // background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
+                    // background: 'linear-gradient(90deg, transparent 60%, hsl(var(--sfr-0a2540) / 0.38) 90%, hsl(var(--sfr-0e2747) / 0.22) 100%)',
                   }}
                 />
                 <div
                   className="relative z-[1] rounded-[28px] px-2.5 py-2.5 space-y-3"
                   style={{
                     background: 'var(--panel-3)',
-                    border: '1.5px solid rgba(255,255,255,0.08)',
+                    border: '1.5px solid hsl(var(--surface-invert) / 0.08)',
                     boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
                   }}
                 >
@@ -1843,17 +1843,17 @@ const MarketingQA = () => {
                             background: 'var(--sfc-111118)',
                             border: '1.5px solid rgba(139, 92, 246, 0.55)',
                             boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
-                            color: '#e2e2f0',
+                            color: 'hsl(var(--pt-e2e2f0))',
                           }}
                         >
                           {inputMode === 'search' ? (
                             <>
-                              <Search className="h-4 w-4" style={{ color: '#a78bfa' }} />
+                              <Search className="h-4 w-4" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
                               <span>Search</span>
                             </>
                           ) : (
                             <>
-                              <BarChart2 className="h-4 w-4" style={{ color: '#a78bfa' }} />
+                              <BarChart2 className="h-4 w-4" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
                               <span>Graph</span>
                             </>
                           )}
@@ -1865,7 +1865,7 @@ const MarketingQA = () => {
                           style={{
                             background: 'var(--panel-4)',
                             border: '1px solid rgba(139, 92, 246, 0.25)',
-                            color: '#e2e2f0',
+                            color: 'hsl(var(--pt-e2e2f0))',
                           }}
                         >
                           <SelectItem value="search" className="rounded-lg focus:bg-violet-600/20 focus:text-white">
@@ -1887,7 +1887,7 @@ const MarketingQA = () => {
                       style={{
                         background: 'var(--sfc-0e0e14)',
                         boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        border: '1px solid hsl(var(--surface-invert) / 0.1)',
                         borderLeftColor: 'rgba(139, 92, 246, 0.45)',
                       }}
                     >
@@ -1932,7 +1932,7 @@ const MarketingQA = () => {
                             boxShadow: loading
                               ? '0 0 16px rgba(220, 38, 38, 0.35), 0 2px 8px rgba(0,0,0,0.3)'
                               : '0 0 16px hsl(var(--brand-600) / 0.35), 0 2px 8px rgba(0,0,0,0.3)',
-                            color: '#ffffff',
+                            color: 'hsl(var(--pt-ffffff))',
                           }}
                         >
                           {loading ? (
@@ -1948,7 +1948,7 @@ const MarketingQA = () => {
                   <div className="space-y-3 w-full pt-1">
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-white/80 font-medium flex items-center gap-1">
-                        <Sparkles className="h-3 w-3" style={{ color: '#a78bfa' }} />
+                        <Sparkles className="h-3 w-3" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
                         Try these examples
                       </span>
                       <HoverTip tip={showSuggestions ? 'Hide example prompts' : 'Click to see some example prompts'}>
@@ -1959,7 +1959,7 @@ const MarketingQA = () => {
                           onClick={() => setShowSuggestions(!showSuggestions)}
                           className="h-7 w-7 p-0 rounded-full transition-all text-white/70 hover:text-white"
                           style={{
-                            background: 'rgba(17,17,24,0.8)',
+                            background: 'hsl(var(--sfr-111118) / 0.8)',
                             border: '1px solid rgba(139, 92, 246, 0.30)',
                             boxShadow: '0 0 12px rgba(139, 92, 246, 0.15)',
                           }}
@@ -1994,8 +1994,8 @@ const MarketingQA = () => {
                                   item.color
                                 )}
                                 style={{
-                                  background: 'rgba(255,255,255,0.05)',
-                                  borderColor: 'rgba(255,255,255,0.10)',
+                                  background: 'hsl(var(--surface-invert) / 0.05)',
+                                  borderColor: 'hsl(var(--surface-invert) / 0.10)',
                                 }}
                               >
                                 <item.icon className={cn("h-3 w-3", item.color)} />
@@ -2023,8 +2023,8 @@ const MarketingQA = () => {
                       key={groupIndex}
                       className="space-y-1.5 rounded-xl p-2 border"
                       style={{
-                        background: 'rgba(255,255,255,0.04)',
-                        borderColor: 'rgba(255,255,255,0.10)',
+                        background: 'hsl(var(--surface-invert) / 0.04)',
+                        borderColor: 'hsl(var(--surface-invert) / 0.10)',
                       }}
                     >
                       <p className={cn("text-xs font-medium flex items-center gap-1 text-white/85", group.color)}>
@@ -2041,7 +2041,7 @@ const MarketingQA = () => {
                             group.color
                           )}
                           style={{
-                            background: 'rgba(17,17,24,0.9)',
+                            background: 'hsl(var(--sfr-111118) / 0.9)',
                             borderColor: 'rgba(139, 92, 246, 0.22)',
                           }}
                           onClick={() => setQuestion(prompt)}

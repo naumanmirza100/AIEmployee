@@ -658,7 +658,7 @@ const CareersPage = ({ scrollToJobs = false }) => {
                     </p>
                   </div>
                   <div className="rounded-xl p-4 space-y-1.5 text-xs text-white/40 text-left"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    style={{ background: 'hsl(var(--surface-invert) / 0.04)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}>
                     <p>• Link expires in <span className="text-white/60">24 hours</span></p>
                     <p>• Check your spam/junk folder if you don't see it</p>
                     <p>• Click the link to open your full application portal</p>
@@ -695,8 +695,8 @@ const CareersPage = ({ scrollToJobs = false }) => {
                           autoFocus
                           className="w-full pl-10 pr-4 py-3 rounded-xl text-sm text-white placeholder-white/30 outline-none transition-colors"
                           style={{
-                            background: 'rgba(255,255,255,0.05)',
-                            border: portalError ? '1px solid rgba(239,68,68,0.5)' : '1px solid rgba(255,255,255,0.12)',
+                            background: 'hsl(var(--surface-invert) / 0.05)',
+                            border: portalError ? '1px solid rgba(239,68,68,0.5)' : '1px solid hsl(var(--surface-invert) / 0.12)',
                           }}
                           onFocus={e => { if (!portalError) e.target.style.borderColor = 'rgba(99,102,241,0.6)'; }}
                           onBlur={e => { if (!portalError) e.target.style.borderColor = 'rgba(255,255,255,0.12)'; }}

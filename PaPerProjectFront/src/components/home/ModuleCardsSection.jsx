@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import ModuleCard from './ModuleCard';
 import {
@@ -14,6 +15,32 @@ import {
 } from 'lucide-react';
 
 const ModuleCardsSection = () => {
+  // Deep links arrive as `/#ai-modules?agent=<module_name>` — sent by the
+  // "Module Not Purchased" screens and by the company dashboard. HomePage
+  // scrolls the section into view; this brings the right card into view within
+  // it and rings it, so a visitor landing here from one specific agent is not
+  // left hunting through nine cards for the one they wanted.
+  const { hash } = useLocation();
+  const targetModule = useMemo(() => {
+    const q = hash.indexOf('?');
+    if (q === -1) return null;
+    return new URLSearchParams(hash.slice(q + 1)).get('agent');
+  }, [hash]);
+  const [highlighted, setHighlighted] = useState(null);
+
+  useEffect(() => {
+    if (!targetModule) return;
+    setHighlighted(targetModule);
+    // After the section itself has been scrolled to by HomePage.
+    const scrollTimer = setTimeout(() => {
+      document.getElementById(`module-${targetModule}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 350);
+    // The ring is a pointer, not a state — drop it once it has been noticed.
+    const clearTimer = setTimeout(() => setHighlighted(null), 3200);
+    return () => { clearTimeout(scrollTimer); clearTimeout(clearTimer); };
+  }, [targetModule]);
+
   // Gradient color mappings for inline styles
   const gradientColors = {
     'blue-500': '#3b82f6',
@@ -231,8 +258,16 @@ const ModuleCardsSection = () => {
         {/* Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
           {modules.map((module, index) => (
-            <ModuleCard
+            <div
               key={index}
+              id={`module-${module.moduleName}`}
+              className={`scroll-mt-28 rounded-2xl transition-all duration-500 ${
+                highlighted === module.moduleName
+                  ? 'ring-2 ring-primary ring-offset-4 ring-offset-background'
+                  : 'ring-0'
+              }`}
+            >
+            <ModuleCard
               title={module.title}
               moduleName={module.moduleName}
               description={module.description}
@@ -245,6 +280,7 @@ const ModuleCardsSection = () => {
               features={module.features}
               highlight={module.highlight}
             />
+            </div>
           ))}
         </div>
 

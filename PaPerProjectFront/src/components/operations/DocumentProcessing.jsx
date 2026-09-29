@@ -426,7 +426,7 @@ const DocumentProcessing = () => {
                           {doc.tags && (
                             <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                               {doc.tags.split(',').slice(0, 4).map((t, i) => (
-                                <span key={i} className="text-[10px] px-2 py-0.5 rounded-full text-white/50 border border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.03)' }}>{t.trim()}</span>
+                                <span key={i} className="text-[10px] px-2 py-0.5 rounded-full text-white/50 border border-white/[0.06]" style={{ background: 'hsl(var(--surface-invert) / 0.03)' }}>{t.trim()}</span>
                               ))}
                               {doc.tags.split(',').length > 4 && <span className="text-[10px] text-white/25">+{doc.tags.split(',').length - 4} more</span>}
                             </div>
@@ -471,7 +471,7 @@ const DocumentProcessing = () => {
               <div className="overflow-x-auto">
                 <table id="OPS-docprocessing-table" data-testid="OPS-docprocessing-table" className="w-full text-left">
                   <thead>
-                    <tr className="border-b border-white/[0.06]" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <tr className="border-b border-white/[0.06]" style={{ background: 'hsl(var(--surface-invert) / 0.02)' }}>
                       <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Document</th>
                       <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Type</th>
                       <th className="px-4 py-3 text-[10px] font-semibold text-white/40 uppercase tracking-wider">Size</th>

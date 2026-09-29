@@ -764,7 +764,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
           <CardContent>
             <ul className="space-y-3">
               {upcomingMain.map((u, idx) => (
-                <li key={`main-${idx}`} className="rounded-lg border-l-4 border-sky-500/70 bg-[rgba(76,75,74,0.2)] p-3">
+                <li key={`main-${idx}`} className="rounded-lg border-l-4 border-sky-500/70 bg-[hsl(var(--sfr-4c4b4a) / 0.2)] p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="font-medium text-foreground">{u.lead_email}</p>
@@ -797,7 +797,7 @@ const EmailSendingStatusPage = ({ embedded = false }) => {
           <CardContent>
             <ul className="space-y-3">
               {upcomingSub.map((u, idx) => (
-                <li key={`sub-${idx}`} className="rounded-lg border-l-4 border-violet-500/70 bg-[rgba(76,75,74,0.2)] p-3">
+                <li key={`sub-${idx}`} className="rounded-lg border-l-4 border-violet-500/70 bg-[hsl(var(--sfr-4c4b4a) / 0.2)] p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="font-medium text-foreground">{u.lead_email}</p>

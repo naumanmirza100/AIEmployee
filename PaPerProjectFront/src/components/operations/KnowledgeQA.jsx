@@ -531,7 +531,7 @@ const KnowledgeQA = () => {
       className="w-full rounded-2xl border border-amber-500/10 overflow-hidden shadow-[0_8px_40px_-12px_rgba(245,158,11,0.15)]"
       style={{
         background:
-          'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, rgba(64,40,10,0.55) 100%)',
+          'linear-gradient(135deg, var(--panel-1) 0%, var(--panel-1) 45%, hsl(var(--sfr-40280a) / 0.55) 100%)',
       }}
     >
       <div className="flex w-full max-w-full relative" style={{ height: 'calc(100vh - 120px)', minHeight: 680 }}>
@@ -851,7 +851,7 @@ const KnowledgeQA = () => {
             <form id="OPS-qa-composer-form" data-testid="OPS-qa-composer-form" onSubmit={handleSend} className="max-w-4xl mx-auto">
               <div
                 className="rounded-2xl border bg-black/50 overflow-hidden transition-all focus-within:border-amber-500/40 focus-within:shadow-[0_0_0_3px_rgba(245,158,11,0.08)]"
-                style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+                style={{ borderColor: 'hsl(var(--surface-invert) / 0.1)' }}
               >
                 <Textarea
                   id="OPS-qa-question-input"
@@ -937,7 +937,7 @@ const KnowledgeQA = () => {
                 desc: 'Use the sidebar to start a New Chat, search past conversations, rename them, or delete ones you no longer need.',
               },
             ].map((step, i) => (
-              <div key={i} className="flex items-start gap-3 rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div key={i} className="flex items-start gap-3 rounded-xl p-3" style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.06)' }}>
                 <span className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg mt-0.5" style={{ backgroundColor: ACCENT_SOFT }}>
                   <step.icon className="h-4 w-4" style={{ color: ACCENT }} />
                 </span>
@@ -1146,7 +1146,7 @@ const Message = ({
           style={{
             backgroundColor: 'rgba(245,158,11,0.14)',
             border: `1px solid ${ACCENT_BORDER}`,
-            color: 'rgba(255,255,255,0.96)',
+            color: 'hsl(var(--surface-invert) / 0.96)',
           }}
         >
           <div className="whitespace-pre-wrap">{message.content}</div>

@@ -165,7 +165,7 @@ const JobApplicationPage = () => {
         <div
           className="w-full max-w-md rounded-2xl p-8 text-center"
           style={{
-            background: 'rgba(255,255,255,0.03)',
+            background: 'hsl(var(--surface-invert) / 0.03)',
             border: `1px solid ${isNotYetOpen ? 'rgba(251,191,36,0.25)' : 'rgba(239,68,68,0.25)'}`,
           }}
         >
@@ -195,7 +195,7 @@ const JobApplicationPage = () => {
       <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--sfc-020308)' }}>
         <div
           className="w-full max-w-md rounded-2xl p-8 text-center space-y-5"
-          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(52,211,153,0.25)' }}
+          style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid rgba(52,211,153,0.25)' }}
         >
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full" style={{ background: 'rgba(52,211,153,0.15)' }}>
             <CheckCircle2 className="h-8 w-8 text-emerald-400" />
@@ -243,7 +243,7 @@ const JobApplicationPage = () => {
         {/* Job header card */}
         <div
           className="rounded-2xl p-6 mb-6"
-          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(167,139,250,0.2)' }}
+          style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid rgba(167,139,250,0.2)' }}
         >
           <div className="flex items-start gap-4">
             <div className="shrink-0 rounded-xl p-3" style={{ background: 'rgba(167,139,250,0.15)' }}>
@@ -268,7 +268,7 @@ const JobApplicationPage = () => {
                   </span>
                 )}
                 {job.department && (
-                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.12)', color: '#c4b5fd', border: '1px solid rgba(167,139,250,0.2)' }}>
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.12)', color: 'hsl(var(--pt-c4b5fd))', border: '1px solid rgba(167,139,250,0.2)' }}>
                     {job.department}
                   </span>
                 )}
@@ -293,7 +293,7 @@ const JobApplicationPage = () => {
         {/* Application form */}
         <div
           className="rounded-2xl p-6"
-          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+          style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.08)' }}
         >
           <h2 className="text-lg font-bold text-white mb-5">Apply for this Position</h2>
 
@@ -433,7 +433,7 @@ const JobApplicationPage = () => {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full rounded-lg px-3 py-6 text-center border-2 border-dashed transition-colors"
-                  style={{ borderColor: errors.cv_file ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.12)' }}
+                  style={{ borderColor: errors.cv_file ? 'rgba(239,68,68,0.5)' : 'hsl(var(--surface-invert) / 0.12)' }}
                   onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(167,139,250,0.4)'; e.currentTarget.style.background = 'rgba(167,139,250,0.05)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.borderColor = errors.cv_file ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.12)'; e.currentTarget.style.background = ''; }}
                 >

@@ -52,7 +52,7 @@ const ScoreRing = ({ score, label, color = 'hsl(var(--brand-600))' }) => {
 
 const Block = ({ title, icon, children }) => (
   <div className="rounded-2xl p-5"
-    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+    style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
     {title && (
       <div className="flex items-center gap-2 mb-4">
         {icon && <span className="text-violet-400">{icon}</span>}
@@ -67,7 +67,7 @@ const InfoPill = ({ icon, label, value }) => {
   if (!value) return null;
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
-      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+      style={{ background: 'hsl(var(--surface-invert) / 0.04)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}>
       <span className="text-white/30 shrink-0">{icon}</span>
       <div className="min-w-0">
         <p className="text-[10px] text-white/30 uppercase tracking-wider">{label}</p>
@@ -296,7 +296,7 @@ const CandidateDetailPage = () => {
 
       {/* ── Top bar ── */}
       <div className="sticky top-0 z-20 px-6 py-3 flex items-center justify-between gap-3 border-b border-white/6 backdrop-blur-md"
-        style={{ background: 'rgba(10,10,26,0.85)' }}>
+        style={{ background: 'hsl(var(--sfr-0a0a1a) / 0.85)' }}>
         <button onClick={() => navigate('/recruitment/candidates')}
           className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors">
           <ArrowLeft className="h-4 w-4" />Back to Candidates
@@ -304,7 +304,7 @@ const CandidateDetailPage = () => {
         {detail && (
           <button onClick={handlePrint}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-1.5 rounded-lg transition-colors text-white hover:bg-white/10"
-            style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
+            style={{ background: 'hsl(var(--surface-invert) / 0.07)', border: '1px solid hsl(var(--surface-invert) / 0.12)' }}>
             <Printer className="h-4 w-4" />Print Report
           </button>
         )}
@@ -329,7 +329,7 @@ const CandidateDetailPage = () => {
                     <DecisionChip decision={detail.qualification_decision} />
                     {detail.qualification_priority && (
                       <span className="text-xs px-2.5 py-1 rounded-full font-medium text-white/60"
-                        style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        style={{ background: 'hsl(var(--surface-invert) / 0.07)', border: '1px solid hsl(var(--surface-invert) / 0.12)' }}>
                         {detail.qualification_priority}
                       </span>
                     )}
@@ -351,19 +351,19 @@ const CandidateDetailPage = () => {
                   <div className="mt-3 flex flex-wrap gap-2">
                     {displayEmail && (
                       <span className="inline-flex items-center gap-1.5 text-xs text-white/60 px-2.5 py-1 rounded-lg"
-                        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        style={{ background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
                         <Mail className="h-3 w-3" />{displayEmail}
                       </span>
                     )}
                     {displayPhone && (
                       <span className="inline-flex items-center gap-1.5 text-xs text-white/60 px-2.5 py-1 rounded-lg"
-                        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        style={{ background: 'hsl(var(--surface-invert) / 0.05)', border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
                         <Phone className="h-3 w-3" />{displayPhone}
                       </span>
                     )}
                     {detail.created_at && (
                       <span className="inline-flex items-center gap-1.5 text-xs text-white/40 px-2.5 py-1 rounded-lg"
-                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.06)' }}>
                         <Clock className="h-3 w-3" />
                         {new Date(detail.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </span>
@@ -385,7 +385,7 @@ const CandidateDetailPage = () => {
             {tabs.map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className="relative px-5 py-3 text-sm font-medium whitespace-nowrap transition-colors"
-                style={{ color: activeTab === tab.id ? '#a78bfa' : 'rgba(255,255,255,0.4)' }}>
+                style={{ color: activeTab === tab.id ? 'hsl(var(--pt-a78bfa))' : 'hsl(var(--surface-invert) / 0.4)' }}>
                 {tab.label}
                 {activeTab === tab.id && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
@@ -514,7 +514,7 @@ const CandidateDetailPage = () => {
                   <div className="space-y-3">
                     {education.map((edu, i) => (
                       <div key={i} className="p-3 rounded-xl"
-                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                        style={{ background: 'hsl(var(--surface-invert) / 0.04)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}>
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <p className="text-sm font-semibold text-white">
@@ -619,7 +619,7 @@ const CandidateDetailPage = () => {
                 <div className="flex items-center justify-between text-xs text-white/30 px-1">
                   <span>Applied: {application.applied_at ? new Date(application.applied_at).toLocaleString() : '—'}</span>
                   <span className="px-2.5 py-1 rounded-full capitalize"
-                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    style={{ background: 'hsl(var(--surface-invert) / 0.06)', border: '1px solid hsl(var(--surface-invert) / 0.1)' }}>
                     {application.status}
                   </span>
                 </div>
@@ -641,7 +641,7 @@ const CandidateDetailPage = () => {
             <div className="space-y-4">
               {interviews.map((iv) => (
                 <div key={iv.id} className="rounded-2xl overflow-hidden"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.08)' }}>
 
                   {/* Header row */}
                   <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-3">
@@ -651,7 +651,7 @@ const CandidateDetailPage = () => {
                     </span>
                     {iv.outcome && (
                       <span className="text-xs px-2.5 py-1 rounded-full text-white/70"
-                        style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                        style={{ background: 'hsl(var(--surface-invert) / 0.08)', border: '1px solid hsl(var(--surface-invert) / 0.12)' }}>
                         {iv.outcome.replace(/_/g, ' ')}
                       </span>
                     )}
@@ -716,7 +716,7 @@ const CandidateDetailPage = () => {
                   {/* Feedback section */}
                   {iv.feedback_rating && (
                     <div className="px-5 py-3 border-t border-white/6 space-y-2"
-                      style={{ background: 'rgba(255,255,255,0.015)' }}>
+                      style={{ background: 'hsl(var(--surface-invert) / 0.015)' }}>
                       <div className="flex items-center gap-3">
                         <div className="flex gap-0.5">
                           {[1,2,3,4,5].map(s => (
@@ -783,8 +783,8 @@ const CandidateDetailPage = () => {
 
               {decisionHistory.length === 0 ? (
                 <div className="rounded-2xl flex flex-col items-center py-16 gap-4"
-                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  style={{ background: 'hsl(var(--surface-invert) / 0.02)', border: '1px solid hsl(var(--surface-invert) / 0.06)' }}>
+                  <div className="rounded-2xl p-4" style={{ background: 'hsl(var(--surface-invert) / 0.04)' }}>
                     <Clock className="h-8 w-8 text-white/20" />
                   </div>
                   <div className="text-center">
@@ -828,7 +828,7 @@ const CandidateDetailPage = () => {
 
                           {/* card */}
                           <div className="flex-1 min-w-0 rounded-2xl overflow-hidden"
-                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                            style={{ background: 'hsl(var(--surface-invert) / 0.03)', border: '1px solid hsl(var(--surface-invert) / 0.07)' }}>
 
                             {/* colored top accent */}
                             <div className="h-0.5 w-full" style={{ background: `linear-gradient(90deg, ${toDS.color}55, transparent)` }} />
@@ -868,7 +868,7 @@ const CandidateDetailPage = () => {
 
                               {/* bottom row: date + user */}
                               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2.5"
-                                style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                                style={{ borderTop: '1px solid hsl(var(--surface-invert) / 0.05)' }}>
                                 <span className="flex items-center gap-1.5 text-xs text-white/35">
                                   <Calendar className="h-3 w-3" />{dateStr}
                                 </span>

@@ -687,7 +687,7 @@ const MarketResearch = () => {
         <div
           className="px-3 pt-3 pb-2 border-b border-violet-500/20 flex flex-col gap-2"
           style={{
-            background: 'linear-gradient(180deg, rgba(60,30,90,0.22) 0%, rgba(36,18,54,0.85) 100%)',
+            background: 'linear-gradient(180deg, hsl(var(--sfr-3c1e5a) / 0.22) 0%, hsl(var(--sfr-241236) / 0.85) 100%)',
           }}
         >
           <div className="flex items-center justify-between">
@@ -755,7 +755,7 @@ const MarketResearch = () => {
               className="flex items-center gap-2 px-2 py-1.5 rounded-lg"
               style={{
                 border: '1.5px solid rgba(139,92,246,0.30)',
-                background: 'rgba(80,36,180,0.12)',
+                background: 'hsl(var(--sfr-5024b4) / 0.12)',
               }}
             >
               <Search className="h-3.5 w-3.5 text-violet-400 shrink-0" />
@@ -1156,14 +1156,14 @@ const MarketResearch = () => {
                 <div
                   className="absolute inset-0 rounded-[28px] pointer-events-none"
                   style={{
-                    background: 'linear-gradient(90deg, transparent 60%, rgba(10,37,64,0.38) 90%, rgba(14,39,71,0.22) 100%)',
+                    background: 'linear-gradient(90deg, transparent 60%, hsl(var(--sfr-0a2540) / 0.38) 90%, hsl(var(--sfr-0e2747) / 0.22) 100%)',
                   }}
                 />
                 <div
                   className="relative z-[1] rounded-[28px] px-2.5 py-2.5 space-y-3"
                   style={{
                     background: 'var(--panel-3)',
-                    border: '1.5px solid rgba(255,255,255,0.08)',
+                    border: '1.5px solid hsl(var(--surface-invert) / 0.08)',
                     boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
                   }}
                 >
@@ -1178,7 +1178,7 @@ const MarketResearch = () => {
                             background: 'var(--sfc-111118)',
                             border: '1.5px solid rgba(139, 92, 246, 0.55)',
                             boxShadow: '0 0 16px rgba(139, 92, 246, 0.2), 0 0 4px rgba(139, 92, 246, 0.15)',
-                            color: '#e2e2f0',
+                            color: 'hsl(var(--pt-e2e2f0))',
                           }}
                         >
                           <SelectValue />
@@ -1189,7 +1189,7 @@ const MarketResearch = () => {
                         style={{
                           background: 'var(--panel-4)',
                           border: '1px solid rgba(139, 92, 246, 0.25)',
-                          color: '#e2e2f0',
+                          color: 'hsl(var(--pt-e2e2f0))',
                         }}
                       >
                         {RESEARCH_TYPES.map((t) => {
@@ -1211,7 +1211,7 @@ const MarketResearch = () => {
                       style={{
                         background: 'var(--sfc-0e0e14)',
                         boxShadow: 'inset 2px 0 8px -2px rgba(139,92,246,0.35)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        border: '1px solid hsl(var(--surface-invert) / 0.1)',
                         borderLeftColor: 'rgba(139, 92, 246, 0.45)',
                       }}
                     >
@@ -1254,7 +1254,7 @@ const MarketResearch = () => {
                           boxShadow: loading
                             ? '0 0 16px rgba(220, 38, 38, 0.35), 0 2px 8px rgba(0,0,0,0.3)'
                             : '0 0 16px hsl(var(--brand-600) / 0.35), 0 2px 8px rgba(0,0,0,0.3)',
-                          color: '#ffffff',
+                          color: 'hsl(var(--pt-ffffff))',
                         }}
                       >
                         {loading ? (
@@ -1294,7 +1294,7 @@ const MarketResearch = () => {
                         <div
                           className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 p-2"
                           // style={{
-                          //   background: 'linear-gradient(90deg, rgba(80,36,180,0.10) 0%, rgba(36,18,54,0.22) 55%, rgba(12,12,18,0.95) 100%)',
+                          //   background: 'linear-gradient(90deg, hsl(var(--sfr-5024b4) / 0.10) 0%, hsl(var(--sfr-241236) / 0.22) 55%, hsl(var(--sfr-0c0c12) / 0.95) 100%)',
                           //   borderColor: 'rgba(139, 92, 246, 0.22)',
                           // }}
                         >
@@ -1340,7 +1340,7 @@ const MarketResearch = () => {
                       className="pt-1"
                     >
                       <div className="w-full flex items-center gap-1 text-xs text-white/80 font-medium mb-2">
-                        <Sparkles className="h-3 w-3" style={{ color: '#a78bfa' }} />
+                        <Sparkles className="h-3 w-3" style={{ color: 'hsl(var(--pt-a78bfa))' }} />
                         Try these research prompts
                       </div>
                       <div className="w-full flex flex-wrap gap-2">
@@ -1360,8 +1360,8 @@ const MarketResearch = () => {
                           whileTap={{ scale: 0.95 }}
                           className="text-xs h-7 rounded-xl px-3 text-left transition-all shadow-sm hover:shadow-md flex items-center text-white/90 border"
                           style={{
-                            background: 'rgba(255,255,255,0.05)',
-                            borderColor: 'rgba(255,255,255,0.10)',
+                            background: 'hsl(var(--surface-invert) / 0.05)',
+                            borderColor: 'hsl(var(--surface-invert) / 0.10)',
                           }}
                           onClick={() => setTopic(prompt)}
                         >

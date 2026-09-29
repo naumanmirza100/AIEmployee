@@ -633,7 +633,7 @@ export const listHRDocumentAccessLog = async (documentId, { limit = 50, offset =
 // the blob with the auth header, then trigger a client-side download.
 export const exportHREmployeeData = async (employeeId, filenameHint = '') => {
   const token = localStorage.getItem('company_auth_token');
-  const apiBase = (import.meta?.env?.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+  const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace(/\/$/, '');
   const resp = await fetch(`${apiBase}/hr/employees/${employeeId}/export`, {
     method: 'GET',
     headers: token ? { Authorization: `Token ${token}` } : {},
@@ -895,9 +895,14 @@ const browserTimezone = () => {
   }
 };
 
-export const hrMeetingSchedule = async (message, chatHistory = []) => {
+/**
+ * @param {object} extra  structured answers; `{ pending_intent, proposed_time }`
+ *                        finishes a "when should it happen?" question without
+ *                        the model re-reading `message`.
+ */
+export const hrMeetingSchedule = async (message, chatHistory = [], extra = {}) => {
   try {
-    const payload = { message, timezone: browserTimezone() };
+    const payload = { message, timezone: browserTimezone(), ...extra };
     if (Array.isArray(chatHistory) && chatHistory.length > 0) {
       payload.chat_history = chatHistory;
     }

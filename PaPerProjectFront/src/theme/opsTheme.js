@@ -85,7 +85,7 @@ export const opsTabActiveStyle = {
 };
 
 export const opsTabInactiveStyle = {
-  background: 'rgba(60, 30, 90, 0.22)',
+  background: 'hsl(var(--sfr-3c1e5a) / 0.22)',
   color: '#cfc6e6',
   border: '1.5px solid var(--line-3)',
   boxShadow: 'none',
