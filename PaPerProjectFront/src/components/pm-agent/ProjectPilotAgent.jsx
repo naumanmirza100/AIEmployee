@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import PilotGapForm from './PilotGapForm';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -136,6 +137,41 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   // through the normal chat path; the LLM sees the previous confirmation
   // card (which lists the proposed tasks) in chat history and regenerates
   // actions accordingly.
+  // Apply a proposal the user filled in and confirmed. Tracks which message's
+  // card is in flight / finished so the chat can disable just that one rather
+  // than the whole conversation.
+  const [confirmingIndex, setConfirmingIndex] = useState(null);
+  const [confirmedIndexes, setConfirmedIndexes] = useState(() => new Set());
+
+  const confirmPilotDraft = async (messageIndex, draft, answers) => {
+    try {
+      setConfirmingIndex(messageIndex);
+      const response = await pmAgentService.projectPilotConfirm(draft.actions || [], answers);
+      if (response.status !== 'success') {
+        throw new Error(response.message || 'Failed to create');
+      }
+      const results = response.data?.action_results || [];
+      const failed = results.filter((r) => !r.success);
+      setConfirmedIndexes((prev) => new Set(prev).add(messageIndex));
+      toast({
+        title: failed.length ? 'Created with problems' : 'Created',
+        description: failed.length
+          ? `${results.length - failed.length} created, ${failed.length} failed: ${failed[0].error}`
+          : response.data?.answer || 'Done.',
+        variant: failed.length ? 'destructive' : undefined,
+      });
+      if (results.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: apiErrorMessage(error, 'Failed to create'),
+        variant: 'destructive',
+      });
+    } finally {
+      setConfirmingIndex(null);
+    }
+  };
+
   const submitPilotChat = async (followUpText, extraContent = '') => {
     if (!followUpText || !followUpText.trim()) return;
     const q = followUpText.trim();
@@ -144,6 +180,21 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     try {
       setLoading(true);
       const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      // The proposal is missing details we ask about. Show it as a form
+      // instead of applying it; PilotGapForm posts it back once confirmed.
+      if (response.status === 'needs_input') {
+        const data = response.data || {};
+        await addMessagePairToChat(
+          { role: 'user', content: q },
+          {
+            role: 'assistant',
+            content: data.answer || 'I need a few more details before I create this.',
+            responseData: { ...data, needs_input: true, project_id: projectId, project_title: projectTitle },
+          },
+          q,
+        );
+        return;
+      }
       if (response.status === 'success') {
         const data = response.data || response;
         const answerText = data.answer || '';
@@ -221,6 +272,21 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     try {
       setLoading(true);
       const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      // The proposal is missing details we ask about. Show it as a form
+      // instead of applying it; PilotGapForm posts it back once confirmed.
+      if (response.status === 'needs_input') {
+        const data = response.data || {};
+        await addMessagePairToChat(
+          { role: 'user', content: q },
+          {
+            role: 'assistant',
+            content: data.answer || 'I need a few more details before I create this.',
+            responseData: { ...data, needs_input: true, project_id: projectId, project_title: projectTitle },
+          },
+          q,
+        );
+        return;
+      }
       if (response.status === 'success') {
         const data = response.data || response;
         const answerText = data.answer || '';
@@ -870,6 +936,14 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           was ambiguous (no explicit "create" verb) or
                           duplicates an existing project. User picks how to
                           proceed via clickable options. */}
+                      {msg.responseData?.needs_input && (
+                        <PilotGapForm
+                          data={msg.responseData}
+                          busy={confirmingIndex === i}
+                          done={confirmedIndexes.has(i)}
+                          onConfirm={(answers) => confirmPilotDraft(i, msg.responseData, answers)}
+                        />
+                      )}
                       {msg.responseData?.confirmation_required && (() => {
                         const conf = msg.responseData.confirmation_required;
                         const similar = conf.similar_projects || [];
