@@ -7,6 +7,12 @@ import { API_BASE_URL } from '@/config/apiConfig';
 /**
  * Get company authentication token from localStorage
  */
+// The recruiter's timezone. Their interview hours and slots are times on
+// their own clock, so the backend needs to know which zone that is.
+const browserTimezone = () => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+};
+
 const getCompanyToken = () => {
   return localStorage.getItem('company_auth_token');
 };
@@ -320,6 +326,7 @@ export const getInterviews = async (filters = {}) => {
     if (filters.job_title)                                    params.append('job_title',  filters.job_title);
     if (filters.page)                                         params.append('page',       filters.page);
     if (filters.page_size)                                    params.append('page_size',  filters.page_size);
+    if (browserTimezone())                                    params.append('timezone',   browserTimezone());
 
     const queryString = params.toString();
     const endpoint = `/recruitment/interviews${queryString ? `?${queryString}` : ''}`;
@@ -338,7 +345,8 @@ export const getInterviews = async (filters = {}) => {
  */
 export const scheduleInterview = async (interviewData) => {
   try {
-    const response = await companyApi.post('/recruitment/interviews/schedule', interviewData);
+    const response = await companyApi.post('/recruitment/interviews/schedule',
+      { timezone: browserTimezone(), ...interviewData });
     return response;
   } catch (error) {
     console.error('Schedule interview error:', error);
@@ -357,6 +365,16 @@ export const updateInterview = async (interviewId, payload) => {
     return response;
   } catch (error) {
     console.error('Update interview error:', error);
+    throw error;
+  }
+};
+
+/** Colleagues who can sit in on an interview (the company's employee logins). */
+export const getInterviewerOptions = async () => {
+  try {
+    return await companyApi.get('/recruitment/interviewers');
+  } catch (error) {
+    console.error('Get interviewer options error:', error);
     throw error;
   }
 };
@@ -483,7 +501,7 @@ export const updateEmailSettings = async (settings) => {
  */
 export const getInterviewSettings = async (jobId = null) => {
   try {
-    const params = jobId ? { job_id: jobId } : {};
+    const params = { ...(jobId ? { job_id: jobId } : {}), timezone: browserTimezone() };
     const response = await companyApi.get('/recruitment/settings/interview', params);
     return response;
   } catch (error) {
@@ -498,7 +516,8 @@ export const getInterviewSettings = async (jobId = null) => {
  */
 export const updateInterviewSettings = async (settings) => {
   try {
-    const response = await companyApi.post('/recruitment/settings/interview', settings);
+    const response = await companyApi.post('/recruitment/settings/interview',
+      { timezone: browserTimezone(), ...settings });
     return response;
   } catch (error) {
     console.error('Update interview settings error:', error);
@@ -742,6 +761,7 @@ export default {
   updateJobDescription,
   deleteJobDescription,
   getInterviews,
+  getInterviewerOptions,
   scheduleInterview,
   getInterviewDetails,
   getRescheduleSlots,

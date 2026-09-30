@@ -1339,59 +1339,35 @@ def get_available_slots_for_interview(request, token):
     if interview.is_job_schedule_expired():
         return JsonResponse({"error": "The scheduling period for this position has ended. Please contact the recruiter."}, status=410)
 
-    # Resolve job for this interview (from CV record)
-    job = None
-    if interview.cv_record and interview.cv_record.job_description_id:
-        job = interview.cv_record.job_description
-    
+    from recruitment_agent import interview_time
+    from core.scheduling import busy_intervals, overlaps
+
+    job = interview.cv_record.job_description if (interview.cv_record and interview.cv_record.job_description_id) else None
     company_user = interview.company_user
     recruiter = interview.recruiter
-    
+
+    settings = interview_time.settings_for(interview)
+    # Slots are the recruiter's wall-clock times, in this zone. They used to be
+    # read as UTC, and shown to the candidate with no zone at all.
+    tz = interview_time.zone_for(interview, settings)
+
     time_slots = []
-    schedule_from_date = None
-    schedule_to_date = None
-    start_time = time(9, 0)  # Default
-    end_time = time(17, 0)  # Default
-    settings = None
-    
-    # Prefer company_user + job-specific settings (same as recruiter settings UI)
-    if company_user:
-        if job:
-            settings = RecruiterInterviewSettings.objects.filter(
-                company_user=company_user, job=job
-            ).first()
-        if not settings:
-            settings = RecruiterInterviewSettings.objects.filter(
-                company_user=company_user, job__isnull=True
-            ).first()
-    
-    # Fallback: recruiter-based settings (backward compatibility)
-    if not settings and recruiter:
-        if job:
-            settings = RecruiterInterviewSettings.objects.filter(
-                recruiter=recruiter, job=job
-            ).first()
-        if not settings:
-            settings = RecruiterInterviewSettings.objects.filter(
-                recruiter=recruiter, job__isnull=True
-            ).first()
-    
-    if settings:
-        schedule_from_date = settings.schedule_from_date
-        schedule_to_date = settings.schedule_to_date
-        start_time = settings.start_time or start_time
-        end_time = settings.end_time or end_time
-        if settings.time_slots_json:
-            all_slots = settings.time_slots_json
-            time_slots = [slot for slot in all_slots if slot.get('available', True)]
-    
+    schedule_from_date = settings.schedule_from_date if settings else None
+    schedule_to_date = settings.schedule_to_date if settings else None
+    start_time = (settings.start_time if settings else None) or time(9, 0)
+    end_time = (settings.end_time if settings else None) or time(17, 0)
+    if settings and settings.time_slots_json:
+        time_slots = [slot for slot in settings.time_slots_json if slot.get('available', True)]
+    duration = timedelta(minutes=(settings.interview_time_gap if settings else None)
+                         or interview.duration_minutes or 30)
+
     # Taken slots: only interviews for the *same job* and same org (company_user/recruiter)
     now = timezone.now()
     base_q = Interview.objects.filter(
         status__in=['SCHEDULED', 'CONFIRMED'],
         scheduled_datetime__isnull=False
     ).exclude(id=interview.id)
-    
+
     if job and company_user:
         scheduled_interviews = base_q.filter(
             company_user=company_user, cv_record__job_description_id=job.id
@@ -1406,87 +1382,74 @@ def get_available_slots_for_interview(request, token):
         scheduled_interviews = base_q.filter(recruiter=recruiter)
     else:
         scheduled_interviews = base_q.none()
-    
-    # Get scheduled datetime strings (ISO format) for comparison
-    taken_slot_datetimes = set()
-    
-    for scheduled_interview in scheduled_interviews:
-        if scheduled_interview.scheduled_datetime:
-            # Normalize datetime to YYYY-MM-DDTHH:MM format for comparison
-            scheduled_datetime_normalized = scheduled_interview.scheduled_datetime.strftime('%Y-%m-%dT%H:%M')
-            taken_slot_datetimes.add(scheduled_datetime_normalized)
-            # Also add with seconds for different formats
-            scheduled_datetime_with_seconds = scheduled_interview.scheduled_datetime.strftime('%Y-%m-%dT%H:%M:%S')
-            taken_slot_datetimes.add(scheduled_datetime_with_seconds)
-            # Add ISO format
-            taken_slot_datetimes.add(scheduled_interview.scheduled_datetime.isoformat())
-    
+
+    # Each booked interview as a slot string on the recruiter's clock, in the
+    # zone it was booked in (older bookings hold clock digits as UTC).
+    taken_slot_datetimes = {
+        interview_time.slot_key(other.scheduled_datetime, interview_time.stored_zone(other))
+        for other in scheduled_interviews
+    }
+
+    # Everyone on the interview must be free — across PM, HR and Frontline
+    # meetings and other interviews. One query over the slots' whole span.
+    instants = {}
+    for slot in time_slots:
+        instant = interview_time.aware(slot.get('datetime', ''), tz)
+        if instant is not None:
+            instants[slot.get('datetime', '')] = instant
+    busy = (busy_intervals(interview_time.people(interview), min(instants.values()),
+                           max(instants.values()) + duration,
+                           exclude=[('recruitment', interview.id)])
+            if instants else [])
+
     # Mark which slots are taken
     available_slots = []
-    now_aware = now  # already timezone-aware from timezone.now()
     for slot in time_slots:
         slot_datetime = slot.get('datetime', '')
-        # Normalize slot datetime for comparison (remove seconds if present)
-        slot_datetime_normalized = slot_datetime
-        if 'T' in slot_datetime:
-            # Extract date and time parts
-            date_part, time_part = slot_datetime.split('T')
-            if ':' in time_part:
-                time_hour_min = ':'.join(time_part.split(':')[:2])  # Get only HH:MM
-                slot_datetime_normalized = f"{date_part}T{time_hour_min}"
+        instant = instants.get(slot_datetime)
+        if instant is not None and instant < now:
+            continue  # Past slot — skip entirely
+        slot_key = interview_time.slot_key(instant, tz) if instant else slot_datetime
 
-        # Skip slots that are in the past
-        try:
-            from django.utils.dateparse import parse_datetime
-            slot_dt_parsed = parse_datetime(slot_datetime)
-            if slot_dt_parsed is None:
-                # Try naive parse and make aware
-                slot_dt_naive = datetime.strptime(slot_datetime_normalized, '%Y-%m-%dT%H:%M')
-                slot_dt_parsed = timezone.make_aware(slot_dt_naive)
-            elif slot_dt_parsed.tzinfo is None:
-                # parse_datetime returned a naive datetime (no tz in string) — make it aware
-                slot_dt_parsed = timezone.make_aware(slot_dt_parsed)
-            if slot_dt_parsed < now_aware:
-                continue  # Past slot — skip entirely
-        except Exception:
-            pass  # If we can't parse, include the slot
-
-        # Check if slot is taken - check both database and scheduled flag in time_slots_json
-        is_scheduled_in_json = slot.get('scheduled', False)  # Check scheduled flag in JSON
-        is_taken_in_db = (slot_datetime in taken_slot_datetimes or
-                         slot_datetime_normalized in taken_slot_datetimes)
-
-        # Slot is taken if either scheduled in JSON or found in database
-        is_taken = is_scheduled_in_json or is_taken_in_db
+        # Taken: marked in the settings, booked by another candidate, or
+        # someone on this interview is busy then (the candidate isn't told why).
+        is_scheduled_in_json = slot.get('scheduled', False)
+        is_taken = (is_scheduled_in_json or slot_key in taken_slot_datetimes
+                    or (instant is not None and overlaps(busy, instant, instant + duration)))
 
         available_slots.append({
             'date': slot.get('date'),
             'time': slot.get('time'),
             'datetime': slot_datetime,
-            'available': not is_taken,  # Available if not taken
+            # The exact instant, so the page can also show the candidate's own time.
+            'iso': instant.isoformat() if instant else None,
+            'available': not is_taken,
             'taken': is_taken,
-            'scheduled': is_scheduled_in_json  # Include scheduled flag for frontend
+            'scheduled': is_scheduled_in_json,
         })
-    
-    # Determine min and max dates
-    min_date = schedule_from_date if schedule_from_date else now.date()
-    if min_date < now.date():
-        min_date = now.date()
-    
-    max_date = schedule_to_date if schedule_to_date else (now.date() + timedelta(days=60))
-    
+
+    # Determine min and max dates — on the recruiter's calendar
+    today_there = interview_time.local(now, tz).date()
+    min_date = schedule_from_date if schedule_from_date else today_there
+    if min_date < today_there:
+        min_date = today_there
+
+    max_date = schedule_to_date if schedule_to_date else (today_there + timedelta(days=60))
+
     job_title = job.title if job else interview.job_role
     return JsonResponse({
         "success": True,
         "job_title": job_title,
         "time_slots": available_slots,
+        "timezone": tz,
+        "timezone_caption": interview_time.zone_caption(tz),
         "constraints": {
             "min_date": min_date.isoformat(),
             "max_date": max_date.isoformat(),
             "start_time": start_time.strftime('%H:%M'),
             "end_time": end_time.strftime('%H:%M'),
         },
-        "taken_slots": list(taken_slot_datetimes),
+        "taken_slots": sorted(taken_slot_datetimes),
     })
 
 
@@ -1539,15 +1502,12 @@ def candidate_select_slot(request, token):
                 'token': token,
             })
 
-        # Reject past dates
+        # Reject past dates. The slot is on the recruiter's clock, in their zone.
         from django.utils import timezone as tz
-        from django.utils.dateparse import parse_datetime
-        from datetime import datetime as _dt
+        from recruitment_agent import interview_time
         try:
-            slot_dt = parse_datetime(selected_slot_datetime)
-            if slot_dt is None:
-                slot_dt = tz.make_aware(_dt.fromisoformat(selected_slot_datetime))
-            if slot_dt < tz.now():
+            slot_dt = interview_time.aware(selected_slot_datetime, interview_time.zone_for(interview))
+            if slot_dt is not None and slot_dt < tz.now():
                 messages.error(request, 'You cannot select a past date/time. Please choose a future slot.')
                 return render(request, 'recruitment_agent/candidate_slot_selection.html', {
                     'interview': interview,

@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send, LayoutList, Columns, MoreVertical, RefreshCw, Award, Building2, Trophy, ThumbsUp, Lock, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send, LayoutList, Columns, MoreVertical, RefreshCw, Award, Building2, Trophy, ThumbsUp, Lock, Search, ChevronLeft, ChevronRight, Users } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -20,6 +20,7 @@ import {
 import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions, submitInterviewFeedback } from '@/services/recruitmentAgentService';
 import SearchableSelect from '@/components/ui/searchable-select';
 import InterviewKanban from './InterviewKanban';
+import InterviewersDialog from './InterviewersDialog';
 
 const Interviews = ({ onUpdate }) => {
   const { toast } = useToast();
@@ -36,6 +37,8 @@ const Interviews = ({ onUpdate }) => {
   const [dateTo, setDateTo]         = useState('');
   // Pagination
   const [currentPage, setCurrentPage]   = useState(1);
+  // The interview whose interviewers are being chosen (dialog open), or null.
+  const [interviewersFor, setInterviewersFor] = useState(null);
   const [totalPages, setTotalPages]     = useState(1);
   const [totalCount, setTotalCount]     = useState(0);
   const [pageSize, setPageSize]         = useState(10);
@@ -506,7 +509,31 @@ const Interviews = ({ onUpdate }) => {
                           <br />
                           <span className="text-muted-foreground">{format(new Date(interview.scheduled_datetime), 'h:mm a')}</span>
                         </span>
+                        {interview.duration_minutes ? (
+                          <span className="text-muted-foreground"> · {interview.duration_minutes} min</span>
+                        ) : null}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Colleagues interviewing too — it goes on their calendars. */}
+                  {!['CANCELLED', 'COMPLETED'].includes(interview.status) && (
+                    <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm flex-wrap">
+                      <Users className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                      <span className="text-muted-foreground">
+                        {(interview.interviewers || []).length
+                          ? interview.interviewers.map((u) => u.name).join(', ')
+                          : 'No other interviewers'}
+                      </span>
+                      <button
+                        type="button"
+                        id={`REC-interviews-interviewers-btn-${interview.id}`}
+                        data-testid={`REC-interviews-interviewers-btn-${interview.id}`}
+                        onClick={() => setInterviewersFor(interview)}
+                        className="text-violet-400 hover:text-violet-300 text-xs font-medium"
+                      >
+                        {(interview.interviewers || []).length ? 'Edit' : 'Add'}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -730,6 +757,13 @@ const Interviews = ({ onUpdate }) => {
       </div>
 
       {/* Reschedule Modal */}
+      <InterviewersDialog
+        interview={interviewersFor}
+        open={!!interviewersFor}
+        onOpenChange={(open) => { if (!open) setInterviewersFor(null); }}
+        onSaved={() => fetchInterviews(currentPage)}
+      />
+
       <Dialog open={showRescheduleModal} onOpenChange={(open) => {
         if (!open) { setShowRescheduleModal(false); setRescheduleInterviewObj(null); setReschedulePickedDate(null); setReschedulePickedTime(''); setRescheduleError(''); }
       }}>

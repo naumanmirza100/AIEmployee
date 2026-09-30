@@ -18,6 +18,7 @@ from django.core.mail.message import sanitize_address
 from django.conf import settings
 from django.template.loader import render_to_string
 
+from recruitment_agent import interview_time
 from recruitment_agent.log_service import LogService
 from recruitment_agent.models import Interview
 
@@ -602,57 +603,33 @@ class InterviewSchedulingAgent:
         """
         try:
             interview = Interview.objects.get(id=interview_id)
-            
-            # Parse and validate the selected slot
-            try:
-                # Handle ISO format with or without timezone
-                if selected_slot_datetime.endswith('Z'):
-                    selected_slot_datetime = selected_slot_datetime[:-1] + '+00:00'
-                selected_datetime = datetime.fromisoformat(selected_slot_datetime)
-                if timezone.is_naive(selected_datetime):
-                    selected_datetime = timezone.make_aware(selected_datetime)
-            except (ValueError, AttributeError) as e:
-                return {
-                    "success": False,
-                    "error": f"Invalid datetime format: {str(e)}",
-                }
-            
-            # Get recruiter interview settings (prefer company_user → job, then recruiter → job)
+
             from recruitment_agent.models import RecruiterInterviewSettings
             recruiter = interview.recruiter
-            schedule_from_date = None
-            schedule_to_date = None
-            start_time = None
-            end_time = None
+            settings = interview_time.settings_for(interview)
+            tz = interview_time.zone_for(interview, settings)
 
-            job = (interview.cv_record.job_description
-                   if (interview.cv_record and interview.cv_record.job_description_id) else None)
-            settings = None
-            if interview.company_user_id:
-                if job:
-                    settings = RecruiterInterviewSettings.objects.filter(
-                        company_user=interview.company_user, job=job).first()
-                if not settings:
-                    settings = RecruiterInterviewSettings.objects.filter(
-                        company_user=interview.company_user, job__isnull=True).first()
-            if not settings and interview.recruiter_id:
-                if job:
-                    settings = RecruiterInterviewSettings.objects.filter(
-                        recruiter=recruiter, job=job).first()
-                if not settings:
-                    settings = RecruiterInterviewSettings.objects.filter(
-                        recruiter=recruiter, job__isnull=True).first()
+            # The slot is the recruiter's wall-clock time ("2026-10-06T10:00"),
+            # so it is read in the recruiter's zone. It used to be read as UTC:
+            # the candidate was told 10:00 while the Meet event, reminders and
+            # the recruiter's dashboard all used 10:00 UTC.
+            selected_datetime = interview_time.aware(selected_slot_datetime, tz)
+            if selected_datetime is None:
+                return {
+                    "success": False,
+                    "error": f"Invalid datetime format: {selected_slot_datetime!r}",
+                }
+            local_selected = interview_time.local(selected_datetime, tz)
 
-            if settings:
-                schedule_from_date = settings.schedule_from_date
-                schedule_to_date = settings.schedule_to_date
-                start_time = settings.start_time
-                end_time = settings.end_time
-            
-            # Validate date range
-            selected_date = selected_datetime.date()
+            schedule_from_date = settings.schedule_from_date if settings else None
+            schedule_to_date = settings.schedule_to_date if settings else None
+            start_time = settings.start_time if settings else None
+            end_time = settings.end_time if settings else None
+
+            # Validate date range — on the recruiter's calendar
+            selected_date = local_selected.date()
             now = timezone.now()
-            
+
             if schedule_from_date:
                 if selected_date < schedule_from_date:
                     return {
@@ -661,7 +638,7 @@ class InterviewSchedulingAgent:
                     }
             else:
                 # Default: can't select past dates
-                if selected_date < now.date():
+                if selected_datetime < now:
                     return {
                         "success": False,
                         "error": "Cannot select a date in the past",
@@ -674,8 +651,8 @@ class InterviewSchedulingAgent:
                         "error": f"Selected date is after the allowed end date ({schedule_to_date})",
                     }
             
-            # Validate time range
-            selected_time = selected_datetime.time()
+            # Validate time range — the recruiter's working hours, on their clock
+            selected_time = local_selected.time()
             if start_time and selected_time < start_time:
                 return {
                     "success": False,
@@ -690,7 +667,7 @@ class InterviewSchedulingAgent:
             # Check if the selected slot is available in recruiter settings and mark as scheduled atomically
             from django.db import transaction
             
-            selected_datetime_str = selected_datetime.strftime('%Y-%m-%dT%H:%M')
+            selected_datetime_str = interview_time.slot_key(selected_datetime, tz)
             slot_found = False
             slot_available = False
             slot_scheduled = False
@@ -754,53 +731,76 @@ class InterviewSchedulingAgent:
                     "error": "This time slot is already taken by another candidate for this position. Please select a different time.",
                 }
             
-            # Use transaction to atomically mark slot as scheduled and save interview
-            with transaction.atomic():
-                # Lock the settings row to prevent concurrent double-booking
-                if settings:
-                    settings = RecruiterInterviewSettings.objects.select_for_update().get(pk=settings.pk)
-                    if settings.time_slots_json:
-                        # Mark slot as scheduled in time_slots_json
-                        slot_marked = False
-                        for slot in settings.time_slots_json:
-                            slot_datetime = slot.get('datetime', '')
-                            slot_datetime_normalized = slot_datetime
-                            if 'T' in slot_datetime:
-                                date_part, time_part = slot_datetime.split('T')
-                                if ':' in time_part:
-                                    time_hour_min = ':'.join(time_part.split(':')[:2])
-                                    slot_datetime_normalized = f"{date_part}T{time_hour_min}"
+            # One slot is as long as the gap between slots.
+            if settings and settings.interview_time_gap:
+                interview.duration_minutes = settings.interview_time_gap
+
+            # The recruiter and the interviewers must be free across every
+            # agent (PM, HR, Frontline meetings and other interviews). Checked
+            # and booked under the same people locks the other schedulers use,
+            # so two bookings can't both pass the check.
+            from core.scheduling import ScheduleConflict, booking_guard, ensure_free
+            busy_people = interview_time.people(interview)
+            try:
+                with booking_guard(busy_people):
+                    ensure_free(busy_people, selected_datetime, interview.duration_minutes,
+                                tz_name=tz, viewer_source='recruitment',
+                                exclude=[('recruitment', interview.id)],
+                                hide_titles=True, suggest=False)
+                    # Lock the settings row to prevent concurrent double-booking
+                    if settings:
+                        settings = RecruiterInterviewSettings.objects.select_for_update().get(pk=settings.pk)
+                        if settings.time_slots_json:
+                            # Mark slot as scheduled in time_slots_json
+                            slot_marked = False
+                            for slot in settings.time_slots_json:
+                                slot_datetime = slot.get('datetime', '')
+                                slot_datetime_normalized = slot_datetime
+                                if 'T' in slot_datetime:
+                                    date_part, time_part = slot_datetime.split('T')
+                                    if ':' in time_part:
+                                        time_hour_min = ':'.join(time_part.split(':')[:2])
+                                        slot_datetime_normalized = f"{date_part}T{time_hour_min}"
                             
-                            if slot_datetime_normalized == selected_datetime_str or slot_datetime == selected_datetime_str:
-                                # Double-check it's not already scheduled (race condition check)
-                                if slot.get('scheduled', False):
-                                    return {
-                                        "success": False,
-                                        "error": "This time slot was just selected by another candidate. Please select a different time slot.",
-                                    }
-                                # Mark as scheduled
-                                slot['scheduled'] = True
-                                slot_marked = True
-                                break
+                                if slot_datetime_normalized == selected_datetime_str or slot_datetime == selected_datetime_str:
+                                    # Double-check it's not already scheduled (race condition check)
+                                    if slot.get('scheduled', False):
+                                        return {
+                                            "success": False,
+                                            "error": "This time slot was just selected by another candidate. Please select a different time slot.",
+                                        }
+                                    # Mark as scheduled
+                                    slot['scheduled'] = True
+                                    slot_marked = True
+                                    break
                         
-                        if slot_marked:
-                            settings.save()  # Save the updated time_slots_json
+                            if slot_marked:
+                                settings.save()  # Save the updated time_slots_json
                 
-                # Format display string
-                selected_slot_display = selected_datetime.strftime('%A, %B %d, %Y at %I:%M %p')
-                
-                # Update interview
-                interview.status = 'SCHEDULED'
-                interview.scheduled_datetime = selected_datetime
-                interview.selected_slot = selected_slot_display
-                interview.save()
+                    # What emails and pages show — with the zone, so a candidate
+                    # elsewhere knows which 10:00 is meant.
+                    selected_slot_display = interview_time.label(selected_datetime, tz)
+
+                    # Update interview
+                    interview.status = 'SCHEDULED'
+                    interview.scheduled_datetime = selected_datetime
+                    interview.selected_slot = selected_slot_display
+                    interview.timezone_name = tz
+                    interview.save()
+            except ScheduleConflict:
+                # Someone on the interview is busy then. The candidate isn't
+                # told who or with what.
+                return {
+                    "success": False,
+                    "error": "This time is no longer available. Please choose a different time.",
+                }
 
             # Generate a meeting link for online interviews and persist it.
             # Prefer Google Meet (uses the company's connected calendar); if that
             # isn't available (calendar not connected, API disabled, etc.), fall
             # back to a Jitsi room so an online interview always has a link.
             if (getattr(interview, 'interview_type', 'ONLINE') or 'ONLINE') == 'ONLINE':
-                meet_link = _create_google_meet_link(interview)
+                meet_link = _create_google_meet_link(interview, interview.duration_minutes)
                 if not meet_link:
                     meet_link = _create_jitsi_meet_link(interview)
                     logger.info(f"Using Jitsi fallback meeting link for interview {interview.id}.")
@@ -870,26 +870,9 @@ class InterviewSchedulingAgent:
         except Interview.DoesNotExist:
             return {"success": False, "error": "Interview not found", "slots": []}
 
-        job = interview.cv_record.job_description if (interview.cv_record and interview.cv_record.job_description_id) else None
-        settings = None
-        if interview.company_user_id:
-            if job:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    company_user=interview.company_user, job=job
-                ).first()
-            if not settings:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    company_user=interview.company_user, job__isnull=True
-                ).first()
-        if not settings and interview.recruiter_id:
-            if job:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    recruiter=interview.recruiter, job=job
-                ).first()
-            if not settings:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    recruiter=interview.recruiter, job__isnull=True
-                ).first()
+        from core.scheduling import busy_intervals, overlaps
+        settings = interview_time.settings_for(interview)
+        tz = interview_time.zone_for(interview, settings)
 
         slots_out = []
         time_slots = getattr(settings, 'time_slots_json', None) if settings else None
@@ -899,7 +882,18 @@ class InterviewSchedulingAgent:
         now = timezone.now()
         current_dt_str = None
         if interview.scheduled_datetime:
-            current_dt_str = interview.scheduled_datetime.strftime('%Y-%m-%dT%H:%M')
+            current_dt_str = interview_time.slot_key(interview.scheduled_datetime,
+                                                     interview_time.stored_zone(interview))
+
+        # Busy time of everyone on the interview, over the slots' whole span,
+        # in one query. A slot someone is busy for is not offered.
+        duration = timedelta(minutes=(settings.interview_time_gap if settings else None)
+                             or interview.duration_minutes or 30)
+        instants = [interview_time.aware(s.get('datetime'), tz) for s in time_slots]
+        instants = [i for i in instants if i is not None]
+        busy = (busy_intervals(interview_time.people(interview), min(instants), max(instants) + duration,
+                               exclude=[('recruitment', interview.id)])
+                if instants else [])
 
         for slot in time_slots:
             slot_datetime = slot.get('datetime', '')
@@ -914,21 +908,24 @@ class InterviewSchedulingAgent:
             scheduled = slot.get('scheduled', False)
             available = (not scheduled) or is_current
             # Only include future slots (optional: filter past slots for display)
-            try:
-                dt_parsed = datetime.fromisoformat(slot_datetime.replace('Z', '+00:00'))
-                if timezone.is_naive(dt_parsed):
-                    dt_parsed = timezone.make_aware(dt_parsed)
-                if dt_parsed < now and not is_current:
+            dt_parsed = interview_time.aware(slot_datetime, tz)
+            is_busy = False
+            if dt_parsed is not None and not is_current:
+                if dt_parsed < now:
                     available = False
-            except (ValueError, AttributeError):
-                pass
+                elif overlaps(busy, dt_parsed, dt_parsed + duration):
+                    available, is_busy = False, True
             slots_out.append({
                 'datetime': slot_datetime,
+                # An exact instant, for showing it in the viewer's own zone.
+                'iso': dt_parsed.isoformat() if dt_parsed else None,
                 'display': slot_display,
                 'available': available,
+                'busy': is_busy,
             })
 
-        return {"success": True, "slots": slots_out}
+        return {"success": True, "slots": slots_out, "timezone": tz,
+                "timezone_caption": interview_time.zone_caption(tz)}
 
     def reschedule_interview(
         self,
@@ -950,46 +947,25 @@ class InterviewSchedulingAgent:
         except Interview.DoesNotExist:
             return {"success": False, "error": "Interview not found"}
 
-        job = interview.cv_record.job_description if (interview.cv_record and interview.cv_record.job_description_id) else None
-        settings = None
-        if interview.company_user_id:
-            if job:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    company_user=interview.company_user, job=job
-                ).first()
-            if not settings:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    company_user=interview.company_user, job__isnull=True
-                ).first()
-        if not settings and interview.recruiter_id:
-            if job:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    recruiter=interview.recruiter, job=job
-                ).first()
-            if not settings:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    recruiter=interview.recruiter, job__isnull=True
-                ).first()
+        settings = interview_time.settings_for(interview)
+        tz = interview_time.zone_for(interview, settings)
 
         schedule_from_date = getattr(settings, 'schedule_from_date', None) if settings else None
         schedule_to_date = getattr(settings, 'schedule_to_date', None) if settings else None
         start_time = getattr(settings, 'start_time', None) if settings else dt_time(9, 0)
         end_time = getattr(settings, 'end_time', None) if settings else dt_time(17, 0)
 
-        try:
-            if new_slot_datetime.endswith('Z'):
-                new_slot_datetime = new_slot_datetime[:-1] + '+00:00'
-            selected_datetime = datetime.fromisoformat(new_slot_datetime)
-            if timezone.is_naive(selected_datetime):
-                selected_datetime = timezone.make_aware(selected_datetime)
-        except (ValueError, AttributeError) as e:
-            return {"success": False, "error": f"Invalid datetime format: {str(e)}"}
+        # The dashboard sends an exact instant; a time without an offset is the
+        # recruiter's wall-clock time.
+        selected_datetime = interview_time.aware(new_slot_datetime, tz)
+        if selected_datetime is None:
+            return {"success": False, "error": f"Invalid datetime format: {new_slot_datetime!r}"}
 
         now = timezone.now()
-        selected_date = selected_datetime.date()
+        selected_date = interview_time.local(selected_datetime, tz).date()
         if schedule_from_date and selected_date < schedule_from_date:
             return {"success": False, "error": f"Selected date is before the allowed start date ({schedule_from_date})"}
-        if not schedule_from_date and selected_date < now.date():
+        if not schedule_from_date and selected_datetime < now:
             return {"success": False, "error": "Cannot select a date in the past"}
         if schedule_to_date and selected_date > schedule_to_date:
             return {"success": False, "error": f"Selected date is after the allowed end date ({schedule_to_date})"}
@@ -997,7 +973,7 @@ class InterviewSchedulingAgent:
         # Company can select any future time for reschedule - no start_time/end_time restriction
         # (avoids timezone issues and gives recruiters full flexibility)
 
-        selected_datetime_str = selected_datetime.strftime('%Y-%m-%dT%H:%M')
+        selected_datetime_str = interview_time.slot_key(selected_datetime, tz)
         existing_q = Interview.objects.filter(
             status__in=['SCHEDULED', 'CONFIRMED'],
             scheduled_datetime=selected_datetime,
@@ -1030,42 +1006,56 @@ class InterviewSchedulingAgent:
             # If not in config, still allow (company can pick any time within range)
 
         old_scheduled_datetime = interview.scheduled_datetime
-        old_datetime_str = old_scheduled_datetime.strftime('%Y-%m-%dT%H:%M') if old_scheduled_datetime else None
+        old_datetime_str = (interview_time.slot_key(old_scheduled_datetime, interview_time.stored_zone(interview))
+                            if old_scheduled_datetime else None)
 
-        with transaction.atomic():
-            # Only update time_slots_json if the selected slot is in the config (unmark old, mark new)
-            if settings and getattr(settings, 'time_slots_json', None):
-                settings.refresh_from_db()
-                if old_datetime_str:
-                    for slot in settings.time_slots_json:
-                        slot_dt = slot.get('datetime', '')
-                        slot_norm = slot_dt
-                        if 'T' in slot_dt:
-                            dp, tp = slot_dt.split('T')
-                            if ':' in tp:
-                                slot_norm = f"{dp}T{':'.join(tp.split(':')[:2])}"
-                        if slot_norm == old_datetime_str or slot_dt == old_datetime_str:
-                            slot['scheduled'] = False
-                            break
-                if slot_found_in_config:
-                    for slot in settings.time_slots_json:
-                        slot_dt = slot.get('datetime', '')
-                        slot_norm = slot_dt
-                        if 'T' in slot_dt:
-                            dp, tp = slot_dt.split('T')
-                            if ':' in tp:
-                                slot_norm = f"{dp}T{':'.join(tp.split(':')[:2])}"
-                        if slot_norm == selected_datetime_str or slot_dt == selected_datetime_str:
-                            slot['scheduled'] = True
-                            break
-                    settings.save()
+        # Everyone on the interview must be free at the new time, across every
+        # agent. The recruiter is told who is busy and gets suggestions.
+        from core.scheduling import ScheduleConflict, booking_guard, ensure_free
+        busy_people = interview_time.people(interview)
+        try:
+            with booking_guard(busy_people):
+                ensure_free(busy_people, selected_datetime, interview.duration_minutes,
+                            tz_name=tz, viewer_source='recruitment',
+                            exclude=[('recruitment', interview.id)], reveal_private=True)
+                # Only update time_slots_json if the selected slot is in the config (unmark old, mark new)
+                if settings and getattr(settings, 'time_slots_json', None):
+                    settings.refresh_from_db()
+                    if old_datetime_str:
+                        for slot in settings.time_slots_json:
+                            slot_dt = slot.get('datetime', '')
+                            slot_norm = slot_dt
+                            if 'T' in slot_dt:
+                                dp, tp = slot_dt.split('T')
+                                if ':' in tp:
+                                    slot_norm = f"{dp}T{':'.join(tp.split(':')[:2])}"
+                            if slot_norm == old_datetime_str or slot_dt == old_datetime_str:
+                                slot['scheduled'] = False
+                                break
+                    if slot_found_in_config:
+                        for slot in settings.time_slots_json:
+                            slot_dt = slot.get('datetime', '')
+                            slot_norm = slot_dt
+                            if 'T' in slot_dt:
+                                dp, tp = slot_dt.split('T')
+                                if ':' in tp:
+                                    slot_norm = f"{dp}T{':'.join(tp.split(':')[:2])}"
+                            if slot_norm == selected_datetime_str or slot_dt == selected_datetime_str:
+                                slot['scheduled'] = True
+                                break
+                        settings.save()
 
-            selected_slot_display = selected_datetime.strftime('%A, %B %d, %Y at %I:%M %p')
-            interview.status = 'SCHEDULED'
-            interview.scheduled_datetime = selected_datetime
-            interview.selected_slot = selected_slot_display
-            interview.confirmation_token = secrets.token_urlsafe(32)
-            interview.save(update_fields=['status', 'scheduled_datetime', 'selected_slot', 'confirmation_token', 'updated_at'])
+                selected_slot_display = interview_time.label(selected_datetime, tz)
+                interview.status = 'SCHEDULED'
+                interview.scheduled_datetime = selected_datetime
+                interview.selected_slot = selected_slot_display
+                interview.timezone_name = tz
+                interview.confirmation_token = secrets.token_urlsafe(32)
+                interview.save(update_fields=['status', 'scheduled_datetime', 'selected_slot', 'timezone_name',
+                                              'confirmation_token', 'updated_at'])
+        except ScheduleConflict as clash:
+            return {"success": False, "error": clash.text(), "code": clash.code,
+                    "conflict": clash.payload()['data']}
 
         email_sent = self.send_reschedule_email(interview)
         return {
@@ -1135,7 +1125,7 @@ class InterviewSchedulingAgent:
             except Exception as template_error:
                 print(f"⚠ Confirmation template failed ({template_error}), using plain-text fallback")
                 logger.warning(f"Confirmation template error for interview {interview.id}: {template_error}")
-                slot_str = interview.selected_slot or (interview.scheduled_datetime.strftime('%A, %B %d, %Y at %I:%M %p') if interview.scheduled_datetime else 'TBD')
+                slot_str = interview.selected_slot or interview_time.when(interview)
                 candidate_message = (
                     f"Dear {interview.candidate_name},\n\n"
                     f"Your interview for {job_title} has been confirmed.\n"
@@ -1197,6 +1187,8 @@ class InterviewSchedulingAgent:
                     'job_title': job_title,
                     'interview_type': interview.interview_type,
                     'scheduled_datetime': interview.scheduled_datetime,
+                    'timezone_caption': interview_time.zone_caption(
+                        interview_time.stored_zone(interview), interview.scheduled_datetime),
                     'meeting_link': interview.meeting_link or '',
                 }
                 
@@ -1207,8 +1199,12 @@ class InterviewSchedulingAgent:
                 recruiter_subject = f"Interview Scheduled - {interview.candidate_name} for {clean_recruiter_title}"
                 
                 try:
-                    recruiter_message = render_to_string('recruitment_agent/emails/interview_confirmation_recruiter.txt', recruiter_context)
-                    recruiter_html = render_to_string('recruitment_agent/emails/interview_confirmation_recruiter.html', recruiter_context)
+                    # The template's date filters convert to the active zone
+                    # (UTC); show the interview's own instead.
+                    from core.scheduling.conflicts import zone_info
+                    with timezone.override(zone_info(interview_time.stored_zone(interview))):
+                        recruiter_message = render_to_string('recruitment_agent/emails/interview_confirmation_recruiter.txt', recruiter_context)
+                        recruiter_html = render_to_string('recruitment_agent/emails/interview_confirmation_recruiter.html', recruiter_context)
                     print("✓ Recruiter email templates rendered")
                 except Exception as template_error:
                     print(f"❌ ERROR: Recruiter template rendering failed: {template_error}")
@@ -1282,7 +1278,7 @@ class InterviewSchedulingAgent:
             subject = f"Interview Rescheduled - {clean_job_title}"
             # Include scheduled_datetime so template can show the new time clearly
             scheduled_dt = interview.scheduled_datetime
-            scheduled_display = scheduled_dt.strftime('%A, %B %d, %Y at %I:%M %p') if scheduled_dt else (interview.selected_slot or '')
+            scheduled_display = interview_time.when(interview) if scheduled_dt else (interview.selected_slot or '')
             context = {
                 'candidate_name': interview.candidate_name,
                 'job_title': job_title,
@@ -1318,7 +1314,7 @@ class InterviewSchedulingAgent:
                 clean_job_title = clean_job_title[:47] + "..."
             subject = f"Interview Cancelled - {clean_job_title}"
             scheduled_dt = interview.scheduled_datetime
-            scheduled_display = scheduled_dt.strftime('%A, %B %d, %Y at %I:%M %p') if scheduled_dt else (interview.selected_slot or '')
+            scheduled_display = interview_time.when(interview) if scheduled_dt else (interview.selected_slot or '')
             context = {
                 'candidate_name': interview.candidate_name,
                 'job_title': job_title,
@@ -1683,6 +1679,10 @@ class InterviewSchedulingAgent:
                 "status": interview.status,
                 "scheduled_datetime": interview.scheduled_datetime.isoformat() if interview.scheduled_datetime else None,
                 "selected_slot": interview.selected_slot,
+                "duration_minutes": interview.duration_minutes,
+                "timezone_name": interview.timezone_name or None,
+                "interviewers": [{"id": u.id, "name": (u.get_full_name() or u.username).strip(),
+                                  "email": u.email} for u in interview.interviewers.all()],
                 "available_slots": available_slots,
                 "created_at": interview.created_at.isoformat(),
                 "updated_at": interview.updated_at.isoformat(),

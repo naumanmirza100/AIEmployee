@@ -150,6 +150,17 @@ def find_conflicts(user_ids, start, end, *, exclude=(), viewer_source=None,
     return clashes
 
 
+def busy_intervals(user_ids, start, end, *, exclude=()) -> list[tuple[datetime, datetime]]:
+    """(starts_at, ends_at) of every busy block for `user_ids` overlapping
+    [start, end) — for checking many candidate times with one query."""
+    return list(_busy_blocks(user_ids, _aware(start), _aware(end), exclude)
+                .values_list('starts_at', 'ends_at'))
+
+
+def overlaps(intervals, start, end) -> bool:
+    return any(s < end and e > start for s, e in intervals)
+
+
 def free_slots(user_ids, day: date, duration_minutes, tz_name='UTC', *, exclude=(),
                limit=6, not_before=None) -> list[datetime]:
     """Start times on `day` (working hours in `tz_name`) when everyone is free."""

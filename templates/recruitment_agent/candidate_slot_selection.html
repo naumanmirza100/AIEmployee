@@ -390,6 +390,8 @@
             <div class="info-item"><strong>Position:</strong> {{ interview.job_role }}</div>
             <div class="info-item"><strong>Candidate:</strong> {{ interview.candidate_name }}</div>
             <div class="info-item"><strong>Type:</strong> {{ interview.get_interview_type_display }}</div>
+            <!-- Filled in once the slots load: which zone the times are in. -->
+            <div class="info-item" id="slotTimezoneNote" style="display:none;"></div>
         </div>
 
         <form method="post" id="slotSelectionForm">
@@ -403,6 +405,9 @@
                     </div>
                 </div>
             </div>
+
+            <!-- The chosen time on the candidate's own clock, when it differs. -->
+            <div id="yourTimeNote" style="display:none; margin: 12px 0; color: var(--text-secondary);"></div>
 
             <button type="submit" class="submit-btn" id="confirmBtn" disabled>✅ Confirm This Time Slot</button>
         </form>
@@ -422,6 +427,8 @@
                         timeSlotsData = data.time_slots || [];
                         takenSlots = data.taken_slots || [];
                         window.slotJobTitle = data.job_title || null;
+                        window.slotTimezone = data.timezone || 'UTC';
+                        showTimezoneNote(data.timezone_caption);
                         displayTimeSlotsGrid();
                     } else {
                         document.getElementById('timeSlotsGrid').innerHTML = 
@@ -594,6 +601,37 @@
                 container.innerHTML = html;
             }
 
+            // The slots are the recruiter's local times. Say which zone that
+            // is, so a candidate elsewhere knows which 10:00 is meant.
+            function showTimezoneNote(caption) {
+                const el = document.getElementById('slotTimezoneNote');
+                if (!el || !caption) return;
+                el.innerHTML = '<strong>Time zone:</strong> ';
+                el.appendChild(document.createTextNode('All times are in ' + caption + '.'));
+                el.style.display = 'block';
+            }
+
+            // "That's 6:00 AM in your time zone", when the candidate's clock
+            // reads differently from the recruiter's.
+            function showYourTime(datetime) {
+                const note = document.getElementById('yourTimeNote');
+                if (!note) return;
+                const slot = timeSlotsData.find(s => s.datetime === datetime);
+                note.style.display = 'none';
+                if (!slot || !slot.iso) return;
+                const opts = { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' };
+                const instant = new Date(slot.iso);
+                let theirs, yours, yourZone = '';
+                try {
+                    theirs = instant.toLocaleString(undefined, { ...opts, timeZone: window.slotTimezone });
+                    yours = instant.toLocaleString(undefined, opts);
+                    yourZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+                } catch (e) { return; }
+                if (theirs === yours) return;
+                note.textContent = "That's " + yours + ' in your time zone' + (yourZone ? ' (' + yourZone + ')' : '') + '.';
+                note.style.display = 'block';
+            }
+
             function selectSlot(element, datetime) {
                 // Remove previous selection
                 document.querySelectorAll('.time-slot-cell.selected').forEach(cell => {
@@ -605,6 +643,7 @@
                 selectedSlot = datetime;
                 document.getElementById('selected_slot_datetime').value = datetime;
                 document.getElementById('confirmBtn').disabled = false;
+                showYourTime(datetime);
             }
 
             function changeCalendarMonth(direction) {

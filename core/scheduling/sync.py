@@ -1,4 +1,5 @@
-"""Keep `CalendarBlock` in step with the three meeting tables.
+"""Keep `CalendarBlock` in step with the meeting tables (PM, HR, Frontline) and
+recruitment interviews.
 
 Signals, not call sites. Meetings are created and changed from the PM chat,
 the HR form, chat and workflow engine, the Frontline dialog, email action
@@ -186,10 +187,11 @@ def connect_signals():
             pmodel = source.participant_model
             _connect(post_save, _participant_changed(key), pmodel, f'calblock-{key}-seat-save')
             _connect(post_delete, _participant_changed(key), pmodel, f'calblock-{key}-seat-delete')
-        # HR and Frontline attendees are many-to-many fields; `.set()` / `.add()`
-        # on those send m2m_changed rather than post_save. (PM's `participants`
-        # is a reverse foreign key, covered by the participant handlers above.)
-        attendees = getattr(model, 'participants', None)
+        # HR and Frontline attendees and interviewers are many-to-many fields;
+        # `.set()` / `.add()` on those send m2m_changed rather than post_save.
+        # (PM's `participants` is a reverse foreign key, covered by the
+        # participant handlers above.)
+        attendees = getattr(model, source.attendees_field, None)
         through = getattr(attendees, 'through', None)
         if through is not None:
             _connect(m2m_changed, _attendees_changed(key), through, f'calblock-{key}-attendees')

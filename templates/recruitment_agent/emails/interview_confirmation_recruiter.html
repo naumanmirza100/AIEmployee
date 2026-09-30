@@ -78,7 +78,7 @@
                                 <tr>
                                     <td style="padding:14px 20px;">
                                         <span style="font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#9ca3af;">Time</span><br>
-                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ scheduled_datetime|time:"g:i A" }}</span>
+                                        <span style="font-size:15px;color:#111827;font-weight:600;">{{ scheduled_datetime|time:"g:i A" }}{% if timezone_caption %} ({{ timezone_caption }}){% endif %}</span>
                                     </td>
                                 </tr>
                             </table>
