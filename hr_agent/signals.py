@@ -167,6 +167,22 @@ def backfill_employees_for_company(company_id: int) -> int:
     return created
 
 
+# Every event an HRWorkflow can listen for (`trigger_conditions.on`), and what
+# fires it. A workflow saved with any other event name would never run — two
+# of the built-in templates shipped like that — so the API refuses one.
+WORKFLOW_EVENTS = {
+    'employee_hired': 'An employee record is created',
+    'employee_offboarding_started': 'An employee starts serving notice',
+    'employee_leaving': 'An employee is offboarded',
+    'employee_on_leave': 'An employee goes on leave',
+    'employee_on_probation': 'An employee is put on probation',
+    'employee_30_days': "30 days after an employee's start date (daily job)",
+    'leave_request_submitted': 'A leave request is submitted',
+    'leave_request_approved': 'A leave request is approved',
+    'leave_request_rejected': 'A leave request is rejected',
+}
+
+
 def _system_user():
     """Single shared Django User used as `executed_by` when a workflow fires
     from a model signal (no human request to attribute it to)."""
@@ -295,6 +311,14 @@ def employee_post_save(sender, instance: Employee, created, **kwargs):
         _run_matching_workflows(
             company_id=instance.company_id, event='employee_on_probation',
             context=_employee_context(instance, event='employee_on_probation'),
+        )
+    elif new_status == 'notice':
+        # Serving notice is where offboarding starts; the built-in offboarding
+        # template listens for this and moves them to `offboarded` itself at
+        # the end. (It used to listen for an event nothing sent.)
+        _run_matching_workflows(
+            company_id=instance.company_id, event='employee_offboarding_started',
+            context=_employee_context(instance, event='employee_offboarding_started'),
         )
 
 

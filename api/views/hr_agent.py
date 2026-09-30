@@ -1383,6 +1383,24 @@ def delete_hr_document(request, document_id):
 
 # --- Workflow CRUD --------------------------------------------------------
 
+def _hr_unknown_trigger_response(trigger_conditions):
+    """400 if the workflow would listen for an event nothing fires, else None.
+
+    Such a workflow saves fine and then silently never runs — which is how two
+    of the built-in templates went unnoticed. No event at all is fine: that is
+    a manual-run workflow.
+    """
+    from hr_agent.signals import WORKFLOW_EVENTS
+    event = trigger_conditions.get('on')
+    if not event or event in WORKFLOW_EVENTS:
+        return None
+    return Response({
+        'status': 'error',
+        'message': f"Unknown trigger event '{event}'. It would never fire. Use one of: "
+                   + ', '.join(sorted(WORKFLOW_EVENTS)) + '.',
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
 def _serialize_hr_workflow(w: HRWorkflow) -> dict:
     return {
         'id': w.id, 'name': w.name, 'description': w.description,
@@ -1436,6 +1454,9 @@ def update_hr_workflow(request, workflow_id):
         if not isinstance(tc, dict):
             return Response({'status': 'error', 'message': 'trigger_conditions must be a dict'},
                             status=status.HTTP_400_BAD_REQUEST)
+        bad = _hr_unknown_trigger_response(tc)
+        if bad:
+            return bad
         w.trigger_conditions = tc
         dirty.append('trigger_conditions')
     if 'steps' in d:
@@ -1529,6 +1550,13 @@ def create_hr_workflow(request):
     if not name:
         return Response({'status': 'error', 'message': 'name is required'},
                         status=status.HTTP_400_BAD_REQUEST)
+    tc = d.get('trigger_conditions') or {}
+    if not isinstance(tc, dict):
+        return Response({'status': 'error', 'message': 'trigger_conditions must be a dict'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    bad = _hr_unknown_trigger_response(tc)
+    if bad:
+        return bad
     w = HRWorkflow.objects.create(
         company=company, name=name, description=d.get('description') or '',
         trigger_conditions=d.get('trigger_conditions') or {},

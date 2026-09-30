@@ -2045,9 +2045,11 @@ const HRDashboard = () => {
                               <SelectContent>
                                 <SelectItem value="__none__">(none — manual run only)</SelectItem>
                                 <SelectItem value="employee_hired">employee_hired</SelectItem>
+                                <SelectItem value="employee_offboarding_started">employee_offboarding_started</SelectItem>
                                 <SelectItem value="employee_leaving">employee_leaving</SelectItem>
                                 <SelectItem value="employee_on_leave">employee_on_leave</SelectItem>
                                 <SelectItem value="employee_on_probation">employee_on_probation</SelectItem>
+                                <SelectItem value="employee_30_days">employee_30_days</SelectItem>
                                 <SelectItem value="leave_request_submitted">leave_request_submitted</SelectItem>
                                 <SelectItem value="leave_request_approved">leave_request_approved</SelectItem>
                                 <SelectItem value="leave_request_rejected">leave_request_rejected</SelectItem>
