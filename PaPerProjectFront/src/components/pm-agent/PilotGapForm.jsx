@@ -128,6 +128,22 @@ const PilotGapForm = ({ data, onConfirm, busy = false, done = false }) => {
     return out;
   }, [values, projectDeadline, timeline, taskRows]);
 
+  // Assignees on approved leave before the task is due (from HR). A warning,
+  // not a block — recomputed as the assignee or date changes.
+  const leaveWarnings = useMemo(() => {
+    const today = new Date().toLocaleDateString('en-CA');           // YYYY-MM-DD, local
+    const from = timeline?.start && timeline.start > today ? timeline.start : today;
+    const out = {};
+    taskRows.forEach((r) => {
+      const { assignee_id: id, due_date: due } = values[r.index] || {};
+      if (!id || !due) return;
+      const person = users.find((u) => String(u.id) === String(id));
+      const clash = (person?.on_leave || []).find((l) => l.start <= due && l.end >= from);
+      if (clash) out[r.index] = `${person.name}: ${clash.label}`;
+    });
+    return out;
+  }, [values, timeline, taskRows, users]);
+
   const emptyCount = useMemo(() => {
     let n = taskRows.reduce((acc, r) => acc
       + (values[r.index]?.assignee_id ? 0 : 1)
@@ -230,9 +246,15 @@ const PilotGapForm = ({ data, onConfirm, busy = false, done = false }) => {
                     {users.map((u) => (
                       <option key={u.id} value={String(u.id)}>
                         {u.name}{u.role ? ` — ${u.role}` : ''}
+                        {u.on_leave?.length ? ` · ${u.on_leave[0].label}` : ''}
                       </option>
                     ))}
                   </select>
+                  {leaveWarnings[row.index] && (
+                    <span className="block text-xs text-amber-600 dark:text-amber-400">
+                      {leaveWarnings[row.index]} — before this is due.
+                    </span>
+                  )}
                 </label>
                 <label className="space-y-1">
                   <span className="block text-xs text-muted-foreground">

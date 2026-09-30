@@ -2411,7 +2411,7 @@ def hr_meeting_availability(request):
 
     is_admin = _is_hr_admin(request.user)
     clashes = find_conflicts(people, start, end, exclude=exclude, viewer_source='hr',
-                             reveal_private=is_admin)
+                             reveal_private=is_admin, tz_name=tz_name)
     suggestions = (suggest_slots(people, start, duration, tz_name, exclude=exclude)
                    if clashes else [])
     return Response({'status': 'success', 'data': {

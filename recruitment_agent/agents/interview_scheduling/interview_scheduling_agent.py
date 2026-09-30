@@ -892,7 +892,7 @@ class InterviewSchedulingAgent:
         instants = [interview_time.aware(s.get('datetime'), tz) for s in time_slots]
         instants = [i for i in instants if i is not None]
         busy = (busy_intervals(interview_time.people(interview), min(instants), max(instants) + duration,
-                               exclude=[('recruitment', interview.id)])
+                               exclude=[('recruitment', interview.id)], tz_name=tz)
                 if instants else [])
 
         for slot in time_slots:

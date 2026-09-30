@@ -13,7 +13,7 @@ decline it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from core.scheduling.identity import login_user_id_for_company_user, login_user_ids_for_employees
 
@@ -239,8 +239,52 @@ class RecruitmentSource(Source):
         return qs.select_related('company_user', 'cv_record__job_description')
 
 
+class LeaveSource(Source):
+    """Approved leave is busy time for the person on leave, in every agent —
+    the same as a meeting. Only approved: a pending request may be refused."""
+    key = 'leave'
+    label = 'Leave'
+    model_label = 'hr_agent.LeaveRequest'
+    attendees_field = ''
+    relevant_fields = frozenset({'status', 'start_date', 'end_date', 'partial_day_period',
+                                 'employee', 'employee_id'})
+    #: Where a half day splits, on the employee's clock.
+    MIDDAY = time(13, 0)
+
+    def booking(self, lr, *, assume_active=False, include_declined=False):
+        if lr.status != 'approved' or not lr.employee_id:
+            return None
+        # "Some hours" leave doesn't say which hours, so it can't block any.
+        if lr.partial_day_period == 'hours':
+            return None
+        employee = lr.employee
+        from zoneinfo import ZoneInfo
+        try:
+            zone = ZoneInfo(employee.timezone_name or 'UTC')
+        except Exception:
+            zone = ZoneInfo('UTC')
+        starts = datetime.combine(lr.start_date, time(0), tzinfo=zone)
+        ends = datetime.combine(lr.end_date + timedelta(days=1), time(0), tzinfo=zone)
+        if lr.partial_day_period == 'morning':
+            ends = datetime.combine(lr.start_date, self.MIDDAY, tzinfo=zone)
+        elif lr.partial_day_period == 'afternoon':
+            starts = datetime.combine(lr.start_date, self.MIDDAY, tzinfo=zone)
+        # Private and plainly titled: colleagues see "on leave", not the
+        # leave type or the reason.
+        b = Booking(company_id=employee.company_id, starts_at=starts, ends_at=ends,
+                    title='On leave', is_private=True)
+        b.add(employee.user_id, PARTICIPANT, 'on_leave')
+        return b
+
+    def upcoming(self, since, company_id=None):
+        qs = self.model.objects.filter(end_date__gte=(since - timedelta(days=1)).date())
+        if company_id:
+            qs = qs.filter(employee__company_id=company_id)
+        return qs.select_related('employee')
+
+
 SOURCES: dict[str, Source] = {s.key: s for s in (ProjectManagerSource(), HRSource(), FrontlineSource(),
-                                                  RecruitmentSource())}
+                                                  RecruitmentSource(), LeaveSource())}
 
 
 def people_for(source_key: str, meeting, *, include_declined=False) -> list[int]:

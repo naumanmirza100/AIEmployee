@@ -4350,7 +4350,8 @@ def check_meeting_availability(request):
         exclude = [('frontline', int(exclude_id))] if exclude_id.isdigit() else []
         tz_name = zone_name(request.GET.get('timezone'))
 
-        clashes = find_conflicts(people, start, end, exclude=exclude, viewer_source='frontline')
+        clashes = find_conflicts(people, start, end, exclude=exclude, viewer_source='frontline',
+                                 tz_name=tz_name)
         conflicts = [{
             'meeting_id': c.source_id,
             'user_id': c.user_id,

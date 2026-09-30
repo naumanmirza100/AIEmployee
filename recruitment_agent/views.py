@@ -1399,7 +1399,7 @@ def get_available_slots_for_interview(request, token):
             instants[slot.get('datetime', '')] = instant
     busy = (busy_intervals(interview_time.people(interview), min(instants.values()),
                            max(instants.values()) + duration,
-                           exclude=[('recruitment', interview.id)])
+                           exclude=[('recruitment', interview.id)], tz_name=tz)
             if instants else [])
 
     # Mark which slots are taken
