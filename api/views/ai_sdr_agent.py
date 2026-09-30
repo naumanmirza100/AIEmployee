@@ -136,6 +136,39 @@ def _mask_key(key: str) -> str:
     return key[:4] + '***' + key[-4:]
 
 
+def _parse_aware_datetime(value):
+    """Parse an ISO 8601 string (or datetime) into an aware datetime; ValueError if invalid."""
+    import datetime as _dtm
+    import dateutil.parser
+    if isinstance(value, _dtm.datetime):
+        parsed = value
+    else:
+        try:
+            parsed = dateutil.parser.isoparse(str(value))
+        except (ValueError, OverflowError) as exc:
+            raise ValueError('Invalid date format. Use ISO 8601.') from exc
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed)
+    return parsed
+
+
+def _validate_mail_settings(d, campaign=None):
+    """Error message if the SMTP/IMAP host or port in ``d`` is unsafe, else None."""
+    from ai_sdr_agent.agents.outreach_agent import validate_mail_server
+
+    def _val(key, default=None):
+        if key in d:
+            return d[key]
+        return getattr(campaign, key, default) if campaign else default
+
+    try:
+        smtp_err = validate_mail_server(_val('smtp_host'), _val('smtp_port') or 587, 'smtp')
+        imap_err = validate_mail_server(_val('imap_host'), _val('imap_port') or 993, 'imap')
+    except (TypeError, ValueError):
+        return 'SMTP/IMAP port must be a number.'
+    return smtp_err or imap_err
+
+
 # --------------------------------------------------------------------------
 # Serialisers
 # --------------------------------------------------------------------------
@@ -472,7 +505,8 @@ def qualify_lead(request, lead_id):
         lead.concerns = result.get('concerns', [])
         lead.outreach_strategy = result.get('outreach_strategy', '')
         lead.qualified_at = timezone.now()
-        lead.status = 'qualified'
+        if lead.status in ('new', 'qualified'):   # never regress contacted/replied/etc.
+            lead.status = 'qualified'
         lead.save()
         return Response({'status': 'success', 'data': _serialize_lead(lead)})
     except SDRLead.DoesNotExist:
@@ -1323,6 +1357,9 @@ def sdr_campaigns_list(request):
         # ── Validation (mirrors the frontend; never trust the client) ─────────
         if not (d.get('name') or '').strip():
             return Response({'status': 'error', 'message': 'Campaign name is required.'}, status=400)
+        mail_err = _validate_mail_settings(d)
+        if mail_err:
+            return Response({'status': 'error', 'message': mail_err}, status=400)
         cal_err = _validate_url_optional(
             d.get('calendar_link'),
             'Enter a valid calendar link like https://calendly.com/you/30min.',
@@ -1407,6 +1444,23 @@ def sdr_campaign_detail(request, campaign_id):
     if request.method == 'PUT':
         try:
             d = request.data
+            mail_err = _validate_mail_settings(d, campaign)
+            if mail_err:
+                return Response({'status': 'error', 'message': mail_err}, status=400)
+            if 'status' in d:
+                new_status = d['status']
+                if new_status not in dict(SDRCampaign.STATUS_CHOICES):
+                    return Response({'status': 'error', 'message': 'Invalid campaign status.'}, status=400)
+                if new_status == 'active' and campaign.status != 'active':
+                    smtp_ok = all([
+                        d.get('smtp_host', campaign.smtp_host),
+                        d.get('smtp_username', campaign.smtp_username),
+                        d.get('smtp_password') or campaign.smtp_password,
+                    ])
+                    if not smtp_ok:
+                        return Response({'status': 'error', 'message': 'Add SMTP settings before activating the campaign.'}, status=400)
+                    if not campaign.steps.filter(is_active=True).exists():
+                        return Response({'status': 'error', 'message': 'Add at least one step before activating the campaign.'}, status=400)
             for field in ['name', 'description', 'status', 'sender_name', 'sender_title',
                           'sender_company', 'postal_address', 'from_email', 'smtp_host', 'smtp_username',
                           'smtp_use_tls', 'imap_host', 'calendar_link', 'auto_check_replies']:
@@ -1696,8 +1750,22 @@ def sdr_enroll_leads(request, campaign_id):
             enrolled += 1
 
         campaign.total_leads = campaign.enrollments.count()
-        campaign.status = 'active'
-        campaign.save(update_fields=['total_leads', 'status'])
+        update_fields = ['total_leads']
+        # Enrolling starts a draft/finished campaign, but must not override a user's
+        # pause, jump a future start date, or activate a campaign with no steps.
+        if enrolled and campaign.status in ('draft', 'completed') and first_step:
+            start = campaign.start_date
+            if isinstance(start, str):
+                from datetime import date as _d
+                start = _d.fromisoformat(start)
+            if start and start > timezone.now().date():
+                campaign.status = 'scheduled'
+            else:
+                campaign.status = 'active'
+                campaign.activated_at = timezone.now()
+                update_fields.append('activated_at')
+            update_fields.append('status')
+        campaign.save(update_fields=update_fields)
 
         resp = {
             'status': 'success',
@@ -1941,6 +2009,9 @@ def sdr_mark_replied(request, campaign_id, enrollment_id):
 # Process outreach — send due steps for campaign
 # ==========================================================================
 
+PROCESS_BATCH_LIMIT = 50   # max enrollments sent per manual "Process" click
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1956,7 +2027,13 @@ def sdr_process_outreach(request, campaign_id):
         now = timezone.now()
         force = request.data.get('force', True)  # default: force-send regardless of timing
 
-        qs = campaign.enrollments.filter(status='active')
+        if campaign.status != 'active':
+            return Response({
+                'status': 'error',
+                'message': f'Campaign is {campaign.status}. Activate it before processing outreach.',
+            }, status=400)
+
+        qs = campaign.enrollments.filter(status='active', lead__is_deleted=False)
         if not force:
             qs = qs.filter(
                 Q(next_action_at__lte=now) | Q(next_action_at__isnull=True)
@@ -1976,8 +2053,17 @@ def sdr_process_outreach(request, campaign_id):
 
         agent = _get_outreach_agent(company_user.company)
         results = []
-        for enrollment in due:
-            result = agent.process_enrollment(enrollment)
+        batch = list(due[:PROCESS_BATCH_LIMIT + 1])
+        remaining = max(0, len(batch) - PROCESS_BATCH_LIMIT)
+        for enrollment in batch[:PROCESS_BATCH_LIMIT]:
+            try:
+                result = agent.process_enrollment(enrollment)
+            except KeyServiceError:
+                raise
+            except Exception as exc:
+                # One bad enrollment must not abort the whole run with a 500.
+                logger.error("Process outreach: enrollment %s failed: %s", enrollment.id, exc, exc_info=True)
+                result = {'status': 'failed', 'lead': enrollment.lead.display_name, 'error': str(exc)}
             results.append(result)
 
         sent = sum(1 for r in results if r['status'] == 'sent')
@@ -1993,6 +2079,7 @@ def sdr_process_outreach(request, campaign_id):
             'skipped': skipped,
             'errors': errors,
             'results': results,
+            'remaining': remaining,
         })
     except KeyServiceError:
         raise
@@ -2122,6 +2209,42 @@ def sdr_check_replies(request, campaign_id):
 # Meetings — scheduling agent output
 # ==========================================================================
 
+def _clean_meeting_fields(d):
+    """Validate the editable meeting fields in ``d``.
+
+    Returns (fields, None) with only the keys that were sent, or (None, message).
+    Bad input used to reach the ORM and come back as a 500.
+    """
+    fields = {}
+    if 'title' in d:
+        fields['title'] = str(d['title'] or '')[:255]
+    if 'notes' in d:
+        fields['notes'] = str(d['notes'] or '')
+    if 'calendar_link' in d:
+        fields['calendar_link'] = str(d['calendar_link'] or '')[:500]
+    if 'status' in d:
+        if d['status'] not in dict(SDRMeeting.STATUS_CHOICES):
+            return None, 'Invalid meeting status.'
+        fields['status'] = d['status']
+    if 'duration_minutes' in d:
+        try:
+            minutes = int(d['duration_minutes'])
+        except (TypeError, ValueError):
+            return None, 'duration_minutes must be a number.'
+        if not 5 <= minutes <= 480:
+            return None, 'duration_minutes must be between 5 and 480.'
+        fields['duration_minutes'] = minutes
+    if 'scheduled_at' in d:
+        if d['scheduled_at']:
+            try:
+                fields['scheduled_at'] = _parse_aware_datetime(d['scheduled_at'])
+            except ValueError as exc:
+                return None, str(exc)
+        else:
+            fields['scheduled_at'] = None
+    return fields, None
+
+
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2161,7 +2284,9 @@ def sdr_meetings_list(request):
             ).order_by(*ordering)
 
             # Always exclude orphaned meetings (campaign or enrollment was deleted)
-            qs = qs.filter(enrollment__isnull=False, enrollment__campaign__isnull=False)
+            qs = qs.filter(
+                Q(enrollment__isnull=False, enrollment__campaign__isnull=False) | Q(is_manual=True)
+            )
 
             # campaign_status filter overrides active_only when provided
             if campaign_status:
@@ -2224,15 +2349,19 @@ def sdr_meetings_list(request):
         if not lead_id:
             return Response({'status': 'error', 'message': 'lead_id required'}, status=400)
         lead = SDRLead.objects.get(id=lead_id, company_user=company_user)
+        fields, err = _clean_meeting_fields(d)
+        if err:
+            return Response({'status': 'error', 'message': err}, status=400)
         meeting = SDRMeeting.objects.create(
             company_user=company_user,
             lead=lead,
-            title=d.get('title', f'Discovery Call with {lead.display_name}'),
-            notes=d.get('notes', ''),
-            scheduled_at=d.get('scheduled_at') or None,
-            duration_minutes=d.get('duration_minutes', 30),
-            calendar_link=d.get('calendar_link', ''),
-            status=d.get('status', 'pending'),
+            title=fields.get('title', f'Discovery Call with {lead.display_name}'),
+            notes=fields.get('notes', ''),
+            scheduled_at=fields.get('scheduled_at'),
+            duration_minutes=fields.get('duration_minutes', 30),
+            calendar_link=fields.get('calendar_link', ''),
+            status=fields.get('status', 'pending'),
+            is_manual=True,
         )
         return Response({'status': 'success', 'data': _serialize_meeting(meeting)}, status=201)
     except SDRLead.DoesNotExist:
@@ -2262,11 +2391,11 @@ def sdr_meeting_detail(request, meeting_id):
         try:
             d = request.data
             old_status = meeting.status
-            for field in ('title', 'notes', 'status', 'calendar_link', 'duration_minutes'):
-                if field in d:
-                    setattr(meeting, field, d[field])
-            if 'scheduled_at' in d:
-                meeting.scheduled_at = d['scheduled_at'] or None
+            fields, err = _clean_meeting_fields(d)
+            if err:
+                return Response({'status': 'error', 'message': err}, status=400)
+            for field, value in fields.items():
+                setattr(meeting, field, value)
             meeting.save()
 
             new_status = meeting.status
@@ -2871,7 +3000,14 @@ def sdr_check_all_replies(request):
 @authentication_classes([])
 @permission_classes([])
 def sdr_google_auth_start(request):
-    """Redirect company owner to Google OAuth consent page (no PKCE)."""
+    """Redirect company owner to Google OAuth consent page (no PKCE).
+
+    One-time developer setup helper: disabled unless DEBUG. It is unauthenticated
+    and the callback hands back a refresh token, so it must not exist in production
+    (companies connect Google Calendar through their own settings instead).
+    """
+    if not settings.DEBUG:
+        return Response({'error': 'Not found.'}, status=404)
     import urllib.parse
     client_id = settings.GOOGLE_CLIENT_ID
     if not client_id or not settings.GOOGLE_CLIENT_SECRET:
@@ -2895,7 +3031,9 @@ def sdr_google_auth_start(request):
 @authentication_classes([])
 @permission_classes([])
 def sdr_google_auth_callback(request):
-    """Exchange auth code for tokens and display refresh_token."""
+    """Exchange auth code for tokens and display refresh_token (DEBUG only)."""
+    if not settings.DEBUG:
+        return Response({'error': 'Not found.'}, status=404)
     import requests as _requests
     client_id     = settings.GOOGLE_CLIENT_ID
     client_secret = settings.GOOGLE_CLIENT_SECRET
@@ -2917,7 +3055,7 @@ def sdr_google_auth_callback(request):
     if not refresh_token:
         return Response({'error': 'No refresh_token returned', 'response': token}, status=400)
 
-    logger.info("Google OAuth refresh_token obtained: %s", refresh_token)
+    logger.info("Google OAuth refresh_token obtained (not logged).")
     return Response({
         'message': 'Success! Copy this refresh_token into your .env as GOOGLE_REFRESH_TOKEN',
         'refresh_token': refresh_token,
@@ -2981,9 +3119,10 @@ def sdr_agent_settings(request):
 
     if request.method == 'GET':
         return Response({
-            'apollo_api_key': sdr_settings.apollo_api_key or '',
+            # Masked: the raw secrets never leave the server once saved.
+            'apollo_api_key': _mask_key(sdr_settings.apollo_api_key or ''),
             'apollo_api_key_set': bool(sdr_settings.apollo_api_key),
-            'apify_api_token': sdr_settings.apify_api_token or '',
+            'apify_api_token': _mask_key(sdr_settings.apify_api_token or ''),
             'apify_api_token_set': bool(sdr_settings.apify_api_token),
             'apify_actor_id': sdr_settings.apify_actor_id or '',
             'updated_at': sdr_settings.updated_at.isoformat() if sdr_settings.updated_at else None,
@@ -3057,6 +3196,9 @@ def sdr_booking_info(request, token):
     })
 
 
+BOOKING_MAX_DAYS_AHEAD = 180   # how far in the future a lead may book
+
+
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([])
@@ -3096,16 +3238,33 @@ def sdr_booking_confirm(request, token):
 
     if scheduled_at <= timezone.now():
         return Response({'error': 'Please select a future date and time.'}, status=400)
+    if scheduled_at > timezone.now() + timedelta(days=BOOKING_MAX_DAYS_AHEAD):
+        return Response({
+            'error': f'Please pick a time within the next {BOOKING_MAX_DAYS_AHEAD} days.',
+        }, status=400)
 
-    # Try Google Meet first; fall back to Jitsi if not configured
     duration_minutes = meeting.duration_minutes or 30
-    meet_link = _create_google_meet_link(meeting, scheduled_at, duration_minutes)
-    if not meet_link:
-        import uuid as _uuid
-        room_slug = str(meeting.booking_token).replace('-', '')[:16]
-        meet_link = f"https://meet.jit.si/SDR-{room_slug}"
 
-    # Claim the slot atomically — prevent double-booking if the page is submitted twice
+    # The host can't be in two places at once: refuse a slot that overlaps another
+    # scheduled meeting of the same account.
+    slot_end = scheduled_at + timedelta(minutes=duration_minutes)
+    for other in SDRMeeting.objects.filter(
+        company_user_id=meeting.company_user_id, status='scheduled',
+        scheduled_at__gt=scheduled_at - timedelta(hours=8), scheduled_at__lt=slot_end,
+    ).exclude(id=meeting.id):
+        other_end = other.scheduled_at + timedelta(minutes=other.duration_minutes or 30)
+        if other.scheduled_at < slot_end and other_end > scheduled_at:
+            return Response({
+                'error': 'slot_unavailable',
+                'message': 'That time is no longer available. Please pick another slot.',
+            }, status=409)
+
+    # Claim the slot atomically FIRST - prevents double-booking if the page is
+    # submitted twice, and means a Google Meet event is only created for the one
+    # request that actually wins (no orphan events / invites). Jitsi is the
+    # fallback link until/unless a Meet link can be created.
+    room_slug = str(meeting.booking_token).replace('-', '')[:16]
+    meet_link = f"https://meet.jit.si/SDR-{room_slug}"
     rows = SDRMeeting.objects.filter(id=meeting.id, status__in=['pending', 'awaiting_approval']).update(
         status='scheduled',
         scheduled_at=scheduled_at,
@@ -3118,10 +3277,25 @@ def sdr_booking_confirm(request, token):
             'message': 'This meeting was just booked by another request.',
         }, status=400)
 
+    try:
+        google_link = _create_google_meet_link(meeting, scheduled_at, duration_minutes)
+    except KeyServiceError:
+        raise
+    except Exception as exc:
+        logger.warning("Google Meet creation failed for meeting %s: %s", meeting.id, exc)
+        google_link = None
+    if google_link:
+        meet_link = google_link
+        SDRMeeting.objects.filter(id=meeting.id).update(calendar_link=meet_link)
+
     meeting.status = 'scheduled'
     meeting.scheduled_at = scheduled_at
     meeting.confirmed_at = timezone.now()
     meeting.calendar_link = meet_link
+
+    lead = meeting.lead
+    lead.status = 'meeting_scheduled'
+    lead.save(update_fields=['status'])
 
     # Send confirmation email (calendar_link is already included in the email body)
     campaign = meeting.enrollment.campaign if meeting.enrollment_id and meeting.enrollment else None

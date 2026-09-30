@@ -59,8 +59,67 @@ def _close_db():
         pass
 
 
+# ── Cross-process job lock ───────────────────────────────────────────────────
+
+def acquire_job(name: str, ttl_seconds: int, min_interval_seconds: int = 0) -> bool:
+    """Claim job ``name`` for this process, or return False if another process
+    holds it (or ran it less than ``min_interval_seconds`` ago).
+
+    ``ttl_seconds`` is a crash guard: if the holder dies without releasing, the
+    lock frees itself after that long.
+    """
+    from django.db.models import Q
+    from django.utils import timezone
+    from ai_sdr_agent.models import SDRJobLock
+
+    now = timezone.now()
+    SDRJobLock.objects.get_or_create(name=name, defaults={'locked_until': now - datetime.timedelta(seconds=1)})
+    qs = SDRJobLock.objects.filter(name=name, locked_until__lte=now)
+    if min_interval_seconds:
+        qs = qs.filter(
+            Q(last_run_at__isnull=True)
+            | Q(last_run_at__lte=now - datetime.timedelta(seconds=min_interval_seconds))
+        )
+    return qs.update(locked_until=now + datetime.timedelta(seconds=ttl_seconds)) == 1
+
+
+def release_job(name: str) -> None:
+    from django.utils import timezone
+    from ai_sdr_agent.models import SDRJobLock
+
+    now = timezone.now()
+    SDRJobLock.objects.filter(name=name).update(locked_until=now, last_run_at=now)
+
+
+def singleton_job(name: str, ttl_seconds: int, min_interval_seconds: int = 0):
+    """Decorator: run the job in at most one process at a time."""
+    import functools
+
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                if not acquire_job(name, ttl_seconds, min_interval_seconds):
+                    logger.debug("SDR job '%s' skipped - held by another process or ran recently", name)
+                    return None
+            except Exception as exc:
+                # Never let a lock-table problem silently stop the agent.
+                logger.exception("SDR job lock failed for '%s' (%s) - skipping this run", name, exc)
+                return None
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                try:
+                    release_job(name)
+                except Exception:
+                    logger.exception("SDR job lock release failed for '%s'", name)
+        return wrapper
+    return deco
+
+
 # ── Job wrappers ─────────────────────────────────────────────────────────────
 
+@singleton_job('send_due_steps', ttl_seconds=1800, min_interval_seconds=240)
 def _run_send_due_steps():
     try:
         from ai_sdr_agent.tasks import send_due_steps_impl
@@ -73,6 +132,7 @@ def _run_send_due_steps():
         _close_db()
 
 
+@singleton_job('qualify_queue', ttl_seconds=900, min_interval_seconds=90)
 def _run_qualify_queue():
     try:
         from ai_sdr_agent.tasks import qualify_queue_impl
@@ -85,6 +145,7 @@ def _run_qualify_queue():
         _close_db()
 
 
+@singleton_job('check_inbox', ttl_seconds=1800, min_interval_seconds=240)
 def _run_check_inbox():
     try:
         from ai_sdr_agent.tasks import check_inbox_replies_impl
@@ -97,6 +158,7 @@ def _run_check_inbox():
         _close_db()
 
 
+@singleton_job('auto_start', ttl_seconds=900, min_interval_seconds=600)
 def _run_auto_start():
     try:
         from ai_sdr_agent.tasks import auto_start_campaigns_impl
@@ -109,6 +171,7 @@ def _run_auto_start():
         _close_db()
 
 
+@singleton_job('auto_complete', ttl_seconds=900, min_interval_seconds=3000)
 def _run_auto_complete():
     try:
         from ai_sdr_agent.tasks import auto_pause_expired_campaigns_impl
@@ -121,6 +184,7 @@ def _run_auto_complete():
         _close_db()
 
 
+@singleton_job('meeting_reminders', ttl_seconds=900, min_interval_seconds=3000)
 def _run_meeting_reminders():
     try:
         from ai_sdr_agent.tasks import send_meeting_reminders_impl
@@ -133,6 +197,7 @@ def _run_meeting_reminders():
         _close_db()
 
 
+@singleton_job('daily_analytics', ttl_seconds=1800, min_interval_seconds=82800)
 def _run_daily_analytics():
     try:
         from ai_sdr_agent.tasks import send_daily_analytics_impl
@@ -145,6 +210,7 @@ def _run_daily_analytics():
         _close_db()
 
 
+@singleton_job('token_resets', ttl_seconds=600, min_interval_seconds=240)
 def _run_token_resets():
     """Apply any managed-token quota resets that are due, so resets happen on
     schedule even when a company isn't actively using the agent."""

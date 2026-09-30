@@ -8,6 +8,8 @@ Handles the full lifecycle after a positive reply:
   4. Sends confirmation email when meeting is booked
 """
 
+import functools
+import html as _html
 import json
 import logging
 import os
@@ -255,6 +257,20 @@ def _divider() -> str:
 # Individual Email HTML Builders
 # ---------------------------------------------------------------------------
 
+def _escape_args(fn):
+    """HTML-escape every text argument of an email builder.
+
+    Lead, company and sender fields come from CSV imports, Apollo/Apify and free
+    text, and were interpolated straight into HTML sent from the customer's SMTP.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        esc = lambda v: _html.escape(v, quote=True) if isinstance(v, str) else v
+        return fn(*[esc(a) for a in args], **{k: esc(v) for k, v in kwargs.items()})
+    return wrapper
+
+
+@_escape_args
 def _build_scheduling_html(first_name, sender, sender_title, sender_company,
                             duration, booking_url, company_name) -> str:
     bullets = ''.join(
@@ -318,6 +334,7 @@ def _build_scheduling_html(first_name, sender, sender_title, sender_company,
     return _base_html(body_html, preview_text=f"Hi {first_name}, let's schedule our call — pick a time that works for you.")
 
 
+@_escape_args
 def _build_confirmation_html(first_name, sender, sender_title, sender_company,
                               scheduled_str, duration, title, meet_link,
                               booking_url) -> str:
@@ -420,6 +437,7 @@ def _build_confirmation_html(first_name, sender, sender_title, sender_company,
     return _base_html(body_html, preview_text=f"Your meeting is confirmed, {first_name}! Here are the details.")
 
 
+@_escape_args
 def _build_reminder_html(first_name, sender, sender_title, sender_company,
                           scheduled_str, duration, title, meet_link,
                           booking_url) -> str:
@@ -516,6 +534,7 @@ def _build_reminder_html(first_name, sender, sender_title, sender_company,
     return _base_html(body_html, preview_text=f"Reminder: your call is tomorrow at {scheduled_str}.")
 
 
+@_escape_args
 def _build_completion_html(first_name, sender, sender_title, sender_company,
                             title, scheduled_str) -> str:
     sender_block = f'<strong style="color:#111827;">{sender}</strong>'
@@ -572,6 +591,7 @@ def _build_completion_html(first_name, sender, sender_title, sender_company,
     return _base_html(body_html, preview_text=f"Thank you for our {title} — great connecting with you!")
 
 
+@_escape_args
 def _build_approval_request_html(first_name, sender, sender_title, sender_company,
                                   title, proposed_time_str, yes_url, suggest_url,
                                   notes: str = '') -> str:

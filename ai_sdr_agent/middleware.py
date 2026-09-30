@@ -43,10 +43,17 @@ class AutoLeadResearchMiddleware:
                         time.sleep(RESEARCH_INTERVAL)
                         if not _bg_running:
                             break
-                        logger.info("Apify auto-research: starting scheduled run")
-                        from ai_sdr_agent.tasks import auto_research_leads_impl
-                        result = auto_research_leads_impl(leads_per_run=10)
-                        logger.info("Apify auto-research completed: %s", result)
+                        from ai_sdr_agent.scheduler import acquire_job, release_job
+                        # Every worker runs this loop; only one may do the run.
+                        if not acquire_job('auto_research', 3600, RESEARCH_INTERVAL - 3600):
+                            continue
+                        try:
+                            logger.info("Apify auto-research: starting scheduled run")
+                            from ai_sdr_agent.tasks import auto_research_leads_impl
+                            result = auto_research_leads_impl(leads_per_run=10)
+                            logger.info("Apify auto-research completed: %s", result)
+                        finally:
+                            release_job('auto_research')
                     except Exception as exc:
                         logger.error("Apify background thread error: %s", exc, exc_info=True)
                         time.sleep(60)

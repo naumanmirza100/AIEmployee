@@ -18,6 +18,15 @@ logger = logging.getLogger(__name__)
 SDR_MODULE = 'ai_sdr_agent'
 
 
+def _send_limits():
+    """(per-campaign emails per scheduler cycle, per-campaign emails per day)."""
+    from django.conf import settings
+    return (
+        int(getattr(settings, 'SDR_MAX_EMAILS_PER_CAMPAIGN_PER_CYCLE', 25)),
+        int(getattr(settings, 'SDR_MAX_EMAILS_PER_CAMPAIGN_PER_DAY', 300)),
+    )
+
+
 def _has_sdr_access(company, cache: dict) -> bool:
     """True if ``company`` has an active AI SDR subscription.
 
@@ -105,6 +114,20 @@ def send_due_steps_impl():
             Q(next_action_at__lte=now) | Q(next_action_at__isnull=True)
         ).select_related('lead')
 
+        # Send throttle: a big campaign must not blast every lead in one burst
+        # (each send is an LLM call + an SMTP round trip, and bursts hurt deliverability).
+        from ai_sdr_agent.models import SDROutreachLog as _Log
+        cycle_cap, daily_cap = _send_limits()
+        sent_today = _Log.objects.filter(
+            enrollment__campaign=campaign, status='sent', action_type='email',
+            sent_at__gte=now.replace(hour=0, minute=0, second=0, microsecond=0),
+        ).count()
+        campaign_budget = max(0, min(cycle_cap, daily_cap - sent_today))
+        campaign_sent = 0
+        if campaign_budget == 0:
+            logger.info("SDR [send-due-steps] campaign=%d daily send limit reached (%d)", campaign.id, daily_cap)
+            continue
+
         due_count = due_qs.count()
         logger.info(
             "SDR [send-due-steps] campaign=%d (%s) due_enrollments=%d",
@@ -112,6 +135,12 @@ def send_due_steps_impl():
         )
 
         for enrollment in due_qs:
+            if campaign_sent >= campaign_budget:
+                logger.info(
+                    "SDR [send-due-steps] campaign=%d send limit for this cycle reached (%d) - rest next cycle",
+                    campaign.id, campaign_budget,
+                )
+                break
             lead_email = (enrollment.lead.email or '').strip().lower()
             lead_name = enrollment.lead.display_name
 
@@ -168,6 +197,7 @@ def send_due_steps_impl():
                 )
                 if status == 'sent':
                     total_sent += 1
+                    campaign_sent += 1
                 elif status == 'failed':
                     total_failed += 1
                     logger.error(
@@ -444,19 +474,20 @@ def auto_pause_expired_campaigns_impl():
     today = timezone.now().date()
     completed = 0
 
+    # end_date is derived from the campaign start, so leads enrolled later must not
+    # be cut off by it: expire each enrollment against ITS OWN window
+    # (enrolled_at + longest step delay). The campaign completes below once no
+    # enrollment is left open.
+    from django.db.models import Max
     expired = SDRCampaign.objects.filter(status='active', end_date__lt=today)
     for campaign in expired:
-        active_enrollments = campaign.enrollments.filter(status='active')
-        for e in active_enrollments:
-            e.status = 'completed'
-            e.completed_at = timezone.now()
-            e.save(update_fields=['status', 'completed_at'])
-        campaign.status = 'completed'
-        campaign.save(update_fields=['status'])
-        completed += 1
-        logger.info("SDR auto-complete: campaign %s expired (end_date passed)", campaign.id)
+        max_delay = campaign.steps.aggregate(m=Max('delay_days'))['m'] or 10
+        cutoff = timezone.now() - timedelta(days=max_delay)
+        campaign.enrollments.filter(status='active', enrolled_at__lt=cutoff).update(
+            status='completed', completed_at=timezone.now(),
+        )
 
-    active = SDRCampaign.objects.filter(status='active').exclude(end_date__lt=today)
+    active = SDRCampaign.objects.filter(status='active')
     for campaign in active:
         open_qs = campaign.enrollments.filter(
             Q(status='active') | Q(status='paused', reply_sentiment='out_of_office')
@@ -662,10 +693,23 @@ def auto_research_leads_impl(leads_per_run: int = 10):
 
             for ld in raw_leads:
                 email = ld.get('email', '').strip().lower()
-                if email and SDRLead.objects.filter(company_user=company_user, email=email).exists():
+                full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
+                if email:
+                    is_dup = SDRLead.all_objects.filter(company_user=company_user, email=email).exists()
+                else:
+                    # No email to match on: fall back to LinkedIn URL, then name + company,
+                    # so the same person isn't re-inserted on every run.
+                    linkedin = (ld.get('linkedin_url') or '').strip()
+                    if linkedin:
+                        is_dup = SDRLead.all_objects.filter(company_user=company_user, linkedin_url=linkedin).exists()
+                    else:
+                        is_dup = bool(full_name) and SDRLead.all_objects.filter(
+                            company_user=company_user, full_name__iexact=full_name,
+                            company_name__iexact=ld.get('company_name', ''),
+                        ).exists()
+                if is_dup:
                     continue  # skip duplicate
 
-                full_name = ld.get('full_name') or f"{ld.get('first_name','')} {ld.get('last_name','')}".strip()
                 SDRLead.objects.create(
                     company_user=company_user,
                     icp_profile=icp,
@@ -721,6 +765,7 @@ def auto_research_leads_task(self):
 # ---------------------------------------------------------------------------
 QUALIFY_BATCH_SIZE = 5        # leads scored per scheduler tick
 QUALIFY_MAX_ATTEMPTS = 3      # give up after this many failed attempts
+QUALIFY_STUCK_MINUTES = 15    # a 'processing' lead older than this is retried
 
 
 def qualify_queue_impl():
@@ -741,10 +786,13 @@ def qualify_queue_impl():
 
     now = timezone.now()
     # pending, or failed-but-still-retryable, oldest first.
+    # 'processing' rows untouched for a while were abandoned by a crashed run.
+    stuck_before = now - timedelta(minutes=QUALIFY_STUCK_MINUTES)
     batch = list(
         SDRLead.objects.filter(
             _Q(qualification_status='pending')
             | _Q(qualification_status='failed', qualification_attempts__lt=QUALIFY_MAX_ATTEMPTS)
+            | _Q(qualification_status='processing', updated_at__lt=stuck_before)
         )
         .select_related('company_user__company')
         .order_by('qualification_queued_at', 'created_at')[:QUALIFY_BATCH_SIZE]
@@ -766,7 +814,10 @@ def qualify_queue_impl():
         if cu_id in blocked_companies:
             continue  # key already out for this company this tick
         if not _has_sdr_access(company, access_cache):
-            continue  # lapsed subscription: leave the lead pending
+            # Lapsed subscription: leave the lead pending, but send it to the back
+            # of the queue so it doesn't hog the batch every tick.
+            SDRLead.objects.filter(pk=lead.pk).update(qualification_queued_at=now)
+            continue
 
         try:
             if cu_id not in agents:
@@ -774,6 +825,18 @@ def qualify_queue_impl():
                 icps[cu_id] = SDRIcpProfile.objects.filter(
                     company_user=lead.company_user, is_active=True
                 ).first()
+
+            if icps[cu_id] is None:
+                # Nothing to score against - fail once with a clear reason instead
+                # of raising on every tick. "Qualify all" re-queues it after an ICP exists.
+                lead.qualification_status = 'failed'
+                lead.qualification_attempts = QUALIFY_MAX_ATTEMPTS
+                lead.qualification_error = 'No active ICP profile - set one up, then qualify again.'
+                lead.save(update_fields=[
+                    'qualification_status', 'qualification_attempts', 'qualification_error', 'updated_at',
+                ])
+                failed += 1
+                continue
 
             lead.qualification_status = 'processing'
             lead.save(update_fields=['qualification_status', 'updated_at'])
@@ -787,7 +850,8 @@ def qualify_queue_impl():
             lead.concerns = result.get('concerns', [])
             lead.outreach_strategy = result.get('outreach_strategy', '')
             lead.qualified_at = now
-            lead.status = 'qualified'
+            if lead.status in ('new', 'qualified'):   # never regress contacted/replied/etc.
+                lead.status = 'qualified'
             lead.qualification_status = 'done'
             lead.qualification_error = ''
             lead.save()
@@ -797,7 +861,8 @@ def qualify_queue_impl():
             # stop touching this company for the rest of the tick.
             lead.qualification_status = 'pending'
             lead.qualification_error = 'AI tokens exhausted — will retry.'
-            lead.save(update_fields=['qualification_status', 'qualification_error', 'updated_at'])
+            lead.qualification_queued_at = now   # back of the queue so other companies aren't starved
+            lead.save(update_fields=['qualification_status', 'qualification_error', 'qualification_queued_at', 'updated_at'])
             blocked_companies.add(cu_id)
             logger.warning("SDR qualify-queue: key/quota out for company_user=%s: %s", cu_id, exc)
         except Exception as exc:
