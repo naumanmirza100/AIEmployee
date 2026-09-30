@@ -3166,6 +3166,20 @@ const FrontlineDashboard = () => {
     setUploadDescription('');
   };
 
+  // Process a failed document again (including one the server marked failed
+  // after it got stuck). Same background pill and polling as an upload.
+  const handleRetryDocument = (doc) => {
+    setDocuments((prev) => prev.map((d) => (d.id === doc.id
+      ? { ...d, processing_status: 'pending', processing_error: null } : d)));
+    startBackgroundUpload({
+      title: `Retry: ${doc.title}`,
+      agent: 'frontline',
+      upload: () => frontlineAgentService.reingestDocument(doc.id),
+      poll: (documentId) => frontlineAgentService.getDocumentStatus(documentId),
+      onDone: () => fetchDashboard(),
+    });
+  };
+
   const handleDeleteDocument = async (documentId) => {
     if (!confirm('Are you sure you want to delete this document?')) {
       return;
@@ -4002,6 +4016,7 @@ const FrontlineDashboard = () => {
             onExtract={handleExtractDocument}
             onToggleOutdated={handleToggleDocOutdated}
             onDelete={handleDeleteDocument}
+            onRetry={handleRetryDocument}
             qa={qaProps}
             onNavigateToTab={setActiveTab}
             activeSubTab={activeSubTab}
@@ -4194,6 +4209,7 @@ const FrontlineDashboard = () => {
             onExtract={handleExtractDocument}
             onToggleOutdated={handleToggleDocOutdated}
             onDelete={handleDeleteDocument}
+            onRetry={handleRetryDocument}
           />
           </ErrorBoundary>
         </TabsContent>

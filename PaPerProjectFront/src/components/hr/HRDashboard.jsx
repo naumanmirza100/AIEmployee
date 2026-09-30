@@ -533,6 +533,20 @@ const HRDashboard = () => {
   };
 
   // ---------- Document actions ----------
+  // Process a failed document again (including one the server marked failed
+  // after it got stuck). Same background pill and polling as an upload.
+  const handleRetryDoc = (d) => {
+    setDocuments((arr) => arr.map((x) => (x.id === d.id
+      ? { ...x, processing_status: 'pending', processing_error: '' } : x)));
+    startBackgroundUpload({
+      title: `Retry: ${d.title}`,
+      agent: 'hr',
+      upload: () => hrAgentService.reingestHRDocument(d.id),
+      poll: (documentId) => hrAgentService.getHRDocumentStatus(documentId),
+      onDone: () => loadDocuments(),
+    });
+  };
+
   const handleSummarizeDoc = async (d) => {
     trackHRRecentlyViewed({ kind: 'document', id: d.id, title: d.title || `Document #${d.id}` });
     setDocResult({ open: true, type: 'summary', title: `Summary: ${d.title}`,
@@ -607,18 +621,12 @@ const HRDashboard = () => {
     }
   };
 
-  const handleReingest = async (d) => {
+  // The menu's Re-ingest works on any document, so it asks first; it then
+  // runs exactly like Retry, with progress in the background pill (it used
+  // to set the status once and never update it).
+  const handleReingest = (d) => {
     if (!confirm(`Re-ingest "${d.title}"? Existing chunks will be wiped and re-built.`)) return;
-    try {
-      const res = await hrAgentService.reingestHRDocument(d.id);
-      const newStatus = res?.data?.processing_status || 'processing';
-      setDocuments((arr) => arr.map((x) => x.id === d.id
-        ? { ...x, processing_status: newStatus, chunks_processed: 0, chunks_total: 0, is_indexed: false }
-        : x));
-      toast({ title: 'Re-ingestion started', description: 'Status will update as Celery progresses.' });
-    } catch (e) {
-      toast({ title: 'Re-ingest failed', description: e.message, variant: 'destructive' });
-    }
+    handleRetryDoc(d);
   };
 
   const handleDeleteDoc = async () => {
@@ -1614,6 +1622,12 @@ const HRDashboard = () => {
                               <div data-tour-hr-docs="card-actions" className="mt-auto border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
                                 <div className="flex items-center">
                                   <InfoHint {...HR_HINTS.hrDocsCardActions} className="ml-1 mr-2" />
+                                  {procStatus === 'failed' && (
+                                    <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-violet-400 hover:text-violet-300"
+                                      onClick={() => handleRetryDoc(d)} title="Process this document again">
+                                      <RotateCcw className="h-3.5 w-3.5 mr-1" /> Retry
+                                    </Button>
+                                  )}
                                   <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
                                     onClick={() => handleSummarizeDoc(d)} title="Summarize">
                                     <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize

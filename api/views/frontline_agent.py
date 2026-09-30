@@ -507,6 +507,41 @@ def _celery_broker_ready(timeout_seconds: float = 1.0) -> bool:
         return False
 
 
+def _dispatch_document_processing(document):
+    """Queue parse+chunk+embed for `document`; returns 'async' or 'inline'.
+
+    The worker updates processing_status and the progress fields. When the
+    broker is unreachable `.delay()` would block ~100s on Celery's connect-retry
+    loop and the client would see "failed to upload", so probe first (500ms
+    budget) and fall back to inline processing so the doc still lands in the
+    index. Shared by upload and Retry.
+    """
+    from Frontline_agent.tasks import process_document as _process_document
+    dispatch_mode = 'async'
+    if _celery_broker_ready(timeout_seconds=0.5):
+        try:
+            _process_document.apply_async(args=[document.id], retry=False)
+        except Exception:
+            logger.exception("process_document: Celery dispatch failed, running inline")
+            dispatch_mode = 'inline'
+    else:
+        logger.warning("process_document: Celery broker unreachable — running inline")
+        dispatch_mode = 'inline'
+
+    if dispatch_mode == 'inline':
+        # Inline fallback: slow for large docs but the request completes, and the
+        # UI's polling loop on /documents/<id>/status/ will see 'ready' immediately.
+        try:
+            _process_document.apply(args=[document.id])
+        except Exception:
+            logger.exception("process_document inline fallback failed for doc %s", document.id)
+            # Don't 500 — the file IS saved; status will show 'failed' and the
+            # user can press Retry.
+        # Refresh so the caller's response reflects the post-processing state.
+        document.refresh_from_db()
+    return dispatch_mode
+
+
 _SLA_HOURS_BY_PRIORITY = {'urgent': 4, 'high': 8, 'medium': 24, 'low': 48}
 
 
@@ -1058,34 +1093,7 @@ def upload_document(request):
         if visibility == 'private':
             document.allowed_users.add(company_user)
 
-        # Enqueue async parse+chunk+embed. Worker updates processing_status / progress fields.
-        # When the broker is unreachable `.delay()` would block ~100s on Celery's
-        # connect-retry loop and the client would see "failed to upload." Probe first
-        # (500ms budget) and fall back to inline processing so the doc still lands
-        # in the index.
-        from Frontline_agent.tasks import process_document as _process_document
-        dispatch_mode = 'async'
-        if _celery_broker_ready(timeout_seconds=0.5):
-            try:
-                _process_document.apply_async(args=[document.id], retry=False)
-            except Exception:
-                logger.exception("process_document: Celery dispatch failed, running inline")
-                dispatch_mode = 'inline'
-        else:
-            logger.warning("process_document: Celery broker unreachable — running inline")
-            dispatch_mode = 'inline'
-
-        if dispatch_mode == 'inline':
-            # Inline fallback: slow for large docs but the upload completes, and the
-            # UI's polling loop on /documents/<id>/status/ will see 'ready' immediately.
-            try:
-                _process_document.apply(args=[document.id])
-            except Exception:
-                logger.exception("process_document inline fallback failed for doc %s", document.id)
-                # Don't 500 the upload — the file IS saved; status will show 'failed'
-                # and the user can retry or the admin can requeue.
-            # Refresh so the response reflects the final (post-processing) state.
-            document.refresh_from_db()
+        dispatch_mode = _dispatch_document_processing(document)
 
         return Response({
             'status': 'accepted',
@@ -7857,43 +7865,44 @@ def unmark_document_outdated(request, document_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def reingest_document(request, document_id):
-    """Re-run the ingestion pipeline on a doc that landed in `failed` (or that
-    HR just wants to re-chunk after fixing OCR settings, embedding model, etc.).
-    Clears existing chunks + flips status back to `processing`, then dispatches
-    the Celery task. Safe to call on `ready` docs too — they get re-chunked."""
+    """Re-run the ingestion pipeline — the Retry button on a doc that `failed`
+    (including one the stuck-document check failed), or a re-chunk after
+    fixing OCR settings, embedding model, etc. Safe on `ready` docs too.
+
+    Refused while the doc is still genuinely processing: two runs at once
+    interleave their chunks. A run stuck longer than the stall limit counts as
+    not running.
+    """
+    from core.tasks import is_stalled
     company = request.user.company
     d = Document.objects.filter(company=company, pk=document_id).first()
     if not d:
         return Response({'status': 'error', 'message': 'Document not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    if d.processing_status in ('pending', 'processing') and not is_stalled(d):
+        return Response({'status': 'error', 'code': 'still_processing',
+                         'message': 'This document is still being processed.'},
+                        status=status.HTTP_409_CONFLICT)
     # Wipe old chunks so the new run starts clean. FAISS will rebuild on next query.
     d.chunks.all().delete()
     d.chunks_processed = 0
     d.chunks_total = 0
     d.is_indexed = False
     d.processed = False
-    d.processing_status = 'processing'
+    d.processing_status = 'pending'
     d.processing_error = ''
     d.save(update_fields=['chunks_processed', 'chunks_total', 'is_indexed',
                           'processed', 'processing_status', 'processing_error',
                           'updated_at'])
-    try:
-        from Frontline_agent.tasks import process_document
-        process_document.delay(d.id)
-    except Exception as exc:
-        # Broker unreachable etc — flip status back so the row reflects truth.
-        logger.exception("reingest_document: failed to dispatch process_document for doc %s", d.id)
-        d.processing_status = 'failed'
-        d.processing_error = f'Failed to enqueue: {exc}'
-        d.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
-        return Response({'status': 'error',
-                         'message': f'Failed to enqueue ingestion: {exc}'},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # Same dispatch as upload: it used to call `.delay()` directly, which hangs
+    # ~100s when the broker is unreachable instead of processing inline.
+    dispatch_mode = _dispatch_document_processing(d)
     _write_frontline_audit_log(request.user, company, 'document.reingest',
                                'document', d.id,
                                after={'processing_status': d.processing_status})
     return Response({'status': 'success', 'data': {
         'id': d.id, 'processing_status': d.processing_status,
+        'processing_error': d.processing_error or None, 'dispatch_mode': dispatch_mode,
     }})
 
 

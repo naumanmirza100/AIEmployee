@@ -80,6 +80,33 @@ def _hr_celery_broker_ready(timeout_seconds: float = 0.5) -> bool:
         return False
 
 
+def _hr_dispatch_document_processing(document):
+    """Queue parse+chunk+embed for an HR document; returns 'async' or 'inline'.
+    Probes the broker first and falls back to inline if Redis is down, so the
+    request doesn't stall in Celery's ~100s connection retry loop. Shared by
+    upload and Retry."""
+    from hr_agent.tasks import process_hr_document
+    dispatch_mode = 'async'
+    if _hr_celery_broker_ready(timeout_seconds=0.5):
+        try:
+            process_hr_document.apply_async(args=[document.id], retry=False)
+        except Exception:
+            logger.exception("process_hr_document: Celery dispatch failed, running inline")
+            dispatch_mode = 'inline'
+    else:
+        logger.warning("process_hr_document: Celery broker unreachable — running inline")
+        dispatch_mode = 'inline'
+
+    if dispatch_mode == 'inline':
+        try:
+            process_hr_document.apply(args=[document.id])
+        except Exception:
+            logger.exception("Inline process_hr_document fallback failed for HR doc %s",
+                             document.id)
+        document.refresh_from_db()
+    return dispatch_mode
+
+
 def _hr_get_or_create_user_for_company_user(company_user):
     """The `auth.User` a dashboard login acts as — needed because FKs like
     `HRDocument.uploaded_by` point at `auth.User`, not `core.CompanyUser`.
@@ -1115,27 +1142,7 @@ def upload_hr_document(request):
             },
         )
 
-        # Dispatch processing — broker probe → fall back to inline if Redis is down,
-        # so the request doesn't stall in Celery's ~100s connection retry loop.
-        from hr_agent.tasks import process_hr_document
-        dispatch_mode = 'async'
-        if _hr_celery_broker_ready(timeout_seconds=0.5):
-            try:
-                process_hr_document.apply_async(args=[document.id], retry=False)
-            except Exception:
-                logger.exception("process_hr_document: Celery dispatch failed, running inline")
-                dispatch_mode = 'inline'
-        else:
-            logger.warning("process_hr_document: Celery broker unreachable — running inline")
-            dispatch_mode = 'inline'
-
-        if dispatch_mode == 'inline':
-            try:
-                process_hr_document.apply(args=[document.id])
-            except Exception:
-                logger.exception("Inline process_hr_document fallback failed for HR doc %s",
-                                 document.id)
-            document.refresh_from_db()
+        dispatch_mode = _hr_dispatch_document_processing(document)
 
         return Response({
             'status': 'accepted',
@@ -6747,10 +6754,15 @@ def unmark_hr_document_outdated(request, document_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def reingest_hr_document(request, document_id):
-    """Re-run the ingestion pipeline on an HR doc — useful when processing
-    landed in `failed`, or after fixing OCR settings, or after updating the
-    embedding model. Wipes existing chunks + flips status back to
-    `processing`, then dispatches the Celery task. HR-admin only."""
+    """Re-run the ingestion pipeline on an HR doc — the Retry button on one
+    that `failed` (including one the stuck-document check failed), or after
+    fixing OCR settings or updating the embedding model. HR-admin only.
+
+    Refused while the doc is still genuinely processing: two runs at once
+    interleave their chunks. A run stuck past the stall limit counts as not
+    running.
+    """
+    from core.tasks import is_stalled
     if not _is_hr_admin(request.user):
         return Response({'status': 'error', 'message': 'HR-admin access required'},
                         status=status.HTTP_403_FORBIDDEN)
@@ -6759,30 +6771,27 @@ def reingest_hr_document(request, document_id):
     if not d:
         return Response({'status': 'error', 'message': 'Document not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    if d.processing_status in ('pending', 'processing') and not is_stalled(d):
+        return Response({'status': 'error', 'code': 'still_processing',
+                         'message': 'This document is still being processed.'},
+                        status=status.HTTP_409_CONFLICT)
     d.chunks.all().delete()
     d.chunks_processed = 0
     d.chunks_total = 0
     d.is_indexed = False
-    d.processing_status = 'processing'
+    d.processing_status = 'pending'
     d.processing_error = ''
     d.save(update_fields=['chunks_processed', 'chunks_total', 'is_indexed',
                           'processing_status', 'processing_error', 'updated_at'])
-    try:
-        from hr_agent.tasks import process_hr_document
-        process_hr_document.delay(d.id)
-    except Exception as exc:
-        logger.exception("reingest_hr_document: failed to dispatch process_hr_document for doc %s", d.id)
-        d.processing_status = 'failed'
-        d.processing_error = f'Failed to enqueue: {exc}'
-        d.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
-        return Response({'status': 'error',
-                         'message': f'Failed to enqueue ingestion: {exc}'},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # Same dispatch as upload: it used to call `.delay()` directly, which hangs
+    # ~100s when the broker is unreachable instead of processing inline.
+    dispatch_mode = _hr_dispatch_document_processing(d)
     _write_audit_log(request.user, company, 'hr_document.reingest',
                      'hr_document', d.id,
                      after={'processing_status': d.processing_status})
     return Response({'status': 'success', 'data': {
         'id': d.id, 'processing_status': d.processing_status,
+        'processing_error': d.processing_error or None, 'dispatch_mode': dispatch_mode,
     }})
 
 

@@ -192,6 +192,16 @@ export const deleteDocument = async (documentId) => {
   }
 };
 
+/** Process a document again — the Retry button on one that failed. */
+export const reingestDocument = async (documentId) => {
+  try {
+    return await companyApi.post(`/frontline/documents/${documentId}/reingest`, {});
+  } catch (error) {
+    console.error('Reingest document error:', error);
+    throw error;
+  }
+};
+
 /**
  * Knowledge Q&A - Ask a question
  * @param {string} question
@@ -1310,6 +1320,7 @@ export default {
   getDocument,
   uploadDocument,
   deleteDocument,
+  reingestDocument,
   getDocumentStatus,
   updateDocumentMetadata,
   knowledgeQA,
