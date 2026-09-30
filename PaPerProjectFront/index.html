@@ -14,20 +14,27 @@
 	<body>
 		<div id="root"></div>
 		<script>
-			// Applies the saved theme before first paint. Without this the page
+			// Applies the theme before first paint. Without this the page
 			// renders in the default theme for a frame and then snaps to the
 			// chosen one — the "flash of wrong theme". Kept inline and tiny on
-			// purpose: it has to run before the bundle loads.
+			// purpose: it has to run before the bundle loads. Same rules as
+			// src/theme/ThemeProvider.jsx: dark unless the visitor chose otherwise.
 			(function () {
+				var root = document.documentElement;
+				var dark = true;
 				try {
-					var saved = localStorage.getItem('ppp-theme') || 'system';
-					var dark = saved === 'dark' || (saved === 'system'
+					var chosen = localStorage.getItem('ppp-theme-choice');
+					if (chosen !== 'light' && chosen !== 'dark' && chosen !== 'system') {
+						var legacy = localStorage.getItem('ppp-theme');
+						chosen = (legacy === 'light' || legacy === 'dark') ? legacy : 'dark';
+					}
+					dark = chosen === 'dark' || (chosen === 'system'
 						&& window.matchMedia('(prefers-color-scheme: dark)').matches);
-					document.documentElement.classList.toggle('dark', dark);
-					document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
 				} catch (e) {
-					// Storage blocked — the provider sorts it out after hydration.
+					// Storage blocked — stay on the default.
 				}
+				root.classList.toggle('dark', dark);
+				root.style.colorScheme = dark ? 'dark' : 'light';
 			})();
 		</script>
 		<script type="module" src="/src/main.jsx"></script>
