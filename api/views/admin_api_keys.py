@@ -34,7 +34,9 @@ from core.models import (
 logger = logging.getLogger(__name__)
 
 # Resolved live from the Agent table — see core.api_key_service._ValidAgents.
-from core.api_key_service import VALID_AGENTS  # noqa: E402
+from core.api_key_service import (  # noqa: E402
+    VALID_AGENTS, provider_supported, unsupported_provider_message,
+)
 
 VALID_PROVIDERS = {name for name, _ in PROVIDER_CHOICES}
 
@@ -201,6 +203,10 @@ def _assign_managed_key_impl(request):
 
     if not company_id or agent_name not in VALID_AGENTS or provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Missing or invalid fields'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if not provider_supported(agent_name, provider):
+        return Response({'status': 'error', 'code': 'unsupported_provider',
+                         'message': unsupported_provider_message(agent_name, provider)},
                         status=status.HTTP_400_BAD_REQUEST)
     if len(api_key) < 10:
         return Response({'status': 'error', 'message': 'API key looks too short'},

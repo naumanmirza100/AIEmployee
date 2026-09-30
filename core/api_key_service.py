@@ -59,6 +59,38 @@ class _ValidAgents:
 VALID_AGENTS = _ValidAgents()
 
 
+#: The LLM providers each agent's code can actually call. Keys can be saved for
+#: five providers, but PM, HR and Frontline call through the shared BaseAgent,
+#: which has Groq and OpenAI clients only, and Recruitment through its own
+#: Groq-only client (recruitment_agent/core.py). Any other key used to be
+#: accepted and then fail on every call. Agents not listed haven't been
+#: checked, so they stay unrestricted.
+AGENT_SUPPORTED_PROVIDERS = {
+    'project_manager_agent': ('openai', 'groq'),
+    'hr_agent': ('openai', 'groq'),
+    'frontline_agent': ('openai', 'groq'),
+    'recruitment_agent': ('groq',),
+}
+
+
+def supported_providers(agent_name):
+    """The providers `agent_name` can use, or None when it isn't restricted."""
+    return AGENT_SUPPORTED_PROVIDERS.get(agent_name)
+
+
+def provider_supported(agent_name, provider) -> bool:
+    allowed = supported_providers(agent_name)
+    return allowed is None or provider in allowed
+
+
+def unsupported_provider_message(agent_name, provider) -> str:
+    from core.models import PROVIDER_CHOICES
+    names = dict(PROVIDER_CHOICES)
+    agent = dict(AGENT_CHOICES).get(agent_name, agent_name)
+    usable = ' or '.join(names.get(p, p) for p in supported_providers(agent_name) or ())
+    return f"{agent} can't use {names.get(provider, provider)} keys. Use {usable} instead."
+
+
 class KeyServiceError(Exception):
     """Base for hard-block errors — catch and surface `.reason` to the user."""
     reason: str = "unknown"
@@ -130,6 +162,22 @@ class BadAPIKey(KeyServiceError):
                 "Please check your key configuration."
             )
         super().__init__(self.user_message)
+
+
+class UnsupportedProvider(KeyServiceError):
+    """A key saved before providers were checked per agent, for a provider this
+    agent can't call. Refused here with a clear message rather than failing
+    later, deep inside the agent, as a server error."""
+    reason = "unsupported_provider"
+
+    def __init__(self, agent_name: str, provider: str, mode: Optional[str] = None):
+        message = unsupported_provider_message(agent_name, provider)
+        if mode == 'byok':
+            message += " Replace your key in API Keys settings."
+        elif mode == 'managed':
+            message += " Please ask your admin to assign a supported key."
+        self.user_message = message
+        super().__init__(message)
 
 
 def _is_provider_auth_error(exc: Exception) -> bool:
@@ -449,6 +497,8 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
                 # Hard-block if the user has set a token cap and it is exhausted
                 if _q and _q.byok_token_limit > 0 and _q.byok_tokens_info >= _q.byok_token_limit:
                     raise ByokCapReached()
+                if not provider_supported(agent_name, byok.provider):
+                    raise UnsupportedProvider(agent_name, byok.provider, mode='byok')
                 return CallContext(
                     company_id=company.id,
                     agent_name=agent_name,
@@ -491,6 +541,8 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
                         # No silent fallback to free/platform.  Company must either reset the quota
                         # (admin action) or add a BYOK key to continue.
                         raise ManagedQuotaExhausted()
+                    elif not provider_supported(agent_name, managed.provider):
+                        raise UnsupportedProvider(agent_name, managed.provider, mode='managed')
                     else:
                         return CallContext(
                             company_id=company.id,
@@ -509,9 +561,15 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
         raise QuotaExhausted()
 
     # Step 4 — platform default key (the "free tokens" path)
-    # Try the agent's default provider first, then fall back to any other active platform key.
+    # Try the agent's default provider first, then fall back to any other active
+    # platform key — in both cases only providers this agent can call. The
+    # fallback used to hand Recruitment an OpenAI key whenever the Groq one was
+    # missing, which it then sent to Groq.
+    allowed = supported_providers(agent_name)
     default_provider = AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai')
-    platform = PlatformAPIKey.objects.filter(provider=default_provider, status='active').first()
+    platform = None
+    if provider_supported(agent_name, default_provider):
+        platform = PlatformAPIKey.objects.filter(provider=default_provider, status='active').first()
     if platform:
         plaintext = platform.get_plaintext_key()
         if plaintext:
@@ -526,12 +584,10 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
             )
 
     # Step 4b — default provider key missing/revoked → try any other active platform key
-    fallback_platform = (
-        PlatformAPIKey.objects
-        .filter(status='active')
-        .exclude(provider=default_provider)
-        .first()
-    )
+    fallback_qs = PlatformAPIKey.objects.filter(status='active').exclude(provider=default_provider)
+    if allowed is not None:
+        fallback_qs = fallback_qs.filter(provider__in=allowed)
+    fallback_platform = fallback_qs.first()
     if fallback_platform:
         fallback_key = fallback_platform.get_plaintext_key()
         if fallback_key:
