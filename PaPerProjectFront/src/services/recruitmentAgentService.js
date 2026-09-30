@@ -369,6 +369,26 @@ export const updateInterview = async (interviewId, payload) => {
   }
 };
 
+/** The "add to HR" review form for a hired candidate: pre-filled values and choices. */
+export const getHRHandoff = async (interviewId) => {
+  try {
+    return await companyApi.get(`/recruitment/interviews/${interviewId}/hr-handoff`);
+  } catch (error) {
+    console.error('Get HR handoff error:', error);
+    throw error;
+  }
+};
+
+/** Add a hired candidate to HR as a new starter (or `link_existing: true`). */
+export const handOffToHR = async (interviewId, payload) => {
+  try {
+    return await companyApi.post(`/recruitment/interviews/${interviewId}/hr-handoff`, payload);
+  } catch (error) {
+    console.error('HR handoff error:', error);
+    throw error;
+  }
+};
+
 /** Colleagues who can sit in on an interview (the company's employee logins). */
 export const getInterviewerOptions = async () => {
   try {
@@ -762,6 +782,8 @@ export default {
   deleteJobDescription,
   getInterviews,
   getInterviewerOptions,
+  getHRHandoff,
+  handOffToHR,
   scheduleInterview,
   getInterviewDetails,
   getRescheduleSlots,

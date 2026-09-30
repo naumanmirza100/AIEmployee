@@ -1031,6 +1031,72 @@ def delete_job_description(request, job_description_id):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def interview_hr_handoff(request, interview_id):
+    """Hired → a new starter in HR (see recruitment_agent.hr_handoff).
+
+    GET: the review form — pre-filled from the interview and job, with the
+    departments, managers and onboarding workflows to show. POST: create the
+    HR record (status `candidate`), which starts HR's onboarding, or with
+    `link_existing` attach the HR record that already uses their email.
+    """
+    from recruitment_agent import hr_handoff
+    company_user = request.user
+    company = company_user.company
+    interview = (Interview.objects.filter(id=interview_id, company_user=company_user)
+                 .select_related('cv_record__job_description', 'hr_employee').first())
+    if not interview:
+        return Response({'status': 'error', 'message': 'Interview not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': hr_handoff.form(interview, company)})
+
+    if not hr_handoff.hr_available(company):
+        return Response({'status': 'error', 'code': 'no_hr',
+                         'message': "Your company doesn't have the HR agent, so there's nowhere to add them."},
+                        status=status.HTTP_403_FORBIDDEN)
+    if interview.outcome != 'HIRED':
+        return Response({'status': 'error', 'message': 'Mark the candidate as Hired first.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if interview.hr_employee_id:
+        e = interview.hr_employee
+        return Response({'status': 'error', 'code': 'already_in_hr',
+                         'message': f'{e.full_name} is already in HR.',
+                         'data': {'employee': {'id': e.id, 'full_name': e.full_name}}},
+                        status=status.HTTP_409_CONFLICT)
+
+    from api.views.hr_agent import _write_audit_log
+    if request.data.get('link_existing'):
+        existing = hr_handoff.existing_employee(interview, company, request.data.get('work_email'))
+        if existing is None:
+            return Response({'status': 'error', 'message': 'There is no HR record to link.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        hr_handoff.link_existing(interview, existing)
+        return Response({'status': 'success', 'data': {
+            'employee': {'id': existing.id, 'full_name': existing.full_name}, 'linked': True,
+        }})
+
+    employee, errors = hr_handoff.create_new_starter(interview, company, request.data)
+    if errors:
+        return Response({'status': 'error', 'message': next(iter(errors.values())), 'errors': errors},
+                        status=status.HTTP_400_BAD_REQUEST)
+    onboarding = hr_handoff.onboarding_workflows(company)
+    _write_audit_log(company_user, company, 'employee.create', 'employee', employee.id, before=None,
+                     after={'full_name': employee.full_name, 'work_email': employee.work_email,
+                            'job_title': employee.job_title, 'employment_status': employee.employment_status,
+                            'start_date': employee.start_date.isoformat() if employee.start_date else None,
+                            'source': 'recruitment', 'interview_id': interview.id})
+    from hr_agent import alerts
+    alerts.new_starter_from_recruitment(employee, added_by=company_user.full_name or company_user.email,
+                                        onboarding=onboarding)
+    return Response({'status': 'success', 'data': {
+        'employee': {'id': employee.id, 'full_name': employee.full_name},
+        'onboarding_workflows': onboarding,
+    }}, status=status.HTTP_201_CREATED)
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1083,7 +1149,7 @@ def list_interviews(request):
         remember_timezone(company_user, request.query_params.get('timezone'))
 
         interviews = Interview.objects.filter(company_user=company_user).select_related(
-            'cv_record', 'cv_record__job_description'
+            'cv_record', 'cv_record__job_description', 'hr_employee'
         ).prefetch_related('interviewers')
 
         if status_filter:
@@ -1136,6 +1202,8 @@ def list_interviews(request):
                 'duration_minutes': interview.duration_minutes,
                 'timezone_name': interview.timezone_name or None,
                 'interviewers': _interviewers_payload(interview),
+                'hr_employee': ({'id': interview.hr_employee_id, 'full_name': interview.hr_employee.full_name}
+                                if interview.hr_employee_id else None),
                 'meeting_link': interview.meeting_link or '',
                 'confirmation_token': interview.confirmation_token,
                 'cv_record_id': interview.cv_record_id,
@@ -1147,9 +1215,12 @@ def list_interviews(request):
                 'created_at': interview.created_at.isoformat() if interview.created_at else None,
             })
 
+        from recruitment_agent.hr_handoff import hr_available
         return Response({
             'status': 'success',
             'data': interview_list,
+            # Whether hired candidates can be handed to HR at all.
+            'hr_available': hr_available(company_user.company),
             'pagination': {
                 'total': total_count,
                 'page': page_num,

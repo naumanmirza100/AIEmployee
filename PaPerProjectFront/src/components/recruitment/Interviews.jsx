@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send, LayoutList, Columns, MoreVertical, RefreshCw, Award, Building2, Trophy, ThumbsUp, Lock, Search, ChevronLeft, ChevronRight, Users } from 'lucide-react';
+import { Loader2, Calendar as CalendarIcon, Mail, Phone, Clock, CalendarClock, Briefcase, User, Star, MessageSquare, CheckCircle2, Link2, Pencil, Send, LayoutList, Columns, MoreVertical, RefreshCw, Award, Building2, Trophy, ThumbsUp, Lock, Search, ChevronLeft, ChevronRight, Users, UserPlus } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -21,6 +21,7 @@ import { getInterviews, updateInterview, rescheduleInterview, getJobDescriptions
 import SearchableSelect from '@/components/ui/searchable-select';
 import InterviewKanban from './InterviewKanban';
 import InterviewersDialog from './InterviewersDialog';
+import HiredToHRDialog from './HiredToHRDialog';
 
 const Interviews = ({ onUpdate }) => {
   const { toast } = useToast();
@@ -39,6 +40,9 @@ const Interviews = ({ onUpdate }) => {
   const [currentPage, setCurrentPage]   = useState(1);
   // The interview whose interviewers are being chosen (dialog open), or null.
   const [interviewersFor, setInterviewersFor] = useState(null);
+  // Hired candidates can be handed to HR when the company has the HR agent.
+  const [hrAvailable, setHrAvailable] = useState(false);
+  const [hireToHRFor, setHireToHRFor] = useState(null);
   const [totalPages, setTotalPages]     = useState(1);
   const [totalCount, setTotalCount]     = useState(0);
   const [pageSize, setPageSize]         = useState(10);
@@ -102,6 +106,7 @@ const Interviews = ({ onUpdate }) => {
       const response = await getInterviews(filters);
       if (response.status === 'success') {
         setInterviews(response.data || []);
+        setHrAvailable(!!response.hr_available);
         const pg = response.pagination;
         if (pg) {
           setTotalPages(pg.total_pages || 1);
@@ -254,6 +259,11 @@ const Interviews = ({ onUpdate }) => {
             ? `Decision set to "${feedbackModal.pendingDecision.label}" and feedback saved.`
             : 'Interview feedback recorded successfully.',
         });
+        // Hired: offer to add them to HR straight away, which starts onboarding.
+        if (feedbackModal.pendingDecision?.outcome === 'HIRED' && hrAvailable
+            && !feedbackModal.interview.hr_employee) {
+          setHireToHRFor(feedbackModal.interview);
+        }
         setFeedbackModal(null);
         fetchInterviews();
         if (onUpdate) onUpdate();
@@ -516,6 +526,23 @@ const Interviews = ({ onUpdate }) => {
                     </div>
                   )}
 
+                  {/* Hired: in HR already, or a way to add them. */}
+                  {interview.outcome === 'HIRED' && (interview.hr_employee ? (
+                    <div className="flex items-center gap-1.5 text-xs sm:text-sm text-emerald-500">
+                      <UserPlus className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                      In HR as {interview.hr_employee.full_name}
+                    </div>
+                  ) : hrAvailable && (
+                    <Button
+                      id={`REC-interviews-add-to-hr-btn-${interview.id}`}
+                      data-testid={`REC-interviews-add-to-hr-btn-${interview.id}`}
+                      size="sm" variant="outline" className="h-8 text-xs w-fit"
+                      onClick={() => setHireToHRFor(interview)}
+                    >
+                      <UserPlus className="h-3.5 w-3.5 mr-1" /> Add to HR
+                    </Button>
+                  ))}
+
                   {/* Colleagues interviewing too — it goes on their calendars. */}
                   {!['CANCELLED', 'COMPLETED'].includes(interview.status) && (
                     <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm flex-wrap">
@@ -757,6 +784,13 @@ const Interviews = ({ onUpdate }) => {
       </div>
 
       {/* Reschedule Modal */}
+      <HiredToHRDialog
+        interview={hireToHRFor}
+        open={!!hireToHRFor}
+        onOpenChange={(open) => { if (!open) setHireToHRFor(null); }}
+        onDone={() => fetchInterviews(currentPage)}
+      />
+
       <InterviewersDialog
         interview={interviewersFor}
         open={!!interviewersFor}

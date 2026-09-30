@@ -47,6 +47,21 @@ def leave_request_submitted(leave_request):
     )
 
 
+def new_starter_from_recruitment(employee, added_by='', onboarding=()):
+    """To HR admins, when Recruitment hands over someone it has hired."""
+    when = f", starting {employee.start_date:%d %b %Y}" if employee.start_date else ''
+    by = f" Added by {added_by}." if added_by else ''
+    runs = (f" Onboarding started: {', '.join(onboarding)}." if onboarding
+            else ' No onboarding workflow is set up in HR yet.')
+    return notify_company_users(
+        hr_admins(employee.company_id),
+        title=f"New hire from Recruitment: {employee.full_name}",
+        message=f"{employee.job_title or 'New starter'}{when}.{by}{runs}",
+        link='/hr/dashboard?tab=employees',
+        kind='hr_new_starter',
+    )
+
+
 def workflow_awaiting_approval(execution):
     """To HR admins, whenever a workflow run stops for approval — before it
     starts, or at an approval step partway through."""

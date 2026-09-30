@@ -403,6 +403,13 @@ class Interview(models.Model):
     interviewers = models.ManyToManyField(
         User, blank=True, related_name='recruitment_interviews_joined',
         help_text='Employee logins interviewing alongside the recruiter.')
+    # The HR record made for this candidate when they were hired (status
+    # `candidate`), which is what starts HR's onboarding. Set once; guards
+    # against adding the same hire twice.
+    hr_employee = models.ForeignKey(
+        'hr_agent.Employee', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='recruitment_interviews',
+        help_text='HR employee record created from this hire.')
     
     # Available slots (stored as JSON)
     available_slots_json = models.TextField(help_text="JSON array of available time slots offered to candidate")
