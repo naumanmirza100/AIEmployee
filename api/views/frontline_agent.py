@@ -7162,6 +7162,7 @@ def bulk_update_tickets(request):
     tickets = list(Ticket.objects.filter(id__in=ids, company=company))
     found_ids = {t.id for t in tickets}
     results = {'updated': [], 'skipped': [], 'not_found': sorted(set(ids) - found_ids)}
+    newly_assigned = []
 
     for t in tickets:
         before = {'status': t.status, 'priority': t.priority, 'category': t.category,
@@ -7179,6 +7180,8 @@ def bulk_update_tickets(request):
         if target_category:
             t.category = target_category.strip()[:20]; fields.append('category')
         if assignee_user is not None:
+            if t.assigned_to_id != assignee_user.id:
+                newly_assigned.append(t)
             t.assigned_to = assignee_user; fields.append('assigned_to')
         if fields:
             fields.append('updated_at')
@@ -7193,6 +7196,10 @@ def bulk_update_tickets(request):
             results['updated'].append(t.id)
         else:
             results['skipped'].append({'id': t.id, 'reason': 'no_changes'})
+    if newly_assigned:
+        from Frontline_agent import alerts
+        updated = set(results['updated'])
+        alerts.tickets_assigned([t for t in newly_assigned if t.id in updated], cu, actor=request.user)
     return Response({'status': 'success', 'data': results})
 
 
@@ -7263,6 +7270,9 @@ def update_ticket(request, ticket_id):
     fields.append('updated_at')
     t.save(update_fields=list(set(fields)))
     _after_status_change(t)
+    if 'assigned_to' in fields and t.assigned_to_id and t.assigned_to_id != before['assigned_to_id']:
+        from Frontline_agent import alerts
+        alerts.tickets_assigned([t], cu, actor=request.user)
     _write_frontline_audit_log(
         request.user, company, 'ticket.update', 'ticket', t.id,
         before=before,
@@ -8220,6 +8230,9 @@ def reassign_ticket_handoff(request, ticket_id):
     ticket.assigned_to = target_user
     ticket.save(update_fields=['handoff_status', 'handoff_accepted_at',
                                'handoff_accepted_by', 'assigned_to', 'updated_at'])
+    if before['assigned_to_id'] != target_user.id:
+        from Frontline_agent import alerts
+        alerts.tickets_assigned([ticket], target_cu, actor=request.user)
     _write_frontline_audit_log(
         request.user, company, 'ticket.handoff.reassign', 'ticket', ticket.id,
         before=before,

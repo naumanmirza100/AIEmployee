@@ -810,7 +810,18 @@ class InterviewSchedulingAgent:
 
             # Send confirmation email
             confirmation_sent = self.send_confirmation_email(interview)
-            
+
+            # Tell the recruiter in the app too; this used to be email-only.
+            if interview.company_user_id:
+                from core.notification_utils import notify_company_users
+                notify_company_users(
+                    [interview.company_user],
+                    title=f"Interview booked: {interview.candidate_name}",
+                    message=f"{interview.job_role} · {interview.selected_slot}.",
+                    link='/recruitment/interviews',
+                    kind='recruitment_interview_booked',
+                )
+
             # Trigger automatic follow-up check (signal will handle pre-interview reminders)
             # The signal will automatically check if reminder needs to be sent
             

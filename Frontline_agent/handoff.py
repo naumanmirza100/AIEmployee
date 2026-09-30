@@ -81,6 +81,8 @@ def trigger_handoff(ticket, reason: str, context: Optional[dict] = None) -> bool
         'handoff_requested_at', 'priority', 'updated_at',
     ])
     logger.info("Ticket %s handoff requested (reason=%s)", ticket.id, reason)
+    from Frontline_agent import alerts
+    alerts.handoff_requested(ticket)
     return True
 
 

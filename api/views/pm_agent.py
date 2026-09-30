@@ -4075,7 +4075,7 @@ def list_notifications(request):
         unread_only = request.GET.get("unread_only", "false").lower() == "true"
         limit = int(request.GET.get("limit", 50))
 
-        qs = PMNotification.objects.filter(company_user=company_user)
+        qs = PMNotification.objects.filter(company_user=company_user).select_related("project")
         if unread_only:
             qs = qs.filter(is_read=False)
 
@@ -4090,6 +4090,9 @@ def list_notifications(request):
             "project_name": n.project.name if n.project else None,
             "is_read": n.is_read,
             "data": n.data,
+            # Where the bell takes you: alerts from HR, Frontline and
+            # Recruitment carry a link to their screen (core.notification_utils).
+            "link": (n.data or {}).get("link") if isinstance(n.data, dict) else None,
             "created_at": n.created_at.isoformat(),
         } for n in notifications]
 

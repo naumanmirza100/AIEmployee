@@ -26,7 +26,8 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from core.models import CompanyUser, UserProfile
-from hr_agent.models import Employee, LeaveRequest
+from hr_agent import alerts
+from hr_agent.models import Employee, HRWorkflowExecution, LeaveRequest
 
 
 logger = logging.getLogger(__name__)
@@ -329,6 +330,7 @@ def leave_request_post_save(sender, instance: LeaveRequest, created, **kwargs):
         return
     ctx = _leave_request_context(instance)
     if created:
+        alerts.leave_request_submitted(instance)
         _run_matching_workflows(company_id=company_id,
                                 event='leave_request_submitted', context=ctx)
         return
@@ -338,6 +340,18 @@ def leave_request_post_save(sender, instance: LeaveRequest, created, **kwargs):
     elif instance.status == 'rejected':
         _run_matching_workflows(company_id=company_id,
                                 event='leave_request_rejected', context=ctx)
+
+
+@receiver(post_save, sender=HRWorkflowExecution)
+def workflow_execution_post_save(sender, instance: HRWorkflowExecution, created,
+                                 update_fields=None, **kwargs):
+    """Tell HR admins when a run stops for approval. It stops either as it is
+    created (a workflow that needs approval to start) or at an approval step
+    partway through, which saves `status` via update_fields."""
+    if instance.status != 'awaiting_approval':
+        return
+    if created or (update_fields and 'status' in update_fields):
+        alerts.workflow_awaiting_approval(instance)
 
 
 # --------------------------------------------------------------------------

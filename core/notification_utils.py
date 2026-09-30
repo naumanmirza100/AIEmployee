@@ -33,28 +33,50 @@ def _user_for_company_user(company_user: CompanyUser) -> User:
         )
 
 
+def notify_company_users(company_users, *, title, message, link=None,
+                         severity='info', kind='custom'):
+    """Put a notification in each of these logins' bell.
+
+    A company login's bell (and its Notifications page) reads the company feed,
+    `PMNotification`, whichever agent's page it is on. Despite the name, that
+    table is every company-wide alert already — billing, quotas, API keys — not
+    only Project Manager's. `link` is an in-app path the bell opens; `kind`
+    says what raised it. Inactive or repeated logins are skipped.
+
+    Returns how many were created. Never raises: an alert must not break the
+    action that raised it.
+    """
+    from project_manager_agent.models import PMNotification
+    try:
+        seen, rows = set(), []
+        for cu in company_users:
+            if not cu or not cu.is_active or cu.id in seen:
+                continue
+            seen.add(cu.id)
+            rows.append(PMNotification(
+                company_user=cu, notification_type='custom', severity=severity,
+                title=str(title)[:255], message=message,
+                data={'link': link, 'kind': kind},
+            ))
+        PMNotification.objects.bulk_create(rows)
+        return len(rows)
+    except Exception as exc:
+        logger.warning("Failed to create company-user notifications: %s", exc)
+        return 0
+
+
 def notify_company_user(company_user, *, title, message, action_url=None,
                         notification_type='key_update'):
-    """Fire an in-app notification to a CompanyUser's paired Django User.
+    """One login's bell; see `notify_company_users`.
 
-    Safe no-op on failure — notifications must never break the calling flow.
+    This used to write the auth-user `Notification` table under a stand-in
+    user, which a company login's bell never reads — so, for example, a
+    rejected managed-key request was never seen by the company that asked.
     """
     if not company_user:
-        return None
-    try:
-        user = _user_for_company_user(company_user)
-        return Notification.objects.create(
-            user=user,
-            type=notification_type,
-            notification_type=notification_type,
-            title=title,
-            message=message,
-            link=action_url,
-            action_url=action_url,
-        )
-    except Exception as exc:
-        logger.warning("Failed to create company-user notification: %s", exc)
-        return None
+        return 0
+    return notify_company_users([company_user], title=title, message=message,
+                                link=action_url, kind=notification_type)
 
 
 def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float = None, pool: str = 'free'):

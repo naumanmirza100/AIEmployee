@@ -220,8 +220,9 @@ def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
 
 #: Roles that administer HR for their company: salaries, performance reviews,
 #: the GDPR export, anonymisation, leave-balance adjustment, the audit log.
-#: `company_user` is deliberately NOT here — see `_is_hr_admin`.
-HR_ADMIN_ROLES = ('hr_agent', 'owner', 'admin')
+#: `company_user` is deliberately NOT here — see `_is_hr_admin`. Defined in
+#: hr_agent.alerts, which also uses it to pick who gets HR's bell alerts.
+from hr_agent.alerts import HR_ADMIN_ROLES  # noqa: E402
 
 #: Roles `set_company_user_role` may grant. A subset of CompanyUser.ROLE_CHOICES:
 #: the agent-specific roles are not HR's to hand out.
