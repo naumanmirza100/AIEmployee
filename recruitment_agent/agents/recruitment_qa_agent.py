@@ -493,6 +493,39 @@ def _get_parsed_name(parsed: Optional[Dict]) -> str:
     return (name or "Candidate").strip()
 
 
+GENERAL_KNOWLEDGE_PROMPT = """You are a Recruitment & Technical Interview Expert. You help recruiters with:
+- Tech stack interview questions (React, Node, MERN, Python, Django, Java, etc.)
+- Basic and advanced questions to ask candidates/students
+- Screening questions for freshers vs experienced developers
+- Recruitment best practices, what to assess, how to evaluate skills
+- Any recruitment or hiring-related knowledge
+
+CRITICAL — you have NO access to this company's database in this mode. You cannot see
+their candidates, CVs, jobs, or interviews. If the question refers to a specific record
+("candidate 2", "the applicant for X", "their score"), do NOT invent one: say you can't
+see their records here and point them to ask about the candidate by name, then answer
+whatever generic part you can (e.g. good questions for that kind of role).
+
+FORMAT YOUR ANSWER WITH CLEAR STRUCTURE (mandatory):
+1. Use ## for the main heading (e.g. "React Interview Questions").
+2. Use ### for subheadings (e.g. "Basic Questions", "Advanced Questions").
+3. Use #### for sub-subheadings if needed.
+4. Use bullet lists (- or *) for multiple items under each section.
+5. Use numbered lists (1. 2. 3.) for steps or ordered questions.
+6. Use tables only when comparing multiple columns (e.g. topic vs level).
+
+Example structure:
+## Main Topic
+### Subheading
+- Item one
+- Item two
+### Another subheading
+1. First step
+2. Second step
+
+Be practical and specific. Give actionable lists of questions recruiters can use."""
+
+
 class RecruitmentQAAgent:
     """
     Recruitment Knowledge Q&A Agent.
@@ -556,79 +589,130 @@ FORMATTING:
         # Reset token tracking for this request
         self.groq_client.last_token_usage = None
         try:
-            if _is_greeting(question):
-                return self._get_friendly_non_data_response()
-            # IMPORTANT: Check recruitment data FIRST (DB queries take priority)
-            # This prevents questions like "how many interviews scheduled?" from being
-            # treated as general knowledge instead of DB queries.
-            is_recruitment = _is_recruitment_data_question(question)
-            is_general = _is_general_knowledge_question(question)
-            
-            # A question naming a specific record ("candidate 2", "details of that
-            # candidate") must be answered from the DB. Routing it to the general
-            # path — which has no database access — is what made the LLM invent
-            # candidates that don't exist.
-            #
-            # Phrasing patterns catch the common shapes; the DB lookup below catches
-            # the rest, including a bare name in any language ("Ameer ki skill batao").
-            needs_record = (
-                _refers_to_specific_record(question)
-                or self._question_names_known_candidate(company_user, question)
-            )
-
-            if is_general and not needs_record:
-                # Pure general knowledge: tech interview questions, best-practices, stacks (no DB)
-                answer = self._generate_general_knowledge_answer(question)
-                return self._wrap_response(answer, [])
-            if needs_record:
-                # Naming a person is itself a data question, even without a keyword
-                # like "candidate" — e.g. "what are the skills of Ameer Hamza".
-                logger.info("Recruitment QA: question references a specific record, using DB path")
-                is_recruitment = True
-            if not is_recruitment:
-                return self._get_friendly_non_data_response()
-            data = self._get_recruitment_data(company_user)
-            direct = self._get_direct_answer(data, question)
-            insights = self._extract_insights(data, question)
-            # For simple count/list questions, direct answer is enough – no LLM, no extra sections
-            # Also skip LLM if direct answer is already comprehensive (contains ## headings)
-            if direct and (_is_simple_count_question(question) or _is_comprehensive_answer(direct)):
-                return self._wrap_response(direct, insights)
-            if needs_record:
-                dossier = self._build_candidate_dossier(company_user, question)
-                if dossier:
-                    # Answer strictly from this candidate's record — passing the whole
-                    # jobs context alongside made the model pad the reply with unrelated
-                    # job descriptions.
-                    answer = self._generate_answer(question, dossier, direct)
-                    return self._wrap_response(answer, insights)
-                # Nothing matched. Say so directly instead of handing the LLM the full
-                # context, which it would otherwise dump as a substitute answer.
-                return self._wrap_response(self._no_candidate_answer(data), insights)
-
-            # A specific job may have been identified (e.g. by _get_direct_answer's
-            # matching) even though no keyword branch fired and `direct` came back
-            # empty. Without this, that job's description/requirements would get
-            # the same multi-job _shorten(...900) trim as an "all jobs" overview.
-            matched_job = _find_matching_job(data.get("jobs", []), question)
-            focus_job_id = matched_job["id"] if matched_job else None
-            context = self._build_context(data, focus_job_id=focus_job_id)
-            answer = self._generate_answer(question, context, direct)
-            return self._wrap_response(answer, insights)
-        except GroqClientError as e:
+            plan = self._plan(question, company_user)
+            if plan[0] == 'done':
+                return plan[1]
+            _, system, text, finish = plan
+            return finish(self.groq_client.send_prompt_text(system_prompt=system, text=text))
+        except GroqClientError:
             logger.exception("Recruitment QA Groq error")
-            return {
-                "answer": "I couldn't complete the analysis due to an API error. Please check your API key configuration and try again.",
-                "insights": [],
-                "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
-            }
-        except Exception as e:
+            return self._api_error_response()
+        except Exception:
             logger.exception("Recruitment QA failed")
-            return {
-                "answer": "An error occurred while processing your question. Please try again.",
-                "insights": [],
-                "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
-            }
+            return self._failure_response()
+
+    def process_stream(self, question: str, company_user: Any):
+        """`process`, as the answer is written. Yields
+        ``{'type': 'token', 'value': '...'}`` as text arrives, then
+        ``{'type': 'done', 'result': <what process returns>}``. Answers that
+        need no model (counts, greetings, a record not found) arrive as one
+        token; an error ends with the same friendly answer `process` gives."""
+        logger.info("Recruitment QA streaming question: %s", question[:100])
+        self.groq_client.last_token_usage = None
+        try:
+            plan = self._plan(question, company_user)
+            if plan[0] == 'done':
+                result = plan[1]
+            else:
+                _, system, text, finish = plan
+                pieces = []
+                for piece in self.groq_client.send_prompt_text_stream(system_prompt=system, text=text):
+                    pieces.append(piece)
+                    yield {'type': 'token', 'value': piece}
+                result = finish(''.join(pieces))
+                yield {'type': 'done', 'result': result}
+                return
+        except GroqClientError:
+            logger.exception("Recruitment QA Groq error (stream)")
+            result = self._api_error_response()
+        except Exception:
+            logger.exception("Recruitment QA failed (stream)")
+            result = self._failure_response()
+        if result.get('answer'):
+            yield {'type': 'token', 'value': result['answer']}
+        yield {'type': 'done', 'result': result}
+
+    def _api_error_response(self) -> Dict[str, Any]:
+        return {
+            "answer": "I couldn't complete the analysis due to an API error. Please check your API key configuration and try again.",
+            "insights": [],
+            "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
+        }
+
+    def _failure_response(self) -> Dict[str, Any]:
+        return {
+            "answer": "An error occurred while processing your question. Please try again.",
+            "insights": [],
+            "token_usage": getattr(self.groq_client, "last_token_usage", None) or {},
+        }
+
+    def _plan(self, question: str, company_user: Any):
+        """Decide how to answer. Returns ('done', result) when no model is
+        needed, else ('ask', system_prompt, text, finish) — `finish` turns the
+        model's text into the result."""
+        if _is_greeting(question):
+            return ('done', self._get_friendly_non_data_response())
+        # IMPORTANT: Check recruitment data FIRST (DB queries take priority)
+        # This prevents questions like "how many interviews scheduled?" from being
+        # treated as general knowledge instead of DB queries.
+        is_recruitment = _is_recruitment_data_question(question)
+        is_general = _is_general_knowledge_question(question)
+        
+        # A question naming a specific record ("candidate 2", "details of that
+        # candidate") must be answered from the DB. Routing it to the general
+        # path — which has no database access — is what made the LLM invent
+        # candidates that don't exist.
+        #
+        # Phrasing patterns catch the common shapes; the DB lookup below catches
+        # the rest, including a bare name in any language ("Ameer ki skill batao").
+        needs_record = (
+            _refers_to_specific_record(question)
+            or self._question_names_known_candidate(company_user, question)
+        )
+
+        if is_general and not needs_record:
+            # Pure general knowledge: tech interview questions, best-practices, stacks (no DB)
+            return ('ask', GENERAL_KNOWLEDGE_PROMPT, question,
+                    lambda text: self._wrap_response(
+                        text or "I couldn't generate an answer. Please try rephrasing your question.", []))
+        if needs_record:
+            # Naming a person is itself a data question, even without a keyword
+            # like "candidate" — e.g. "what are the skills of Ameer Hamza".
+            logger.info("Recruitment QA: question references a specific record, using DB path")
+            is_recruitment = True
+        if not is_recruitment:
+            return ('done', self._get_friendly_non_data_response())
+        data = self._get_recruitment_data(company_user)
+        direct = self._get_direct_answer(data, question)
+        insights = self._extract_insights(data, question)
+        # For simple count/list questions, direct answer is enough – no LLM, no extra sections
+        # Also skip LLM if direct answer is already comprehensive (contains ## headings)
+        if direct and (_is_simple_count_question(question) or _is_comprehensive_answer(direct)):
+            return ('done', self._wrap_response(direct, insights))
+        if needs_record:
+            dossier = self._build_candidate_dossier(company_user, question)
+            if dossier:
+                # Answer strictly from this candidate's record — passing the whole
+                # jobs context alongside made the model pad the reply with unrelated
+                # job descriptions.
+                return self._ask(question, dossier, direct, insights)
+            # Nothing matched. Say so directly instead of handing the LLM the full
+            # context, which it would otherwise dump as a substitute answer.
+            return ('done', self._wrap_response(self._no_candidate_answer(data), insights))
+
+        # A specific job may have been identified (e.g. by _get_direct_answer's
+        # matching) even though no keyword branch fired and `direct` came back
+        # empty. Without this, that job's description/requirements would get
+        # the same multi-job _shorten(...900) trim as an "all jobs" overview.
+        matched_job = _find_matching_job(data.get("jobs", []), question)
+        focus_job_id = matched_job["id"] if matched_job else None
+        context = self._build_context(data, focus_job_id=focus_job_id)
+        return self._ask(question, context, direct, insights)
+
+    def _ask(self, question, context, direct, insights):
+        """The model call that answers from `context`, and its tidy-up."""
+        return ('ask', self.SYSTEM_PROMPT, self._answer_prompt(question, context, direct),
+                lambda text: self._wrap_response(self._tidy_answer(question, context, text), insights))
 
     def _wrap_response(self, answer: str, insights: List[Dict]) -> Dict[str, Any]:
         """Wrap answer + insights, appending token usage info if an LLM call was made."""
@@ -663,37 +747,7 @@ FORMATTING:
 
     def _generate_general_knowledge_answer(self, question: str) -> str:
         """Answer stack/interview/recruitment knowledge questions using LLM (no DB)."""
-        system = """You are a Recruitment & Technical Interview Expert. You help recruiters with:
-- Tech stack interview questions (React, Node, MERN, Python, Django, Java, etc.)
-- Basic and advanced questions to ask candidates/students
-- Screening questions for freshers vs experienced developers
-- Recruitment best practices, what to assess, how to evaluate skills
-- Any recruitment or hiring-related knowledge
-
-CRITICAL — you have NO access to this company's database in this mode. You cannot see
-their candidates, CVs, jobs, or interviews. If the question refers to a specific record
-("candidate 2", "the applicant for X", "their score"), do NOT invent one: say you can't
-see their records here and point them to ask about the candidate by name, then answer
-whatever generic part you can (e.g. good questions for that kind of role).
-
-FORMAT YOUR ANSWER WITH CLEAR STRUCTURE (mandatory):
-1. Use ## for the main heading (e.g. "React Interview Questions").
-2. Use ### for subheadings (e.g. "Basic Questions", "Advanced Questions").
-3. Use #### for sub-subheadings if needed.
-4. Use bullet lists (- or *) for multiple items under each section.
-5. Use numbered lists (1. 2. 3.) for steps or ordered questions.
-6. Use tables only when comparing multiple columns (e.g. topic vs level).
-
-Example structure:
-## Main Topic
-### Subheading
-- Item one
-- Item two
-### Another subheading
-1. First step
-2. Second step
-
-Be practical and specific. Give actionable lists of questions recruiters can use."""
+        system = GENERAL_KNOWLEDGE_PROMPT
         try:
             return self.groq_client.send_prompt_text(
                 system_prompt=system,
@@ -1775,6 +1829,13 @@ Be practical and specific. Give actionable lists of questions recruiters can use
 
     def _generate_answer(self, question: str, context: str, direct_answer: str = "") -> str:
         """Generate markdown answer using Groq. Strictly enforce markdown tables, explanations, and summaries for complex queries."""
+        llm_answer = self.groq_client.send_prompt_text(
+            system_prompt=self.SYSTEM_PROMPT,
+            text=self._answer_prompt(question, context, direct_answer),
+        )
+        return self._tidy_answer(question, context, llm_answer)
+
+    def _answer_prompt(self, question: str, context: str, direct_answer: str = "") -> str:
         q = question.lower()
         # Always require markdown table, summary, and explanation for any query with 'table', 'summary', 'markdown', 'compare', 'explain', 'analysis', 'recommendation', 'impact', 'top candidate', 'most popular job', or 'short summary'.
         if any(x in q for x in ["table", "compare", "summary", "markdown", "explain", "analysis", "recommendation", "impact", "top candidate", "most popular job", "short summary"]):
@@ -1819,45 +1880,43 @@ INSTRUCTIONS:
 - Format with markdown: ## headings, bullet lists for multiple fields per item.
 - Do not give a one-line answer if the context has more relevant detail.
 """
-        try:
-            llm_answer = self.groq_client.send_prompt_text(
-                system_prompt=self.SYSTEM_PROMPT,
-                text=prompt,
-            )
-            # Post-processing: If output does not contain markdown table, summary, or explanation as required, reformat or retry
-            needs_table = any(x in q for x in ["table", "compare", "summary", "markdown"])
-            needs_explanation = any(x in q for x in ["explain", "analysis", "recommendation", "impact"])
-            needs_top = any(x in q for x in ["top candidate", "most popular job", "short summary"])
-            def is_markdown_table(text):
-                return "|" in text and "---" in text
-            def is_markdown_heading(text):
-                return "##" in text or "###" in text
-            def is_bullet_list(text):
-                return "- " in text or "* " in text
-            def is_explanation(text):
-                return len(text.split("\n")) > 4 and (is_markdown_heading(text) or is_bullet_list(text))
-            # If required format missing, retry with forced template
-            if needs_table and not is_markdown_table(llm_answer):
-                # Force a markdown table template
-                table_header = "| Job Title | Department | Location | Candidates | Interviews | Outcomes |\n|---|---|---|---|---|---|"
-                rows = []
-                # Use context to extract job info
-                for line in context.split("\n"):
-                    if line.startswith("JOB_ID_"):
-                        parts = re.findall(r'title="([^"]+)".*department="([^"]*)".*location="([^"]*)".*candidates=(\d+).*interviews=(\d+)', line)
-                        if parts:
-                            title, dept, loc, cand, interv = parts[0]
-                            rows.append(f"| {title} | {dept} | {loc} | {cand} | {interv} | |")
-                table = table_header + "\n" + "\n".join(rows)
-                summary = "\n\n**Summary:** Recruitment status for all jobs is shown above."
-                llm_answer = table + summary
-            elif needs_explanation and not is_explanation(llm_answer):
-                llm_answer = "## Explanation\n- The qualification settings determine which candidates are selected for interviews based on their scores.\n- Interview threshold: Candidates above this score are invited for interviews.\n- Hold threshold: Candidates between hold and interview thresholds are put on hold.\n- Custom thresholds: If enabled, allows per-job settings."
-            elif needs_top and not is_bullet_list(llm_answer):
-                llm_answer = "## Top Candidates\n1. Candidate A (Score: 25, Decision: INTERVIEW)\n2. Candidate B (Score: 23, Decision: INTERVIEW)\n3. Candidate C (Score: 21, Decision: INTERVIEW)\n\n**Summary:** These candidates are ranked highest based on role fit score."
-            return llm_answer or "No answer could be generated from the data."
-        except GroqClientError:
-            raise
+        return prompt
+
+    def _tidy_answer(self, question: str, context: str, llm_answer: str) -> str:
+        """If the answer lacks the format the question asked for, fix it."""
+        q = question.lower()
+        # Post-processing: If output does not contain markdown table, summary, or explanation as required, reformat or retry
+        needs_table = any(x in q for x in ["table", "compare", "summary", "markdown"])
+        needs_explanation = any(x in q for x in ["explain", "analysis", "recommendation", "impact"])
+        needs_top = any(x in q for x in ["top candidate", "most popular job", "short summary"])
+        def is_markdown_table(text):
+            return "|" in text and "---" in text
+        def is_markdown_heading(text):
+            return "##" in text or "###" in text
+        def is_bullet_list(text):
+            return "- " in text or "* " in text
+        def is_explanation(text):
+            return len(text.split("\n")) > 4 and (is_markdown_heading(text) or is_bullet_list(text))
+        # If required format missing, retry with forced template
+        if needs_table and not is_markdown_table(llm_answer):
+            # Force a markdown table template
+            table_header = "| Job Title | Department | Location | Candidates | Interviews | Outcomes |\n|---|---|---|---|---|---|"
+            rows = []
+            # Use context to extract job info
+            for line in context.split("\n"):
+                if line.startswith("JOB_ID_"):
+                    parts = re.findall(r'title="([^"]+)".*department="([^"]*)".*location="([^"]*)".*candidates=(\d+).*interviews=(\d+)', line)
+                    if parts:
+                        title, dept, loc, cand, interv = parts[0]
+                        rows.append(f"| {title} | {dept} | {loc} | {cand} | {interv} | |")
+            table = table_header + "\n" + "\n".join(rows)
+            summary = "\n\n**Summary:** Recruitment status for all jobs is shown above."
+            llm_answer = table + summary
+        elif needs_explanation and not is_explanation(llm_answer):
+            llm_answer = "## Explanation\n- The qualification settings determine which candidates are selected for interviews based on their scores.\n- Interview threshold: Candidates above this score are invited for interviews.\n- Hold threshold: Candidates between hold and interview thresholds are put on hold.\n- Custom thresholds: If enabled, allows per-job settings."
+        elif needs_top and not is_bullet_list(llm_answer):
+            llm_answer = "## Top Candidates\n1. Candidate A (Score: 25, Decision: INTERVIEW)\n2. Candidate B (Score: 23, Decision: INTERVIEW)\n3. Candidate C (Score: 21, Decision: INTERVIEW)\n\n**Summary:** These candidates are ranked highest based on role fit score."
+        return llm_answer or "No answer could be generated from the data."
 
     def _extract_insights(
         self, data: Dict[str, Any], question: str

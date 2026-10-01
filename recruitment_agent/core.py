@@ -203,6 +203,91 @@ class GroqClient:
             raise GroqClientError("Unable to read Groq response") from None
 
 
+    def send_prompt_text_stream(self, system_prompt: str, text: str, max_retries: int = 3):
+        """`send_prompt_text`, as it is written: yields pieces of the answer.
+
+        Errors before the first piece (auth, rate limit after retries, too
+        large) raise GroqClientError exactly as the plain call does. Token
+        usage lands in `last_token_usage` at the end — Groq reports it on the
+        last chunk; if it didn't, or the reader stopped early, it's estimated.
+        """
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+            "temperature": 0,
+            "max_tokens": 2048,
+            "stream": True,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        response = None
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(self.base_url, headers=headers, json=payload,
+                                         timeout=self.timeout, stream=True)
+                response.raise_for_status()
+                break
+            except requests.HTTPError as exc:
+                code = exc.response.status_code
+                try:
+                    detail = exc.response.json().get("error", {}).get("message", exc.response.text)
+                except Exception:
+                    detail = exc.response.text
+                if code in (401, 403):
+                    raise GroqClientError(f"Groq API authentication failed: {detail}", is_auth_error=True) from exc
+                if code == 429:
+                    if attempt < max_retries - 1:
+                        try:
+                            wait = int(exc.response.headers.get("Retry-After", 30))
+                        except (ValueError, TypeError):
+                            wait = 30
+                        time.sleep(wait)
+                        continue
+                    raise GroqClientError("Groq API rate limit exceeded.", is_rate_limit=True) from exc
+                if code == 413:
+                    raise GroqClientError("Groq API request too large.", is_request_too_large=True) from exc
+                raise GroqClientError(f"Groq API request failed (HTTP {code}): {detail}") from exc
+            except requests.RequestException as exc:
+                raise GroqClientError(f"Groq API request failed: {exc}") from exc
+
+        self.last_token_usage = None
+        collected = []
+        try:
+            for raw in response.iter_lines():
+                line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else (raw or "")
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except ValueError:
+                    continue
+                usage = chunk.get("usage") or (chunk.get("x_groq") or {}).get("usage")
+                if usage:
+                    self.last_token_usage = usage
+                for choice in chunk.get("choices") or []:
+                    piece = (choice.get("delta") or {}).get("content") or ""
+                    if piece:
+                        collected.append(piece)
+                        yield piece
+        except requests.RequestException as exc:
+            raise GroqClientError(f"Groq API stream failed: {exc}") from exc
+        finally:
+            response.close()
+            if not self.last_token_usage:
+                prompt_tokens = (len(system_prompt) + len(text)) // 4 + 1
+                completion_tokens = len("".join(collected)) // 4 + 1
+                self.last_token_usage = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+                                         "total_tokens": prompt_tokens + completion_tokens, "estimated": True}
+
+
 import logging as _logging
 _core_logger = _logging.getLogger(__name__)
 
@@ -239,3 +324,16 @@ class QuotaAwareGroqClient(GroqClient):
         result = super().send_prompt_text(system_prompt, text, max_retries)
         self._record_after_call()
         return result
+
+    def send_prompt_text_stream(self, system_prompt: str, text: str, max_retries: int = 3):
+        # Recorded however the stream ends — the model wrote those tokens even
+        # if the reader went away part-way.
+        started = False
+        try:
+            for piece in super().send_prompt_text_stream(system_prompt, text, max_retries):
+                started = True
+                yield piece
+            started = True
+        finally:
+            if started:
+                self._record_after_call()

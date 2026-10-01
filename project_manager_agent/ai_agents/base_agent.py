@@ -61,6 +61,28 @@ def _record_llm_usage(*, company_id, agent_name, model, usage_dict, duration_ms,
         logger.warning("LLM usage tracking failed: %s", exc)
 
 
+def _stream_usage(chunk):
+    """Token usage on a streamed chunk, if the provider put it there: OpenAI
+    (with include_usage) on the last chunk's `usage`, Groq on `x_groq.usage`."""
+    usage = getattr(chunk, 'usage', None) or getattr(getattr(chunk, 'x_groq', None), 'usage', None)
+    if usage is None:
+        return None
+    read = (usage.get if isinstance(usage, dict) else lambda k: getattr(usage, k, None))
+    total = read('total_tokens')
+    if not total:
+        return None
+    return {'prompt_tokens': read('prompt_tokens'), 'completion_tokens': read('completion_tokens'),
+            'total_tokens': total}
+
+
+def _estimate_usage(messages, text):
+    """About four characters a token, when the provider reported nothing."""
+    prompt = sum(len(m.get('content') or '') for m in messages) // 4 + 1
+    completion = len(text or '') // 4 + 1
+    return {'prompt_tokens': prompt, 'completion_tokens': completion, 'total_tokens': prompt + completion,
+            'estimated': True}
+
+
 class BaseAgent:
     """
     Base class for all AI agents in the Project Manager system.
@@ -340,7 +362,12 @@ class BaseAgent:
         messages.append({'role': 'user', 'content': prompt})
 
         collected = []
-        completion_tokens = 0
+        reported = None
+        extra = {}
+        if key_ctx and key_ctx.provider == 'openai':
+            # OpenAI only reports usage on a stream when asked; Groq always
+            # puts it on the last chunk (`x_groq.usage`).
+            extra['stream_options'] = {'include_usage': True}
         try:
             stream = client.chat.completions.create(
                 model=effective_model,
@@ -348,8 +375,10 @@ class BaseAgent:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
+                **extra,
             )
             for chunk in stream:
+                reported = _stream_usage(chunk) or reported
                 try:
                     delta = chunk.choices[0].delta
                     piece = getattr(delta, 'content', None) or ''
@@ -357,19 +386,23 @@ class BaseAgent:
                     piece = ''
                 if piece:
                     collected.append(piece)
-                    completion_tokens += 1  # approximation
                     yield {'type': 'token', 'value': piece}
 
             full_text = ''.join(collected)
             elapsed_ms = int((_time.time() - _start) * 1000)
-            usage_dict = {
-                'prompt_tokens': None,           # streaming APIs typically don't
-                'completion_tokens': completion_tokens,  # return usage; approximate
-                'total_tokens': None,
-            }
+            # A streamed answer counts against the company's quota like any
+            # other call. It used not to: only `_call_llm` recorded usage, so
+            # every streamed answer (HR and Frontline Q&A) was free.
+            usage_dict = reported or _estimate_usage(messages, full_text)
             self.last_llm_usage = usage_dict
+            if key_ctx and usage_dict.get('total_tokens'):
+                try:
+                    from core.api_key_service import record_usage
+                    record_usage(key_ctx, usage_dict['total_tokens'])
+                except Exception as e:
+                    logger.warning("quota decrement failed on stream: %s", e)
             logger.info(f"[LLM STREAM] {self.agent_name} | {elapsed_ms}ms | "
-                        f"~{completion_tokens} chunks | model={effective_model}")
+                        f"{usage_dict.get('total_tokens')} tokens | model={effective_model}")
 
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),

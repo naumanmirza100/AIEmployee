@@ -2,6 +2,7 @@
 
 import { companyApi } from './companyAuthService';
 import { API_BASE_URL } from '@/config/apiConfig';
+import { streamAnswer } from '@/utils/ndjsonStream';
 
 /**
  * Project Pilot Agent - Create projects, tasks, and manage operations
@@ -92,6 +93,22 @@ export const knowledgeQA = async (question, projectId = null, chatHistory = null
     console.error('Knowledge Q&A error:', error);
     throw error;
   }
+};
+
+/**
+ * Knowledge Q&A with the answer shown as it is written. Same inputs and the
+ * same resolved shape as `knowledgeQA` ({status, data, session_id}); calls
+ * `onText(answerSoFar)` as text arrives. Given `chatId`, the server reads the
+ * chat so far itself, so follow-up questions keep their context.
+ */
+export const knowledgeQAStream = async (question, projectId = null, chatHistory = null, { chatId, onText, signal } = {}) => {
+  const body = { question: question.trim(), project_id: projectId || null };
+  if (chatId) body.chat_id = chatId;
+  else if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+    body.chat_history = chatHistory.map((m) => ({ role: m.role, content: m.content || '' }));
+  }
+  const done = await streamAnswer('/project-manager/ai/knowledge-qa/stream', body, { onText, signal });
+  return { status: 'success', data: done.data, session_id: done.session_id };
 };
 
 /** List all Knowledge QA chats */
@@ -638,6 +655,7 @@ export const deleteNotificationTemplate = async (templateId) => {
 };
 
 export default {
+  knowledgeQAStream,
   projectPilot,
   projectPilotConfirm,
   projectPilotFromFile,
