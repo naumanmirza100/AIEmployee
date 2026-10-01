@@ -53,6 +53,12 @@ class Ticket(models.Model):
     company = models.ForeignKey('core.Company', on_delete=models.CASCADE, null=True, blank=True, related_name='frontline_tickets')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_tickets')
+    # The Project Manager task this ticket became (a bug or a request someone
+    # has to build). When that task is done the ticket gets a note, once, so
+    # whoever owns it can tell the customer (Frontline_agent/ticket_tasks.py).
+    pm_task = models.ForeignKey('core.Task', on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name='frontline_tickets')
+    pm_task_done_noted_at = models.DateTimeField(null=True, blank=True)
     resolution = models.TextField(blank=True, null=True)
     auto_resolved = models.BooleanField(default=False)
     resolution_confidence = models.FloatField(null=True, blank=True, help_text="AI confidence score for auto-resolution")

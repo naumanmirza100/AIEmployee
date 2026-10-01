@@ -510,6 +510,7 @@ urlpatterns = [
     # Handoff release (H1)
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/release-handoff/?$', frontline_agent.release_handoff, name='frontline_release_handoff'),  # POST
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/reassign-handoff/?$', frontline_agent.reassign_ticket_handoff, name='frontline_reassign_handoff'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/task/?$', frontline_agent.ticket_pm_task, name='frontline_ticket_pm_task'),  # GET/POST
 
     re_path(r'^frontline/tickets/?$', frontline_agent.list_tickets, name='frontline_list_tickets'),  # GET
     re_path(r'^frontline/tickets/aging/?$', frontline_agent.list_tickets_aging, name='frontline_list_tickets_aging'),  # GET

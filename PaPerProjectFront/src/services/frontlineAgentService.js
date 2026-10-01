@@ -192,6 +192,26 @@ export const deleteDocument = async (documentId) => {
   }
 };
 
+/** The "create project task" review form for a ticket: pre-filled values, projects, people. */
+export const getTicketTask = async (ticketId) => {
+  try {
+    return await companyApi.get(`/frontline/tickets/${ticketId}/task`);
+  } catch (error) {
+    console.error('Get ticket task error:', error);
+    throw error;
+  }
+};
+
+/** Turn a ticket into a Project Manager task, linked both ways. */
+export const createTicketTask = async (ticketId, payload) => {
+  try {
+    return await companyApi.post(`/frontline/tickets/${ticketId}/task`, payload);
+  } catch (error) {
+    console.error('Create ticket task error:', error);
+    throw error;
+  }
+};
+
 /** Process a document again — the Retry button on one that failed. */
 export const reingestDocument = async (documentId) => {
   try {
@@ -1321,6 +1341,8 @@ export default {
   uploadDocument,
   deleteDocument,
   reingestDocument,
+  getTicketTask,
+  createTicketTask,
   getDocumentStatus,
   updateDocumentMetadata,
   knowledgeQA,

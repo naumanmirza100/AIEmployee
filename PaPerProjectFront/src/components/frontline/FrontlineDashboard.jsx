@@ -16,6 +16,7 @@ import InsightsView from './InsightsView';
 import AutomationView from './AutomationView';
 import SettingsView from './SettingsView';
 import MacroPickerDialog from './MacroPickerDialog';
+import TicketTaskDialog from './TicketTaskDialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +66,7 @@ import {
   Pencil,
   MoreHorizontal,
   StickyNote,
+  ClipboardList,
   PauseCircle,
   PlayCircle,
   Moon,
@@ -2933,6 +2935,8 @@ const FrontlineDashboard = () => {
 
   // Tickets list (filter + pagination)
   const [ticketsList, setTicketsList] = useState([]);
+  // The ticket being turned into a project task (dialog open), or null.
+  const [taskDialogTicket, setTaskDialogTicket] = useState(null);
   const [ticketsLoading, setTicketsLoading] = useState(false);
 
   // Ticket lifecycle: notes dialog + per-row busy flag
@@ -5508,6 +5512,12 @@ const FrontlineDashboard = () => {
                             <div>
                               <div className="font-medium flex items-center gap-2 flex-wrap">
                                 <span>{t.title}</span>
+                                {t.pm_task && (
+                                  <Badge variant="outline" className="text-[10px] gap-1"
+                                    title={`Project task in ${t.pm_task.project}: ${t.pm_task.title}`}>
+                                    <ClipboardList className="h-3 w-3" /> Task: {t.pm_task.status_label}
+                                  </Badge>
+                                )}
                                 {t.is_snoozed && (
                                   <Badge variant="outline" className="text-[10px] gap-1">
                                     <Moon className="h-3 w-3" /> Snoozed
@@ -5555,6 +5565,11 @@ const FrontlineDashboard = () => {
                                 <DropdownMenuItem onClick={() => openNotesDialog(t)}>
                                   <StickyNote className="h-4 w-4 mr-2" /> Notes{t.notes_count ? ` (${t.notes_count})` : ''}
                                 </DropdownMenuItem>
+                                {!t.pm_task && (
+                                  <DropdownMenuItem onClick={() => setTaskDialogTicket(t)}>
+                                    <ClipboardList className="h-4 w-4 mr-2" /> Create project task
+                                  </DropdownMenuItem>
+                                )}
                                 {t.is_snoozed ? (
                                   <DropdownMenuItem onClick={() => handleUnsnooze(t)}>
                                     <Sun className="h-4 w-4 mr-2" /> Unsnooze
@@ -5644,6 +5659,13 @@ const FrontlineDashboard = () => {
       </Tabs>
 
       {/* Ticket notes dialog (internal / private agent discussion) */}
+      <TicketTaskDialog
+        ticket={taskDialogTicket}
+        open={!!taskDialogTicket}
+        onOpenChange={(open) => { if (!open) setTaskDialogTicket(null); }}
+        onDone={loadTickets}
+      />
+
       <Dialog open={notesDialog.open} onOpenChange={(open) => setNotesDialog((prev) => ({ ...prev, open }))}>
         <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
           <DialogHeader>

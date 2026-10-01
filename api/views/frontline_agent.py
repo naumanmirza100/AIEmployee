@@ -2466,6 +2466,15 @@ def list_tickets(request):
                 .values_list('ticket_id', 'c')
             )
 
+        # The project task each ticket became, if any (one query for the page).
+        from core.models import Task as _Task
+        task_ids = [t.pm_task_id for t in tickets if t.pm_task_id]
+        task_map = {}
+        if task_ids:
+            from Frontline_agent.ticket_tasks import task_summary
+            task_map = {task.id: task_summary(task)
+                        for task in _Task.objects.filter(pk__in=task_ids).select_related('project')}
+
         def _ticket_row(t):
             is_snoozed = bool(t.snoozed_until and t.snoozed_until > now)
             row = {
@@ -2487,6 +2496,7 @@ def list_tickets(request):
                 'is_sla_paused': t.sla_paused_at is not None,
                 'last_triaged_at': t.last_triaged_at.isoformat() if t.last_triaged_at else None,
                 'notes_count': notes_count_map.get(t.id, 0),
+                'pm_task': task_map.get(t.pm_task_id),
                 'intent': t.intent,
                 'entities': t.entities,
             }
@@ -8204,6 +8214,45 @@ def merge_contacts(request):
 # ============================================================================
 # Handoff release (H1)
 # ============================================================================
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def ticket_pm_task(request, ticket_id):
+    """Turn a ticket into a Project Manager task (Frontline_agent/ticket_tasks.py).
+
+    GET: the review form (pre-filled from the ticket, with projects and
+    people). POST ``{project_id, title, description, priority, assignee_id,
+    due_date}`` creates the task through PM's service layer and links it.
+    """
+    from Frontline_agent import ticket_tasks
+    from project_manager_agent.services.errors import ServiceError
+    company = request.user.company
+    ticket = Ticket.objects.filter(pk=ticket_id, company=company).select_related('contact', 'pm_task__project').first()
+    if not ticket:
+        return Response({'status': 'error', 'message': 'Ticket not found'}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': ticket_tasks.form(ticket, request.user)})
+
+    if not ticket_tasks.pm_available(company):
+        return Response({'status': 'error', 'code': 'no_pm',
+                         'message': "Your company doesn't have the Project Manager agent."},
+                        status=status.HTTP_403_FORBIDDEN)
+    if ticket.pm_task_id:
+        return Response({'status': 'error', 'code': 'already_linked',
+                         'message': 'This ticket already has a project task.',
+                         'data': ticket_tasks.task_summary(ticket.pm_task)},
+                        status=status.HTTP_409_CONFLICT)
+    try:
+        task = ticket_tasks.create_task(ticket, request.user, request.data or {})
+    except ServiceError as exc:
+        return Response({'status': 'error', 'message': exc.message}, status=exc.http_status)
+    _write_frontline_audit_log(request.user, company, 'ticket.pm_task', 'ticket', ticket.id,
+                               after={'task_id': task.id, 'project_id': task.project_id})
+    return Response({'status': 'success', 'data': ticket_tasks.task_summary(task)},
+                    status=status.HTTP_201_CREATED)
+
 
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
