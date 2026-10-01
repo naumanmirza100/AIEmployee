@@ -37,6 +37,9 @@ class Command(BaseCommand):
             raise CommandError(f'A configured encryption key is not a valid Fernet key: {exc}')
 
         self._report(rows)
+        sdr_rows = self._sdr_smtp_inventory()
+        self._report_sdr(sdr_rows)
+        rows = rows + [('ai_sdr_agent.SDRCampaign', pk, state) for pk, state in sdr_rows]
         unreadable = [(label, pk) for label, pk, state in rows if state == 'unreadable']
         older = [(label, pk) for label, pk, state in rows if state == 'older']
 
@@ -56,6 +59,9 @@ class Command(BaseCommand):
             by_model = {m._meta.label: m for m in MODELS}
             with transaction.atomic():
                 for label, pk in older:
+                    if label == 'ai_sdr_agent.SDRCampaign':
+                        self._reencrypt_sdr_smtp(pk)
+                        continue
                     model = by_model[label]
                     current = model.objects.filter(pk=pk).values_list('encrypted_key', flat=True).first()
                     if not current:
@@ -96,3 +102,36 @@ class Command(BaseCommand):
                           'key, if FIELD_ENCRYPTION_KEY is unset)')
         self.stdout.write('  older = readable only with a fallback / the SECRET_KEY key; '
                           're-encrypted by this command')
+
+    # SDR campaign SMTP passwords live in an EncryptedCharField, which hides the
+    # stored token from the ORM, so they are inventoried with raw SQL.
+    def _sdr_smtp_inventory(self):
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id, smtp_password FROM sdr_campaign WHERE smtp_password <> ''")
+            fetched = cursor.fetchall()
+        rows = []
+        for pk, stored in fetched:
+            try:
+                state = secret_state(stored)
+            except InvalidToken:
+                state = 'unreadable'
+            if state == 'unreadable' and not stored.startswith('gAAAA'):
+                state = 'older'   # legacy plaintext: rewriting it encrypts it
+            rows.append((pk, state))
+        return rows
+
+    def _reencrypt_sdr_smtp(self, pk):
+        from ai_sdr_agent.models import SDRCampaign
+        # Reading decrypts (or passes legacy plaintext through); writing encrypts
+        # with FIELD_ENCRYPTION_KEY.
+        password = SDRCampaign.objects.filter(pk=pk).values_list('smtp_password', flat=True).first()
+        if password:
+            SDRCampaign.objects.filter(pk=pk).update(smtp_password=password)
+
+    def _report_sdr(self, rows):
+        counts = {}
+        for _pk, state in rows:
+            counts[state] = counts.get(state, 0) + 1
+        summary = ', '.join(f'{n} {state}' for state, n in sorted(counts.items())) or 'no rows'
+        self.stdout.write(f'ai_sdr_agent.SDRCampaign (smtp_password): {summary}')

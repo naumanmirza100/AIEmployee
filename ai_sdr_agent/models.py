@@ -4,6 +4,8 @@ from datetime import date as _date, timedelta as _timedelta
 from django.db import models
 from django.utils import timezone
 
+from ai_sdr_agent.fields import EncryptedCharField
+
 
 class SDRIcpProfile(models.Model):
     """Ideal Customer Profile — defines who to target for outreach."""
@@ -228,7 +230,7 @@ class SDRCampaign(models.Model):
     smtp_host = models.CharField(max_length=255, blank=True)
     smtp_port = models.IntegerField(default=587)
     smtp_username = models.CharField(max_length=255, blank=True)
-    smtp_password = models.CharField(max_length=500, blank=True)
+    smtp_password = EncryptedCharField(max_length=1000, blank=True)   # Fernet-encrypted at rest
     smtp_use_tls = models.BooleanField(default=True)
 
     # IMAP settings for reply detection (falls back to env EMAIL_HOST_USER/PASSWORD)
@@ -431,6 +433,9 @@ class SDRMeeting(models.Model):
     # Used to display scheduled_at in the lead's local time in emails and UI.
     lead_timezone = models.CharField(max_length=100, default='UTC', blank=True)
 
+    # True for meetings a user created by hand (they have no enrollment).
+    is_manual = models.BooleanField(default=False)
+
     # Public booking link — shared with the lead so they can self-schedule
     booking_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
@@ -447,6 +452,24 @@ class SDRMeeting(models.Model):
 
     def __str__(self):
         return f"Meeting with {self.lead.display_name} ({self.status})"
+
+
+class SDRJobLock(models.Model):
+    """Cross-process lock for scheduler jobs.
+
+    Every web worker starts its own scheduler, so without this each job runs once
+    per worker (duplicate reply handling, double token spend, the daily email
+    re-sent on every restart). A job runs only if it can claim its row.
+    """
+    name = models.CharField(max_length=64, unique=True)
+    locked_until = models.DateTimeField(default=timezone.now)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'sdr_job_lock'
+
+    def __str__(self):
+        return f"{self.name} (last run {self.last_run_at})"
 
 
 class SDRAgentSettings(models.Model):

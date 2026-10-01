@@ -19,6 +19,7 @@ import os
 import re
 import smtplib
 import ssl
+import time
 from datetime import timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -48,6 +49,47 @@ _BOUNCE_SUBJECT_HINTS = (
 )
 # SMTP replies that mean "this recipient will never work" (not auth/transient).
 _PERMANENT_SMTP_CODES = {550, 551, 553, 554}
+
+
+_SMTP_PORTS = (25, 465, 587, 2525)
+_IMAP_PORTS = (143, 993)
+_UNFILLED_PLACEHOLDER = re.compile(
+    r'\{[a-z_]+\}|\[(?:key value proposition|your [a-z ]{2,30}|insert [a-z ]{2,30}|first name|company name)\]',
+    re.IGNORECASE,
+)
+
+
+def validate_mail_server(host: str, port, kind: str = 'smtp'):
+    """Return an error string if ``host``/``port`` must not be connected to, else None.
+
+    SMTP/IMAP hosts are tenant-controlled, so without this a tenant could aim the
+    server at internal addresses (localhost, cloud metadata, the LAN) and read the
+    result from the error text. Blank hosts are allowed (they fall back to defaults).
+    Set SDR_ALLOW_PRIVATE_MAIL_HOSTS=True to allow private hosts (local dev mail catchers).
+    """
+    import ipaddress
+    import socket
+
+    host = (host or '').strip()
+    if not host:
+        return None
+    if not re.fullmatch(r'[A-Za-z0-9.-]{1,253}', host):
+        return 'Mail server host name is not valid.'
+    allowed_ports = _SMTP_PORTS if kind == 'smtp' else _IMAP_PORTS
+    if port not in (None, '') and int(port) not in allowed_ports:
+        return f"{kind.upper()} port must be one of {', '.join(map(str, allowed_ports))}."
+    if getattr(settings, 'SDR_ALLOW_PRIVATE_MAIL_HOSTS', False):
+        return None
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return f"Could not resolve mail server '{host}'."
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                or ip.is_multicast or ip.is_unspecified):
+            return 'Mail server must be a public host.'
+    return None
 
 
 class PermanentSendError(ValueError):
@@ -375,6 +417,9 @@ Rules:
             )
             return improved
         except Exception as exc:
+            from core.api_key_service import KeyServiceError
+            if isinstance(exc, KeyServiceError):
+                raise   # key/quota problems must surface, not silently send the raw template
             logger.warning("EmailAssistantAgent.improve_email failed lead=%s: %s", lead.id, exc)
             return {'subject': subject, 'body': body}
 
@@ -479,6 +524,10 @@ Rules:
         else:
             since_date = (timezone.now() - timedelta(days=7)).strftime('%d-%b-%Y')
 
+        host_error = validate_mail_server(imap_host, imap_port, 'imap')
+        if host_error:
+            raise ValueError(host_error)
+
         found = []
         seen_message_ids = set()   # deduplicate by Message-ID header
         seen_senders = set()       # only keep the most-recent reply per sender
@@ -507,8 +556,12 @@ Rules:
                             if meta_data and meta_data[0]:
                                 parsed = imaplib.Internaldate2tuple(meta_data[0])
                                 if parsed:
-                                    internal_date = _dt.datetime(
-                                        *parsed[:6], tzinfo=_dt.timezone.utc
+                                    # Internaldate2tuple returns the time converted to the
+                                    # *server's local* zone; mktime turns that back into an
+                                    # absolute instant (labelling it UTC was off by the
+                                    # server's UTC offset).
+                                    internal_date = _dt.datetime.fromtimestamp(
+                                        time.mktime(parsed), tz=_dt.timezone.utc
                                     )
                         except Exception:
                             pass
@@ -715,6 +768,10 @@ Rules:
             msg['List-Unsubscribe'] = f"<{unsubscribe_url}>"
             msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+        host_error = validate_mail_server(host, port, 'smtp')
+        if host_error:
+            raise ValueError(host_error)
 
         context = ssl.create_default_context()
         try:
@@ -934,6 +991,12 @@ Rules:
             else:
                 try:
                     content = self.generate_personalized_email(lead, step, campaign)
+                    leftover = _UNFILLED_PLACEHOLDER.findall(f"{content['subject']}\n{content['body']}")
+                    if leftover:
+                        raise ValueError(
+                            f"Email still contains unfilled placeholders {sorted(set(leftover))} - "
+                            "edit the step template before sending."
+                        )
                     logger.info(
                         "SDR [EMAIL-SEND] enrollment=%d lead=%s TO=%s "
                         "step=%d subject='%s' — SENDING NOW via SMTP host=%s",
