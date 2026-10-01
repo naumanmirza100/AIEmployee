@@ -42,7 +42,12 @@ const STATUS_BADGE = {
 
 export default function HRLeaveTab() {
   const { toast } = useToast();
-  const [view, setView] = useState('pending_for_me'); // 'pending_for_me' | 'mine' | 'all'
+  // 'pending_for_me' | 'mine' | 'all'. A link can open a given view (?view=all
+  // from "My work", for requests nobody was named to approve).
+  const [view, setView] = useState(() => {
+    const asked = new URLSearchParams(window.location.search).get('view');
+    return ['pending_for_me', 'mine', 'all'].includes(asked) ? asked : 'pending_for_me';
+  });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
 

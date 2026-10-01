@@ -2392,7 +2392,9 @@ def list_ticket_tasks(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_tickets(request):
-    """List support tickets with filters and pagination. Scoped to tickets created by this company user."""
+    """List support tickets with filters and pagination. Scoped to tickets this
+    company user created or is assigned — a ticket handed to them (a hand-off,
+    or a leaver's handover) is theirs to work even though someone else raised it."""
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
@@ -2400,7 +2402,7 @@ def list_tickets(request):
         # to be shared across companies (or whose id collides) could see another
         # tenant's tickets. Belt-and-suspenders alongside created_by.
         qs = Ticket.objects.filter(
-            company=company_user.company, created_by=user,
+            Q(created_by=user) | Q(assigned_to=user), company=company_user.company,
         ).order_by('-created_at')
 
         status_filter = request.GET.get('status')
@@ -2543,8 +2545,8 @@ def list_tickets_aging(request):
         at_risk_threshold = now + timedelta(hours=2)
         resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
         qs = Ticket.objects.filter(
+            Q(created_by=user) | Q(assigned_to=user),
             company=company_user.company,   # FL-SEC-4: was scoped by creator only
-            created_by=user,
             sla_due_at__isnull=False,
             sla_paused_at__isnull=True,  # paused tickets don't age
         ).exclude(status__in=resolved_statuses).order_by('sla_due_at')

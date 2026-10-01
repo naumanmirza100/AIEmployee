@@ -22,6 +22,15 @@ def hr_admins(company_id):
                                            role__in=HR_ADMIN_ROLES))
 
 
+def leave_summary(leave_request):
+    """E.g. "Vacation, 12 Oct – 14 Oct (3 days)"."""
+    days = float(leave_request.days_requested or 0)
+    days_text = f"{days:g} day{'' if days == 1 else 's'}"
+    when = (f"{leave_request.start_date:%d %b}" if leave_request.start_date == leave_request.end_date
+            else f"{leave_request.start_date:%d %b} – {leave_request.end_date:%d %b}")
+    return f"{leave_request.get_leave_type_display()}, {when} ({days_text})"
+
+
 def leave_request_submitted(leave_request):
     """To HR admins and the employee's manager; not to whoever asked."""
     emp = leave_request.employee
@@ -33,15 +42,10 @@ def leave_request_submitted(leave_request):
         recipients.append(manager.company_user)
     recipients = [cu for cu in recipients if cu.id != emp.company_user_id]
 
-    days = float(leave_request.days_requested or 0)
-    days_text = f"{days:g} day{'' if days == 1 else 's'}"
-    when = (f"{leave_request.start_date:%d %b}" if leave_request.start_date == leave_request.end_date
-            else f"{leave_request.start_date:%d %b} – {leave_request.end_date:%d %b}")
     return notify_company_users(
         recipients,
         title=f"Leave request from {emp.full_name}",
-        message=(f"{leave_request.get_leave_type_display()}, {when} ({days_text}). "
-                 "Waiting for a decision."),
+        message=f"{leave_summary(leave_request)}. Waiting for a decision.",
         link='/hr/dashboard?tab=leave',
         kind='hr_leave_request',
     )

@@ -215,7 +215,7 @@ export default function HomeView() {
             </CardDescription>
           </div>
           {actionItems.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => navigate('/me/tasks')} className="text-white/60 hover:text-white">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/me/work')} className="text-white/60 hover:text-white">
               View all <ArrowRight className="h-3.5 w-3.5 ml-1" />
             </Button>
           )}

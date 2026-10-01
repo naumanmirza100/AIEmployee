@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LogOut, Bell, Key, User, Menu } from 'lucide-react';
+import { LogOut, Bell, Key, User, Menu, ListChecks } from 'lucide-react';
 import AgentSidebar, { EXPANDED_W, COLLAPSED_W } from '@/components/common/AgentSidebar';
 import ThemeToggle from '@/components/common/ThemeToggle';
 import {
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { API_BASE_URL } from '@/config/apiConfig';
+import { fetchMyWork, urgentCount } from '@/utils/myWork';
 
 const DashboardNavbar = ({
   icon: Icon,
@@ -99,6 +100,17 @@ const DashboardNavbar = ({
     const interval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // "My work" for a dashboard login: how much is overdue or due today, across
+  // the agents. Employee logins have it in the My Space sidebar instead.
+  const [urgentWork, setUrgentWork] = useState(0);
+  useEffect(() => {
+    if (!usesCompanyFeed) return undefined;
+    const load = () => fetchMyWork().then((items) => setUrgentWork(urgentCount(items))).catch(() => {});
+    load();
+    const interval = setInterval(load, 120000);
+    return () => clearInterval(interval);
+  }, [usesCompanyFeed]);
 
   // Close panel on outside click
   useEffect(() => {
@@ -207,6 +219,21 @@ const DashboardNavbar = ({
             </div>
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <ThemeToggle />
+              {usesCompanyFeed && (
+                <button
+                  onClick={() => navigate('/my-work')}
+                  className="h-8 w-8 sm:h-9 sm:w-9 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors relative"
+                  title={urgentWork > 0 ? `My work: ${urgentWork} overdue or due today` : 'My work'}
+                  aria-label="My work"
+                >
+                  <ListChecks className="h-4 w-4" />
+                  {urgentWork > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 h-4 min-w-[1rem] px-0.5 rounded-full bg-amber-500 text-[10px] font-bold text-pure-white flex items-center justify-center">
+                      {urgentWork > 9 ? '9+' : urgentWork}
+                    </span>
+                  )}
+                </button>
+              )}
               {/* Notification Bell */}
               <div className="relative" ref={notifRef}>
                 <button
