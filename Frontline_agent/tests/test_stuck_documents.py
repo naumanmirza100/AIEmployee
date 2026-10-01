@@ -101,3 +101,12 @@ class StuckDocumentTests(FrontlineTestCase):
                                          uploaded_by=self.rival_user, processing_status='failed')
         code, _ = self.retry(theirs)
         self.assertEqual(code, 404)
+
+    def test_the_documents_tab_is_told_a_document_failed_and_why(self):
+        # The tab lists documents from the dashboard endpoint, which left the
+        # status out: a failed upload showed as "Queued", with no Retry.
+        self.doc('failed', processing_error='No such file')
+        code, body = self.call(views.frontline_dashboard, self.admin, method='get')
+        self.assertEqual(code, 200)
+        [doc] = body['data']['recent_documents']
+        self.assertEqual((doc['processing_status'], doc['processing_error']), ('failed', 'No such file'))

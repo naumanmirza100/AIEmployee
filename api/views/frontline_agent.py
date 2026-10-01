@@ -714,6 +714,15 @@ def frontline_dashboard(request):
                         'document_type': d.document_type,
                         'is_indexed': d.is_indexed,
                         'processed': d.processed,
+                        # The documents tab reads its list from here; without
+                        # these a failed upload showed as "Queued", with no
+                        # reason and no Retry.
+                        'processing_status': d.processing_status,
+                        'processing_error': d.processing_error or None,
+                        'chunks_processed': d.chunks_processed,
+                        'chunks_total': d.chunks_total,
+                        'file_size': d.file_size,
+                        'is_outdated': getattr(d, 'is_outdated', False),
                         'created_at': d.created_at.isoformat(),
                     }
                     for d in recent_documents

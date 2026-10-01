@@ -310,8 +310,9 @@ def _move_interview_seats(company_id, ids, target):
                 interview.interviewers.remove(*ids)
                 interview.interviewers.add(target)
             moved += 1
-        except ScheduleConflict:
-            skipped.append(f'{interview.candidate_name}: {_name(target)} is busy then')
+        except ScheduleConflict as clash:
+            why = clash.clashes[0].describe(stored_zone(interview)) if clash.clashes else f'{_name(target)} is busy then'
+            skipped.append(f'{interview.candidate_name}: {why}')
     return {'moved': moved, 'to': _name(target), 'skipped': skipped}
 
 

@@ -330,7 +330,10 @@ def leave_request_post_save(sender, instance: LeaveRequest, created, **kwargs):
         return
     ctx = _leave_request_context(instance)
     if created:
-        alerts.leave_request_submitted(instance)
+        # Only a request waiting for a decision; leave entered as already
+        # approved (by HR, or an import) needs nobody's attention.
+        if instance.status == 'pending':
+            alerts.leave_request_submitted(instance)
         _run_matching_workflows(company_id=company_id,
                                 event='leave_request_submitted', context=ctx)
         return

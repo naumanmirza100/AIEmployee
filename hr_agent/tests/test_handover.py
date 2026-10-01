@@ -136,5 +136,7 @@ class HandoverTests(HRTestCase):
         code, body = self.hand_over({'interviews': self.tom.user_id})
         self.assertEqual(code, 200)
         self.assertEqual(body['data']['results']['interviews']['moved'], 0)
-        self.assertTrue(body['data']['results']['interviews']['skipped'])
+        [reason] = body['data']['results']['interviews']['skipped']
+        self.assertIn('is busy', reason)                       # says why, not just "busy then"
+        self.assertIn('Project Manager meeting', reason)
         self.assertEqual(list(self.interview.interviewers.all()), [self.lee.user])

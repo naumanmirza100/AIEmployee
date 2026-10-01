@@ -1331,7 +1331,7 @@ def update_interview(request, interview_id):
                         ensure_free(sorted(added), interview.scheduled_datetime,
                                     interview.duration_minutes, tz_name=stored_zone(interview),
                                     viewer_source='recruitment', reveal_private=True,
-                                    exclude=[('recruitment', interview.id)])
+                                    exclude=[('recruitment', interview.id)], suggest=False)
                         interview.interviewers.set(valid)
                 except ScheduleConflict as clash:
                     return clash.response()

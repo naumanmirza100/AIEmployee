@@ -47,6 +47,14 @@ class HRAlertTests(HRTestCase):
         self.ask_for_leave(self.admin_emp)               # an HR admin asking for themselves
         self.assertEqual(len(bell(self.admin)), 1)       # only the earlier request
 
+    def test_leave_entered_as_already_approved_needs_nobody(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        start = timezone.now().date() + timedelta(days=10)
+        LeaveRequest.objects.create(employee=self.member_emp, leave_type='vacation', start_date=start,
+                                    end_date=start, days_requested=1, status='approved')
+        self.assertEqual(bell(self.admin), [])
+
     def test_other_companies_hear_nothing(self):
         self.ask_for_leave(self.member_emp)
         self.assertEqual(bell(self.rival_admin), [])
