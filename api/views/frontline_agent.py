@@ -6790,6 +6790,14 @@ def list_handoff_queue(request):
 
         qs = qs.order_by('-handoff_requested_at', '-created_at')[:200]
         rows = [_serialize_ticket_for_handoff(t) for t in qs]
+        # Who's best placed to take a waiting customer right now: the same
+        # person for every pending row, so it's worked out once.
+        if any(r.get('handoff_status') == 'pending' for r in rows):
+            from Frontline_agent.routing import suggest_assignee
+            suggestion = suggest_assignee(company)
+            for row in rows:
+                if row.get('handoff_status') == 'pending':
+                    row['suggested_assignee'] = suggestion
         return Response({'status': 'success', 'data': rows, 'count': len(rows)})
     except Exception:
         logger.exception("list_handoff_queue failed")

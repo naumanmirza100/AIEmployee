@@ -1461,6 +1461,22 @@ export function HandoffQueueTab() {
       setReassigningHandoff(false);
     }
   };
+  // One-click assign to the suggested colleague (see Frontline_agent/routing.py).
+  const [assigningId, setAssigningId] = useState(null);
+  const assignSuggested = async (t) => {
+    const who = t.suggested_assignee;
+    if (!who) return;
+    setAssigningId(t.id);
+    try {
+      await frontlineAgentService.reassignHandoff(t.id, who.id);
+      toast({ title: 'Assigned', description: `${who.name} has the hand-off.` });
+      load();
+    } catch (e) {
+      toast({ title: 'Assign failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+    } finally {
+      setAssigningId(null);
+    }
+  };
   const handleMacroInsert = (body) => {
     setDrawer((prev) => {
       const cur = prev.reply || '';
@@ -1663,9 +1679,20 @@ export function HandoffQueueTab() {
                   </TableCell>
                   <TableCell><Badge variant="outline" className="text-xs">{t.priority}</Badge></TableCell>
                   <TableCell className="text-right">
-                    <Button size="sm" variant="outline" onClick={() => openTicket(t)}>
-                      Open
-                    </Button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {/* Best placed to take it right now: free on the shared calendar,
+                          on the Frontline team, fewest open tickets. One click assigns. */}
+                      {t.handoff_status === 'pending' && t.suggested_assignee && (
+                        <Button size="sm" variant="secondary" disabled={assigningId === t.id}
+                          title={`Suggested: ${t.suggested_assignee.reason}`}
+                          onClick={() => assignSuggested(t)}>
+                          {assigningId === t.id ? 'Assigning…' : `Assign to ${t.suggested_assignee.name}`}
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => openTicket(t)}>
+                        Open
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
