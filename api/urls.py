@@ -277,6 +277,11 @@ urlpatterns = [
     re_path(r'^project-manager/ai/calendar-schedule/?$', pm_agent.calendar_schedule, name='pm_calendar_schedule'),
     re_path(r'^project-manager/ai/notifications/scan/?$', pm_agent.scan_notifications, name='pm_scan_notifications'),
     re_path(r'^project-manager/ai/notifications/?$', pm_agent.list_notifications, name='pm_list_notifications'),
+    # The same company feed at a neutral address. Every agent's alerts land in
+    # it, but /project-manager/ is gated on buying the PM agent, so a company
+    # without it had a bell that could never load (api/middleware/module_access).
+    re_path(r'^company/notifications/?$', pm_agent.list_notifications, name='company_list_notifications'),
+    re_path(r'^company/notifications/read/?$', pm_agent.mark_notifications_read, name='company_mark_notifications_read'),
     re_path(r'^project-manager/ai/notifications/read/?$', pm_agent.mark_notifications_read, name='pm_mark_notifications_read'),
     re_path(r'^project-manager/ai/team-performance/?$', pm_agent.team_performance, name='pm_team_performance'),
     re_path(r'^project-manager/ai/time-estimation/?$', pm_agent.time_estimation, name='pm_time_estimation'),

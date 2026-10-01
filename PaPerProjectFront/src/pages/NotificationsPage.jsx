@@ -131,7 +131,7 @@ const NotificationsPage = () => {
   const authToken = localStorage.getItem('auth_token') || localStorage.getItem('company_auth_token');
   const isPM = isCompanyUser && !localStorage.getItem('auth_token');
   const notifEndpoint = isPM
-    ? `${API_BASE_URL}/project-manager/ai/notifications`
+    ? `${API_BASE_URL}/company/notifications`
     : `${API_BASE_URL}/notifications`;
 
   // Company users get the same profile block the dashboard shows. Project users
@@ -175,7 +175,7 @@ const NotificationsPage = () => {
   const markAsRead = async (id) => {
     try {
       if (isPM) {
-        await fetch(`${API_BASE_URL}/project-manager/ai/notifications/read`, {
+        await fetch(`${API_BASE_URL}/company/notifications/read`, {
           method: 'POST',
           headers: { Authorization: `Token ${authToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ notification_ids: [id] }),
@@ -195,7 +195,7 @@ const NotificationsPage = () => {
       if (isPM) {
         const allIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
         if (allIds.length) {
-          await fetch(`${API_BASE_URL}/project-manager/ai/notifications/read`, {
+          await fetch(`${API_BASE_URL}/company/notifications/read`, {
             method: 'POST',
             headers: { Authorization: `Token ${authToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ notification_ids: allIds }),

@@ -75,7 +75,7 @@ const DashboardNavbar = ({
   // login, not only Project Manager's, despite the endpoint's name.
   const usesCompanyFeed = isCompanyUser && !localStorage.getItem('auth_token');
   const notifEndpoint = usesCompanyFeed
-    ? `${API_BASE_URL}/project-manager/ai/notifications`
+    ? `${API_BASE_URL}/company/notifications`
     : `${API_BASE_URL}/notifications`;
 
   useEffect(() => {
@@ -115,7 +115,7 @@ const DashboardNavbar = ({
     try {
       if (isCompanyUser && !localStorage.getItem('auth_token')) {
         // PMNotifications use a different mark-read endpoint
-        await fetch(`${API_BASE_URL}/project-manager/ai/notifications/read`, {
+        await fetch(`${API_BASE_URL}/company/notifications/read`, {
           method: 'POST',
           headers: { 'Authorization': `Token ${authToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ notification_ids: [id] }),
@@ -136,7 +136,7 @@ const DashboardNavbar = ({
       if (isCompanyUser && !localStorage.getItem('auth_token')) {
         const allIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
         if (allIds.length) {
-          await fetch(`${API_BASE_URL}/project-manager/ai/notifications/read`, {
+          await fetch(`${API_BASE_URL}/company/notifications/read`, {
             method: 'POST',
             headers: { 'Authorization': `Token ${authToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ notification_ids: allIds }),
