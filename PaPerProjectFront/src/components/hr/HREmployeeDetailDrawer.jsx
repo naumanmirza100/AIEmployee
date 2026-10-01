@@ -25,9 +25,10 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, User, Briefcase, Building2, Mail, CalendarClock, FileText,
   ClipboardList, ChevronRight, DollarSign, Plus, Trash2, Star,
-  Pencil, Shield, Target, Download, AlertTriangle,
+  Pencil, Shield, Target, Download, AlertTriangle, ArrowRightLeft,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
+import HandoverDialog from './HandoverDialog';
 
 const STAT_BG = 'rgba(167,139,250,0.2)';
 const STAT_FG = '#a78bfa';
@@ -390,6 +391,8 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
   // field for anonymize. This single dialog handles both actions with
   // a styled UI matching the rest of HR, plus an optional reason for
   // the audit log.
+  // Hand over a leaver's open work in every agent (opens after Deactivate too).
+  const [handoverOpen, setHandoverOpen] = useState(false);
   const [dangerDialog, setDangerDialog] = useState({
     open: false,
     action: null, // 'anonymize' | 'deactivate'
@@ -427,7 +430,10 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
       }
       const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
       setData(refreshed?.data || null);
+      const wasDeactivate = dangerDialog.action === 'deactivate';
       setDangerDialog({ open: false, action: null, reason: '', busy: false });
+      // Their open work in the other agents is still theirs: offer to hand it over.
+      if (wasDeactivate) setHandoverOpen(true);
     } catch (e) {
       toast({
         title: dangerDialog.action === 'anonymize' ? 'Anonymize failed' : 'Deactivate failed',
@@ -585,6 +591,14 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                         vs. editing employment_status through the general update
                         endpoint. Deactivate is the standard offboarding flow;
                         reactivate reverses it. Both are HR-admin only server-side. */}
+                    {!e.anonymized_at && (
+                      <Button size="sm" variant="outline"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setHandoverOpen(true)}
+                        title="Give their open tasks, tickets, reports and interviews to someone else">
+                        <ArrowRightLeft className="h-3 w-3 mr-1" /> Hand over work
+                      </Button>
+                    )}
                     {!e.anonymized_at && e.employment_status !== 'offboarded' && (
                       <Button size="sm" variant="outline"
                         className="h-7 px-2 text-xs text-amber-300 hover:text-amber-200 border-amber-400/30"
@@ -1330,6 +1344,12 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
         the old `window.confirm` / `window.prompt` popups. Same dialog
         drives both actions — only the copy changes based on
         `dangerDialog.action`. */}
+    <HandoverDialog
+      employeeId={data?.employee?.id}
+      open={handoverOpen}
+      onOpenChange={setHandoverOpen}
+    />
+
     <Dialog open={dangerDialog.open} onOpenChange={(o) => {
       if (!dangerDialog.busy) setDangerDialog((s) => ({ ...s, open: o }));
     }}>

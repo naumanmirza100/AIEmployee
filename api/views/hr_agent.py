@@ -4982,6 +4982,44 @@ def update_employee(request, employee_id):
 #      it back to the same state.
 # ============================================================================
 
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def employee_handover(request, employee_id):
+    """Hand over someone's open work in every agent (see hr_agent.handover).
+
+    GET: what they own — open tasks, support tickets, direct reports,
+    interview seats — and who each group can go to; plus meetings they
+    organise and projects they lead, listed only. POST
+    ``{assignments: {group: target_id}}`` moves the chosen groups. HR-admin only.
+    """
+    from hr_agent import handover
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    company = request.user.company
+    employee = Employee.objects.filter(pk=employee_id, company=company).first()
+    if not employee:
+        return Response({'status': 'error', 'message': 'Employee not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': handover.summary(employee)})
+
+    assignments = (request.data or {}).get('assignments')
+    if not isinstance(assignments, dict) or not assignments:
+        return Response({'status': 'error', 'message': 'Choose who gets at least one group.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        results = handover.hand_over(employee, assignments, request.user)
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    _write_audit_log(request.user, company, 'employee.handover', 'employee', employee.id,
+                     after={key: {'moved': r['moved'], 'to': r['to']} for key, r in results.items()})
+    return Response({'status': 'success', 'data': {'results': results,
+                                                   'remaining': handover.summary(employee)}})
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])

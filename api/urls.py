@@ -867,6 +867,7 @@ urlpatterns = [
     re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/?$', hr_agent.list_leave_balances, name='hr_list_leave_balances'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/adjust/?$', hr_agent.adjust_leave_balance, name='hr_adjust_leave_balance'),  # POST
     re_path(r'^hr/employees/(?P<employee_id>\d+)/deactivate/?$', hr_agent.deactivate_employee, name='hr_deactivate_employee'),  # POST
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/handover/?$', hr_agent.employee_handover, name='hr_employee_handover'),  # GET/POST
     re_path(r'^hr/employees/(?P<employee_id>\d+)/reactivate/?$', hr_agent.reactivate_employee, name='hr_reactivate_employee'),  # POST
 
     # Compensation history (HR-admin only)
