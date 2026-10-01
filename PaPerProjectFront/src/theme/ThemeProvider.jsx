@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 /**
  * Light / dark theme for the whole app.
+ *
+ * Dark unless the visitor has picked otherwise. Their pick is saved in this
+ * browser and used on every later visit.
  *
  * Three states, not two: 'light', 'dark' and 'system'. 'system' follows the
  * operating system and keeps following it — someone whose laptop switches to
@@ -14,7 +17,14 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
  * this provider takes over from there and keeps them in step.
  */
 
-const STORAGE_KEY = 'ppp-theme';
+// Written only when the visitor picks a theme, so "nothing stored" really
+// means "never chose" and gets the default.
+const STORAGE_KEY = 'ppp-theme-choice';
+// Earlier builds wrote the theme here on every visit, 'system' included,
+// whether or not anyone chose it. Only 'light' and 'dark' there were real
+// choices (the toggle offered nothing else), so those are still honoured.
+const LEGACY_KEY = 'ppp-theme';
+const DEFAULT_THEME = 'dark';
 const ThemeContext = createContext(null);
 
 function systemPrefersDark() {
@@ -25,12 +35,14 @@ function systemPrefersDark() {
 
 function readStoredTheme() {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+    const chosen = localStorage.getItem(STORAGE_KEY);
+    if (chosen === 'light' || chosen === 'dark' || chosen === 'system') return chosen;
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy === 'light' || legacy === 'dark') return legacy;
   } catch (_) {
     // Private browsing, blocked storage — fall through to the default.
   }
-  return 'system';
+  return DEFAULT_THEME;
 }
 
 function applyTheme(theme) {
@@ -50,12 +62,18 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => {
     setIsDark(applyTheme(theme));
-    try {
-      localStorage.setItem(STORAGE_KEY, theme);
-    } catch (_) {
-      // Not fatal — the theme still applies for this page load.
-    }
   }, [theme]);
+
+  // Only a real choice is saved. Saving on every load, as this used to, made
+  // the default indistinguishable from a choice and pinned everyone to it.
+  const setTheme = useCallback((next) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch (_) {
+      // Not fatal — the theme still applies for this visit.
+    }
+    setThemeState(next);
+  }, []);
 
   // Follow the OS while the choice is 'system'.
   useEffect(() => {
@@ -69,9 +87,9 @@ export function ThemeProvider({ children }) {
   const value = useMemo(() => ({
     theme,                                   // 'light' | 'dark' | 'system'
     isDark,                                  // what is actually showing
-    setTheme: setThemeState,
-    toggleTheme: () => setThemeState(isDark ? 'light' : 'dark'),
-  }), [theme, isDark]);
+    setTheme,
+    toggleTheme: () => setTheme(isDark ? 'light' : 'dark'),
+  }), [theme, isDark, setTheme]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

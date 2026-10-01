@@ -26,7 +26,8 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from core.models import CompanyUser, UserProfile
-from hr_agent.models import Employee, LeaveRequest
+from hr_agent import alerts
+from hr_agent.models import Employee, HRWorkflowExecution, LeaveRequest
 
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,22 @@ def backfill_employees_for_company(company_id: int) -> int:
     return created
 
 
+# Every event an HRWorkflow can listen for (`trigger_conditions.on`), and what
+# fires it. A workflow saved with any other event name would never run — two
+# of the built-in templates shipped like that — so the API refuses one.
+WORKFLOW_EVENTS = {
+    'employee_hired': 'An employee record is created',
+    'employee_offboarding_started': 'An employee starts serving notice',
+    'employee_leaving': 'An employee is offboarded',
+    'employee_on_leave': 'An employee goes on leave',
+    'employee_on_probation': 'An employee is put on probation',
+    'employee_30_days': "30 days after an employee's start date (daily job)",
+    'leave_request_submitted': 'A leave request is submitted',
+    'leave_request_approved': 'A leave request is approved',
+    'leave_request_rejected': 'A leave request is rejected',
+}
+
+
 def _system_user():
     """Single shared Django User used as `executed_by` when a workflow fires
     from a model signal (no human request to attribute it to)."""
@@ -296,6 +313,14 @@ def employee_post_save(sender, instance: Employee, created, **kwargs):
             company_id=instance.company_id, event='employee_on_probation',
             context=_employee_context(instance, event='employee_on_probation'),
         )
+    elif new_status == 'notice':
+        # Serving notice is where offboarding starts; the built-in offboarding
+        # template listens for this and moves them to `offboarded` itself at
+        # the end. (It used to listen for an event nothing sent.)
+        _run_matching_workflows(
+            company_id=instance.company_id, event='employee_offboarding_started',
+            context=_employee_context(instance, event='employee_offboarding_started'),
+        )
 
 
 @receiver(post_save, sender=LeaveRequest)
@@ -305,6 +330,7 @@ def leave_request_post_save(sender, instance: LeaveRequest, created, **kwargs):
         return
     ctx = _leave_request_context(instance)
     if created:
+        alerts.leave_request_submitted(instance)
         _run_matching_workflows(company_id=company_id,
                                 event='leave_request_submitted', context=ctx)
         return
@@ -314,6 +340,18 @@ def leave_request_post_save(sender, instance: LeaveRequest, created, **kwargs):
     elif instance.status == 'rejected':
         _run_matching_workflows(company_id=company_id,
                                 event='leave_request_rejected', context=ctx)
+
+
+@receiver(post_save, sender=HRWorkflowExecution)
+def workflow_execution_post_save(sender, instance: HRWorkflowExecution, created,
+                                 update_fields=None, **kwargs):
+    """Tell HR admins when a run stops for approval. It stops either as it is
+    created (a workflow that needs approval to start) or at an approval step
+    partway through, which saves `status` via update_fields."""
+    if instance.status != 'awaiting_approval':
+        return
+    if created or (update_fields and 'status' in update_fields):
+        alerts.workflow_awaiting_approval(instance)
 
 
 # --------------------------------------------------------------------------

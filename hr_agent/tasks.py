@@ -657,6 +657,9 @@ def walk_hr_time_based_events():
       * **document_expiring** — for HRDocument rows with `extracted_fields.expiry_date`
         in the next 30 days.
 
+    It also fires the `employee_30_days` *workflow* event (see
+    `_fire_thirty_day_events`), which is not a notification template.
+
     Run daily via Beat (e.g. once at 06:00 UTC).
     """
     from datetime import date as _date
@@ -773,8 +776,48 @@ def walk_hr_time_based_events():
                                  'role': role},
                     )
 
+    try:
+        thirty_day = _fire_thirty_day_events(today)
+    except Exception:
+        logger.exception('walk_hr_time_based_events: 30-day workflow events failed')
+        thirty_day = 0
+
     logger.info("walk_hr_time_based_events: scheduled %d notifications", created_total)
-    return {'scheduled': created_total}
+    return {'scheduled': created_total, 'thirty_day_employees': thirty_day}
+
+
+# How late a 30-day event may still fire if the daily walk didn't run on the
+# day itself (worker down, deploy). Each workflow runs once per employee — its
+# idempotency key sees to that — so the overlap never repeats one.
+THIRTY_DAY_CATCH_UP_DAYS = 7
+
+
+def _fire_thirty_day_events(today):
+    """Fire the `employee_30_days` workflow event for employees who started 30
+    days ago. Nothing fired it before, so the built-in "30-day check-in"
+    template never ran. Returns how many employees were due."""
+    from hr_agent.models import Employee, HRWorkflow
+    from hr_agent.signals import _employee_context, _run_matching_workflows
+
+    companies = {
+        w.company_id
+        for w in HRWorkflow.objects.filter(is_active=True).only('company_id', 'trigger_conditions')
+        if (w.trigger_conditions or {}).get('on') == 'employee_30_days'
+    }
+    if not companies:
+        return 0
+    due = Employee.objects.filter(
+        company_id__in=companies,
+        start_date__gte=today - timedelta(days=30 + THIRTY_DAY_CATCH_UP_DAYS),
+        start_date__lte=today - timedelta(days=30),
+        employment_status__in=['onboarding', 'active', 'probation'],
+    )
+    count = 0
+    for emp in due:
+        _run_matching_workflows(company_id=emp.company_id, event='employee_30_days',
+                                context=_employee_context(emp, event='employee_30_days'))
+        count += 1
+    return count
 
 
 @shared_task(name='hr_agent.tasks.purge_hr_audit_log')

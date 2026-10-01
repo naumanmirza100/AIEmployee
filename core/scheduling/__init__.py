@@ -1,7 +1,7 @@
-"""One calendar across the PM, HR and Frontline agents.
+"""One calendar across the PM, HR and Frontline agents and recruitment interviews.
 
 Each agent keeps its own meeting table; `core.models.CalendarBlock` holds every
-employee's busy time from all three, so any agent can refuse a booking that
+employee's busy time from all of them, so any agent can refuse a booking that
 would double-book someone, whichever agent made the other booking.
 
     sync       keeps CalendarBlock in step with the meeting tables (signals)
@@ -15,10 +15,12 @@ from core.scheduling.conflicts import (  # noqa: F401
     Clash,
     ScheduleConflict,
     booking_guard,
+    busy_intervals,
     ensure_free,
     find_conflicts,
     free_slots,
     lock_people,
+    overlaps,
     suggest_slots,
 )
 from core.scheduling.identity import login_user_id_for_company_user  # noqa: F401

@@ -10,6 +10,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from core.api_key_service import supported_providers
 from core.models import Agent, AdminPricingConfig
 
 
@@ -56,6 +57,8 @@ def list_agents(request):
                 'description': agent.description,
                 'features': agent.features or [],
                 'default_provider': agent.default_provider,
+                # null = any provider; otherwise the only ones a key may use.
+                'supported_providers': list(supported_providers(agent.slug) or []) or None,
                 'is_active': agent.is_active,
                 'is_purchasable': agent.is_purchasable,
                 'sort_order': agent.sort_order,

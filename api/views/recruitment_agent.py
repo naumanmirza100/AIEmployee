@@ -1031,6 +1031,86 @@ def delete_job_description(request, job_description_id):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def interview_hr_handoff(request, interview_id):
+    """Hired → a new starter in HR (see recruitment_agent.hr_handoff).
+
+    GET: the review form — pre-filled from the interview and job, with the
+    departments, managers and onboarding workflows to show. POST: create the
+    HR record (status `candidate`), which starts HR's onboarding, or with
+    `link_existing` attach the HR record that already uses their email.
+    """
+    from recruitment_agent import hr_handoff
+    company_user = request.user
+    company = company_user.company
+    interview = (Interview.objects.filter(id=interview_id, company_user=company_user)
+                 .select_related('cv_record__job_description', 'hr_employee').first())
+    if not interview:
+        return Response({'status': 'error', 'message': 'Interview not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': hr_handoff.form(interview, company)})
+
+    if not hr_handoff.hr_available(company):
+        return Response({'status': 'error', 'code': 'no_hr',
+                         'message': "Your company doesn't have the HR agent, so there's nowhere to add them."},
+                        status=status.HTTP_403_FORBIDDEN)
+    if interview.outcome != 'HIRED':
+        return Response({'status': 'error', 'message': 'Mark the candidate as Hired first.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if interview.hr_employee_id:
+        e = interview.hr_employee
+        return Response({'status': 'error', 'code': 'already_in_hr',
+                         'message': f'{e.full_name} is already in HR.',
+                         'data': {'employee': {'id': e.id, 'full_name': e.full_name}}},
+                        status=status.HTTP_409_CONFLICT)
+
+    from api.views.hr_agent import _write_audit_log
+    if request.data.get('link_existing'):
+        existing = hr_handoff.existing_employee(interview, company, request.data.get('work_email'))
+        if existing is None:
+            return Response({'status': 'error', 'message': 'There is no HR record to link.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        hr_handoff.link_existing(interview, existing)
+        return Response({'status': 'success', 'data': {
+            'employee': {'id': existing.id, 'full_name': existing.full_name}, 'linked': True,
+        }})
+
+    employee, errors = hr_handoff.create_new_starter(interview, company, request.data)
+    if errors:
+        return Response({'status': 'error', 'message': next(iter(errors.values())), 'errors': errors},
+                        status=status.HTTP_400_BAD_REQUEST)
+    onboarding = hr_handoff.onboarding_workflows(company)
+    _write_audit_log(company_user, company, 'employee.create', 'employee', employee.id, before=None,
+                     after={'full_name': employee.full_name, 'work_email': employee.work_email,
+                            'job_title': employee.job_title, 'employment_status': employee.employment_status,
+                            'start_date': employee.start_date.isoformat() if employee.start_date else None,
+                            'source': 'recruitment', 'interview_id': interview.id})
+    from hr_agent import alerts
+    alerts.new_starter_from_recruitment(employee, added_by=company_user.full_name or company_user.email,
+                                        onboarding=onboarding)
+    return Response({'status': 'success', 'data': {
+        'employee': {'id': employee.id, 'full_name': employee.full_name},
+        'onboarding_workflows': onboarding,
+    }}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def list_interviewer_options(request):
+    """Colleagues who can sit in on an interview: this company's employee
+    logins (people with an employee account), who have calendars to block."""
+    from core.tenancy import members_of
+    users = members_of(request.user.company).order_by('first_name', 'last_name', 'username')[:500]
+    return Response({'status': 'success', 'data': [
+        {'id': u.id, 'name': (u.get_full_name() or u.username).strip(), 'email': u.email}
+        for u in users
+    ]})
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1063,9 +1143,14 @@ def list_interviews(request):
         except (ValueError, TypeError):
             page_num, page_size = 1, 20
 
+        # The browser's zone, recorded for the recruiter's interview times if
+        # none is known yet (see recruitment_agent.interview_time).
+        from recruitment_agent.interview_time import remember_timezone
+        remember_timezone(company_user, request.query_params.get('timezone'))
+
         interviews = Interview.objects.filter(company_user=company_user).select_related(
-            'cv_record', 'cv_record__job_description'
-        )
+            'cv_record', 'cv_record__job_description', 'hr_employee'
+        ).prefetch_related('interviewers')
 
         if status_filter:
             interviews = interviews.filter(status=status_filter)
@@ -1114,6 +1199,11 @@ def list_interviews(request):
                 'outcome': interview.outcome or '',
                 'scheduled_datetime': interview.scheduled_datetime.isoformat() if interview.scheduled_datetime else None,
                 'selected_slot': interview.selected_slot,
+                'duration_minutes': interview.duration_minutes,
+                'timezone_name': interview.timezone_name or None,
+                'interviewers': _interviewers_payload(interview),
+                'hr_employee': ({'id': interview.hr_employee_id, 'full_name': interview.hr_employee.full_name}
+                                if interview.hr_employee_id else None),
                 'meeting_link': interview.meeting_link or '',
                 'confirmation_token': interview.confirmation_token,
                 'cv_record_id': interview.cv_record_id,
@@ -1125,9 +1215,12 @@ def list_interviews(request):
                 'created_at': interview.created_at.isoformat() if interview.created_at else None,
             })
 
+        from recruitment_agent.hr_handoff import hr_available
         return Response({
             'status': 'success',
             'data': interview_list,
+            # Whether hired candidates can be handed to HR at all.
+            'hr_available': hr_available(company_user.company),
             'pagination': {
                 'total': total_count,
                 'page': page_num,
@@ -1146,6 +1239,11 @@ def list_interviews(request):
             'status': 'error',
             'message': f'Failed to list interviews: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _interviewers_payload(interview):
+    return [{'id': u.id, 'name': (u.get_full_name() or u.username).strip(), 'email': u.email}
+            for u in interview.interviewers.all()]
 
 
 VALID_INTERVIEW_STATUSES = {'PENDING', 'SCHEDULED', 'COMPLETED', 'CANCELLED', 'RESCHEDULED'}
@@ -1206,6 +1304,40 @@ def update_interview(request, interview_id):
         if new_meeting_link is not None:
             interview.meeting_link = new_meeting_link.strip() or None
 
+        # Colleagues interviewing alongside the recruiter. Employee logins of
+        # this company only; the interview becomes busy time on their calendars.
+        interviewer_ids = request.data.get('interviewer_ids')
+        if interviewer_ids is not None:
+            from core.tenancy import members_of
+            if not isinstance(interviewer_ids, list):
+                return Response({'status': 'error', 'message': 'interviewer_ids must be a list'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            wanted = {int(x) for x in interviewer_ids if str(x).isdigit()}
+            valid = set(members_of(company_user.company).filter(pk__in=wanted)
+                        .values_list('id', flat=True))
+            if wanted - valid:
+                return Response({'status': 'error',
+                                 'message': 'Interviewers must be colleagues in your company.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            added = valid - set(interview.interviewers.values_list('id', flat=True))
+            booked = (interview.scheduled_datetime is not None
+                      and interview.status in ('SCHEDULED', 'RESCHEDULED', 'CONFIRMED'))
+            if added and booked:
+                # Someone joining a booked interview must be free then.
+                from core.scheduling import ScheduleConflict, booking_guard, ensure_free
+                from recruitment_agent.interview_time import stored_zone
+                try:
+                    with booking_guard(added):
+                        ensure_free(sorted(added), interview.scheduled_datetime,
+                                    interview.duration_minutes, tz_name=stored_zone(interview),
+                                    viewer_source='recruitment', reveal_private=True,
+                                    exclude=[('recruitment', interview.id)])
+                        interview.interviewers.set(valid)
+                except ScheduleConflict as clash:
+                    return clash.response()
+            else:
+                interview.interviewers.set(valid)
+
         interview.save()
 
         # Resend confirmation email with the updated meeting link
@@ -1265,6 +1397,7 @@ def update_interview(request, interview_id):
                 'candidate_name': interview.candidate_name,
                 'job_title': job_title,
                 'meeting_link': interview.meeting_link or '',
+                'interviewers': _interviewers_payload(interview),
             }
         })
     except KeyServiceError:
@@ -1363,6 +1496,8 @@ def get_reschedule_slots(request, interview_id):
             'data': {
                 'slots': result.get('slots', []),
                 'message': result.get('message'),
+                'timezone': result.get('timezone'),
+                'timezone_caption': result.get('timezone_caption'),
             }
         })
     except KeyServiceError:
@@ -1404,6 +1539,13 @@ def reschedule_interview(request, interview_id):
         result = interview_agent.reschedule_interview(interview_id, new_slot_datetime)
 
         if not result.get('success'):
+            # Someone on the interview is busy then: 409, with who and when
+            # everyone is free, like the other agents' schedulers.
+            if result.get('code') == 'schedule_conflict':
+                return Response({'status': 'error', 'code': 'schedule_conflict',
+                                 'message': result.get('error'),
+                                 'data': result.get('conflict')},
+                                status=status.HTTP_409_CONFLICT)
             return Response({
                 'status': 'error',
                 'message': result.get('error', 'Reschedule failed')
@@ -1435,7 +1577,9 @@ def schedule_interview(request):
     """Schedule an interview for an approved candidate"""
     try:
         company_user = request.user
-        
+        from recruitment_agent.interview_time import remember_timezone
+        remember_timezone(company_user, request.data.get('timezone'))
+
         log_service = LogService()
         interview_agent = InterviewSchedulingAgent(log_service=log_service)
 
@@ -2319,7 +2463,12 @@ def interview_settings(request):
                     'message': f'Job with id {job_id} not found or does not belong to your company.'
                 }, status=status.HTTP_404_NOT_FOUND)
         
+        from core.scheduling import zone_name
+        from recruitment_agent.interview_time import remember_timezone, zone_caption
+        browser_tz = request.query_params.get('timezone') if request.method == 'GET' else request.data.get('timezone')
+
         if request.method == 'GET':
+            remember_timezone(company_user, browser_tz)
             # Try to get job-specific settings first, then fallback to company-wide settings
             if job:
                 settings = RecruiterInterviewSettings.objects.filter(company_user=company_user, job=job).first()
@@ -2340,9 +2489,12 @@ def interview_settings(request):
                         'interview_time_gap': 30,
                         'default_interview_type': 'ONLINE',
                         'time_slots_json': [],
+                        'timezone_name': zone_name(browser_tz),
+                        'timezone_caption': zone_caption(zone_name(browser_tz)),
                     }
                 })
-            
+
+            settings_tz = settings.timezone_name or 'UTC'
             return Response({
                 'status': 'success',
                 'data': {
@@ -2355,6 +2507,9 @@ def interview_settings(request):
                     'interview_time_gap': settings.interview_time_gap,
                     'default_interview_type': getattr(settings, 'default_interview_type', 'ONLINE') or 'ONLINE',
                     'time_slots_json': settings.time_slots_json,
+                    # The slots and hours above are times in this zone.
+                    'timezone_name': settings_tz,
+                    'timezone_caption': zone_caption(settings_tz),
                 }
             })
         
@@ -2394,6 +2549,10 @@ def interview_settings(request):
                     settings.default_interview_type = 'ONLINE'
             
             update_availability_only = request.data.get('update_availability', False)
+
+            # Saving settings from the browser states the zone its times are in.
+            if browser_tz:
+                settings.timezone_name = zone_name(browser_tz, default=settings.timezone_name or '')
             
             if 'schedule_from_date' in request.data:
                 from datetime import datetime
@@ -2537,9 +2696,11 @@ def interview_settings(request):
                     'end_time': settings.end_time.strftime('%H:%M') if settings.end_time else '17:00',
                     'interview_time_gap': settings.interview_time_gap,
                     'time_slots_json': settings.time_slots_json,
+                    'timezone_name': settings.timezone_name or 'UTC',
+                    'timezone_caption': zone_caption(settings.timezone_name or 'UTC'),
                 }
             })
-    
+
     except KeyServiceError:
         raise
     except Exception as e:

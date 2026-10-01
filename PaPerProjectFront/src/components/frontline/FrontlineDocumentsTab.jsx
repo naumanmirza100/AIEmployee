@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   FileText, Upload, Loader2, FileSearch, ListChecks, Trash2,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, RotateCcw,
 } from 'lucide-react';
 import InfoHint from './InfoHint';
 import { HINTS } from './frontlineTutorialSteps';
@@ -33,6 +33,7 @@ export default function FrontlineDocumentsTab({
   onExtract,
   onToggleOutdated,
   onDelete,
+  onRetry,
 }) {
   const docs = Array.isArray(documents) ? documents : [];
   return (
@@ -76,6 +77,7 @@ export default function FrontlineDocumentsTab({
                 onExtract={onExtract}
                 onToggleOutdated={onToggleOutdated}
                 onDelete={onDelete}
+                onRetry={onRetry}
               />
             ))}
           </div>
@@ -87,7 +89,7 @@ export default function FrontlineDocumentsTab({
 
 // One card per document. Extracted into its own component so the main grid
 // map stays readable — nothing else references it.
-function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, onToggleOutdated, onDelete }) {
+function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, onToggleOutdated, onDelete, onRetry }) {
   const fmt = (doc.file_format || 'other').toLowerCase();
   const fmtColor = {
     pdf: 'bg-rose-500/15 text-rose-400 border-rose-400/30',
@@ -147,6 +149,12 @@ function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, o
             </span>
           )}
         </div>
+        {/* Why it failed — the card used to say only "Failed". */}
+        {procStatus === 'failed' && doc.processing_error && (
+          <div className="mt-2 text-[11px] text-rose-400 line-clamp-2" title={doc.processing_error}>
+            {doc.processing_error}
+          </div>
+        )}
       </div>
 
       {/* Expandable summary */}
@@ -187,6 +195,12 @@ function DocCard({ doc, summaryState, onToggleSummary, onSummarize, onExtract, o
       <div data-tour-docs="card-actions" className="border-t border-white/[0.06] px-2 py-1.5 flex items-center justify-between bg-black/10">
         <div className="flex items-center">
           <InfoHint {...HINTS.docsCardActions} className="ml-1 mr-2" />
+          {procStatus === 'failed' && onRetry && (
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-violet-400 hover:text-violet-300"
+              onClick={() => onRetry(doc)} title="Process this document again">
+              <RotateCcw className="h-3.5 w-3.5 mr-1" /> Retry
+            </Button>
+          )}
           <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onSummarize(doc)} title="Full summary">
             <FileSearch className="h-3.5 w-3.5 mr-1" /> Summarize
           </Button>

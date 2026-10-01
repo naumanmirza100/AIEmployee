@@ -1096,6 +1096,14 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 6 * 3600},
     },
 
+    # Frontline / HR documents stuck on "processing" -> failed, so the user
+    # sees why and can press Retry. Every 10 minutes.
+    'fail-stalled-documents': {
+        'task': 'core.tasks.fail_stalled_documents',
+        'schedule': 600.0,
+        'options': {'expires': 540},
+    },
+
     # Meeting reminders - runs every 5 minutes
     # Sends 1-hour and 15-minute reminders for upcoming meetings
     'send-meeting-reminders': {

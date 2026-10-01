@@ -246,6 +246,19 @@ def timeline(actions, today=None, project=None):
     }
 
 
+def leave_before(user, start, due):
+    """The label of `user`'s first approved leave that overlaps [start, due]
+    ("On leave 6–10 Oct"), or None. `user['on_leave']` is attached by the view
+    from HR; without HR there is none, and nothing is flagged."""
+    if not user or not due:
+        return None
+    for leave in user.get('on_leave') or ():
+        first, last = _to_date(leave.get('start')), _to_date(leave.get('end'))
+        if first and last and first <= due and last >= start:
+            return leave.get('label') or 'On leave'
+    return None
+
+
 def inspect(actions, available_users=None, *, today=None, project=None):
     """Report what the proposed actions are missing.
 
@@ -307,6 +320,11 @@ def inspect(actions, available_users=None, *, today=None, project=None):
     missing_by_index = {item['index']: [g['field'] for g in item['gaps']] for item in items}
 
     rows = []
+    leave_warnings = 0
+    users_by_id = {str(u.get('id')): u for u in users}
+    # Leave only matters once work can start: today, or the project's start.
+    today_date = _to_date(today) or date.today()
+    work_from = max(today_date, _to_date(plan.get('start')) or today_date)
     for index, action in enumerate(actions):
         if not isinstance(action, dict):
             continue
@@ -326,6 +344,11 @@ def inspect(actions, available_users=None, *, today=None, project=None):
         elif kind == 'create_task':
             given = _to_date(action.get('due_date'))
             dated = plan['tasks'].get(index)
+            assignee = None if _is_blank(action.get('assignee_id')) else action.get('assignee_id')
+            due = given or _to_date((dated or {}).get('suggested'))
+            leave = leave_before(users_by_id.get(str(assignee)), work_from, due) if assignee else None
+            if leave:
+                leave_warnings += 1
             rows.append({
                 'index': index,
                 'action': kind,
@@ -335,10 +358,16 @@ def inspect(actions, available_users=None, *, today=None, project=None):
                 'suggested': given is None and dated is not None,
                 'weight': (dated or {}).get('weight'),
                 'missing': missing_by_index.get(index, []),
+                # The assignee is on approved leave before this is due. A
+                # warning, not a block: the user decides.
+                'leave': leave,
             })
 
     return {
-        'needs_input': any_gap,
+        # Someone on leave is reason enough to review before creating, even
+        # with nothing missing; otherwise the warning would never be seen.
+        'needs_input': any_gap or leave_warnings > 0,
+        'leave_warnings': leave_warnings,
         'no_users': no_users and any_gap,
         'items': items,
         'summary': summary,
@@ -348,17 +377,20 @@ def inspect(actions, available_users=None, *, today=None, project=None):
     }
 
 
-def chat_text(actions, answer=None):
-    """The sentence to show above the gap form.
+def chat_text(actions, answer=None, gaps=None):
+    """The sentence to show above the gap form. `gaps` is `inspect`'s result,
+    which says why the form is showing: missing details, people on leave, or both.
 
     The agent's `answer` is often not prose at all but the JSON the actions
     were parsed out of. Passed through, it put a screen of raw JSON in the chat
     above the form. Use it only when it reads as a sentence; otherwise say in
     plain words what is about to be created.
     """
+    on_leave_note = (" Some tasks go to people who are on leave before they're due — "
+                     "check them below.") if gaps and gaps.get('leave_warnings') else ''
     text = (answer or '').strip()
     if text and text[0] not in '[{' and '"action"' not in text:
-        return text
+        return text + on_leave_note
 
     counts = {'create_project': 0, 'create_task': 0}
     for action in actions or []:
@@ -371,8 +403,16 @@ def chat_text(actions, answer=None):
         if n:
             parts.append('%d %s%s' % (n, noun, '' if n == 1 else 's'))
     what = ' and '.join(parts) or 'this'
-    return ("Here's the plan: %s. A few details are missing — fill in what you "
+    missing = gaps is None or bool(gaps.get('items'))
+    on_leave = bool(gaps and gaps.get('leave_warnings'))
+    if on_leave and not missing:
+        return ("Here's the plan: %s. Some tasks go to people who are on leave before "
+                "they're due — check them below, then confirm." % what)
+    text = ("Here's the plan: %s. A few details are missing — fill in what you "
             "know below, then confirm." % what)
+    if on_leave:
+        text += " Some tasks also go to people who are on leave before they're due."
+    return text
 
 
 def apply_answers(actions, answers):

@@ -134,3 +134,55 @@ def rebuild_calendar_blocks():
     total = sum(s['blocks'] for s in stats.values())
     logger.info('rebuild_calendar_blocks: %s', stats)
     return f'Rebuilt {total} calendar block(s)'
+
+
+# How long a document may sit in `pending` / `processing` with no progress
+# before it is called stuck. Progress (`updated_at`) moves at the start and
+# after every batch of chunks; parsing a very large scanned PDF is the longest
+# silent stretch, hence the margin. A job that was merely slow still finishes
+# and sets itself back to `ready`.
+DOCUMENT_STALL_MINUTES = 30
+
+_NEVER_STARTED = ("Processing never started. The background worker may be down. "
+                  "Press Retry to process it again.")
+_STOPPED = ("Processing stopped before it finished. The background worker may have "
+            "restarted. Press Retry to process it again.")
+
+
+def stalled_documents(model, now=None):
+    """`model`'s documents stuck in `pending` / `processing` (Frontline and HR
+    documents share these fields)."""
+    cutoff = (now or timezone.now()) - timedelta(minutes=DOCUMENT_STALL_MINUTES)
+    return model.objects.filter(processing_status__in=('pending', 'processing'),
+                                updated_at__lt=cutoff)
+
+
+def is_stalled(document, now=None):
+    cutoff = (now or timezone.now()) - timedelta(minutes=DOCUMENT_STALL_MINUTES)
+    return (document.processing_status in ('pending', 'processing')
+            and document.updated_at is not None and document.updated_at < cutoff)
+
+
+@shared_task(name='core.tasks.fail_stalled_documents')
+def fail_stalled_documents():
+    """Mark Frontline and HR documents that stopped processing as failed.
+
+    They used to show "processing" forever: when the queue is reachable but no
+    worker takes the job, or a worker dies partway, nothing ever updated the
+    row. Failing it tells the user and shows the Retry button. It is not
+    re-queued here: the original job may still be waiting in the queue, and
+    two copies running together would interleave their chunks.
+    """
+    from Frontline_agent.models import Document
+    from hr_agent.models import HRDocument
+
+    failed = 0
+    for model in (Document, HRDocument):
+        for doc in stalled_documents(model):
+            doc.processing_error = _NEVER_STARTED if doc.processing_status == 'pending' else _STOPPED
+            doc.processing_status = 'failed'
+            doc.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
+            failed += 1
+    if failed:
+        logger.warning('fail_stalled_documents: marked %d stuck document(s) failed', failed)
+    return f'Marked {failed} stuck document(s) failed'

@@ -40,6 +40,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
     auto_send_followups: true,
     auto_send_reminders: true,
   });
+  // Which zone the hours and slots are in, e.g. "Asia/Karachi (UTC+05:00)".
+  const [timezoneCaption, setTimezoneCaption] = useState('');
   const [interviewSettings, setInterviewSettings] = useState({
     schedule_from_date: '',
     schedule_to_date: '',
@@ -189,6 +191,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
           interview_time_gap: data.interview_time_gap || 30,
           default_interview_type: data.default_interview_type || 'ONLINE',
         });
+        setTimezoneCaption(data.timezone_caption || '');
         // Load time slots from the response
         if (data.time_slots_json && Array.isArray(data.time_slots_json)) {
           setTimeSlots(data.time_slots_json);
@@ -996,6 +999,13 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                     </p>
                   </div>
                 </div>
+
+                {timezoneCaption && (
+                  <p id="REC-settings-timezone-note" className="text-xs text-muted-foreground">
+                    Interview times are in <span className="font-medium text-foreground">{timezoneCaption}</span>.
+                    Candidates see this zone next to every slot, and their own time when it differs.
+                  </p>
+                )}
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">

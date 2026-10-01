@@ -363,7 +363,8 @@ const NotificationsPage = () => {
                 const sev = getSeverity(n);
                 const style = SEVERITY_STYLE[sev];
                 const Icon = style.icon;
-                // Only the core Notification model carries link/action_url; PM rows won't.
+                // Core Notification rows carry link/action_url; company-feed rows carry
+                // `link` when the alert has a screen of its own (HR, Frontline, Recruitment).
                 const target = n.link || n.action_url;
 
                 return (

@@ -1055,8 +1055,18 @@ const AgentKeysSettingsPage = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openByok = (agent) => setByokModal({ open: true, agent, provider: agent.byok?.provider || 'openai', apiKey: '', error: '' });
-  const openRequest = (agent, isRenewal = false) => setRequestModal({ open: true, agent, provider: agent.managed?.provider || 'openai', note: '', preferred_duration: 'monthly', is_renewal: isRenewal });
+  // Only the providers this agent can actually call (null from the API = any).
+  // Offering the rest let people save keys that then failed on every request.
+  const providersFor = (agent) => {
+    const allowed = agent?.supported_providers;
+    return allowed ? providers.filter((p) => allowed.includes(p.value)) : providers;
+  };
+  const usableProvider = (agent, preferred) => {
+    const options = providersFor(agent).map((p) => p.value);
+    return options.includes(preferred) ? preferred : (options[0] || 'openai');
+  };
+  const openByok = (agent) => setByokModal({ open: true, agent, provider: usableProvider(agent, agent.byok?.provider || 'openai'), apiKey: '', error: '' });
+  const openRequest = (agent, isRenewal = false) => setRequestModal({ open: true, agent, provider: usableProvider(agent, agent.managed?.provider || 'openai'), note: '', preferred_duration: 'monthly', is_renewal: isRenewal });
 
   const submitByok = async () => {
     if (!byokModal.apiKey || byokModal.apiKey.length < 10) {
@@ -1341,7 +1351,7 @@ const AgentKeysSettingsPage = () => {
               <Select value={byokModal.provider} onValueChange={(v) => setByokModal({ ...byokModal, provider: v, error: '' })}>
                 <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
-                  {providers.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                  {providersFor(byokModal.agent).map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -1504,7 +1514,7 @@ const AgentKeysSettingsPage = () => {
               <Select value={requestModal.provider} onValueChange={(v) => setRequestModal({ ...requestModal, provider: v })}>
                 <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
-                  {providers.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                  {providersFor(requestModal.agent).map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

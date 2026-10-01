@@ -127,6 +127,19 @@ const SuperAdminApiKeysPage = () => {
 
   const [assignModal, setAssignModal] = useState({ open: false, replacingKey: null, prefillRequest: null });
   const [assignForm, setAssignForm] = useState({ company_id: '', agent_name: 'frontline_agent', provider: 'openai', api_key: '', reset_tokens: true, managed_tokens: '', renewal_period: 'none', duration_months: '', reset_interval_days: '7' });
+
+  // Only providers the chosen agent can call (`supported_providers` null = any).
+  // The server refuses the others; this keeps them out of the list, and moves
+  // the selection to a usable one when the agent (or a prefilled request) needs it.
+  const assignProviderOptions = useMemo(() => {
+    const allowed = agentOptions.find((a) => a.value === assignForm.agent_name)?.supported_providers;
+    return allowed ? PROVIDER_OPTIONS.filter((p) => allowed.includes(p.value)) : PROVIDER_OPTIONS;
+  }, [agentOptions, assignForm.agent_name]);
+  useEffect(() => {
+    if (assignProviderOptions.length && !assignProviderOptions.some((p) => p.value === assignForm.provider)) {
+      setAssignForm((f) => ({ ...f, provider: assignProviderOptions[0].value }));
+    }
+  }, [assignProviderOptions, assignForm.provider]);
   const [approveModal, setApproveModal] = useState({ open: false, request: null, key_cost: '', service_charge: '', discount_pct: '0', admin_note: '', sync_global_pricing: false });
   const [rejectModal, setRejectModal] = useState({ open: false, request: null, note: '' });
   // Edit a request's price/duration/note before payment (pending / payment_pending).
@@ -668,7 +681,7 @@ const SuperAdminApiKeysPage = () => {
                   <Select value={assignForm.provider} onValueChange={(v) => setAssignForm({ ...assignForm, provider: v })}>
                     <SelectTrigger className="bg-[var(--panel-1)] border-[var(--line-2)] text-white mt-1"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-[var(--panel-1)] border-[var(--line-2)] text-white">
-                      {PROVIDER_OPTIONS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                      {assignProviderOptions.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

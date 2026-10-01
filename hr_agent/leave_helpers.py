@@ -88,3 +88,45 @@ def resolve_approver_for_leave(employee, company):
         if emp:
             return emp
     return None
+
+
+_PART_LABELS = {'morning': 'morning', 'afternoon': 'afternoon', 'hours': 'part of the day'}
+
+
+def leave_label(start: _date, end: _date, part: str = '') -> str:
+    """'On leave 6–10 Oct', 'On leave 6 Oct (morning)'."""
+    if start == end:
+        text = f"On leave {start.day} {start:%b}"
+    elif (start.year, start.month) == (end.year, end.month):
+        text = f"On leave {start.day}–{end.day} {end:%b}"
+    else:
+        text = f"On leave {start.day} {start:%b}–{end.day} {end:%b}"
+    if part in _PART_LABELS:
+        text += f" ({_PART_LABELS[part]})"
+    return text
+
+
+def approved_leave_by_login(user_ids, from_date: _date, to_date: _date) -> dict:
+    """{login user id: [{start, end, part, label}]} — approved leave of the
+    employees behind these logins that overlaps [from_date, to_date].
+
+    Only approved leave: a pending request may still be turned down. Used to
+    warn before giving someone work due while they're away.
+    """
+    from hr_agent.models import LeaveRequest
+
+    ids = [int(u) for u in user_ids if u]
+    if not ids:
+        return {}
+    rows = (LeaveRequest.objects
+            .filter(status='approved', employee__user_id__in=ids,
+                    start_date__lte=to_date, end_date__gte=from_date)
+            .values_list('employee__user_id', 'start_date', 'end_date', 'partial_day_period')
+            .order_by('start_date'))
+    out: dict = {}
+    for user_id, start, end, part in rows:
+        out.setdefault(user_id, []).append({
+            'start': start.isoformat(), 'end': end.isoformat(), 'part': part or '',
+            'label': leave_label(start, end, part or ''),
+        })
+    return out

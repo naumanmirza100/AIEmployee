@@ -4,11 +4,17 @@ The app supports **light**, **dark** and **system** (follow the OS). Tailwind is
 configured with `darkMode: ["class"]`, so everything hangs off a single `dark`
 class on `<html>`.
 
-- `src/theme/ThemeProvider.jsx` owns the choice, persists it to `localStorage`
-  under `ppp-theme`, and keeps following the OS while the choice is `system`.
+**The default is dark.** A visitor who picks a theme keeps it: the pick is saved
+in their browser and used on every later visit.
+
+- `src/theme/ThemeProvider.jsx` owns the choice. It saves it to `localStorage`
+  under `ppp-theme-choice`, **only when the visitor picks one**, and keeps
+  following the OS while the choice is `system`. Earlier builds wrote
+  `ppp-theme` on every visit, so only `light` / `dark` values there are read,
+  as older choices.
 - The inline script in `index.html` applies the class **before first paint**, so
-  the page never flashes the wrong theme. If you change the storage key, change
-  it in both places.
+  the page never flashes the wrong theme. It repeats the same rules; if you
+  change the keys or the default, change them in both places.
 - `src/components/common/ThemeToggle.jsx` is the switcher. `<ThemeToggle />` is
   a single light/dark button; `<ThemeToggle variant="menu" />` offers all three
   options for a settings screen.

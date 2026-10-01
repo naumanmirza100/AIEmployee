@@ -466,21 +466,77 @@ def _frontline_meeting_items(user):
     return items
 
 
+def _recruitment_meeting_items(user):
+    """Booked interviews this employee runs or sits in on. Informational, like
+    Frontline's: the time is the candidate's choice, changed by the recruiter."""
+    from django.db.models import Q
+    from recruitment_agent.models import Interview
+
+    # The recruiter is a dashboard login; it is this employee when HR links
+    # the two, or failing that by the same email in the same company — the
+    # rule the shared calendar uses (core.scheduling.identity).
+    q = Q(interviewers=user) | Q(recruiter=user)
+    try:
+        from hr_agent.models import Employee
+        linked = Employee.objects.filter(user=user, company_user__isnull=False).values_list('company_user_id', flat=True)
+        q |= Q(company_user_id__in=list(linked))
+    except Exception:
+        pass
+    company_id = getattr(getattr(user, 'profile', None), 'company_id', None)
+    if user.email and company_id:
+        q |= Q(company_user__email__iexact=user.email, company_user__company_id=company_id)
+
+    interviews = (Interview.objects.filter(q, scheduled_datetime__isnull=False)
+                  .exclude(status='PENDING').distinct()
+                  .select_related('company_user').prefetch_related('interviewers')
+                  .order_by('-created_at')[:50])
+    items = []
+    for iv in interviews:
+        runs_it = user not in iv.interviewers.all()
+        recruiter = iv.company_user
+        items.append({
+            'id': iv.id,
+            'source': 'recruitment',
+            'source_label': 'Interview',
+            'organizer_name': (recruiter.full_name if recruiter else '') or 'Recruiter',
+            'organizer_email': _visible_email(recruiter.email) if recruiter else '',
+            'title': f'Interview: {iv.candidate_name} — {iv.job_role}',
+            'description': '',
+            'agenda': [],
+            'proposed_time': iv.scheduled_datetime.isoformat(),
+            'duration_minutes': iv.duration_minutes,
+            'status': (iv.status or '').lower(),
+            'my_status': 'organizer' if runs_it else 'scheduled',
+            'participants': [{'user_id': p.id, 'name': p.get_full_name() or p.username,
+                              'status': 'scheduled'} for p in iv.interviewers.all()],
+            'created_at': iv.created_at.isoformat() if iv.created_at else None,
+            'responses': [],
+            'meeting_link': iv.meeting_link,
+            'location': '',
+            'can_respond': False,
+            'can_suggest_time': False,
+            'respond_url': None,
+        })
+    return items
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def meeting_list_for_user(request):
     """Every meeting the current employee is part of, from the Project
-    Manager, HR and Frontline agents.
+    Manager, HR and Frontline agents, and interviews they run or sit in on.
 
-    Each item carries `source` ('pm' | 'hr' | 'frontline'); ids are only unique
-    within a source. `respond_url` (relative to /api) is where to send an
-    accept / reject / counter-proposal, and `can_respond` says whether the
-    employee may answer now. Frontline meetings are informational.
+    Each item carries `source` ('pm' | 'hr' | 'frontline' | 'recruitment');
+    ids are only unique within a source. `respond_url` (relative to /api) is
+    where to send an accept / reject / counter-proposal, and `can_respond`
+    says whether the employee may answer now. Frontline meetings and
+    interviews are informational.
     """
     try:
         user = request.user
         items = []
-        for collect in (_pm_meeting_items, _hr_meeting_items, _frontline_meeting_items):
+        for collect in (_pm_meeting_items, _hr_meeting_items, _frontline_meeting_items,
+                        _recruitment_meeting_items):
             try:
                 items += collect(user)
             except Exception:

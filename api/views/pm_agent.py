@@ -340,6 +340,29 @@ def _is_true(value):
     return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
+#: How far ahead Project Pilot looks for someone's approved leave.
+LEAVE_LOOKAHEAD_DAYS = 180
+
+
+def _with_upcoming_leave(users):
+    """Attach each person's approved leave over the coming months as
+    `on_leave` ([{start, end, part, label}]), so Project Pilot can warn before
+    giving someone work due while they're away. Needs HR; without it, or if
+    the lookup fails, the list is returned unchanged."""
+    try:
+        from hr_agent.leave_helpers import approved_leave_by_login
+        today = timezone.localdate()
+        leave = approved_leave_by_login([u.get('id') for u in users], today,
+                                        today + timedelta(days=LEAVE_LOOKAHEAD_DAYS))
+    except Exception:
+        logger.exception("_with_upcoming_leave: leave lookup failed")
+        return users
+    for user in users:
+        if leave.get(user.get('id')):
+            user['on_leave'] = leave[user['id']]
+    return users
+
+
 def _build_available_users(project_id=None, project=None, company_user=None):
     """
     Return users created by this company_user (from UserProfile).
@@ -366,7 +389,7 @@ def _build_available_users(project_id=None, project=None, company_user=None):
                 "name": user.get_full_name() or user.username,
                 "role": profile.role or "team_member",
             })
-        return available_users
+        return _with_upcoming_leave(available_users)
 
     # Fallback: team members for a specific project
     if project_id and project is not None:
@@ -393,7 +416,7 @@ def _build_available_users(project_id=None, project=None, company_user=None):
                 {"id": u.id, "username": u.username, "name": u.get_full_name() or u.username}
             )
 
-    return available_users
+    return _with_upcoming_leave(available_users)
 
 
 # Common words to ignore when matching user names in "only N users, X and Y" (avoids matching "and" as a name)
@@ -847,7 +870,7 @@ def project_pilot(request):
                         "data": {
                             # Not the raw `answer`: that is usually the JSON the
                             # actions came from, and it rendered as a wall of code.
-                            "answer": drafts.chat_text(actions, result.get("answer")),
+                            "answer": drafts.chat_text(actions, result.get("answer"), gaps),
                             "actions": actions,
                             "project_id": project.id if project else None,
                             **gaps,
@@ -4075,7 +4098,7 @@ def list_notifications(request):
         unread_only = request.GET.get("unread_only", "false").lower() == "true"
         limit = int(request.GET.get("limit", 50))
 
-        qs = PMNotification.objects.filter(company_user=company_user)
+        qs = PMNotification.objects.filter(company_user=company_user).select_related("project")
         if unread_only:
             qs = qs.filter(is_read=False)
 
@@ -4090,6 +4113,9 @@ def list_notifications(request):
             "project_name": n.project.name if n.project else None,
             "is_read": n.is_read,
             "data": n.data,
+            # Where the bell takes you: alerts from HR, Frontline and
+            # Recruitment carry a link to their screen (core.notification_utils).
+            "link": (n.data or {}).get("link") if isinstance(n.data, dict) else None,
             "created_at": n.created_at.isoformat(),
         } for n in notifications]
 

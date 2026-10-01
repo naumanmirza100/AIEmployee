@@ -36,7 +36,12 @@ _RESPONSE_LABELS = {
     'counter_proposed': 'new time proposed',
     'organizer': 'organizing',
     'scheduled': 'scheduled',
+    'on_leave': 'on leave',
 }
+
+# Busy time that isn't a meeting reads differently: "Ali is on leave 6–8 Oct",
+# "Mon Oct 06 is a company holiday (Eid)".
+_OFF_LABELS = {'leave': 'Leave', 'holiday': 'Company holiday'}
 
 
 def zone_info(tz_name):
@@ -95,11 +100,20 @@ class Clash:
 
     @property
     def source_label(self):
+        if self.source in _OFF_LABELS:
+            return _OFF_LABELS[self.source]
         return SOURCES[self.source].label if self.source in SOURCES else 'meeting'
 
     def describe(self, tz_name='UTC') -> str:
         zone = zone_info(tz_name)
         s, e = self.starts_at.astimezone(zone), self.ends_at.astimezone(zone)
+        if self.source == 'holiday':
+            return f'{s:%a %b %d} is a company holiday' + (f' ({self.title})' if self.title else '')
+        if self.source == 'leave':
+            last = (e - timedelta(microseconds=1))
+            days = f'{s:%a %b %d}' if last.date() == s.date() else f'{s:%a %b %d}–{last:%a %b %d}'
+            half = ' (half day)' if (e - s) < timedelta(hours=20) else ''
+            return f'{self.user_name} is on leave {days}{half}'
         span = f"{s:%a %b %d}, {clock_label(s)}–{clock_label(e)}"
         what = self.source_label
         state = _RESPONSE_LABELS.get(self.response)
@@ -122,9 +136,44 @@ class Clash:
         }
 
 
+def _company_ids_for(user_ids) -> set[int]:
+    from core.models import UserProfile
+    ids = {int(u) for u in user_ids if u}
+    if not ids:
+        return set()
+    rows = UserProfile.objects.filter(user_id__in=ids).values_list(
+        'company_id', 'created_by_company_user__company_id')
+    return {c for pair in rows for c in pair if c}
+
+
+def holiday_intervals(user_ids, start, end, tz_name='UTC') -> list[tuple[datetime, datetime, str]]:
+    """(starts, ends, name) of each company-wide day off that overlaps
+    [start, end) for these people's companies. A holiday is a date, so it is
+    read in `tz_name` — the zone the booking is being made in. Regional
+    holidays and working "bridge" days don't count."""
+    try:
+        from hr_agent.models import Holiday
+    except ImportError:  # pragma: no cover — HR app not installed
+        return []
+    companies = _company_ids_for(user_ids)
+    if not companies:
+        return []
+    zone = zone_info(tz_name)
+    first = _aware(start).astimezone(zone).date()
+    last = (_aware(end) - timedelta(microseconds=1)).astimezone(zone).date()
+    out = []
+    for day, name in (Holiday.objects.filter(company_id__in=companies, region='', is_working_day=False,
+                                             date__range=(first, last))
+                      .order_by('date').values_list('date', 'name').distinct()):
+        begins = datetime.combine(day, time(0), tzinfo=zone)
+        out.append((begins, begins + timedelta(days=1), name))
+    return out
+
+
 def find_conflicts(user_ids, start, end, *, exclude=(), viewer_source=None,
-                   reveal_private=False, hide_titles=False) -> list[Clash]:
-    """Every busy block that overlaps [start, end) for any of `user_ids`.
+                   reveal_private=False, hide_titles=False, tz_name=None) -> list[Clash]:
+    """Every busy block that overlaps [start, end) for any of `user_ids`,
+    and, when `tz_name` says which day it is, any company holiday.
 
     A private meeting's title is shown only to its own agent, and only when
     the caller says the viewer may see it (`reveal_private`); everyone else
@@ -147,7 +196,26 @@ def find_conflicts(user_ids, start, end, *, exclude=(), viewer_source=None,
             ends_at=block.ends_at,
             response=block.response,
         ))
+    if tz_name is not None:
+        for begins, ends, name in holiday_intervals(user_ids, start, end, tz_name):
+            clashes.append(Clash(user_id=0, user_name='Everyone', source='holiday', source_id=0,
+                                 title=name, starts_at=begins, ends_at=ends, response='holiday'))
     return clashes
+
+
+def busy_intervals(user_ids, start, end, *, exclude=(), tz_name=None) -> list[tuple[datetime, datetime]]:
+    """(starts_at, ends_at) of every busy block for `user_ids` overlapping
+    [start, end) — for checking many candidate times with one query. With
+    `tz_name`, company holidays are included."""
+    busy = list(_busy_blocks(user_ids, _aware(start), _aware(end), exclude)
+                .values_list('starts_at', 'ends_at'))
+    if tz_name is not None:
+        busy += [(s, e) for s, e, _ in holiday_intervals(user_ids, start, end, tz_name)]
+    return busy
+
+
+def overlaps(intervals, start, end) -> bool:
+    return any(s < end and e > start for s, e in intervals)
 
 
 def free_slots(user_ids, day: date, duration_minutes, tz_name='UTC', *, exclude=(),
@@ -157,6 +225,8 @@ def free_slots(user_ids, day: date, duration_minutes, tz_name='UTC', *, exclude=
     duration = timedelta(minutes=max(1, int(duration_minutes or 30)))
     day_start = datetime.combine(day, time(WORK_START_HOUR), tzinfo=zone)
     day_end = datetime.combine(day, time(WORK_END_HOUR), tzinfo=zone)
+    if holiday_intervals(user_ids, day_start, day_end, tz_name):
+        return []   # a company holiday: nobody is offered a time that day
     busy = list(_busy_blocks(user_ids, day_start, day_end, exclude).values_list('starts_at', 'ends_at'))
     earliest = max(timezone.now(), _aware(not_before)) if not_before else timezone.now()
 
@@ -278,7 +348,7 @@ def ensure_free(user_ids, starts, duration_minutes, *, tz_name='UTC', exclude=()
     for start in starts:
         found = find_conflicts(user_ids, start, start + duration, exclude=exclude,
                                viewer_source=viewer_source, reveal_private=reveal_private,
-                               hide_titles=hide_titles)
+                               hide_titles=hide_titles, tz_name=tz_name)
         if found:
             clashes += found
             clashing_starts.append(start)

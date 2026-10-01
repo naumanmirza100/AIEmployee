@@ -161,6 +161,14 @@ class RecruiterInterviewSettings(models.Model):
         blank=True,
         help_text="Generated time slots stored as JSON array. Format: [{'date': 'YYYY-MM-DD', 'time': 'HH:MM', 'datetime': 'YYYY-MM-DDTHH:MM'}, ...]"
     )
+
+    # The slots above, and start/end time, are wall-clock times in this zone.
+    # Blank = not known yet (older rows), read as UTC — which is how every
+    # slot used to be read, so a Karachi recruiter's 10:00 became 15:00 there.
+    timezone_name = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text="IANA timezone the recruiter's interview times are in, e.g. Asia/Karachi."
+    )
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -384,6 +392,24 @@ class Interview(models.Model):
     )
     scheduled_datetime = models.DateTimeField(null=True, blank=True)
     selected_slot = models.CharField(max_length=255, null=True, blank=True, help_text="The time slot selected by candidate")
+    # How long it runs — it blocks the recruiter's and interviewers' calendars
+    # for this long. Set from the recruiter's slot length when booked.
+    duration_minutes = models.PositiveSmallIntegerField(default=30)
+    # The zone scheduled_datetime is shown in (the recruiter's). Blank = booked
+    # before zones were recorded, shown in UTC as it always was.
+    timezone_name = models.CharField(max_length=64, blank=True, default='')
+    # Colleagues sitting in, besides the recruiter. Employee logins, so the
+    # interview is busy time on their calendars and in their meetings list.
+    interviewers = models.ManyToManyField(
+        User, blank=True, related_name='recruitment_interviews_joined',
+        help_text='Employee logins interviewing alongside the recruiter.')
+    # The HR record made for this candidate when they were hired (status
+    # `candidate`), which is what starts HR's onboarding. Set once; guards
+    # against adding the same hire twice.
+    hr_employee = models.ForeignKey(
+        'hr_agent.Employee', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='recruitment_interviews',
+        help_text='HR employee record created from this hire.')
     
     # Available slots (stored as JSON)
     available_slots_json = models.TextField(help_text="JSON array of available time slots offered to candidate")

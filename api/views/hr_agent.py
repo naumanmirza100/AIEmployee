@@ -80,6 +80,33 @@ def _hr_celery_broker_ready(timeout_seconds: float = 0.5) -> bool:
         return False
 
 
+def _hr_dispatch_document_processing(document):
+    """Queue parse+chunk+embed for an HR document; returns 'async' or 'inline'.
+    Probes the broker first and falls back to inline if Redis is down, so the
+    request doesn't stall in Celery's ~100s connection retry loop. Shared by
+    upload and Retry."""
+    from hr_agent.tasks import process_hr_document
+    dispatch_mode = 'async'
+    if _hr_celery_broker_ready(timeout_seconds=0.5):
+        try:
+            process_hr_document.apply_async(args=[document.id], retry=False)
+        except Exception:
+            logger.exception("process_hr_document: Celery dispatch failed, running inline")
+            dispatch_mode = 'inline'
+    else:
+        logger.warning("process_hr_document: Celery broker unreachable — running inline")
+        dispatch_mode = 'inline'
+
+    if dispatch_mode == 'inline':
+        try:
+            process_hr_document.apply(args=[document.id])
+        except Exception:
+            logger.exception("Inline process_hr_document fallback failed for HR doc %s",
+                             document.id)
+        document.refresh_from_db()
+    return dispatch_mode
+
+
 def _hr_get_or_create_user_for_company_user(company_user):
     """The `auth.User` a dashboard login acts as — needed because FKs like
     `HRDocument.uploaded_by` point at `auth.User`, not `core.CompanyUser`.
@@ -220,8 +247,9 @@ def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
 
 #: Roles that administer HR for their company: salaries, performance reviews,
 #: the GDPR export, anonymisation, leave-balance adjustment, the audit log.
-#: `company_user` is deliberately NOT here — see `_is_hr_admin`.
-HR_ADMIN_ROLES = ('hr_agent', 'owner', 'admin')
+#: `company_user` is deliberately NOT here — see `_is_hr_admin`. Defined in
+#: hr_agent.alerts, which also uses it to pick who gets HR's bell alerts.
+from hr_agent.alerts import HR_ADMIN_ROLES  # noqa: E402
 
 #: Roles `set_company_user_role` may grant. A subset of CompanyUser.ROLE_CHOICES:
 #: the agent-specific roles are not HR's to hand out.
@@ -1114,27 +1142,7 @@ def upload_hr_document(request):
             },
         )
 
-        # Dispatch processing — broker probe → fall back to inline if Redis is down,
-        # so the request doesn't stall in Celery's ~100s connection retry loop.
-        from hr_agent.tasks import process_hr_document
-        dispatch_mode = 'async'
-        if _hr_celery_broker_ready(timeout_seconds=0.5):
-            try:
-                process_hr_document.apply_async(args=[document.id], retry=False)
-            except Exception:
-                logger.exception("process_hr_document: Celery dispatch failed, running inline")
-                dispatch_mode = 'inline'
-        else:
-            logger.warning("process_hr_document: Celery broker unreachable — running inline")
-            dispatch_mode = 'inline'
-
-        if dispatch_mode == 'inline':
-            try:
-                process_hr_document.apply(args=[document.id])
-            except Exception:
-                logger.exception("Inline process_hr_document fallback failed for HR doc %s",
-                                 document.id)
-            document.refresh_from_db()
+        dispatch_mode = _hr_dispatch_document_processing(document)
 
         return Response({
             'status': 'accepted',
@@ -1383,6 +1391,24 @@ def delete_hr_document(request, document_id):
 
 # --- Workflow CRUD --------------------------------------------------------
 
+def _hr_unknown_trigger_response(trigger_conditions):
+    """400 if the workflow would listen for an event nothing fires, else None.
+
+    Such a workflow saves fine and then silently never runs — which is how two
+    of the built-in templates went unnoticed. No event at all is fine: that is
+    a manual-run workflow.
+    """
+    from hr_agent.signals import WORKFLOW_EVENTS
+    event = trigger_conditions.get('on')
+    if not event or event in WORKFLOW_EVENTS:
+        return None
+    return Response({
+        'status': 'error',
+        'message': f"Unknown trigger event '{event}'. It would never fire. Use one of: "
+                   + ', '.join(sorted(WORKFLOW_EVENTS)) + '.',
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
 def _serialize_hr_workflow(w: HRWorkflow) -> dict:
     return {
         'id': w.id, 'name': w.name, 'description': w.description,
@@ -1436,6 +1462,9 @@ def update_hr_workflow(request, workflow_id):
         if not isinstance(tc, dict):
             return Response({'status': 'error', 'message': 'trigger_conditions must be a dict'},
                             status=status.HTTP_400_BAD_REQUEST)
+        bad = _hr_unknown_trigger_response(tc)
+        if bad:
+            return bad
         w.trigger_conditions = tc
         dirty.append('trigger_conditions')
     if 'steps' in d:
@@ -1529,6 +1558,13 @@ def create_hr_workflow(request):
     if not name:
         return Response({'status': 'error', 'message': 'name is required'},
                         status=status.HTTP_400_BAD_REQUEST)
+    tc = d.get('trigger_conditions') or {}
+    if not isinstance(tc, dict):
+        return Response({'status': 'error', 'message': 'trigger_conditions must be a dict'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    bad = _hr_unknown_trigger_response(tc)
+    if bad:
+        return bad
     w = HRWorkflow.objects.create(
         company=company, name=name, description=d.get('description') or '',
         trigger_conditions=d.get('trigger_conditions') or {},
@@ -2375,7 +2411,7 @@ def hr_meeting_availability(request):
 
     is_admin = _is_hr_admin(request.user)
     clashes = find_conflicts(people, start, end, exclude=exclude, viewer_source='hr',
-                             reveal_private=is_admin)
+                             reveal_private=is_admin, tz_name=tz_name)
     suggestions = (suggest_slots(people, start, duration, tz_name, exclude=exclude)
                    if clashes else [])
     return Response({'status': 'success', 'data': {
@@ -6718,10 +6754,15 @@ def unmark_hr_document_outdated(request, document_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def reingest_hr_document(request, document_id):
-    """Re-run the ingestion pipeline on an HR doc — useful when processing
-    landed in `failed`, or after fixing OCR settings, or after updating the
-    embedding model. Wipes existing chunks + flips status back to
-    `processing`, then dispatches the Celery task. HR-admin only."""
+    """Re-run the ingestion pipeline on an HR doc — the Retry button on one
+    that `failed` (including one the stuck-document check failed), or after
+    fixing OCR settings or updating the embedding model. HR-admin only.
+
+    Refused while the doc is still genuinely processing: two runs at once
+    interleave their chunks. A run stuck past the stall limit counts as not
+    running.
+    """
+    from core.tasks import is_stalled
     if not _is_hr_admin(request.user):
         return Response({'status': 'error', 'message': 'HR-admin access required'},
                         status=status.HTTP_403_FORBIDDEN)
@@ -6730,30 +6771,27 @@ def reingest_hr_document(request, document_id):
     if not d:
         return Response({'status': 'error', 'message': 'Document not found'},
                         status=status.HTTP_404_NOT_FOUND)
+    if d.processing_status in ('pending', 'processing') and not is_stalled(d):
+        return Response({'status': 'error', 'code': 'still_processing',
+                         'message': 'This document is still being processed.'},
+                        status=status.HTTP_409_CONFLICT)
     d.chunks.all().delete()
     d.chunks_processed = 0
     d.chunks_total = 0
     d.is_indexed = False
-    d.processing_status = 'processing'
+    d.processing_status = 'pending'
     d.processing_error = ''
     d.save(update_fields=['chunks_processed', 'chunks_total', 'is_indexed',
                           'processing_status', 'processing_error', 'updated_at'])
-    try:
-        from hr_agent.tasks import process_hr_document
-        process_hr_document.delay(d.id)
-    except Exception as exc:
-        logger.exception("reingest_hr_document: failed to dispatch process_hr_document for doc %s", d.id)
-        d.processing_status = 'failed'
-        d.processing_error = f'Failed to enqueue: {exc}'
-        d.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
-        return Response({'status': 'error',
-                         'message': f'Failed to enqueue ingestion: {exc}'},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # Same dispatch as upload: it used to call `.delay()` directly, which hangs
+    # ~100s when the broker is unreachable instead of processing inline.
+    dispatch_mode = _hr_dispatch_document_processing(d)
     _write_audit_log(request.user, company, 'hr_document.reingest',
                      'hr_document', d.id,
                      after={'processing_status': d.processing_status})
     return Response({'status': 'success', 'data': {
         'id': d.id, 'processing_status': d.processing_status,
+        'processing_error': d.processing_error or None, 'dispatch_mode': dispatch_mode,
     }})
 
 

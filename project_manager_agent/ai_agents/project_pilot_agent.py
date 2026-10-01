@@ -313,6 +313,9 @@ class ProjectPilotAgent(BaseAgent):
                 users_str += f"- ID: {user.get('id', 'N/A')}, Username: {user.get('username', 'Unknown')}, Name: {user.get('name', user.get('username', 'Unknown'))}\n"
                 if 'role' in user:
                     users_str += f"  Role: {user.get('role')}\n"
+                if user.get('on_leave'):
+                    away = '; '.join(l.get('label', 'On leave') for l in user['on_leave'])
+                    users_str += f"  {away}. Don't give them work due while they're away.\n"
         
         # --- SPRINT PLANNING (takes priority) ---
         if is_sprint_planning:
@@ -454,7 +457,9 @@ RULES:
                 if available_users:
                     user_id_ref = "\nAVAILABLE USER IDs (use ONLY these numeric IDs for assignee_id):\n"
                     for u in available_users:
-                        user_id_ref += f"- {u.get('id')} = {u.get('name', u.get('username', 'Unknown'))}\n"
+                        away = '; '.join(l.get('label', 'On leave') for l in (u.get('on_leave') or []))
+                        user_id_ref += (f"- {u.get('id')} = {u.get('name', u.get('username', 'Unknown'))}"
+                                        + (f" ({away})" if away else '') + "\n")
                         user_ids_list.append(str(u.get('id')))
 
                 # Collect all task IDs from context so we can tell the LLM exactly how many to return

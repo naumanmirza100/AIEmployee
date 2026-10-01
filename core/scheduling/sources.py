@@ -13,7 +13,7 @@ decline it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from core.scheduling.identity import login_user_id_for_company_user, login_user_ids_for_employees
 
@@ -67,6 +67,8 @@ class Source:
     # is busy, so they skip the resync. Background reminder jobs save that way.
     relevant_fields: frozenset = frozenset()
     participant_model_label = ''
+    # Many-to-many attendee field, if any; `.set()`/`.add()` on it resync.
+    attendees_field = 'participants'
 
     @property
     def model(self):
@@ -191,7 +193,98 @@ class FrontlineSource(Source):
         return qs
 
 
-SOURCES: dict[str, Source] = {s.key: s for s in (ProjectManagerSource(), HRSource(), FrontlineSource())}
+class RecruitmentSource(Source):
+    """A booked interview occupies the recruiter and anyone interviewing with
+    them. Until the candidate picks a slot there is no time, so nothing."""
+    key = 'recruitment'
+    label = 'Interview'
+    model_label = 'recruitment_agent.Interview'
+    attendees_field = 'interviewers'
+    relevant_fields = frozenset({'scheduled_datetime', 'duration_minutes', 'status',
+                                 'company_user', 'company_user_id', 'recruiter', 'recruiter_id',
+                                 'candidate_name', 'job_role'})
+    BOOKED = ('SCHEDULED', 'RESCHEDULED', 'CONFIRMED')
+
+    def booking(self, iv, *, assume_active=False, include_declined=False):
+        if iv.scheduled_datetime is None:
+            return None
+        # Booked before interview zones were recorded: the stored time is the
+        # recruiter's clock read as UTC, hours off for most recruiters. Left
+        # off the calendar, as before, rather than block the wrong hour.
+        if not iv.timezone_name:
+            return None
+        if not assume_active and iv.status not in self.BOOKED:
+            return None
+        company_id = iv.company_user.company_id if iv.company_user_id else None
+        if not company_id and iv.cv_record_id:
+            job = getattr(iv.cv_record, 'job_description', None)
+            company_id = getattr(job, 'company_id', None)
+        starts, ends = _window(iv.scheduled_datetime, iv.duration_minutes)
+        # Private: the title names the candidate, which colleagues checking
+        # their own bookings in other agents have no need to see.
+        b = Booking(company_id=company_id, starts_at=starts, ends_at=ends,
+                    title=f'Interview: {iv.candidate_name} ({iv.job_role})'[:255], is_private=True)
+        for user_id in iv.interviewers.values_list('id', flat=True):
+            b.add(user_id, PARTICIPANT, 'scheduled')
+        if iv.company_user_id:
+            b.add(login_user_id_for_company_user(iv.company_user), ORGANIZER, ORGANIZER)
+        elif iv.recruiter_id:
+            b.add(iv.recruiter_id, ORGANIZER, ORGANIZER)
+        return b
+
+    def upcoming(self, since, company_id=None):
+        qs = self.model.objects.filter(scheduled_datetime__gte=since - timedelta(days=1))
+        if company_id:
+            qs = qs.filter(company_user__company_id=company_id)
+        return qs.select_related('company_user', 'cv_record__job_description')
+
+
+class LeaveSource(Source):
+    """Approved leave is busy time for the person on leave, in every agent —
+    the same as a meeting. Only approved: a pending request may be refused."""
+    key = 'leave'
+    label = 'Leave'
+    model_label = 'hr_agent.LeaveRequest'
+    attendees_field = ''
+    relevant_fields = frozenset({'status', 'start_date', 'end_date', 'partial_day_period',
+                                 'employee', 'employee_id'})
+    #: Where a half day splits, on the employee's clock.
+    MIDDAY = time(13, 0)
+
+    def booking(self, lr, *, assume_active=False, include_declined=False):
+        if lr.status != 'approved' or not lr.employee_id:
+            return None
+        # "Some hours" leave doesn't say which hours, so it can't block any.
+        if lr.partial_day_period == 'hours':
+            return None
+        employee = lr.employee
+        from zoneinfo import ZoneInfo
+        try:
+            zone = ZoneInfo(employee.timezone_name or 'UTC')
+        except Exception:
+            zone = ZoneInfo('UTC')
+        starts = datetime.combine(lr.start_date, time(0), tzinfo=zone)
+        ends = datetime.combine(lr.end_date + timedelta(days=1), time(0), tzinfo=zone)
+        if lr.partial_day_period == 'morning':
+            ends = datetime.combine(lr.start_date, self.MIDDAY, tzinfo=zone)
+        elif lr.partial_day_period == 'afternoon':
+            starts = datetime.combine(lr.start_date, self.MIDDAY, tzinfo=zone)
+        # Private and plainly titled: colleagues see "on leave", not the
+        # leave type or the reason.
+        b = Booking(company_id=employee.company_id, starts_at=starts, ends_at=ends,
+                    title='On leave', is_private=True)
+        b.add(employee.user_id, PARTICIPANT, 'on_leave')
+        return b
+
+    def upcoming(self, since, company_id=None):
+        qs = self.model.objects.filter(end_date__gte=(since - timedelta(days=1)).date())
+        if company_id:
+            qs = qs.filter(employee__company_id=company_id)
+        return qs.select_related('employee')
+
+
+SOURCES: dict[str, Source] = {s.key: s for s in (ProjectManagerSource(), HRSource(), FrontlineSource(),
+                                                  RecruitmentSource(), LeaveSource())}
 
 
 def people_for(source_key: str, meeting, *, include_declined=False) -> list[int]:

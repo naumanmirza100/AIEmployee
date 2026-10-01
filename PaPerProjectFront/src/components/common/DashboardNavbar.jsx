@@ -71,7 +71,10 @@ const DashboardNavbar = ({
   // Determine which auth token and notification endpoint to use
   const isCompanyUser = !!localStorage.getItem('company_auth_token');
   const authToken = localStorage.getItem('auth_token') || localStorage.getItem('company_auth_token');
-  const notifEndpoint = isCompanyUser && !localStorage.getItem('auth_token')
+  // A company login reads the company feed: every agent's alerts for that
+  // login, not only Project Manager's, despite the endpoint's name.
+  const usesCompanyFeed = isCompanyUser && !localStorage.getItem('auth_token');
+  const notifEndpoint = usesCompanyFeed
     ? `${API_BASE_URL}/project-manager/ai/notifications`
     : `${API_BASE_URL}/notifications`;
 
@@ -244,10 +247,15 @@ const DashboardNavbar = ({
                             onClick={() => {
                               if (!n.is_read) markAsRead(n.id);
                               setShowNotifPanel(false);
-                              // Pages that pass their own handler (User / PM dashboards)
-                              // keep their tab-switching behaviour; everywhere else we
-                              // open the full-detail page, since the dropdown truncates.
-                              if (onNotificationClick) {
+                              // An alert that says where it belongs (HR leave requests,
+                              // Frontline hand-offs, booked interviews…) opens that screen,
+                              // from whichever agent's page the bell is on. Otherwise pages
+                              // that pass their own handler (User / PM dashboards) keep
+                              // their tab-switching behaviour; everywhere else we open the
+                              // full-detail page, since the dropdown truncates.
+                              if (usesCompanyFeed && n.link) {
+                                navigate(n.link);
+                              } else if (onNotificationClick) {
                                 onNotificationClick(n);
                               } else {
                                 navigate('/notifications');

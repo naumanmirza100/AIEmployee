@@ -34,7 +34,9 @@ from core.models import (
 logger = logging.getLogger(__name__)
 
 # Resolved live from the Agent table — see core.api_key_service._ValidAgents.
-from core.api_key_service import VALID_AGENTS  # noqa: E402
+from core.api_key_service import (  # noqa: E402
+    VALID_AGENTS, provider_supported, supported_providers, unsupported_provider_message,
+)
 
 VALID_PROVIDERS = {name for name, _ in PROVIDER_CHOICES}
 
@@ -173,6 +175,8 @@ def list_agent_keys(request):
             'managed': _serialize_key(agent_keys['managed']) if 'managed' in agent_keys else None,
             'quota': _serialize_quota(quotas_by_agent.get(agent_name), agent_name),
             'default_provider': AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai'),
+            # null = any provider; otherwise the only ones the key form offers.
+            'supported_providers': list(supported_providers(agent_name) or []) or None,
         })
 
     return Response({
@@ -201,6 +205,10 @@ def upsert_byok_key(request):
                         status=status.HTTP_400_BAD_REQUEST)
     if provider not in VALID_PROVIDERS:
         return Response({'status': 'error', 'message': 'Invalid provider'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if not provider_supported(agent_name, provider):
+        return Response({'status': 'error', 'code': 'unsupported_provider',
+                         'message': unsupported_provider_message(agent_name, provider)},
                         status=status.HTTP_400_BAD_REQUEST)
     if len(api_key) < 10:
         return Response({'status': 'error', 'message': 'API key looks too short to be valid'},
@@ -435,6 +443,10 @@ def create_key_request(request):
                             status=status.HTTP_400_BAD_REQUEST)
         if provider not in VALID_PROVIDERS:
             return Response({'status': 'error', 'message': 'Invalid provider'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not provider_supported(agent_name, provider):
+            return Response({'status': 'error', 'code': 'unsupported_provider',
+                             'message': unsupported_provider_message(agent_name, provider)},
                             status=status.HTTP_400_BAD_REQUEST)
 
         has_purchase = CompanyModulePurchase.objects.filter(
