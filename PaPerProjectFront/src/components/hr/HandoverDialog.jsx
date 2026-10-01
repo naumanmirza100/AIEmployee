@@ -9,11 +9,12 @@ import hrAgentService from '@/services/hrAgentService';
 /**
  * Hand over a leaver's open work in every agent.
  *
- * Lists what they still own — open project tasks, support tickets, the people
- * who report to them, seats on upcoming interviews — with a "Give to" choice
- * per group. Nothing moves until HR confirms; a group left on "Keep for now"
- * stays put. Meetings they organise and projects they lead are listed only:
- * those are changed in their own agent.
+ * Lists what they still own — open project tasks and projects they lead,
+ * meetings they organise, support tickets, the people who report to them and
+ * leave waiting for their decision, interviews they run or sit in on — with a
+ * "Give to" choice per group. Nothing moves until HR confirms; a group left on
+ * "Keep for now" stays put. Anything at a time the new person is busy is
+ * skipped, and the result says why.
  */
 const fmtWhen = (iso) => {
   if (!iso) return '';
@@ -31,12 +32,16 @@ export default function HandoverDialog({ employeeId, open, onOpenChange, onDone 
   const [choice, setChoice] = useState({});
   const [error, setError] = useState('');
   const [results, setResults] = useState(null);
+  const [labels, setLabels] = useState({});
 
   const load = () => {
     setLoading(true);
     setError('');
     hrAgentService.getEmployeeHandover(employeeId)
-      .then((res) => setData(res?.data || null))
+      .then((res) => {
+        setData(res?.data || null);
+        setLabels(Object.fromEntries((res?.data?.groups || []).map((g) => [g.key, g.label])));
+      })
       .catch((e) => setError(e?.message || 'Could not load their work.'))
       .finally(() => setLoading(false));
   };
@@ -94,7 +99,7 @@ export default function HandoverDialog({ employeeId, open, onOpenChange, onDone 
           <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm space-y-1">
             {Object.entries(results).map(([key, r]) => (
               <p key={key}>
-                <span className="font-medium">{r.moved}</span> moved to {r.to}
+                {labels[key] ? `${labels[key]}: ` : ''}<span className="font-medium">{r.moved}</span> moved to {r.to}
                 {r.skipped?.length ? ` — ${r.skipped.length} skipped: ${r.skipped.join('; ')}` : ''}
               </p>
             ))}
@@ -125,7 +130,8 @@ export default function HandoverDialog({ employeeId, open, onOpenChange, onDone 
                 {g.items.map((item) => (
                   <li key={item.id} className="truncate">
                     <span className="text-foreground">{item.title}</span>
-                    {item.detail ? ` · ${g.key === 'interviews' ? fmtWhen(item.detail) : item.detail}` : ''}
+                    {item.when ? ` · ${fmtWhen(item.when)}` : ''}
+                    {item.detail ? ` · ${item.detail}` : ''}
                     {item.due ? ` · due ${item.due}` : ''}
                   </li>
                 ))}
@@ -134,23 +140,6 @@ export default function HandoverDialog({ employeeId, open, onOpenChange, onDone 
             </div>
           ))}
         </div>
-
-        {(data?.meetings?.length > 0 || data?.projects_led?.length > 0) && (
-          <div className="rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground space-y-2">
-            <p className="font-medium text-foreground">Also theirs — change these in their own agent</p>
-            {data.meetings?.length > 0 && (
-              <div>
-                <p>Upcoming meetings they organise (cancel or move them; others were invited by them):</p>
-                <ul className="mt-1 space-y-0.5">
-                  {data.meetings.map((m, i) => <li key={i}>{m.agent}: {m.title} · {fmtWhen(m.when)}</li>)}
-                </ul>
-              </div>
-            )}
-            {data.projects_led?.length > 0 && (
-              <p>Projects they lead: {data.projects_led.map((p) => p.name).join(', ')}</p>
-            )}
-          </div>
-        )}
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 
