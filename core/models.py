@@ -1815,6 +1815,24 @@ class NotificationPreference(models.Model):
         return f"{self.user.username} - {self.notification_type}"
 
 
+class NotificationSetting(models.Model):
+    """A dashboard login's choice for one topic of notification: in the bell,
+    by email, or both. The topics and their defaults are in
+    `core.notification_settings`; no row means the default. A row with topic
+    'all' and email off pauses every email."""
+    company_user = models.ForeignKey('CompanyUser', on_delete=models.CASCADE, related_name='notification_settings')
+    topic = models.CharField(max_length=40)
+    in_app = models.BooleanField(default=True)
+    email = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('company_user', 'topic')]
+
+    def __str__(self):
+        return f"{self.company_user_id} · {self.topic}: bell={self.in_app} email={self.email}"
+
+
 # Task Monitoring & Activity Tracking
 class TaskTag(models.Model):
     """Tags for categorizing tasks"""

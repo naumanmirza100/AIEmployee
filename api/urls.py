@@ -49,6 +49,7 @@ from api.views import crm_sync_agent as crm_api
 from api.views.health import health_check, ping
 from api.views import public_jobs
 from api.views import my_work
+from api.views import notification_settings
 
 app_name = 'api'
 
@@ -286,6 +287,9 @@ urlpatterns = [
     # One list of what the caller has to do, across the agents (core/my_work.py).
     re_path(r'^company/my-work/?$', my_work.company_my_work, name='company_my_work'),  # GET
     re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET
+    # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
+    re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
+            name='company_notification_settings'),  # GET/PATCH
     re_path(r'^project-manager/ai/notifications/read/?$', pm_agent.mark_notifications_read, name='pm_mark_notifications_read'),
     re_path(r'^project-manager/ai/team-performance/?$', pm_agent.team_performance, name='pm_team_performance'),
     re_path(r'^project-manager/ai/time-estimation/?$', pm_agent.time_estimation, name='pm_time_estimation'),

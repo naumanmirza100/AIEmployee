@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Bell, Check, Search, RefreshCw, Loader2, ChevronLeft,
-  AlertTriangle, CheckCircle2, Inbox, Clock, ExternalLink,
+  AlertTriangle, CheckCircle2, Inbox, Clock, ExternalLink, Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -317,6 +317,16 @@ const NotificationsPage = () => {
                 ? <Loader2 className="h-4 w-4 animate-spin" />
                 : <RefreshCw className="h-4 w-4" />}
             </Button>
+            {isPM && (
+              <Button
+                variant="outline"
+                onClick={() => navigate('/company/settings/notifications')}
+                className="border-[var(--line-3)] bg-[var(--panel-2)] text-white/70 hover:bg-white/5 hover:text-white shrink-0"
+              >
+                <Settings className="h-4 w-4 mr-1" />
+                Settings
+              </Button>
+            )}
             {unreadCount > 0 && (
               <Button
                 onClick={markAllRead}

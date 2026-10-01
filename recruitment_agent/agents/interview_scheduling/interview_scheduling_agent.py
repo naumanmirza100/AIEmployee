@@ -820,6 +820,7 @@ class InterviewSchedulingAgent:
                     message=f"{interview.job_role} · {interview.selected_slot}.",
                     link='/recruitment/interviews',
                     kind='recruitment_interview_booked',
+                    email=False,          # the confirmation email above is the email
                 )
 
             # Trigger automatic follow-up check (signal will handle pre-interview reminders)
@@ -1176,7 +1177,14 @@ class InterviewSchedulingAgent:
                     else:
                         recruiter_name = "Recruiter"
                     print(f"✓ Using recruiter email from environment variable")
-            
+
+            # The recruiter can turn this email off ("A candidate books an
+            # interview", core.notification_settings); the bell alert stays.
+            if recruiter_email and interview.company_user_id:
+                from core.notification_settings import wants_email
+                if not wants_email(interview.company_user, 'interviews_booked'):
+                    recruiter_email = None
+
             if recruiter_email:
                 print(f"\n📝 Preparing recruiter notification email...")
                 recruiter_context = {

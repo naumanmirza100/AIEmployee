@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LogOut, Bell, Key, User, Menu, ListChecks } from 'lucide-react';
+import { LogOut, Bell, Key, User, Menu, ListChecks, Settings } from 'lucide-react';
 import AgentSidebar, { EXPANDED_W, COLLAPSED_W } from '@/components/common/AgentSidebar';
 import ThemeToggle from '@/components/common/ThemeToggle';
 import {
@@ -258,11 +258,23 @@ const DashboardNavbar = ({
                   >
                     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                       <span className="text-sm font-semibold text-foreground">Notifications</span>
-                      {unreadCount > 0 && (
-                        <button onClick={markAllRead} className="text-[11px] text-violet-400 hover:text-violet-300">
-                          Mark all read
-                        </button>
-                      )}
+                      <div className="flex items-center gap-3">
+                        {unreadCount > 0 && (
+                          <button onClick={markAllRead} className="text-[11px] text-violet-400 hover:text-violet-300">
+                            Mark all read
+                          </button>
+                        )}
+                        {usesCompanyFeed && (
+                          <button
+                            onClick={() => { setShowNotifPanel(false); navigate('/company/settings/notifications'); }}
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Notification settings"
+                            aria-label="Notification settings"
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {notifications.length === 0 ? (
                       <div className="p-6 text-center text-sm text-muted-foreground">No notifications</div>
@@ -365,6 +377,15 @@ const DashboardNavbar = ({
                       >
                         <Key className="mr-2 h-4 w-4" />
                         API Keys
+                      </DropdownMenuItem>
+                    )}
+                    {usesCompanyFeed && (
+                      <DropdownMenuItem
+                        onClick={() => navigate('/company/settings/notifications')}
+                        className="cursor-pointer"
+                      >
+                        <Bell className="mr-2 h-4 w-4" />
+                        Notification settings
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuSeparator />

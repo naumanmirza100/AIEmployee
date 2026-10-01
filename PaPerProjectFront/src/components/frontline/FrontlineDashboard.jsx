@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import ChatMarkdown from '@/components/shared/ChatMarkdown';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -146,24 +146,12 @@ const WORKFLOW_STEPS_COMPLEX_EXAMPLE = `[
   { "type": "update_ticket", "status": "closed" }
 ]`;
 
-const PREFERENCES_DEFAULT = {
-  email_enabled: true,
-  in_app_enabled: true,
-  ticket_created_email: true,
-  ticket_updated_email: true,
-  ticket_assigned_email: true,
-  workflow_email_enabled: true,
-};
-
 export function FrontlineNotificationsTab() {
   const { toast } = useToast();
   const [templates, setTemplates] = useState([]);
   const [scheduled, setScheduled] = useState([]);
   const [notificationTicketsList, setNotificationTicketsList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [preferences, setPreferences] = useState(PREFERENCES_DEFAULT);
-  const [preferencesLoading, setPreferencesLoading] = useState(true);
-  const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [sendForm, setSendForm] = useState({ template_id: '', recipient_email: '', ticket_id: '' });
   const [sending, setSending] = useState(false);
   const [templateDialog, setTemplateDialog] = useState({ open: false, editingId: null, ...TEMPLATE_DEFAULT });
@@ -171,39 +159,21 @@ export function FrontlineNotificationsTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const [tRes, sRes, tickRes, prefsRes] = await Promise.all([
+      const [tRes, sRes, tickRes] = await Promise.all([
         frontlineAgentService.listNotificationTemplates(),
         frontlineAgentService.listScheduledNotifications(),
         frontlineAgentService.listTickets({ limit: 100 }),
-        frontlineAgentService.getNotificationPreferences?.().catch(() => ({ status: 'success', data: PREFERENCES_DEFAULT })),
       ]);
       setTemplates((tRes.status === 'success' && tRes.data) ? tRes.data : []);
       setScheduled((sRes.status === 'success' && sRes.data) ? sRes.data : []);
       setNotificationTicketsList((tickRes.status === 'success' && tickRes.data) ? tickRes.data : []);
-      if (prefsRes?.status === 'success' && prefsRes.data) setPreferences(prefsRes.data);
     } catch (e) {
       toast({ title: 'Error', description: e.message || 'Failed to load', variant: 'destructive' });
     } finally {
       setLoading(false);
-      setPreferencesLoading(false);
     }
   };
   useEffect(() => { load(); }, []);
-  const updatePreference = async (key, value) => {
-    const next = { ...preferences, [key]: value };
-    setPreferences(next);
-    setPreferencesSaving(true);
-    try {
-      const res = await frontlineAgentService.updateNotificationPreferences({ [key]: value });
-      if (res.status === 'success' && res.data) setPreferences(res.data);
-      else toast({ title: 'Error', description: res.message || 'Failed to save preference', variant: 'destructive' });
-    } catch (e) {
-      setPreferences(preferences);
-      toast({ title: 'Error', description: e.message || 'Failed to save', variant: 'destructive' });
-    } finally {
-      setPreferencesSaving(false);
-    }
-  };
   const handleSendNow = async (e) => {
     e.preventDefault();
     if (!sendForm.template_id || !sendForm.recipient_email) {
@@ -295,75 +265,17 @@ export function FrontlineNotificationsTab() {
           <CardTitle className="text-base">Notification preferences</CardTitle>
           <InfoHint {...HINTS.notifPrefs} />
         </div>
-        <CardDescription>Control how and when you receive notifications. Turning these off reduces spam and respects your choice.</CardDescription>
+        <CardDescription>Which of these emails you get — and what reaches your bell from every agent — is now chosen in one place.</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {preferencesLoading ? (
-          <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading preferences...</div>
-        ) : (
-          <div data-tour-notif="prefs" className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-muted-foreground">Master toggles</p>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="pref-email"
-                  checked={!!preferences.email_enabled}
-                  onCheckedChange={(checked) => updatePreference('email_enabled', !!checked)}
-                  disabled={preferencesSaving}
-                />
-                <Label htmlFor="pref-email" className="text-sm font-normal cursor-pointer">Receive notification emails</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="pref-inapp"
-                  checked={!!preferences.in_app_enabled}
-                  onCheckedChange={(checked) => updatePreference('in_app_enabled', !!checked)}
-                  disabled={preferencesSaving}
-                />
-                <Label htmlFor="pref-inapp" className="text-sm font-normal cursor-pointer">Show in-app notifications</Label>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-muted-foreground">Email by event (when emails are on)</p>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="pref-ticket-created"
-                  checked={!!preferences.ticket_created_email}
-                  onCheckedChange={(checked) => updatePreference('ticket_created_email', !!checked)}
-                  disabled={preferencesSaving}
-                />
-                <Label htmlFor="pref-ticket-created" className="text-sm font-normal cursor-pointer">Ticket created</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="pref-ticket-updated"
-                  checked={!!preferences.ticket_updated_email}
-                  onCheckedChange={(checked) => updatePreference('ticket_updated_email', !!checked)}
-                  disabled={preferencesSaving}
-                />
-                <Label htmlFor="pref-ticket-updated" className="text-sm font-normal cursor-pointer">Ticket updated</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="pref-ticket-assigned"
-                  checked={!!preferences.ticket_assigned_email}
-                  onCheckedChange={(checked) => updatePreference('ticket_assigned_email', !!checked)}
-                  disabled={preferencesSaving}
-                />
-                <Label htmlFor="pref-ticket-assigned" className="text-sm font-normal cursor-pointer">Ticket assigned to me</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="pref-workflow-email"
-                  checked={!!preferences.workflow_email_enabled}
-                  onCheckedChange={(checked) => updatePreference('workflow_email_enabled', !!checked)}
-                  disabled={preferencesSaving}
-                />
-                <Label htmlFor="pref-workflow-email" className="text-sm font-normal cursor-pointer">Workflow & template trigger emails</Label>
-              </div>
-            </div>
-          </div>
-        )}
+      <CardContent>
+        <div data-tour-notif="prefs" className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            Ticket created and updated emails, other automation emails, tickets assigned to you and the weekly summary are all there.
+          </p>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/company/settings/notifications">Open notification settings</Link>
+          </Button>
+        </div>
       </CardContent>
     </Card>
     <Card>

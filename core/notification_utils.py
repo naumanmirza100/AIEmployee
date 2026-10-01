@@ -34,30 +34,43 @@ def _user_for_company_user(company_user: CompanyUser) -> User:
 
 
 def notify_company_users(company_users, *, title, message, link=None,
-                         severity='info', kind='custom'):
-    """Put a notification in each of these logins' bell.
+                         severity='info', kind='custom', email=True, data=None):
+    """Tell each of these logins, the way each has chosen.
 
     A company login's bell (and its Notifications page) reads the company feed,
     `PMNotification`, whichever agent's page it is on. Despite the name, that
     table is every company-wide alert already — billing, quotas, API keys — not
     only Project Manager's. `link` is an in-app path the bell opens; `kind`
-    says what raised it. Inactive or repeated logins are skipped.
+    says what raised it, and decides its topic in `core.notification_settings`:
+    each login's choice there puts it in the bell, sends it by email, or both.
+    Pass `email=False` when the caller sends its own, richer email (after
+    asking `wants_email`). Inactive or repeated logins are skipped.
 
-    Returns how many were created. Never raises: an alert must not break the
-    action that raised it.
+    Returns how many bell rows were created. Never raises: an alert must not
+    break the action that raised it.
     """
     from project_manager_agent.models import PMNotification
+    from core import notification_settings
     try:
-        seen, rows = set(), []
+        seen, recipients = set(), []
         for cu in company_users:
             if not cu or not cu.is_active or cu.id in seen:
                 continue
             seen.add(cu.id)
-            rows.append(PMNotification(
-                company_user=cu, notification_type='custom', severity=severity,
-                title=str(title)[:255], message=message,
-                data={'link': link, 'kind': kind},
-            ))
+            recipients.append(cu)
+        topic = notification_settings.topic_for_kind(kind)
+        chosen = notification_settings.choices(recipients, topic.key) if topic else {}
+        rows = []
+        for cu in recipients:
+            in_app, by_email = chosen.get(cu.id, (True, False))
+            if in_app:
+                rows.append(PMNotification(
+                    company_user=cu, notification_type='custom', severity=severity,
+                    title=str(title)[:255], message=message,
+                    data={**(data or {}), 'link': link, 'kind': kind},
+                ))
+            if by_email and email and cu.email:
+                notification_settings.send_email(cu, topic.key, title=title, message=message, link=link)
         PMNotification.objects.bulk_create(rows)
         return len(rows)
     except Exception as exc:
