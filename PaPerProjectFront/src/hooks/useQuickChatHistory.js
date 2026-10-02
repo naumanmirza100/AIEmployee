@@ -66,6 +66,8 @@ function forgetBrowserCopies() {
  */
 export default function useQuickChatHistory(agent, mode = '') {
   const [history, setHistory] = useState([]);
+  const latest = useRef(history);
+  latest.current = history;
   const showing = useRef({ agent, mode });
   showing.current = { agent, mode };
 
@@ -87,6 +89,8 @@ export default function useQuickChatHistory(agent, mode = '') {
 
   const save = useCallback((conversation) => {
     if (!conversation?.id || !conversation.messages?.length) return;
+    // Just opened from the list, unchanged: saving would move it to the top as "just now".
+    if (latest.current.some((c) => c.id === conversation.id && c.messages === conversation.messages)) return;
     const title = conversation.title || 'Chat';
     setHistory((list) => [{ id: conversation.id, title, messages: conversation.messages, updated_at: Date.now() },
       ...list.filter((c) => c.id !== conversation.id)]);
