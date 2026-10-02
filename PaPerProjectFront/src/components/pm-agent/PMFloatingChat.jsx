@@ -62,6 +62,17 @@ function newConversationId() {
   return `pmfc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// A document upload is read in the background; wait for its result.
+async function waitForPilotJob(jobId, { everyMs = 2000, tries = 150 } = {}) {
+  for (let i = 0; i < tries; i += 1) {
+    const res = await pmAgentService.getProjectPilotJobStatus(jobId);
+    const data = res?.data || {};
+    if (data.processing_status === 'ready' || data.processing_status === 'failed') return data;
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+  }
+  throw new Error('Reading the document is taking longer than expected. Please try again.');
+}
+
 const PMFloatingChat = () => {
   const { enabled: hintsEnabled } = useHints();
   const { toast } = useToast();
@@ -318,17 +329,34 @@ const PMFloatingChat = () => {
     try {
       // Force Pilot mode for uploads — that's the agent that reads files.
       if (mode !== 'pilot') switchMode('pilot');
-      const res = await pmAgentService.projectPilotFromFile(file, null, [], input.trim());
-      if (res && (res.status === 'success' || res.data)) {
-        const data = res.data || res;
+      const prompt = input.trim();
+      setInput('');
+      const res = await pmAgentService.projectPilotFromFile(file, null, [], prompt);
+      const jobId = res?.data?.id;
+      if (!jobId) throw new Error((res && res.message) || 'Upload failed');
+      // The document is read in the background. This used to say "Ingested"
+      // straight away and never show what happened to it.
+      const data = await waitForPilotJob(jobId);
+      if (data.processing_status === 'failed') throw new Error(data.error || 'The document could not be processed.');
+      if (data.draft) {
+        // Nothing is created until the card is confirmed.
         pushMessage({
           role: 'assistant',
-          content: data.answer || data.response || `Ingested "${file.name}".`,
-          system: true,
+          content: data.draft.answer || 'Review this, then confirm.',
+          draft: data.draft,
+          draftId: `d_${Date.now()}`,
+          draftState: 'open',
+          mode: 'pilot',
         });
-        toast({ title: 'File processed', description: file.name });
+      } else if (data.confirmation_required) {
+        const choices = (data.confirmation_required.options || []).map((o) => `- ${o.label}`).join('\n');
+        pushMessage({
+          role: 'assistant',
+          content: `${(data.answer || '').replace('Pick an option below to continue.', 'Reply with what you would like:')}\n${choices}`,
+          mode: 'pilot',
+        });
       } else {
-        throw new Error((res && res.message) || 'Upload failed');
+        pushMessage({ role: 'assistant', content: data.answer || data.cannot_do || `Read "${file.name}".`, mode: 'pilot' });
       }
     } catch (err) {
       pushMessage({ role: 'assistant', content: `Upload failed: ${err.message || 'Unknown error'}`, error: true });

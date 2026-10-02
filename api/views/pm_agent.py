@@ -2894,8 +2894,9 @@ def project_pilot_from_file(request):
 
     Saves the uploaded file to disk, creates a ProjectPilotJob row, enqueues
     the Celery task, and returns 202 immediately with the job id. The
-    browser polls /project-pilot/jobs/<id>/status to pick up the result
-    when the LLM extraction + action execution finishes.
+    browser polls /project-pilot/jobs/<id>/status to pick up the result —
+    a proposal to review (`draft`), a question, or an answer; nothing is
+    created until the user confirms.
 
     Body (multipart/form-data):
       * file          - required; .txt, .pdf, or .docx (max 10 MB).
@@ -3052,6 +3053,9 @@ def project_pilot_job_status(request, job_id):
     # timing display isn't polluted.
     timing = dict(job.timing_ms or {})
     confirmation_required = timing.pop('_confirmation_required', None)
+    # What the document proposes, as a review card — as `project_pilot`
+    # returns with status 'needs_input'. Confirmed via `project_pilot_confirm`.
+    draft = timing.pop('_draft', None)
     return Response({
         "status": "success",
         "data": {
@@ -3062,6 +3066,7 @@ def project_pilot_job_status(request, job_id):
             "action_results": job.action_results or [],
             "cannot_do": job.cannot_do or "",
             "confirmation_required": confirmation_required,
+            "draft": draft,
             "error": job.error_message or "",
             "timing_ms": timing,
             "created_at": job.created_at.isoformat() if job.created_at else None,

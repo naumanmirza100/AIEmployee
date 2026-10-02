@@ -17,6 +17,7 @@ import AutomationView from './AutomationView';
 import SettingsView from './SettingsView';
 import MacroPickerDialog from './MacroPickerDialog';
 import TicketTaskDialog from './TicketTaskDialog';
+import { RetriageReviewDialog, TicketSuggestionDialog } from './AiSuggestionDialogs';
 import { labelOf, labelled } from '@/utils/labels';
 import {
   DropdownMenu,
@@ -2836,6 +2837,11 @@ const FrontlineDashboard = () => {
   
   // Ticket creation
   const [showTicketDialog, setShowTicketDialog] = useState(false);
+  // The AI's suggestions, waiting for a person: a new ticket's knowledge-base
+  // answer, and a Re-triage proposal.
+  const [ticketSuggestion, setTicketSuggestion] = useState(null);
+  const [retriageProposal, setRetriageProposal] = useState(null);
+  const [suggestionBusy, setSuggestionBusy] = useState(false);
   const [ticketTitle, setTicketTitle] = useState('');
   const [ticketDescription, setTicketDescription] = useState('');
   const [creatingTicket, setCreatingTicket] = useState(false);
@@ -3425,22 +3431,54 @@ const FrontlineDashboard = () => {
     }
   };
 
+  // Re-triage asks the AI, then shows what it suggests; nothing changes
+  // until "Apply changes".
   const handleRetriage = async (ticket) => {
     setTicketBusyId(ticket.id);
     try {
       const res = await frontlineAgentService.retriageTicket(ticket.id);
-      const { new_category, new_priority } = res.data || {};
-      setTicketsList((list) => list.map((t) => (t.id === ticket.id ? {
-        ...t,
-        category: new_category ?? t.category,
-        priority: new_priority ?? t.priority,
-        last_triaged_at: res.data.last_triaged_at ?? t.last_triaged_at,
-      } : t)));
-      toast({ title: 'Re-triage complete', description: `Category: ${new_category}, Priority: ${new_priority}` });
+      setRetriageProposal({ ticket, data: res.data || {} });
     } catch (err) {
       toast({ title: 'Re-triage failed', variant: 'destructive' });
     } finally {
       setTicketBusyId(null);
+    }
+  };
+
+  const applyRetriage = async () => {
+    const { ticket, data } = retriageProposal;
+    setSuggestionBusy(true);
+    try {
+      const res = await frontlineAgentService.applyRetriage(ticket.id, data);
+      const saved = res.data || {};
+      setTicketsList((list) => list.map((t) => (t.id === ticket.id ? {
+        ...t,
+        category: saved.new_category ?? t.category,
+        priority: saved.new_priority ?? t.priority,
+        last_triaged_at: saved.last_triaged_at ?? t.last_triaged_at,
+      } : t)));
+      setRetriageProposal(null);
+      toast({ title: 'Re-triage applied', description: `#${ticket.id} updated.` });
+    } catch (err) {
+      toast({ title: 'Could not apply the re-triage', description: err.message, variant: 'destructive' });
+    } finally {
+      setSuggestionBusy(false);
+    }
+  };
+
+  const resolveWithSuggestion = async () => {
+    setSuggestionBusy(true);
+    try {
+      await frontlineAgentService.updateTicket(ticketSuggestion.ticketId,
+        { status: 'resolved', resolution: ticketSuggestion.text });
+      toast({ title: 'Ticket resolved', description: `#${ticketSuggestion.ticketId} resolved with the suggested answer.` });
+      setTicketSuggestion(null);
+      fetchDashboard();
+      if (activeTab === 'tickets') { loadTickets(); loadTicketsAging(); }
+    } catch (err) {
+      toast({ title: 'Could not resolve the ticket', description: err.message, variant: 'destructive' });
+    } finally {
+      setSuggestionBusy(false);
     }
   };
 
@@ -3674,10 +3712,13 @@ const FrontlineDashboard = () => {
       );
 
       if (response.status === 'success' && response.data) {
-        toast({
-          title: response.data.auto_resolved ? 'Ticket Auto-Resolved!' : 'Ticket Created!',
-          description: response.data.response || 'Your ticket has been processed',
-        });
+        const created = response.data;
+        if (created.suggested_resolution) {
+          // The ticket is open; offer the knowledge base's answer.
+          setTicketSuggestion({ ticketId: created.ticket_id, text: created.suggested_resolution });
+        } else {
+          toast({ title: 'Ticket created', description: `#${created.ticket_id} is open.` });
+        }
         setShowTicketDialog(false);
         setTicketTitle('');
         setTicketDescription('');
@@ -5844,6 +5885,10 @@ const FrontlineDashboard = () => {
       </Dialog>
 
       {/* Create Ticket Dialog */}
+      <TicketSuggestionDialog suggestion={ticketSuggestion} busy={suggestionBusy}
+        onResolve={resolveWithSuggestion} onKeepOpen={() => setTicketSuggestion(null)} />
+      <RetriageReviewDialog proposal={retriageProposal} busy={suggestionBusy}
+        onApply={applyRetriage} onCancel={() => setRetriageProposal(null)} />
       <Dialog open={showTicketDialog} onOpenChange={setShowTicketDialog}>
         <DialogContent>
           <DialogHeader>

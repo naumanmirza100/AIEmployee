@@ -451,6 +451,20 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
               user_prompt: userPrompt || null,
             },
           };
+          // What the document proposes comes back as a review card, like a
+          // typed request: nothing is created until it is confirmed.
+          if (data.draft) {
+            await addMessagePairToChatById(chatIdSnapshot, userMsg, {
+              role: 'assistant',
+              content: data.draft.answer || 'Review this, then confirm.',
+              responseData: {
+                ...data.draft, needs_input: true, project_id: projectId, project_title: projectTitle,
+                from_file: true, file_name: file.name,
+              },
+            }, `File: ${file.name}`);
+            toast({ title: 'Review the proposal', description: `Nothing from "${file.name}" is created until you confirm.` });
+            return;
+          }
           const assistantMsg = {
             role: 'assistant',
             content: answerText || (cannotDo || 'Processed.'),

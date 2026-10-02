@@ -269,9 +269,12 @@ const FrontlineFloatingChat = () => {
         if (res && res.status === 'success' && res.data) {
           const t = res.data;
           const ticketId = t.id || t.ticket_id;
+          // The ticket stays open; a knowledge-base answer is only suggested.
           pushMessage({
             role: 'assistant',
-            content: `Ticket #${ticketId} created${t.auto_resolved ? ' and auto-resolved by AI.' : '.'}${t.response ? '\n\n' + t.response : ''}`,
+            content: t.suggested_resolution
+              ? `Ticket #${ticketId} created and left open. The knowledge base suggests:\n\n${t.suggested_resolution}\n\nIt's saved as a note on the ticket; resolve it from Tickets if it's right.`
+              : `Ticket #${ticketId} created.`,
             system: true,
           });
           toast({ title: 'Ticket created', description: `#${ticketId}: ${title}` });

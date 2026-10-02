@@ -1583,7 +1583,12 @@ def create_hr_workflow(request):
 def execute_hr_workflow(request, workflow_id):
     """Run an HR workflow with the supplied context. Returns 202 + the paused
     snapshot when a `wait` step is hit (the resume task takes over); 200 on
-    immediate completion; 500 on executor error."""
+    immediate completion; 500 on executor error.
+
+    `context.employee_id` runs it for that employee: their details are filled
+    in as an event would (name, work email…). `simulate: true` is the preview
+    the dashboard shows before running — each step says what it would do, and
+    nothing is sent, changed or recorded."""
     try:
         company = request.user.company
         user = _hr_get_or_create_user_for_company_user(request.user)
@@ -1593,18 +1598,30 @@ def execute_hr_workflow(request, workflow_id):
                             status=status.HTTP_404_NOT_FOUND)
         data = request.data or {}
         context_data = dict(data.get('context') or {})
+        simulate = bool(data.get('simulate'))
+        if context_data.get('employee_id'):
+            emp = Employee.objects.filter(company=company, pk=context_data['employee_id']).first()
+            if emp is None:
+                return Response({'status': 'error', 'message': 'Employee not found'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            from hr_agent.signals import _employee_context
+            context_data = {**_employee_context(emp, event='manual_run'), **context_data}
         # Always seed company_id so HR step handlers can scope inserts (e.g. schedule_meeting).
         context_data.setdefault('company_id', company.id)
+
+        from hr_agent.workflow_engine import execute_workflow as _exec
+        if simulate:
+            success, result_data, err = _exec(w, context_data, user, simulate=True)
+            return Response({'status': 'success',
+                             'data': {'simulated': True, 'ok': success, 'error': err,
+                                      'result_data': result_data}})
 
         exec_obj = HRWorkflowExecution.objects.create(
             workflow=w, workflow_name=w.name, executed_by=user,
             employee_id=context_data.get('employee_id') or None,
             status='in_progress', context_data=context_data,
         )
-
-        from hr_agent.workflow_engine import execute_workflow as _exec
-        success, result_data, err = _exec(w, context_data, user, simulate=bool(data.get('simulate')),
-                                          execution=exec_obj)
+        success, result_data, err = _exec(w, context_data, user, simulate=False, execution=exec_obj)
 
         if result_data and result_data.get('paused'):
             return Response({

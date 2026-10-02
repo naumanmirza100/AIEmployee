@@ -64,6 +64,7 @@ import {
 } from './hrTutorialSteps';
 import { trackHRRecentlyViewed } from './hrLocalStore';
 import { WORKFLOW_EVENTS, FILTER_LABELS, eventLabel, humanize } from './hrEventLabels';
+import RunWorkflowDialog from './RunWorkflowDialog';
 import {
   useTutorialNudge,
   tourAvailable, makeHoverLaunchHandlers,
@@ -727,21 +728,17 @@ const HRDashboard = () => {
     }
   };
 
-  const handleRunWorkflow = async (w) => {
-    setWfBusyId(w.id);
-    try {
-      const res = await hrAgentService.executeHRWorkflow(w.id, {});
-      const status = res?.data?.status || 'completed';
-      const sc = res?.data?.result_data?.steps_completed;
-      toast({
-        title: `Workflow ${status}`,
-        description: sc != null ? `${sc} step(s) completed` : undefined,
-      });
-    } catch (e) {
-      toast({ title: 'Run failed', description: e.message, variant: 'destructive' });
-    } finally {
-      setWfBusyId(null);
-    }
+  // Run opens a preview: who it is for and what each step will do; it runs
+  // only from there. It used to start at once, for nobody.
+  const [runWorkflow, setRunWorkflow] = useState(null);
+  const handleRunWorkflow = (w) => setRunWorkflow(w);
+  const afterWorkflowRun = (data) => {
+    const status = data?.status || 'completed';
+    const sc = data?.result_data?.steps_completed;
+    toast({
+      title: `Workflow ${labelOf(status).toLowerCase()}`,
+      description: sc != null ? `${sc} step(s) completed` : undefined,
+    });
   };
 
   const handleDeleteWorkflow = async () => {
@@ -2127,6 +2124,9 @@ const HRDashboard = () => {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+
+                <RunWorkflowDialog workflow={runWorkflow} onDone={afterWorkflowRun}
+                  onOpenChange={(open) => { if (!open) setRunWorkflow(null); }} />
 
                 {/* Workflow delete confirm */}
                 <Dialog open={wfDelete.open} onOpenChange={(open) => setWfDelete((s) => ({ ...s, open }))}>

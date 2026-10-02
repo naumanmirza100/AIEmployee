@@ -1,20 +1,16 @@
-"""Project Pilot pipeline — extracted from `api/views/pm_agent.py::project_pilot_from_file`
-so it can be called from both the (now-async) HTTP endpoint and the Celery
-task that actually runs the LLM extraction + project/task creation.
+"""Project Pilot from a document — run by the Celery task behind the upload
+endpoint (`api/views/pm_agent.py::project_pilot_from_file`).
 
-The 500-line pipeline is preserved verbatim from the original view — same
-JSON parsing, same bracket-fixing heuristics, same two-pass action execution
-— just with the outer `request`/`Response` scaffolding stripped out so it
-takes primitives and returns a dict.
+Reads the document's text into the Pilot agent and returns what it proposes:
+a question when the instruction is unclear or a similar project exists, and
+otherwise the same review card as a typed Pilot request. Nothing is created
+here; `project_pilot_confirm` makes what the user confirms.
 """
 from __future__ import annotations
 
 import json
 import logging
 import re
-from datetime import datetime, timedelta
-
-from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -216,8 +212,6 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
         _build_available_users,
         _build_user_assignments,
         _get_allowed_user_ids_for_only_n_users,
-        _get_project_owner,
-        _assignee_display,
     )
     company = company_user.company
     # Combine the user's typed instruction with the document text. Sending
@@ -538,305 +532,31 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
                 "extracted_text_preview": extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text,
             }
 
-    # ---- Write phase ------------------------------------------------------
-    # One transaction around everything the LLM asked for. Without it each
-    # save() committed on its own, so a failure partway — or a Celery worker
-    # dying mid-batch, which acks_late + reject_on_worker_lost then RETRIES —
-    # left a half-built project behind, and the retry created a duplicate.
-    #
-    # Each action also gets its own savepoint (the inner atomic below). The
-    # per-action try/except deliberately keeps going when one task is bad;
-    # without a savepoint, a DB error caught inside the outer block leaves the
-    # transaction unusable for every action after it.
-    with transaction.atomic():
-        # Process actions (reuse same logic from project_pilot)
-        action_results = []
-        created_projects = {}  # Map to track created projects for task assignment
-    
-        # First pass: Create all projects
-        for action in actions:
-            if action.get("action") == "create_project":
-                try:
-                    with transaction.atomic():  # savepoint per action
-                        # Get default owner (required field)
-                        from django.contrib.auth.models import User
-                        default_owner = _get_project_owner(company_user)
-                        if not default_owner:
-                            action_results.append({
-                                "action": "create_project",
-                                "success": False,
-                                "error": "No default owner available. Please ensure at least one user exists in the system.",
-                            })
-                            continue
-                
-                        # Handle industry field - it's a ForeignKey, so we need to handle it properly
-                        industry_value = action.get("industry", "")
-                        industry_instance = None
-                        if industry_value:
-                            # Try to find industry by name or slug
-                            from core.models import Industry
-                            try:
-                                # First try by name (case-insensitive)
-                                industry_instance = Industry.objects.filter(name__iexact=industry_value).first()
-                                # If not found, try by slug
-                                if not industry_instance:
-                                    industry_instance = Industry.objects.filter(slug__iexact=industry_value.lower().replace(' ', '-')).first()
-                            except Exception as e:
-                                logger.warning(f"Could not find industry '{industry_value}': {e}")
-                                industry_instance = None
-                
-                        # Parse dates. end_date is the legacy alias for deadline —
-                        # accept either, mirror to both columns below.
-                        start_date = action.get("start_date")
-                        deadline = action.get("deadline") or action.get("end_date")
+    # ---- Review ---------------------------------------------------------------
+    # Nothing is written here, as for a typed Pilot request (see
+    # api.views.pm_agent.project_pilot): the proposal comes back as a review
+    # card, and `project_pilot_confirm` makes exactly what the user confirms.
+    # This used to create every project and task at once whenever the
+    # instruction was explicit and no similar project existed.
+    preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
+    from project_manager_agent import drafts, pilot_review
+    from project_manager_agent.services.actor import DashboardActor
+    if pilot_review.proposes_changes(actions):
+        gaps = drafts.inspect(actions, available_users, today=timezone.localdate(), project=project)
+        answer = drafts.chat_text(actions, result.get("answer"), gaps)
+        draft = {
+            "answer": answer,
+            "actions": actions,
+            "project_id": project.id if project else None,
+            **gaps,
+            "changes": pilot_review.changes(actions, DashboardActor(company_user)),
+            "review": True,
+        }
+        logger.info("Project Pilot pipeline: %d proposed actions sent for review", len(actions))
+        return {"answer": answer, "action_results": [], "cannot_do": "", "draft": draft,
+                "extracted_text_preview": preview}
 
-                        if start_date and isinstance(start_date, str):
-                            try:
-                                from datetime import datetime
-                                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-                            except (ValueError, TypeError):
-                                logger.debug(f"Failed to parse start_date: {start_date}")
-                                start_date = None
-
-                        if deadline and isinstance(deadline, str):
-                            try:
-                                from datetime import datetime
-                                deadline = datetime.strptime(deadline, '%Y-%m-%d').date()
-                            except (ValueError, TypeError):
-                                logger.debug(f"Failed to parse deadline: {deadline}")
-                                deadline = None
-                
-                        # Handle budget - Project model uses budget_min and budget_max, not budget
-                        budget = action.get("budget")
-                        budget_min = None
-                        budget_max = None
-                        if budget:
-                            try:
-                                budget_value = float(budget)
-                                budget_min = budget_value
-                                budget_max = budget_value
-                            except (ValueError, TypeError):
-                                pass
-                
-                        project = Project.objects.create(
-                            name=action.get("project_name", "New Project"),
-                            description=action.get("project_description", ""),
-                            status=action.get("project_status", "planning"),
-                            priority=action.get("project_priority", "medium"),
-                            project_type=action.get("project_type", "general"),
-                            industry=industry_instance,  # Use None if not found
-                            budget_min=budget_min,
-                            budget_max=budget_max,
-                            start_date=start_date,
-                            end_date=deadline,  # mirror — legacy column
-                            deadline=deadline,
-                            # `company` was missing here — the only one of the three
-                            # project-create paths without it — so every project made
-                            # by uploading a document had company=NULL and was
-                            # invisible to company-scoped queries such as
-                            # scan_notifications (`filter(company=company)`).
-                            company=company,
-                            created_by_company_user=company_user,
-                            owner=default_owner,
-                        )
-                
-                        created_projects[action.get("project_name")] = project.id
-                        action_results.append({
-                            "action": "create_project",
-                            "success": True,
-                            "project_id": project.id,
-                            "project_name": project.name,
-                        })
-                except Exception as e:
-                    logger.exception(f"Error creating project: {action.get('project_name')}")
-                    action_results.append({
-                        "action": "create_project",
-                        "success": False,
-                        "error": str(e),
-                    })
-
-        # Second pass: Create tasks (can now reference created projects)
-        # If we created a project in the first pass, use it for tasks without project_id
-        default_project_id = None
-        if created_projects:
-            # Use the first created project as default
-            default_project_id = list(created_projects.values())[0]
-    
-        for action in actions:
-            if action.get("action") == "create_task":
-                try:
-                    with transaction.atomic():  # savepoint per action
-                        project_id_for_task = action.get("project_id")
-                        project_name = action.get("project_name")
-
-                        # BUG-04: any project_id emitted by the LLM MUST belong to this
-                        # company user. Without this check the pilot happily created
-                        # tasks against arbitrary project IDs (including projects owned
-                        # by other tenants). If ownership check fails, drop the id so
-                        # we fall through to name-based resolution and — if that also
-                        # misses — reject the whole task rather than silently
-                        # redirecting it to some other project.
-                        if project_id_for_task:
-                            owns_project = Project.objects.filter(
-                                id=project_id_for_task,
-                                created_by_company_user=company_user,
-                            ).exists()
-                            if not owns_project:
-                                logger.warning(
-                                    "Project Pilot: rejecting task '%s' — project_id %s "
-                                    "does not exist or is not owned by company_user %s.",
-                                    action.get("task_title"), project_id_for_task, company_user.id,
-                                )
-                                project_id_for_task = None
-
-                        # If project_id is null but project_name is provided, look it up
-                        if not project_id_for_task and project_name:
-                            if project_name in created_projects:
-                                project_id_for_task = created_projects[project_name]
-                            else:
-                                # Try to find existing project (already company-scoped)
-                                try:
-                                    existing_project = Project.objects.get(
-                                        name=project_name,
-                                        created_by_company_user=company_user
-                                    )
-                                    project_id_for_task = existing_project.id
-                                except Project.DoesNotExist:
-                                    pass
-
-                        # BUG-04: silent fallback to `default_project_id` (the first
-                        # project we happened to create this turn) has caused tasks to
-                        # land on the wrong project. Only fall back when the LLM
-                        # provided NO project reference at all AND we created exactly
-                        # one project this turn (unambiguous), so an explicit but
-                        # mistyped project_name still surfaces as an error.
-                        if (
-                            not project_id_for_task
-                            and not action.get("project_id")
-                            and not project_name
-                            and default_project_id
-                            and len(created_projects) == 1
-                        ):
-                            project_id_for_task = default_project_id
-                            logger.info(
-                                "Project Pilot: task '%s' had no project reference; "
-                                "attaching to the single project created this turn (id=%s).",
-                                action.get("task_title"), project_id_for_task,
-                            )
-
-                        if not project_id_for_task:
-                            hint = (
-                                f"project_name '{project_name}' was not found in this workspace"
-                                if project_name
-                                else "no project_id or project_name was specified"
-                            )
-                            action_results.append({
-                                "action": "create_task",
-                                "success": False,
-                                "error": (
-                                    f"Rejected task '{action.get('task_title')}': target "
-                                    f"project not found — {hint}."
-                                ),
-                            })
-                            continue
-                
-                        # Parse due date
-                        due_date = None
-                        due_date_str = action.get("due_date")
-                        if due_date_str:
-                            try:
-                                from django.utils import timezone
-                                from datetime import datetime as dt_time
-                                if isinstance(due_date_str, str):
-                                    # Try parsing different formats
-                                    for fmt in ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%SZ']:
-                                        try:
-                                            due_date = datetime.strptime(due_date_str, fmt)
-                                            if timezone.is_naive(due_date):
-                                                due_date = timezone.make_aware(due_date)
-                                            break
-                                        except ValueError:
-                                            continue
-                                    # If still None, try date only
-                                    if due_date is None:
-                                        date_only = datetime.strptime(due_date_str.split('T')[0], '%Y-%m-%d').date()
-                                        if date_only:
-                                            due_date = datetime.combine(date_only, dt_time(23, 59, 59))
-                                            if timezone.is_naive(due_date):
-                                                due_date = timezone.make_aware(due_date)
-                            except Exception:
-                                due_date = None
-                
-                        # Default due_date when missing
-                        if due_date is None and project_id_for_task:
-                            try:
-                                from django.utils import timezone
-                                from datetime import datetime as dt_time
-                                task_project = Project.objects.filter(id=project_id_for_task, created_by_company_user=company_user).first()
-                                if task_project and getattr(task_project, "deadline", None):
-                                    d = task_project.deadline
-                                    if hasattr(d, "year"):
-                                        due_date = datetime.combine(d, dt_time(23, 59, 59))
-                                        if timezone.is_naive(due_date):
-                                            due_date = timezone.make_aware(due_date)
-                                if due_date is None and task_project and getattr(task_project, "end_date", None):
-                                    d = task_project.end_date
-                                    if hasattr(d, "year"):
-                                        due_date = datetime.combine(d, dt_time(23, 59, 59))
-                                        if timezone.is_naive(due_date):
-                                            due_date = timezone.make_aware(due_date)
-                                if due_date is None:
-                                    due_date = timezone.now() + timedelta(days=14)
-                            except Exception:
-                                pass
-                
-                        # Parse estimated_hours
-                        estimated_hours = action.get("estimated_hours")
-                        if estimated_hours:
-                            try:
-                                estimated_hours = float(estimated_hours)
-                            except (ValueError, TypeError):
-                                estimated_hours = None
-                
-                        task = Task.objects.create(
-                            project_id=project_id_for_task,
-                            title=action.get("task_title", "New Task"),
-                            description=action.get("task_description", ""),
-                            status=action.get("status", "todo"),
-                            priority=action.get("priority", "medium"),
-                            due_date=due_date,
-                            estimated_hours=estimated_hours,
-                            assignee_id=action.get("assignee_id") if action.get("assignee_id") else None,
-                            ai_reasoning=action.get("reasoning", ""),
-                        )
-                
-                        action_results.append({
-                            "action": "create_task",
-                            "success": True,
-                            "task_id": task.id,
-                            "task_title": task.title,
-                            "project_id": project_id_for_task,
-                            "project_name": task.project.name if task.project else None,
-                            "message": f'Task "{task.title}" created successfully!',
-                            "priority": getattr(task, "priority", None) or "medium",
-                            "assignee_username": task.assignee.username if task.assignee else None,
-                            "assignee_name": _assignee_display(task.assignee),
-                            "due_date": task.due_date.isoformat() if task.due_date else None,
-                            "deadline": task.due_date.isoformat() if task.due_date else None,
-                            "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
-                        })
-                except Exception as e:
-                    logger.exception(f"Error creating task: {action.get('task_title')}")
-                    action_results.append({
-                        "action": "create_task",
-                        "success": False,
-                        "error": str(e),
-                    })
-
-    logger.info(f"Project Pilot pipeline done: {len(action_results)} action_results")
-    return {
-        "answer": result.get("answer", ""),
-        "action_results": action_results,
-        "cannot_do": "",
-        "extracted_text_preview": extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text,
-    }
+    answer_text = (result.get("answer") or "").strip()
+    if answer_text.startswith("[") or answer_text.startswith("{"):
+        answer_text = "I didn't find anything to create or change in that document."
+    return {"answer": answer_text, "action_results": [], "cannot_do": "", "extracted_text_preview": preview}
