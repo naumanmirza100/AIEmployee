@@ -1,7 +1,7 @@
 import React from 'react';
 import { Headphones, Ticket } from 'lucide-react';
 import { SubTabsShell, SubTabClickThrough, TabsContent } from './FrontlineSubTabs';
-import { HandoffQueueTab } from './FrontlineDashboard';
+import { HandoffQueueTab } from './HandoffQueueTab';
 
 /**
  * QueueView — Queue tab body: [Hand-offs | Tickets] sub-tabs.

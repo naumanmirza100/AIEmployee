@@ -1,6 +1,6 @@
 import React from 'react';
 import { SubTabsShell, TabsContent } from './FrontlineSubTabs';
-import { FrontlineAnalyticsTab } from './FrontlineDashboard';
+import { FrontlineAnalyticsTab } from './FrontlineAnalyticsTab';
 import FrontlineAIGraphs from './FrontlineAIGraphs';
 
 /**
