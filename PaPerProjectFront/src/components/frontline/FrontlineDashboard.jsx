@@ -111,7 +111,7 @@ import {
 import { GraduationCap, Eye, EyeOff } from 'lucide-react';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { apiErrorMessage } from '@/utils/apiErrorMessage';
-import { renderChart } from '../recruitment/ChartRenderer';
+import { renderChart } from '@/components/common/ChartRenderer';
 import {
   BarChart,
   Bar,

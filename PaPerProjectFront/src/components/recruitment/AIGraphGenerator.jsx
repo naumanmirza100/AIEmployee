@@ -45,7 +45,7 @@ import {
   LayoutDashboard,
 } from 'lucide-react';
 import { generateGraph, getSavedPrompts, savePrompt, deletePrompt, toggleFavorite, toggleDashboardPrompt, isPromptOnDashboard } from '@/services/recruitmentAgentService';
-import { renderChart } from './ChartRenderer';
+import { renderChart } from '@/components/common/ChartRenderer';
 
 // Chart type icons mapping
 const chartTypeIcons = {
