@@ -1,3 +1,13 @@
+"""Project Manager agent API for dashboard logins.
+
+Who may use it: any active dashboard login of a company that has the agent.
+CompanyUserTokenAuthentication and IsCompanyUserOnly refuse an inactive login,
+and api.middleware.module_access refuses a company without the agent, before
+any view here runs. No view checks a role. Views used to each carry a copy of
+an older check — the `project_manager` or `company_user` role, two of twelve
+and not the default `admin` — that could no longer refuse anyone but still
+said "Project manager or company user role required".
+"""
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -531,22 +541,6 @@ def project_pilot(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error",
-             "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     try:
         question = request.data.get("question", "").strip()
         if not question:
@@ -958,21 +952,6 @@ def task_prioritization(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     try:
         project_id = request.data.get("project_id")
         company = company_user.company
@@ -1232,21 +1211,6 @@ def generate_subtasks(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     try:
         project_id = request.data.get("project_id")
         if not project_id:
@@ -1381,21 +1345,6 @@ def timeline_gantt(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     try:
         action = request.data.get("action")
         project_id = request.data.get("project_id")
@@ -1509,21 +1458,6 @@ def _knowledge_qa_inputs(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        ), None
-
     question = request.data.get("question", "").strip()
     if not question:
         return Response(
@@ -2922,12 +2856,6 @@ def project_pilot_confirm(request):
         skip     list    indexes of actions the user unticked
     """
     company_user = request.user
-    if not company_user.can_access_project_manager_features():
-        return Response(
-            {"status": "error",
-             "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
 
     proposed = request.data.get("actions")
     if not isinstance(proposed, list) or not proposed:
@@ -2982,18 +2910,6 @@ def project_pilot_from_file(request):
     from django.conf import settings as _dj_settings
 
     company_user = request.user
-
-    # Access check (unchanged from the previous sync endpoint).
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        can_access = company_user.role in ['project_manager', 'company_user']
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
 
     try:
         if 'file' not in request.FILES:
@@ -3166,8 +3082,6 @@ def daily_standup(request):
     """Generate daily or weekly standup report for a project."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         action = request.data.get("action", "daily")  # "daily" or "weekly"
@@ -3262,8 +3176,6 @@ def project_health_score(request):
     """Calculate project health score and risk analysis."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         action = request.data.get("action", "health")  # "health", "risks", "report", "metrics"
@@ -3305,8 +3217,6 @@ def project_status_report(request):
     """Generate comprehensive project status report."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         if not project_id:
@@ -3346,8 +3256,6 @@ def meeting_notes(request):
     """Process meeting notes and extract action items."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         meeting_text = request.data.get("meeting_text", "")
         action = request.data.get("action", "summarize")  # "summarize" or "extract_actions"
@@ -3417,8 +3325,6 @@ def workflow_suggest(request):
     """Suggest workflows and checklists for a project."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         action = request.data.get("action", "suggest")  # "suggest", "checklist", "validate"
@@ -3483,8 +3389,6 @@ def calendar_schedule(request):
     """Generate optimized task schedules and detect conflicts."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         action = request.data.get("action", "schedule")  # "schedule" or "conflicts"
@@ -3546,8 +3450,6 @@ def scan_notifications(request):
     """Scan projects for issues and generate smart notifications."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
 
@@ -3711,8 +3613,6 @@ def team_performance(request):
     """Get team performance analytics for a project."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         if not project_id:
@@ -3765,8 +3665,6 @@ def time_estimation(request):
     """
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         if not project_id:

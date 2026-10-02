@@ -852,21 +852,6 @@ class CompanyUser(models.Model):
         """Check if user is a project manager"""
         return self.role == 'project_manager'
     
-    def can_access_project_manager_features(self):
-        """Any active company user may use the Project Manager agent.
-
-        This used to be ``self.role in ['project_manager', 'company_user']`` —
-        two of the twelve roles in ROLE_CHOICES, and not the ``admin`` the field
-        defaults to. So the first user of a brand new company was refused even
-        with the module bought and paid for.
-
-        Which agents a company may use is decided by its purchases, and
-        ``api.middleware.module_access`` already enforces that for the
-        ``project-manager`` prefix. No other agent gates on role. The role list
-        therefore bought no safety and only locked legitimate owners out.
-        """
-        return bool(self.is_active)
-    
     def is_recruitment_agent(self):
         """Check if user is a recruitment agent"""
         return self.role == 'recruitment_agent'
