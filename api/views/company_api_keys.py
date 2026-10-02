@@ -126,6 +126,22 @@ def _serialize_quota(quota: AgentTokenQuota, agent_name: str = None):
     }
 
 
+def _ai_calls_by_agent(company, days=30):
+    """{agent: {calls, failed, tokens}} over the last `days`, from LLMUsage —
+    one row per AI call, written by the shared BaseAgent."""
+    from datetime import timedelta
+    from django.db.models import Count, Q, Sum
+    from django.utils import timezone
+    from Frontline_agent.models import LLMUsage
+    rows = (LLMUsage.objects
+            .filter(company=company, created_at__gte=timezone.now() - timedelta(days=days))
+            .exclude(agent='')
+            .values('agent')
+            .annotate(calls=Count('id'), failed=Count('id', filter=Q(success=False)),
+                      tokens=Sum('total_tokens')))
+    return {r['agent']: {'calls': r['calls'], 'failed': r['failed'], 'tokens': r['tokens'] or 0} for r in rows}
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -163,6 +179,8 @@ def list_agent_keys(request):
         for q in AgentTokenQuota.objects.filter(company=company).prefetch_related('provider_usage')
     }
 
+    usage_by_agent = _ai_calls_by_agent(company)
+
     rows = []
     for agent_name, agent_label in AGENT_CHOICES:
         if agent_name not in purchased:
@@ -177,6 +195,8 @@ def list_agent_keys(request):
             'default_provider': AGENT_DEFAULT_PROVIDER.get(agent_name, 'openai'),
             # null = any provider; otherwise the only ones the key form offers.
             'supported_providers': list(supported_providers(agent_name) or []) or None,
+            # AI calls in the last 30 days, from the per-call log.
+            'usage_30d': usage_by_agent.get(agent_name, {'calls': 0, 'failed': 0, 'tokens': 0}),
         })
 
     return Response({

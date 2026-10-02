@@ -303,6 +303,16 @@ const AgentCard = ({ agent, pendingReq, onByok, onRevoke, onRequest, onSetPool, 
         <div className="flex gap-0">
           {/* Left: quota bars + pool indicator */}
           <div className="flex-1 px-6 py-3 space-y-2.5 min-w-0">
+            {/* How much the agent actually called the AI, from the per-call log. */}
+            {agent.usage_30d && (
+              <p data-testid={`agent-usage-${agent.agent_name}`} className="text-[11px] text-white/50">
+                Last 30 days: {agent.usage_30d.calls.toLocaleString()} AI call{agent.usage_30d.calls === 1 ? '' : 's'}
+                {agent.usage_30d.failed > 0 && (
+                  <span className="text-amber-400/90"> · {agent.usage_30d.failed.toLocaleString()} failed</span>
+                )}
+                {agent.usage_30d.tokens > 0 && ` · ${formatTokens(agent.usage_30d.tokens)} tokens`}
+              </p>
+            )}
             {q && q.included_tokens > 0 && (
               <div>
                 <div className="flex justify-between text-[10px] text-white/40 mb-1">

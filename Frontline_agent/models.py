@@ -1070,6 +1070,9 @@ class LLMUsage(models.Model):
     rough approximation from a hardcoded price map — tune as models change.
     """
     company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='llm_usage')
+    # The agent the call was for ('project_manager_agent', 'hr_agent', ...);
+    # blank on rows written before it was recorded.
+    agent = models.CharField(max_length=40, blank=True, default='')
     agent_name = models.CharField(max_length=100, db_index=True)
     model = models.CharField(max_length=100, db_index=True)
     prompt_tokens = models.IntegerField(default=0)
@@ -1086,6 +1089,7 @@ class LLMUsage(models.Model):
         indexes = [
             models.Index(fields=['company', 'created_at']),
             models.Index(fields=['company', 'agent_name', 'created_at']),
+            models.Index(fields=['company', 'agent', 'created_at'], name='frontline_llmusage_agent_idx'),
         ]
 
     def __str__(self):

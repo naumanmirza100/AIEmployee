@@ -28,7 +28,7 @@ from recruitment_agent.agents.lead_qualification import LeadQualificationAgent
 from recruitment_agent.agents.job_description_parser import JobDescriptionParserAgent
 from recruitment_agent.agents.interview_scheduling import InterviewSchedulingAgent
 from recruitment_agent.agents.recruitment_qa_agent import RecruitmentQAAgent
-from recruitment_agent.core import QuotaAwareGroqClient
+from recruitment_agent.core import RecruitmentAIClient
 from recruitment_agent import sharing
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
@@ -54,7 +54,8 @@ def _make_agents(company):
     """Per-request agent factory. Resolves the company's LLM key via the
     subscription system and creates fresh agent instances for this request.
 
-    - If company has BYOK or admin-assigned key → QuotaAwareGroqClient (usage tracked).
+    - The AI client is the shared BaseAgent's (recruitment_agent.core): the
+      company's Groq or OpenAI key, quota counted, every call logged.
     - NoKeyAvailable / QuotaExhausted / ByokCapReached propagate to the
       global DRF handler (core/drf_exceptions.py) which returns 402/403 JSON.
     - Env key is NEVER used as a silent fallback.
@@ -67,7 +68,7 @@ def _make_agents(company):
         ctx.api_key.encode('latin-1')
     except (UnicodeEncodeError, UnicodeDecodeError):
         raise BadAPIKey(mode=ctx.mode)
-    groq_client = QuotaAwareGroqClient(api_key=ctx.api_key, key_ctx=ctx)
+    groq_client = RecruitmentAIClient(company_id=company.id)
 
     log_service = LogService()
     django_repo = DjangoRepository()
@@ -1308,9 +1309,9 @@ def update_interview(request, interview_id):
         # Resend confirmation email with the updated meeting link
         if resend_confirmation and interview.candidate_email:
             try:
-                agents = get_agents()
-                interview_agent = agents['interview_agent']
-                interview_agent.send_confirmation_email(interview)
+                # This called get_agents(), which isn't defined here: the
+                # NameError was caught below, so the email was never resent.
+                InterviewSchedulingAgent(log_service=LogService()).send_confirmation_email(interview)
             except Exception as mail_err:
                 logger.warning(f"Failed to resend confirmation email: {mail_err}")
 

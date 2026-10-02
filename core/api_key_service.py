@@ -60,16 +60,16 @@ VALID_AGENTS = _ValidAgents()
 
 
 #: The LLM providers each agent's code can actually call. Keys can be saved for
-#: five providers, but PM, HR and Frontline call through the shared BaseAgent,
-#: which has Groq and OpenAI clients only, and Recruitment through its own
-#: Groq-only client (recruitment_agent/core.py). Any other key used to be
-#: accepted and then fail on every call. Agents not listed haven't been
-#: checked, so they stay unrestricted.
+#: five providers, but PM, HR, Frontline and Recruitment all call through the
+#: shared BaseAgent (Recruitment via recruitment_agent/core.py), which has Groq
+#: and OpenAI clients only. Any other key used to be accepted and then fail on
+#: every call. Agents not listed haven't been checked, so they stay
+#: unrestricted.
 AGENT_SUPPORTED_PROVIDERS = {
     'project_manager_agent': ('openai', 'groq'),
     'hr_agent': ('openai', 'groq'),
     'frontline_agent': ('openai', 'groq'),
-    'recruitment_agent': ('groq',),
+    'recruitment_agent': ('openai', 'groq'),
 }
 
 
