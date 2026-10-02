@@ -753,7 +753,22 @@ const SDRLeadsTab = () => {
       setPage(1);
       loadLeads({ page: 1 });
     } catch (e) {
-      toast({ title: 'Generate failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+      const data = e?.data || e?.response?.data;
+      if (data?.code === 'apify_approval_required') {
+        // The user must approve the actor once on Apify; give them the link.
+        toast({
+          title: 'Approve the Apify actor first',
+          description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
+          variant: 'destructive',
+          action: (
+            <ToastAction altText="Open Apify" onClick={() => window.open(data.approval_url, '_blank', 'noopener,noreferrer')}>
+              Open Apify
+            </ToastAction>
+          ),
+        });
+      } else {
+        toast({ title: 'Generate failed', description: data?.message || e.message, variant: 'destructive' });
+      }
     } finally { setGenerating(false); }
   };
 
