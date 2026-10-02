@@ -468,18 +468,31 @@ class Interview(models.Model):
     def __str__(self):
         return f"Interview: {self.candidate_name} - {self.job_role} ({self.status})"
     
+    def _job(self):
+        try:
+            if self.cv_record_id and self.cv_record and self.cv_record.job_description_id:
+                return self.cv_record.job_description
+        except CVRecord.DoesNotExist:
+            pass
+        return None
+
     def get_recruiter_settings(self):
-        """The recruiter's email settings, with defaults if none are saved.
+        """The email settings for this interview's candidate emails, with
+        defaults if none are saved: the job owner's (see
+        recruitment_agent.sharing), else the recruiter running it.
 
         The dashboard saves them against the dashboard login (`company_user`);
         only older interviews name an employee-login `recruiter`. This used to
         look at `recruiter` alone, so settings saved on the dashboard — the
         follow-up timing and the on/off switches — were never used.
         """
-        if self.company_user_id:
-            found = RecruiterEmailSettings.objects.filter(company_user_id=self.company_user_id).first()
-            if found is not None:
-                return found
+        from recruitment_agent.sharing import owner
+        job_owner = owner(self._job(), None)
+        for cu_id in (job_owner.id if job_owner else None, self.company_user_id):
+            if cu_id:
+                found = RecruiterEmailSettings.objects.filter(company_user_id=cu_id).first()
+                if found is not None:
+                    return found
         if self.recruiter:
             try:
                 return self.recruiter.recruiter_email_settings
@@ -541,36 +554,12 @@ class Interview(models.Model):
         Returns True if schedule_to_date is set and today is past that date.
         """
         from datetime import date
-        job = None
-        try:
-            if self.cv_record_id and self.cv_record and self.cv_record.job_description_id:
-                job = self.cv_record.job_description
-        except CVRecord.DoesNotExist:
-            pass
-
-        if not job:
+        from recruitment_agent.interview_time import settings_for
+        if not self._job():
             return False
 
-        # Check job-specific settings first, then fallback to general settings
-        settings = None
-        if self.company_user:
-            settings = RecruiterInterviewSettings.objects.filter(
-                company_user=self.company_user, job=job
-            ).first()
-            if not settings:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    company_user=self.company_user, job__isnull=True
-                ).first()
-
-        if not settings and self.recruiter:
-            settings = RecruiterInterviewSettings.objects.filter(
-                recruiter=self.recruiter, job=job
-            ).first()
-            if not settings:
-                settings = RecruiterInterviewSettings.objects.filter(
-                    recruiter=self.recruiter, job__isnull=True
-                ).first()
-
+        # The job's own settings, else the recruiter's defaults
+        settings = settings_for(self)
         if settings and settings.schedule_to_date:
             return date.today() > settings.schedule_to_date
 

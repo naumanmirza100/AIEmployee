@@ -23,22 +23,27 @@ from core.scheduling.conflicts import clock_label, zone_info
 
 
 def settings_for(interview):
-    """The recruiter's interview settings that apply to `interview`: the job's
-    own, else the recruiter's defaults (company login first, then the legacy
-    auth-user recruiter)."""
+    """The interview settings that apply to `interview`: the job's own, whoever
+    set them up; else the defaults of the recruiter running it (company login
+    first, then the legacy auth-user recruiter), then of the job's owner."""
     from recruitment_agent.models import RecruiterInterviewSettings
+    from recruitment_agent.sharing import job_interview_settings
 
     job = (interview.cv_record.job_description
            if interview.cv_record_id and interview.cv_record and interview.cv_record.job_description_id
            else None)
+    found = job_interview_settings(job)
+    if found:
+        return found
     owners = []
     if interview.company_user_id:
         owners.append({'company_user_id': interview.company_user_id})
     if interview.recruiter_id:
         owners.append({'recruiter_id': interview.recruiter_id})
+    if job is not None and job.company_user_id:
+        owners.append({'company_user_id': job.company_user_id})
     for owner in owners:
-        qs = RecruiterInterviewSettings.objects.filter(**owner)
-        found = (qs.filter(job=job).first() if job else None) or qs.filter(job__isnull=True).first()
+        found = RecruiterInterviewSettings.objects.filter(job__isnull=True, **owner).first()
         if found:
             return found
     return None

@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from django.db.models import Count, Avg, Max, Min
+from django.db.models import Count, Avg, Max, Min, Q
 
 from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.models import (
@@ -757,9 +757,14 @@ FORMATTING:
             raise
 
     def _get_recruitment_data(self, company_user: Any) -> Dict[str, Any]:
-        """Load comprehensive recruitment data: jobs, CVs, interviews, settings, time slots, applications."""
+        """Load comprehensive recruitment data: jobs, CVs, interviews, settings, time slots, applications.
+
+        Jobs, candidates and interviews are the whole company's (see
+        recruitment_agent.sharing); the email and screening settings are the
+        asker's own."""
+        from recruitment_agent import sharing
         jobs_qs = (
-            JobDescription.objects.filter(company_user=company_user)
+            sharing.jobs(company_user).select_related("company_user")
             .order_by("-created_at")
         )
         jobs_list = []
@@ -831,7 +836,6 @@ FORMATTING:
 
             # Per-job interviews with details
             job_interviews_qs = Interview.objects.filter(
-                company_user=company_user,
                 cv_record__job_description_id=job.id,
             ).order_by('-created_at')
             interview_count = job_interviews_qs.count()
@@ -887,9 +891,7 @@ FORMATTING:
             job_time_slots = []
             job_interview_setting = None
             try:
-                job_interview_setting = RecruiterInterviewSettings.objects.filter(
-                    company_user=company_user, job=job
-                ).first()
+                job_interview_setting = sharing.job_interview_settings(job)
                 if job_interview_setting and job_interview_setting.time_slots_json:
                     slots = job_interview_setting.time_slots_json
                     if isinstance(slots, str):
@@ -920,6 +922,7 @@ FORMATTING:
                 "department": job.department or "",
                 "type": job.type or "Full-time",
                 "requirements": job.requirements or "",
+                "posted_by": (job.company_user.full_name or job.company_user.email) if job.company_user_id else "",
                 "candidates": candidates,
                 # Everyone who applied — analysed or not. Counting only analysed CVs
                 # made the agent answer "0 candidates" for jobs that had applicants
@@ -953,11 +956,10 @@ FORMATTING:
             })
 
         # Global CV count (all jobs)
-        all_cvs = CVRecord.objects.filter(
-            job_description__company_user=company_user
-        )
+        all_cvs = sharing.cvs(company_user)
         total_cvs = all_cvs.count()
-        interview_total = Interview.objects.filter(company_user=company_user).count()
+        all_interviews = sharing.interviews(company_user)
+        interview_total = all_interviews.count()
 
         # Qualification decision breakdown (global)
         qual_qs = all_cvs.order_by().values('qualification_decision').annotate(cnt=Count('id'))
@@ -967,16 +969,14 @@ FORMATTING:
             qualification_counts[decision] = row['cnt']
 
         # Interview status breakdown (global)
-        interview_status_qs = Interview.objects.filter(
-            company_user=company_user
-        ).order_by().values('status').annotate(cnt=Count('id'))
+        interview_status_qs = all_interviews.order_by().values('status').annotate(cnt=Count('id'))
         interview_status_counts = {}
         for row in interview_status_qs:
             interview_status_counts[row['status']] = row['cnt']
 
         # Interview outcome breakdown (global)
-        interview_outcome_qs = Interview.objects.filter(
-            company_user=company_user, outcome__isnull=False
+        interview_outcome_qs = all_interviews.filter(
+            outcome__isnull=False
         ).exclude(outcome='').order_by().values('outcome').annotate(cnt=Count('id'))
         interview_outcome_counts = {}
         for row in interview_outcome_qs:
@@ -984,7 +984,7 @@ FORMATTING:
 
         # Career application counts (global)
         app_qs = CareerApplication.objects.filter(
-            position__company_user=company_user
+            position__in=sharing.jobs(company_user)
         ).order_by().values('status').annotate(cnt=Count('id'))
         career_application_counts = {}
         for row in app_qs:
@@ -994,9 +994,10 @@ FORMATTING:
         email_settings = RecruiterEmailSettings.objects.filter(
             company_user=company_user
         ).first()
+        # The company's jobs' settings, and the asker's own defaults
         interview_settings = list(
             RecruiterInterviewSettings.objects.filter(
-                company_user=company_user
+                Q(job__in=sharing.jobs(company_user)) | Q(company_user=company_user, job__isnull=True)
             ).select_related("job")
         )
         qual_settings = RecruiterQualificationSettings.objects.filter(
@@ -1092,7 +1093,8 @@ FORMATTING:
             ss = j.get("score_stats", {})
 
             lines.append(f"\n=== JOB: {title} (ID:{aid}) ===")
-            lines.append(f"Status: {active_str} | Type: {jtype} | Location: {loc} | Department: {dept}")
+            lines.append(f"Status: {active_str} | Type: {jtype} | Location: {loc} | Department: {dept}"
+                         + (f" | Posted by: {j['posted_by']}" if j.get("posted_by") else ""))
             lines.append(
                 f"Candidates: {cand} (analysed: {j.get('analysed_count', 0)}, "
                 f"awaiting AI analysis: {j.get('pending_count', 0)}) | "
@@ -1282,9 +1284,9 @@ FORMATTING:
 
     def _find_candidates_in_question(self, company_user: Any, question: str) -> List[Any]:
         """Locate CVRecords the question refers to, by name or by 'candidate N' index."""
+        from recruitment_agent import sharing
         cv_qs = (
-            CVRecord.objects
-            .filter(job_description__company_user=company_user)
+            sharing.cvs(company_user)
             .select_related('job_description')
         )
 

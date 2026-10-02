@@ -680,6 +680,13 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                         {job.location && `${job.location} • `}
                         {job.type}
                       </CardDescription>
+                      {/* The company shares jobs: say whose this is (its settings are theirs). */}
+                      {job.owner && (
+                        <p data-testid={`REC-jobs-owner-${job.id}`} className="mt-0.5 text-xs text-muted-foreground">
+                          Posted by {job.owner.is_you ? 'you' : job.owner.name}
+                          {!job.owner.active && ' (no longer here)'}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap justify-end">

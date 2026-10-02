@@ -29,6 +29,7 @@ from recruitment_agent.agents.job_description_parser import JobDescriptionParser
 from recruitment_agent.agents.interview_scheduling import InterviewSchedulingAgent
 from recruitment_agent.agents.recruitment_qa_agent import RecruitmentQAAgent
 from recruitment_agent.core import QuotaAwareGroqClient
+from recruitment_agent import sharing
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
 from recruitment_agent.models import (
@@ -130,16 +131,10 @@ def process_cvs(request):
         # Fetch job description (required)
         if job_description_id:
             try:
-                job_desc = JobDescription.objects.filter(
-                    id=job_description_id,
-                    company_user=company_user
-                ).first()
+                job_desc = sharing.jobs(company_user).filter(id=job_description_id).first()
                 if job_desc:
                     # Check if interview settings are complete for this job
-                    interview_settings = RecruiterInterviewSettings.objects.filter(
-                        company_user=company_user,
-                        job=job_desc
-                    ).first()
+                    interview_settings = sharing.job_interview_settings(job_desc)
                     
                     # Check if settings are complete (all required fields must be present)
                     settings_incomplete = False
@@ -325,16 +320,9 @@ def process_cvs(request):
                     'parse_only': True
                 })
             
-            # Get qualification settings for company user (fetch once, use for all CVs)
-            interview_threshold = None
-            hold_threshold = None
-            try:
-                qual_settings = RecruiterQualificationSettings.objects.filter(company_user=company_user).first()
-                if qual_settings and qual_settings.use_custom_thresholds:
-                    interview_threshold = qual_settings.interview_threshold
-                    hold_threshold = qual_settings.hold_threshold
-            except Exception as e:
-                logger.warning(f"Error fetching qualification settings: {e}")
+            # The job owner's screening thresholds (fetch once, use for all CVs)
+            settings_owner = sharing.owner(job_desc, company_user)
+            interview_threshold, hold_threshold = sharing.thresholds(settings_owner)
             
             # Summarize, enrich, and qualify
             all_results = []
@@ -390,33 +378,13 @@ def process_cvs(request):
             # Use job's default interview type (Online/Onsite) for auto-scheduled invitations
             auto_interview_type = 'ONLINE'
             if job_desc:
-                job_int_settings = RecruiterInterviewSettings.objects.filter(
-                    company_user=company_user,
-                    job=job_desc
-                ).first()
+                job_int_settings = sharing.job_interview_settings(job_desc)
                 if job_int_settings and getattr(job_int_settings, 'default_interview_type', None):
                     auto_interview_type = job_int_settings.default_interview_type
-            
-            # Get company user email settings for interview defaults
-            try:
-                email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
-                email_settings = {
-                    'followup_delay_hours': email_settings_obj.followup_delay_hours,
-                    'reminder_hours_before': email_settings_obj.reminder_hours_before,
-                    'max_followup_emails': email_settings_obj.max_followup_emails,
-                    'min_hours_between_followups': email_settings_obj.min_hours_between_followups,
-                }
-                followup_delay = email_settings_obj.followup_delay_hours
-                reminder_hours = email_settings_obj.reminder_hours_before
-                max_followups = email_settings_obj.max_followup_emails
-                min_between = email_settings_obj.min_hours_between_followups
-            except RecruiterEmailSettings.DoesNotExist:
-                email_settings = None
-                followup_delay = 48
-                reminder_hours = 24
-                max_followups = 3
-                min_between = 24
-            
+
+            # The job owner's email timings for the interviews
+            email_settings = sharing.email_settings(settings_owner)
+
             # Update CV records with qualification data and auto-schedule interviews
             for idx, result in enumerate(ranked):
                 if result['record_id']:
@@ -665,7 +633,7 @@ def list_job_descriptions(request):
     try:
         company_user = request.user
 
-        qs = JobDescription.objects.filter(company_user=company_user)
+        qs = sharing.jobs(company_user).select_related('company_user')
 
         # search
         search = request.query_params.get('search', '').strip()
@@ -720,6 +688,7 @@ def list_job_descriptions(request):
                 'application_close_date': jd.application_close_date.isoformat() if jd.application_close_date else None,
                 'created_at': jd.created_at.isoformat() if jd.created_at else None,
                 'updated_at': jd.updated_at.isoformat() if jd.updated_at else None,
+                'owner': sharing.owner_payload(jd, company_user),
             })
 
         return Response({
@@ -749,7 +718,7 @@ def list_job_applications(request, job_description_id):
     from recruitment_agent.models import JobApplication
     try:
         company_user = request.user
-        job = JobDescription.objects.filter(id=job_description_id, company_user=company_user).first()
+        job = sharing.jobs(company_user).filter(id=job_description_id).first()
         if not job:
             return Response({'status': 'error', 'message': 'Job description not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -922,12 +891,9 @@ def update_job_description(request, job_description_id):
     """Update an existing job description"""
     try:
         company_user = request.user
-        
-        job_desc = JobDescription.objects.filter(
-            id=job_description_id,
-            company_user=company_user
-        ).first()
-        
+
+        job_desc = sharing.jobs(company_user).filter(id=job_description_id).first()
+
         if not job_desc:
             return Response({
                 'status': 'error',
@@ -1002,18 +968,15 @@ def delete_job_description(request, job_description_id):
     """Delete a job description"""
     try:
         company_user = request.user
-        
-        job_desc = JobDescription.objects.filter(
-            id=job_description_id,
-            company_user=company_user
-        ).first()
-        
+
+        job_desc = sharing.jobs(company_user).filter(id=job_description_id).first()
+
         if not job_desc:
             return Response({
                 'status': 'error',
                 'message': 'Job description not found'
             }, status=status.HTTP_404_NOT_FOUND)
-        
+
         job_desc.delete()
         
         return Response({
@@ -1045,7 +1008,7 @@ def interview_hr_handoff(request, interview_id):
     from recruitment_agent import hr_handoff
     company_user = request.user
     company = company_user.company
-    interview = (Interview.objects.filter(id=interview_id, company_user=company_user)
+    interview = (sharing.interviews(company_user).filter(id=interview_id)
                  .select_related('cv_record__job_description', 'hr_employee').first())
     if not interview:
         return Response({'status': 'error', 'message': 'Interview not found'},
@@ -1148,8 +1111,8 @@ def list_interviews(request):
         from recruitment_agent.interview_time import remember_timezone
         remember_timezone(company_user, request.query_params.get('timezone'))
 
-        interviews = Interview.objects.filter(company_user=company_user).select_related(
-            'cv_record', 'cv_record__job_description', 'hr_employee'
+        interviews = sharing.interviews(company_user).select_related(
+            'cv_record', 'cv_record__job_description', 'hr_employee', 'company_user'
         ).prefetch_related('interviewers')
 
         if status_filter:
@@ -1202,6 +1165,11 @@ def list_interviews(request):
                 'duration_minutes': interview.duration_minutes,
                 'timezone_name': interview.timezone_name or None,
                 'interviewers': _interviewers_payload(interview),
+                # Who runs it: the login that invited the candidate, or was handed it.
+                'recruiter': ({'id': interview.company_user_id,
+                               'name': interview.company_user.full_name or interview.company_user.email,
+                               'is_you': interview.company_user_id == company_user.id}
+                              if interview.company_user_id else None),
                 'hr_employee': ({'id': interview.hr_employee_id, 'full_name': interview.hr_employee.full_name}
                                 if interview.hr_employee_id else None),
                 'meeting_link': interview.meeting_link or '',
@@ -1264,10 +1232,7 @@ def update_interview(request, interview_id):
     """Update interview status and/or outcome (company only)"""
     try:
         company_user = request.user
-        interview = Interview.objects.filter(
-            id=interview_id,
-            company_user=company_user
-        ).first()
+        interview = sharing.interviews(company_user).filter(id=interview_id).first()
 
         if not interview:
             return Response({
@@ -1418,10 +1383,7 @@ def submit_interview_feedback(request, interview_id):
     from django.utils import timezone as tz
     try:
         company_user = request.user
-        interview = Interview.objects.filter(
-            id=interview_id,
-            company_user=company_user
-        ).first()
+        interview = sharing.interviews(company_user).filter(id=interview_id).first()
         if not interview:
             return Response({'status': 'error', 'message': 'Interview not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1471,10 +1433,7 @@ def get_reschedule_slots(request, interview_id):
     """Get available slots for rescheduling an interview (company only)"""
     try:
         company_user = request.user
-        interview = Interview.objects.filter(
-            id=interview_id,
-            company_user=company_user
-        ).first()
+        interview = sharing.interviews(company_user).filter(id=interview_id).first()
 
         if not interview:
             return Response({
@@ -1517,10 +1476,7 @@ def reschedule_interview(request, interview_id):
     """Reschedule an interview to a new slot; sends new invitation to candidate (company only)"""
     try:
         company_user = request.user
-        interview = Interview.objects.filter(
-            id=interview_id,
-            company_user=company_user
-        ).first()
+        interview = sharing.interviews(company_user).filter(id=interview_id).first()
 
         if not interview:
             return Response({
@@ -1606,25 +1562,22 @@ def schedule_interview(request):
                 'message': 'Invalid interview_type. Must be ONLINE or ONSITE'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Verify CV record belongs to company user if provided; use job's interview type if set
+        # Verify the CV record is one of the company's; use the job's interview type if set
         interview_type_to_use = interview_type
+        job = None
         if cv_record_id:
-            cv_record = CVRecord.objects.filter(
-                id=cv_record_id,
-                job_description__company_user=company_user
+            cv_record = sharing.cvs(company_user).filter(
+                id=cv_record_id
             ).select_related('job_description', 'job_application').first()
             if not cv_record:
                 return Response({
                     'status': 'error',
                     'message': 'CV record not found or access denied'
                 }, status=status.HTTP_404_NOT_FOUND)
-            if cv_record.job_description_id:
-                job_settings = RecruiterInterviewSettings.objects.filter(
-                    company_user=company_user,
-                    job_id=cv_record.job_description_id
-                ).first()
-                if job_settings and getattr(job_settings, 'default_interview_type', None):
-                    interview_type_to_use = job_settings.default_interview_type
+            job = cv_record.job_description
+            job_settings = sharing.job_interview_settings(job)
+            if job_settings and getattr(job_settings, 'default_interview_type', None):
+                interview_type_to_use = job_settings.default_interview_type
 
             # Override with real application data if available (real form submission beats AI-parsed)
             _app = cv_record.job_application
@@ -1633,26 +1586,10 @@ def schedule_interview(request):
                 candidate_email = _app.email or candidate_email
                 candidate_phone = _app.phone or candidate_phone
         
-        # Get company user email settings for interview defaults
-        try:
-            email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
-            email_settings = {
-                'followup_delay_hours': email_settings_obj.followup_delay_hours,
-                'reminder_hours_before': email_settings_obj.reminder_hours_before,
-                'max_followup_emails': email_settings_obj.max_followup_emails,
-                'min_hours_between_followups': email_settings_obj.min_hours_between_followups,
-            }
-            followup_delay = email_settings_obj.followup_delay_hours
-            reminder_hours = email_settings_obj.reminder_hours_before
-            max_followups = email_settings_obj.max_followup_emails
-            min_between = email_settings_obj.min_hours_between_followups
-        except RecruiterEmailSettings.DoesNotExist:
-            # Use defaults
-            email_settings = None
-            followup_delay = 48
-            reminder_hours = 24
-            max_followups = 3
-            min_between = 24
+        # The job owner's email timings, else defaults
+        email_settings = sharing.email_settings(sharing.owner(job, company_user))
+        timings = email_settings or {'followup_delay_hours': 48, 'reminder_hours_before': 24,
+                                     'max_followup_emails': 3, 'min_hours_between_followups': 24}
         
         # Schedule interview - use job's default_interview_type when available
         result = interview_agent.schedule_interview(
@@ -1676,11 +1613,8 @@ def schedule_interview(request):
                 # Update company_user if not already set
                 if not interview.company_user:
                     interview.company_user = company_user
-                # Ensure company user email settings are applied
-                interview.followup_delay_hours = followup_delay
-                interview.reminder_hours_before = reminder_hours
-                interview.max_followup_emails = max_followups
-                interview.min_hours_between_followups = min_between
+                for field, value in timings.items():
+                    setattr(interview, field, value)
                 interview.save()
             except Interview.DoesNotExist:
                 pass
@@ -1709,10 +1643,7 @@ def get_interview_details(request, interview_id):
     try:
         company_user = request.user
         
-        interview = Interview.objects.filter(
-            id=interview_id,
-            company_user=company_user
-        ).first()
+        interview = sharing.interviews(company_user).filter(id=interview_id).first()
         
         if not interview:
             return Response({
@@ -1772,9 +1703,7 @@ def list_cv_records(request):
             page = 1
             page_size = None
         
-        cv_records = CVRecord.objects.filter(
-            job_description__company_user=company_user
-        ).select_related('job_description', 'job_application')
+        cv_records = sharing.cvs(company_user).select_related('job_description', 'job_application')
 
         if job_id:
             cv_records = cv_records.filter(job_description_id=job_id)
@@ -1901,7 +1830,7 @@ def _reject_recipient(cv_record):
     return None, 'Candidate'
 
 
-def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, email_settings, log_service):
+def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, log_service):
     """
     If this CV record has no existing interview and has candidate email,
     schedule an interview and send invitation email. Returns ('sent', True), ('skipped', reason), or ('error', False).
@@ -1943,12 +1872,11 @@ def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, 
     if cv_record.job_description:
         job_role = (cv_record.job_description.title or 'Position')[:255]
     interview_type_to_use = 'ONLINE'
-    job_settings = RecruiterInterviewSettings.objects.filter(
-        company_user=company_user,
-        job_id=cv_record.job_description_id
-    ).first()
+    job_settings = sharing.job_interview_settings(cv_record.job_description)
     if job_settings and getattr(job_settings, 'default_interview_type', None):
         interview_type_to_use = job_settings.default_interview_type
+    # The job owner's email timings
+    email_settings = sharing.email_settings(sharing.owner(cv_record.job_description, company_user))
 
     try:
         result = interview_agent.schedule_interview(
@@ -1967,14 +1895,8 @@ def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, 
             interview = Interview.objects.filter(id=result['interview_id']).first()
             if interview:
                 interview.company_user = company_user
-                try:
-                    email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
-                    interview.followup_delay_hours = email_settings_obj.followup_delay_hours
-                    interview.reminder_hours_before = email_settings_obj.reminder_hours_before
-                    interview.max_followup_emails = email_settings_obj.max_followup_emails
-                    interview.min_hours_between_followups = email_settings_obj.min_hours_between_followups
-                except RecruiterEmailSettings.DoesNotExist:
-                    pass
+                for field, value in (email_settings or {}).items():
+                    setattr(interview, field, value)
                 interview.save()
         if result.get('invitation_sent'):
             logger.info(f"Bulk INTERVIEW: invitation email sent for CV record id={cv_record.id} -> {candidate_email}")
@@ -2001,10 +1923,7 @@ def get_cv_record_detail(request, record_id):
     from recruitment_agent.models import JobApplication
     try:
         company_user = request.user
-        cv = CVRecord.objects.filter(
-            id=record_id,
-            job_description__company_user=company_user
-        ).select_related('job_description').first()
+        cv = sharing.cvs(company_user).filter(id=record_id).select_related('job_description').first()
 
         if not cv:
             return Response({'status': 'error', 'message': 'Record not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -2099,10 +2018,7 @@ def get_cv_record_decision_history(request, record_id):
     """Return the full decision change audit trail for a CV record."""
     try:
         company_user = request.user
-        cv = CVRecord.objects.filter(
-            id=record_id,
-            job_description__company_user=company_user,
-        ).first()
+        cv = sharing.cvs(company_user).filter(id=record_id).first()
         if not cv:
             return Response({'status': 'error', 'message': 'CV record not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -2156,10 +2072,7 @@ def bulk_update_cv_records(request):
                 'message': 'No valid CV record IDs provided'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        qs = CVRecord.objects.filter(
-            id__in=ids,
-            job_description__company_user=company_user
-        )
+        qs = sharing.cvs(company_user).filter(id__in=ids)
 
         # Candidates whose interview is already COMPLETED are locked — their
         # decision can't be changed anymore. Skip them and report back.
@@ -2265,23 +2178,11 @@ def bulk_update_cv_records(request):
             try:
                 log_service = LogService()
                 interview_agent = InterviewSchedulingAgent(log_service=log_service)
-                email_settings = None
-                try:
-                    email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
-                    email_settings = {
-                        'followup_delay_hours': email_settings_obj.followup_delay_hours,
-                        'reminder_hours_before': email_settings_obj.reminder_hours_before,
-                        'max_followup_emails': email_settings_obj.max_followup_emails,
-                        'min_hours_between_followups': email_settings_obj.min_hours_between_followups,
-                    }
-                except RecruiterEmailSettings.DoesNotExist:
-                    pass
-                cv_records = CVRecord.objects.filter(
-                    id__in=ids,
-                    job_description__company_user=company_user
-                ).exclude(id__in=completed_ids).select_related('job_description')
+                cv_records = sharing.cvs(company_user).filter(
+                    id__in=ids
+                ).exclude(id__in=completed_ids).select_related('job_description__company_user')
                 for cv in cv_records:
-                    sched_status, sched_detail = _schedule_interview_for_cv_record(cv, company_user, interview_agent, email_settings, log_service)
+                    sched_status, sched_detail = _schedule_interview_for_cv_record(cv, company_user, interview_agent, log_service)
                     if sched_status == 'sent':
                         emails_sent += 1
                     elif sched_status == 'skipped':
@@ -2455,9 +2356,8 @@ def interview_settings(request):
         # Validate job_id if provided
         job = None
         if job_id:
-            try:
-                job = JobDescription.objects.get(id=job_id, company_user=company_user)
-            except JobDescription.DoesNotExist:
+            job = sharing.jobs(company_user).filter(id=job_id).first()
+            if job is None:
                 return Response({
                     'status': 'error',
                     'message': f'Job with id {job_id} not found or does not belong to your company.'
@@ -2469,9 +2369,9 @@ def interview_settings(request):
 
         if request.method == 'GET':
             remember_timezone(company_user, browser_tz)
-            # Try to get job-specific settings first, then fallback to company-wide settings
+            # A job's own settings, whoever set them up; else this login's defaults
             if job:
-                settings = RecruiterInterviewSettings.objects.filter(company_user=company_user, job=job).first()
+                settings = sharing.job_interview_settings(job)
             else:
                 settings = RecruiterInterviewSettings.objects.filter(company_user=company_user, job__isnull=True).first()
             
@@ -2514,19 +2414,15 @@ def interview_settings(request):
             })
         
         else:  # POST
-            # Get or create job-specific settings
+            # The job's settings (shared by everyone working on it), or new ones
             if job:
-                settings, created = RecruiterInterviewSettings.objects.get_or_create(
-                    company_user=company_user,
-                    job=job,
-                    defaults={
-                        'start_time': '09:00',
-                        'end_time': '17:00',
-                        'interview_time_gap': 30,
-                        'default_interview_type': 'ONLINE',
-                        'time_slots_json': [],
-                    }
-                )
+                settings = sharing.job_interview_settings(job)
+                if settings is None:
+                    from datetime import time as dt_time
+                    settings = RecruiterInterviewSettings(
+                        company_user_id=job.company_user_id or company_user.id, job=job,
+                        start_time=dt_time(9, 0), end_time=dt_time(17, 0), interview_time_gap=30,
+                        default_interview_type='ONLINE', time_slots_json=[])
             else:
                 # Fallback to company-wide settings (backward compatibility)
                 settings, created = RecruiterInterviewSettings.objects.get_or_create(
@@ -2831,7 +2727,7 @@ def recruitment_analytics(request):
         if job_id_param not in (None, '', 'all'):
             try:
                 job_id = int(job_id_param)
-                job_filter = JobDescription.objects.get(id=job_id, company_user=company_user)
+                job_filter = sharing.jobs(company_user).get(id=job_id)
             except (ValueError, TypeError):
                 return Response({
                     'status': 'error',
@@ -2849,8 +2745,10 @@ def recruitment_analytics(request):
         months_ago = now - timedelta(days=months * 30)
         
         # Base filters for CVs and Interviews
-        cv_base_filter = Q(job_description__company_user=company_user)
-        interview_base_filter = Q(company_user=company_user)
+        company_cvs = sharing.cvs(company_user)
+        company_interviews = sharing.interviews(company_user)
+        cv_base_filter = Q(pk__in=company_cvs.values('pk'))
+        interview_base_filter = Q(pk__in=company_interviews.values('pk'))
         
         if job_filter:
             cv_base_filter &= Q(job_description=job_filter)
@@ -2865,8 +2763,8 @@ def recruitment_analytics(request):
             total_jobs = 1
             active_jobs = 1 if job_filter.is_active else 0
         else:
-            total_jobs = JobDescription.objects.filter(company_user=company_user).count()
-            active_jobs = JobDescription.objects.filter(company_user=company_user, is_active=True).count()
+            total_jobs = sharing.jobs(company_user).count()
+            active_jobs = sharing.jobs(company_user).filter(is_active=True).count()
         
         # ========== CV STATISTICS ==========
         # For SQL Server compatibility: clear any default ordering and sort in Python
@@ -2890,8 +2788,7 @@ def recruitment_analytics(request):
         # CVs by job (only if not filtering by specific job)
         # For SQL Server compatibility: clear any default ordering and sort in Python
         if not job_filter:
-            cv_by_job = list(CVRecord.objects.filter(
-                job_description__company_user=company_user,
+            cv_by_job = list(company_cvs.filter(
                 job_description__isnull=False
             ).order_by().values(
                 'job_description__title'
@@ -2966,8 +2863,7 @@ def recruitment_analytics(request):
         # Interviews by job (only if not filtering by specific job)
         # For SQL Server compatibility: clear any default ordering and sort in Python
         if not job_filter:
-            interviews_by_job = list(Interview.objects.filter(
-                company_user=company_user,
+            interviews_by_job = list(company_interviews.filter(
                 cv_record__job_description__isnull=False
             ).order_by().values(
                 'cv_record__job_description__title'
@@ -2995,7 +2891,7 @@ def recruitment_analytics(request):
         
         # ========== JOB STATISTICS ==========
         # When filtering by job: show only that job's status. Otherwise all jobs.
-        jobs_q = JobDescription.objects.filter(company_user=company_user)
+        jobs_q = sharing.jobs(company_user)
         if job_filter:
             jobs_q = jobs_q.filter(pk=job_filter.id)
         jobs_by_status = list(jobs_q.order_by().values('is_active').annotate(
@@ -3013,8 +2909,7 @@ def recruitment_analytics(request):
                 job_status_data['inactive'] = item['count']
         
         # Jobs created over time (monthly for last 6 months). When job filter: that job only.
-        jobs_over_time_q = JobDescription.objects.filter(
-            company_user=company_user,
+        jobs_over_time_q = sharing.jobs(company_user).filter(
             created_at__gte=months_ago
         )
         if job_filter:
@@ -3027,7 +2922,7 @@ def recruitment_analytics(request):
         jobs_over_time.sort(key=lambda x: x['month'] if x['month'] else datetime.min)
         
         # Top jobs by CV count. When job filter: that job only.
-        top_jobs_q = JobDescription.objects.filter(company_user=company_user)
+        top_jobs_q = sharing.jobs(company_user)
         if job_filter:
             top_jobs_q = top_jobs_q.filter(pk=job_filter.id)
         top_jobs_by_cvs = list(top_jobs_q.order_by().annotate(
@@ -3100,7 +2995,7 @@ def recruitment_analytics(request):
         # Top Performing Jobs (by conversion rate) - only if not filtering by job
         if not job_filter:
             top_performing_jobs = []
-            all_jobs = JobDescription.objects.filter(company_user=company_user)
+            all_jobs = sharing.jobs(company_user)
             for job in all_jobs:
                 job_interview_cvs = CVRecord.objects.filter(
                     job_description=job,
@@ -3271,9 +3166,7 @@ def export_candidates_csv(request):
     company_user = request.user
     job_id = request.query_params.get('job_id')
 
-    qs = CVRecord.objects.filter(
-        job_description__company_user=company_user
-    ).select_related('job_description').order_by('-created_at')
+    qs = sharing.cvs(company_user).select_related('job_description').order_by('-created_at')
     if job_id:
         qs = qs.filter(job_description_id=job_id)
 
@@ -3314,7 +3207,7 @@ def export_interviews_csv(request):
     company_user = request.user
     job_id = request.query_params.get('job_id')
 
-    qs = Interview.objects.filter(company_user=company_user).order_by('-created_at')
+    qs = sharing.interviews(company_user).order_by('-created_at')
     if job_id:
         qs = qs.filter(cv_record__job_description_id=job_id)
 
@@ -3374,17 +3267,11 @@ def suggest_interview_questions(request):
                 'message': 'cv_record_id and job_description_id are required.',
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        cv_record = CVRecord.objects.filter(
-            id=cv_record_id,
-            job_description__company_user=company_user
-        ).first()
+        cv_record = sharing.cvs(company_user).filter(id=cv_record_id).first()
         if not cv_record:
             return Response({'status': 'error', 'message': 'CV record not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        job = JobDescription.objects.filter(
-            id=job_description_id,
-            company_user=company_user
-        ).first()
+        job = sharing.jobs(company_user).filter(id=job_description_id).first()
         if not job:
             return Response({'status': 'error', 'message': 'Job description not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -3662,11 +3549,8 @@ def delete_qa_chat(request, chat_id):
 # ---------- Per-agent APIs (call each agent individually) ----------
 
 def _cv_record_for_company_user(cv_record_id, company_user):
-    """Get CVRecord by id scoped to company user (via job_description)."""
-    return CVRecord.objects.filter(
-        id=cv_record_id,
-        job_description__company_user=company_user
-    ).first()
+    """Get CVRecord by id, if it is one of the company's."""
+    return sharing.cvs(company_user).filter(id=cv_record_id).first()
 
 
 @api_view(['POST'])
@@ -3828,6 +3712,7 @@ def api_cv_qualify(request):
         if hold_threshold is not None:
             hold_threshold = int(hold_threshold)
         cv_record_id = data.get('cv_record_id')
+        record = None
         if cv_record_id:
             record = _cv_record_for_company_user(cv_record_id, company_user)
             if not record:
@@ -3847,10 +3732,9 @@ def api_cv_qualify(request):
         if not parsed or not insights:
             return Response({'status': 'error', 'message': "Provide 'parsed_json' and 'insights_json', or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
         if interview_threshold is None or hold_threshold is None:
+            # The job owner's thresholds for a stored CV, else this login's
             settings_obj = RecruiterQualificationSettings.objects.filter(
-                company_user=company_user
-            ).first() or RecruiterQualificationSettings.objects.filter(
-                recruiter=company_user.user
+                company_user=sharing.owner(record.job_description if record else None, company_user)
             ).first()
             if settings_obj and getattr(settings_obj, 'use_custom_thresholds', False):
                 if interview_threshold is None:

@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from datetime import timedelta
 from django.utils import timezone
-from django.db.models import Count, Avg, Q
+from django.db.models import Count, Avg
 from django.db.models.functions import TruncDate, TruncMonth, TruncWeek
 
 logger = logging.getLogger(__name__)
@@ -59,24 +59,16 @@ class GraphGeneratorAgent:
         """Fetch all relevant recruitment data for the company user."""
         from recruitment_agent.models import CVRecord, Interview, JobDescription, RecruiterInterviewSettings
         
-        # Get jobs for this company
-        jobs = JobDescription.objects.filter(
-            Q(company_user=self.company_user) |
-            Q(company=self.company_user.company)
-        )
-        
-        # Get CV records
-        cv_records = CVRecord.objects.filter(
-            Q(job_description__company_user=self.company_user) |
-            Q(job_description__company=self.company_user.company)
-        ).select_related('job_description')
-        
-        # Get interviews
-        interviews = Interview.objects.filter(company_user=self.company_user)
+        from recruitment_agent import sharing
 
-        # Get interview settings for jobs
+        # The company's jobs, candidates and interviews, whoever posted them
+        jobs = sharing.jobs(self.company_user)
+        cv_records = sharing.cvs(self.company_user).select_related('job_description')
+        interviews = sharing.interviews(self.company_user)
+
+        # Interview settings for the company's jobs
         interview_settings = RecruiterInterviewSettings.objects.filter(
-            company_user=self.company_user
+            job__in=jobs
         ).select_related('job')
         
         # Time ranges

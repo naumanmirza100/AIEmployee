@@ -480,6 +480,12 @@ const Interviews = ({ onUpdate }) => {
                       <Briefcase className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
                       <CardDescription className="text-xs sm:text-sm truncate">
                         {interview.job_title || interview.job_role}
+                        {/* The company shares interviews: say whose this is. */}
+                        {interview.recruiter && (
+                          <span data-testid={`REC-interviews-recruiter-${interview.id}`}>
+                            {' · '}Run by {interview.recruiter.is_you ? 'you' : interview.recruiter.name}
+                          </span>
+                        )}
                       </CardDescription>
                     </div>
                   </div>

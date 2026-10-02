@@ -8,7 +8,8 @@ once HR confirms:
   * Frontline: open tickets;
   * HR: the people who report to them, leave requests waiting for their
     decision;
-  * Recruitment: interviews they run, and seats on interviews they sit in on;
+  * Recruitment: jobs they posted, interviews they run, and seats on
+    interviews they sit in on;
   * upcoming meetings they organise, in PM, HR and Frontline.
 
 Anything with a time (a booked interview, a meeting) is only moved to someone
@@ -109,6 +110,16 @@ def _interviews_run(cu):
         return Interview.objects.none()
     return (Interview.objects.filter(company_user=cu, status__in=OPEN_INTERVIEW_STATUSES)
             .order_by('scheduled_datetime', 'id'))
+
+
+def _jobs_they_own(cu):
+    """Jobs this dashboard login posted, or was handed. The whole company can
+    work on them (recruitment_agent.sharing), but they use their owner's
+    recruiter settings."""
+    from recruitment_agent.models import JobDescription
+    if cu is None:
+        return JobDescription.objects.none()
+    return JobDescription.objects.filter(company_user=cu).order_by('-is_active', '-created_at')
 
 
 def _leave_to_decide(employee):
@@ -218,6 +229,7 @@ def summary(employee) -> dict:
     tickets = _tickets(company_id, ids) if ids else None
     reports = _reports(employee)
     leave = _leave_to_decide(employee)
+    jobs = _jobs_they_own(cu)
     interviews_run = _interviews_run(cu)
     interviews = _interviews(company_id, ids) if ids else None
     logins = _dashboard_logins(company_id, cu.id if cu else None)
@@ -257,6 +269,10 @@ def summary(employee) -> dict:
               lambda lr: {'id': lr.id, 'title': lr.employee.full_name, 'detail': leave_summary(lr)},
               [{'id': e.id, 'name': e.full_name} for e in _approvers(employee).order_by('full_name')[:500]],
               hint='The new approver. Only colleagues with a dashboard login can decide leave.'),
+        group('jobs', 'Jobs they posted', jobs,
+              lambda j: {'id': j.id, 'title': j.title, 'detail': 'Open' if j.is_active else 'Closed'},
+              logins, hint='The new owner. Their recruiter settings (email timings, screening '
+                           'thresholds) apply to these jobs from now on.'),
         group('interviews_run', 'Interviews they run', interviews_run, interview, logins,
               hint='The new recruiter. A booked interview is skipped if they are busy then.'),
         group('interviews', 'Interviews they sit in on', interviews, interview,
@@ -289,7 +305,7 @@ def hand_over(employee, assignments: dict, actor) -> dict:
             continue
         if key in ('tasks', 'projects', 'interviews'):
             target = members.filter(pk=target_id).exclude(pk__in=ids).first()
-        elif key in ('tickets', 'meetings', 'interviews_run'):
+        elif key in ('tickets', 'meetings', 'interviews_run', 'jobs'):
             target = (CompanyUser.objects.filter(company=company, pk=target_id, is_active=True)
                       .exclude(pk=cu.pk if cu else None).first())
         elif key == 'reports':
@@ -309,6 +325,7 @@ def hand_over(employee, assignments: dict, actor) -> dict:
         'tickets': lambda t: _move_tickets(company.id, ids, t, actor),
         'reports': lambda t: _move_reports(employee, t),
         'leave': lambda t: _move_leave(employee, t),
+        'jobs': lambda t: _move_jobs(cu, t),
         'interviews_run': lambda t: _move_interviews_run(cu, ids, t),
         'interviews': lambda t: _move_interview_seats(company.id, ids, t),
     }
@@ -447,6 +464,19 @@ def _move_interviews_run(cu, ids, target_cu):
     return {'moved': moved, 'to': target_cu.full_name or target_cu.email, 'skipped': skipped}
 
 
+def _move_jobs(cu, target_cu):
+    from recruitment_agent.models import RecruiterInterviewSettings
+    jobs = list(_jobs_they_own(cu))
+    for job in jobs:
+        job.company_user = target_cu
+        job.save(update_fields=['company_user', 'updated_at'])
+    # Each job's interview hours and slots go with it. (No NULL in the NOT IN:
+    # one NULL there and nothing would move.)
+    theirs = RecruiterInterviewSettings.objects.filter(company_user=target_cu, job__isnull=False).values('job')
+    RecruiterInterviewSettings.objects.filter(company_user=cu, job__in=jobs)         .exclude(job__in=theirs).update(company_user=target_cu)
+    return {'moved': len(jobs), 'to': target_cu.full_name or target_cu.email, 'skipped': []}
+
+
 def _move_meetings(employee, ids, target_cu):
     """Make `target_cu` the organiser, in each agent's own terms: PM organisers
     are dashboard logins, HR organisers HR records, Frontline organisers users."""
@@ -490,12 +520,14 @@ def _tell_recipients(employee, plan, results):
     links = {'tasks': '/project-manager/dashboard?tab=tasks', 'projects': '/project-manager/dashboard?tab=projects',
              'tickets': '/frontline/dashboard?tab=tickets',
              'reports': '/hr/dashboard?tab=my_team', 'leave': '/hr/dashboard?tab=leave',
+             'jobs': '/recruitment/job-descriptions',
              'interviews_run': '/recruitment/interviews', 'interviews': '/recruitment/interviews'}
     titles = {'tasks': ('task handed over to you', 'tasks handed over to you'),
               'projects': ('project for you to lead', 'projects for you to lead'),
               'meetings': ('meeting for you to organise', 'meetings for you to organise'),
               'reports': ('person now reports to you', 'people now report to you'),
               'leave': ('leave request for you to decide', 'leave requests for you to decide'),
+              'jobs': ('job handed over to you', 'jobs handed over to you'),
               'interviews_run': ('interview for you to run', 'interviews for you to run'),
               'interviews': ('interview handed over to you', 'interviews handed over to you')}
     for key, target in plan.items():
