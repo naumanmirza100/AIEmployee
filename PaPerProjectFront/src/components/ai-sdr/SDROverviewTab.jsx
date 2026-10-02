@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { useNavigate } from 'react-router-dom';
 import {
   getSdrDashboard, getSdrAnalytics, checkAllReplies,
@@ -237,7 +238,22 @@ export default function SDROverviewTab() {
       setShowGenModal(false);
       await load();
     } catch (e) {
-      toast({ title: 'Generate failed', description: e?.response?.data?.message || e.message, variant: 'destructive' });
+      const data = e?.data || e?.response?.data;
+      if (data?.code === 'apify_approval_required') {
+        // The user must approve the actor once on Apify; give them the link.
+        toast({
+          title: 'Approve the Apify actor first',
+          description: 'This actor needs a one-time permission approval on Apify. Approve it, then try again.',
+          variant: 'destructive',
+          action: (
+            <ToastAction altText="Open Apify" onClick={() => window.open(data.approval_url, '_blank', 'noopener,noreferrer')}>
+              Open Apify
+            </ToastAction>
+          ),
+        });
+      } else {
+        toast({ title: 'Generate failed', description: data?.message || e.message, variant: 'destructive' });
+      }
     } finally { setGenerating(false); }
   };
 

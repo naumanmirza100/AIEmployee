@@ -23,6 +23,53 @@ logger = logging.getLogger(__name__)
 APOLLO_SEARCH_URL = "https://api.apollo.io/v1/people/search"
 APIFY_BASE = "https://api.apify.com/v2"
 
+
+def _is_error_item(item) -> bool:
+    """True for a dataset item that is the actor reporting a failure, not a lead.
+
+    Some actors "succeed" at the run level but write {"error": "..."} as their only
+    output (e.g. leads-finder on the free plan when started via the API).
+    """
+    return isinstance(item, dict) and bool(item.get('error')) and not any(
+        item.get(k) for k in ('email', 'name', 'fullName', 'full_name', 'first_name', 'firstName', 'linkedin')
+    )
+
+
+def _raise_for_error_items(items, actor: str):
+    errors = [str(i.get('error')) for i in items if _is_error_item(i)]
+    if not errors or len(errors) != len([i for i in items if i]):
+        return
+    message = errors[0][:300]
+    if 'free' in message.lower() and 'plan' in message.lower():
+        raise ValueError(
+            f"Apify says: {message} Run the '{actor}' actor on the Apify website with your filters, "
+            "then click 'Fetch from Apify' here to import the results (or upgrade your Apify plan "
+            "to run it from this app)."
+        )
+    raise ValueError(f"The Apify actor '{actor}' returned an error instead of leads: {message}")
+
+
+def apify_actor_page_url(actor: str) -> str:
+    """Public Apify Store page for an actor id like "code_crafter/leads-finder"."""
+    return f"https://apify.com/{(actor or '').replace('~', '/').strip('/')}"
+
+
+class ApifyApprovalRequired(ValueError):
+    """The Apify actor needs a one-time permission approval by its user.
+
+    Only the user can approve it (it is tied to their Apify account), so callers
+    surface ``approval_url`` as a link for them to open.
+    """
+
+    def __init__(self, actor: str, approval_url: str = ''):
+        self.actor = actor
+        # Apify's own approval link when it sends one, else the actor's Store page.
+        self.approval_url = approval_url or apify_actor_page_url(actor)
+        super().__init__(
+            f"The Apify actor '{actor}' needs a one-time permission approval. "
+            f"Open it on Apify and click Approve, then try again: {self.approval_url}"
+        )
+
 # Default Apify actor — Google Search scraper (free, no Bright Data needed)
 DEFAULT_APIFY_ACTOR = "apify/google-search-scraper"
 
@@ -374,11 +421,7 @@ class LeadResearchAgent:
                     except Exception:
                         pass
                     logger.warning("Apify actor '%s' needs permission approval: %s", self.apify_actor, approval)
-                    raise ValueError(
-                        f"The Apify actor '{self.apify_actor}' needs a one-time permission approval. "
-                        f"Open it in Apify Console and click Approve"
-                        + (f": {approval}" if approval else "") + ", then try again."
-                    )
+                    raise ApifyApprovalRequired(self.apify_actor, approval)
                 logger.warning("Apify 403 on actor '%s': %s", self.apify_actor, body)
                 raise ValueError(f"Apify actor '{self.apify_actor}' is not accessible. Check your token or choose a different actor.")
             if run_resp.status_code == 400:
@@ -423,6 +466,7 @@ class LeadResearchAgent:
             items = items_resp.json()
             if not isinstance(items, list):
                 items = []
+            _raise_for_error_items(items, self.apify_actor)
 
         except requests.RequestException as exc:
             logger.error("Apify request error: %s", exc)
@@ -432,7 +476,7 @@ class LeadResearchAgent:
         # separate lead), so expand those instead of keeping only the first.
         leads = []
         for item in items:
-            if not item:
+            if not item or _is_error_item(item):
                 continue
             if isinstance(item, dict) and 'organicResults' in item:
                 for r in item.get('organicResults', []):
@@ -497,8 +541,8 @@ class LeadResearchAgent:
             if not isinstance(items, list):
                 continue
             for item in items:
-                if not item:
-                    continue
+                if not item or _is_error_item(item):
+                    continue   # skip runs that only contain an actor error (e.g. free-plan API runs)
                 if isinstance(item, dict) and 'organicResults' in item:
                     parsed_list = [self._parse_google_result(r) for r in item.get('organicResults', [])]
                 else:

@@ -860,6 +860,18 @@ const SDRSettingsTab = () => {
                   style={{ ...inputStyle, fontFamily: 'monospace' }}
                 />
                 <p style={hintStyle}>Leave blank to use the default LinkedIn scraper.</p>
+                {apifyActor.trim().includes('/') && (
+                  <p style={hintStyle}>
+                    New actors need a one-time permission approval on Apify.{' '}
+                    <a
+                      href={`https://apify.com/${apifyActor.trim().replace('~', '/')}`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ color: 'hsl(var(--pt-c084fc))', textDecoration: 'underline' }}
+                    >
+                      Open this actor on Apify
+                    </a>
+                  </p>
+                )}
               </div>
             </Section>
 

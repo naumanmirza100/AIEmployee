@@ -685,3 +685,117 @@ class SmtpPasswordEncryptionTests(SDRBase):
         force_authenticate(req, user=self.cu)
         resp = views.sdr_campaign_detail(req, campaign_id=self.campaign.id)
         self.assertNotIn('smtp_password', str(resp.data))
+
+
+class ApifyApprovalTests(SDRBase):
+    """The actor-approval error must reach the UI as a structured response with a link."""
+
+    def setUp(self):
+        super().setUp()
+        self.rf = APIRequestFactory()
+        SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
+
+    def run_research(self, apify_body, actor='code_crafter/leads-finder'):
+        from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+        resp403 = mock.MagicMock(status_code=403)
+        resp403.json.return_value = apify_body
+        resp403.text = str(apify_body)
+        agent = LeadResearchAgent(apify_token='tok', apify_actor=actor)
+        req = self.rf.post('/x', {'count': 5, 'source': 'apify'}, format='json')
+        force_authenticate(req, user=self.cu)
+        with mock.patch.object(views, '_get_research_agent', return_value=agent), \
+                mock.patch('requests.post', return_value=resp403):
+            return views.research_leads(req)
+
+    def test_apify_approval_url_is_returned_to_the_ui(self):
+        body = {'error': {'type': 'actor-not-approved', 'message': 'approvePermissions required',
+                          'data': {'approvalUrl': 'https://console.apify.com/approve/abc'}}}
+        resp = self.run_research(body)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data['code'], 'apify_approval_required')
+        self.assertEqual(resp.data['approval_url'], 'https://console.apify.com/approve/abc')
+
+    def test_falls_back_to_the_actor_page_when_apify_sends_no_link(self):
+        body = {'error': {'type': 'not-approved', 'message': 'not-approved'}}
+        resp = self.run_research(body)
+        self.assertEqual(resp.data['code'], 'apify_approval_required')
+        self.assertEqual(resp.data['approval_url'], 'https://apify.com/code_crafter/leads-finder')
+
+    def test_other_403_is_still_a_normal_error(self):
+        resp = self.run_research({'error': {'type': 'forbidden', 'message': 'bad token'}})
+        self.assertEqual(resp.status_code, 500)
+        self.assertNotIn('code', resp.data)
+
+    def test_settings_returns_actor_page_link(self):
+        SDRAgentSettings.objects.create(company_user=self.cu, apify_actor_id='code_crafter/leads-finder')
+        req = self.rf.get('/x')
+        force_authenticate(req, user=self.cu)
+        resp = views.sdr_agent_settings(req)
+        self.assertEqual(resp.data['apify_actor_url'], 'https://apify.com/code_crafter/leads-finder')
+
+
+class ApifyErrorItemTests(SDRBase):
+    FREE_PLAN_ERROR = ('Users on the free Apify plan can run the actor through the UI '
+                       'and not via other methods.')
+
+    def agent(self):
+        from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+        return LeadResearchAgent(apify_token='tok', apify_actor='code_crafter/leads-finder')
+
+    def fake_apify(self, items, runs=None):
+        """requests.post starts a run, requests.get returns run status / dataset items."""
+        post = mock.MagicMock(status_code=201)
+        post.json.return_value = {'data': {'id': 'RUN1'}}
+
+        def get(url, **kw):
+            r = mock.MagicMock(status_code=200)
+            if '/actor-runs/' in url:
+                r.json.return_value = {'data': {'status': 'SUCCEEDED', 'defaultDatasetId': 'DS1'}}
+            elif '/acts/' in url and url.endswith('/runs'):
+                r.json.return_value = {'data': {'items': runs or []}}
+            else:
+                r.json.return_value = items
+            return r
+        return post, get
+
+    def test_free_plan_error_item_is_raised_with_a_helpful_message(self):
+        post, get = self.fake_apify([{'error': self.FREE_PLAN_ERROR}])
+        icp = SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
+        with mock.patch('requests.post', return_value=post), mock.patch('requests.get', side_effect=get), \
+                mock.patch('time.sleep'):
+            with self.assertRaises(ValueError) as ctx:
+                self.agent()._search_apify(icp, 5)
+        self.assertIn('Fetch from Apify', str(ctx.exception))
+        self.assertIn('free Apify plan', str(ctx.exception))
+
+    def test_real_leads_are_still_parsed(self):
+        post, get = self.fake_apify([{'full_name': 'Jane Doe', 'email': 'jane@acme.com',
+                                      'job_title': 'CEO', 'company_name': 'Acme'}])
+        icp = SDRIcpProfile.objects.create(company_user=self.cu, is_active=True, job_titles=['CEO'])
+        with mock.patch('requests.post', return_value=post), mock.patch('requests.get', side_effect=get), \
+                mock.patch('time.sleep'):
+            leads = self.agent()._search_apify(icp, 5)
+        self.assertEqual([l['email'] for l in leads], ['jane@acme.com'])
+
+    def test_fetch_from_runs_skips_error_only_runs(self):
+        runs = [
+            {'id': 'bad', 'status': 'SUCCEEDED', 'defaultDatasetId': 'DS_BAD'},
+            {'id': 'good', 'status': 'SUCCEEDED', 'defaultDatasetId': 'DS_GOOD'},
+        ]
+        datasets = {
+            'DS_BAD': [{'error': self.FREE_PLAN_ERROR}],
+            'DS_GOOD': [{'full_name': 'Sam Lee', 'email': 'sam@x.com', 'company_name': 'X'}],
+        }
+
+        def get(url, **kw):
+            r = mock.MagicMock(status_code=200)
+            if url.endswith('/runs'):
+                r.json.return_value = {'data': {'items': runs}}
+            else:
+                ds = url.split('/datasets/')[1].split('/')[0]
+                r.json.return_value = datasets[ds]
+            return r
+
+        with mock.patch('requests.get', side_effect=get):
+            leads = self.agent().fetch_apify_runs(max_leads=10)
+        self.assertEqual([l['email'] for l in leads], ['sam@x.com'])
