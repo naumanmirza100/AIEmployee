@@ -20,6 +20,7 @@
  *     backend.
  */
 import React, { useState, useEffect, useRef } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -853,7 +854,7 @@ export default function HRMeetingScheduler() {
                               {MEETING_TYPE_LABEL[m.meeting_type] || m.meeting_type}
                             </Badge>
                             <Badge variant="outline" className={`text-[10px] ${sb.bg} ${sb.color} ${sb.border}`}>
-                              {m.status}
+                              {labelOf(m.status)}
                             </Badge>
                             {m.visibility === 'private' && (
                               <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-400/30">
@@ -915,7 +916,7 @@ export default function HRMeetingScheduler() {
                                 <div key={r.id} className="text-xs text-white/55 flex items-center gap-2 flex-wrap">
                                   <span className="font-medium text-white/65">{r.responder_name}</span>
                                   <span className={`px-1.5 py-0.5 rounded text-[10px] ${RESPONSE_CONFIG[r.action]?.bg || 'bg-white/[0.05]'} ${RESPONSE_CONFIG[r.action]?.color || 'text-white/55'}`}>
-                                    {r.action.replace('_', ' ')}
+                                    {RESPONSE_CONFIG[r.action]?.label || labelOf(r.action)}
                                   </span>
                                   {r.proposed_time && <span>→ {formatWhen(r.proposed_time)}</span>}
                                   {r.reason && <span className="italic">"{r.reason}"</span>}

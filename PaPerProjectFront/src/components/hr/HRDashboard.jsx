@@ -10,6 +10,7 @@
  *   * Empty states: centered icon tile + sub-line.
  */
 import React, { useState, useEffect } from 'react';
+import { labelOf } from '@/utils/labels';
 import { useSearchParams } from 'react-router-dom';
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
@@ -62,6 +63,7 @@ import {
   HR_MAIN_TOUR_STEPS, HR_TAB_TOURS, HR_HINTS, HR_MAIN_TOUR_KEY,
 } from './hrTutorialSteps';
 import { trackHRRecentlyViewed } from './hrLocalStore';
+import { WORKFLOW_EVENTS, FILTER_LABELS, eventLabel, humanize } from './hrEventLabels';
 import {
   useTutorialNudge,
   tourAvailable, makeHoverLaunchHandlers,
@@ -1289,7 +1291,7 @@ const HRDashboard = () => {
                                     <TableCell className="text-white/70 text-sm">{e.department_name || e.department || '—'}</TableCell>
                                     <TableCell>
                                       <Badge variant="outline" className={`text-[10px] ${statusBadgeClass}`}>
-                                        {e.employment_status || 'active'}
+                                        {labelOf(e.employment_status || 'active')}
                                       </Badge>
                                     </TableCell>
                                     <TableCell className="text-white/70 text-xs">
@@ -1391,7 +1393,7 @@ const HRDashboard = () => {
                                       closed: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
                                       cancelled: 'bg-rose-500/10 text-rose-300 border-rose-400/30',
                                     }[c.status] || 'bg-white/[0.04] text-white/70'
-                                  }`}>{c.status}</Badge>
+                                  }`}>{labelOf(c.status)}</Badge>
                                 </div>
                                 <div className="text-xs text-white/50">
                                   {c.period_start} → {c.period_end}
@@ -1584,7 +1586,7 @@ const HRDashboard = () => {
                                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${procColor}`}>
                                     {procLabel}
                                   </Badge>
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">{d.confidentiality}</Badge>
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">{labelOf(d.confidentiality)}</Badge>
                                   {d.version > 1 && (
                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-violet-500/10 text-violet-300 border-violet-400/30">
                                       v{d.version}
@@ -1822,7 +1824,7 @@ const HRDashboard = () => {
                               )}
                             </div>
                             <div className="text-[11px] text-white/45 mt-1">
-                              {r.document_type} · {r.confidentiality} · uploaded {r.created_at?.slice(0, 10)}
+                              {labelOf(r.document_type)} · {labelOf(r.confidentiality)} · uploaded {r.created_at?.slice(0, 10)}
                             </div>
                           </div>
                         ))}
@@ -1869,7 +1871,7 @@ const HRDashboard = () => {
                                 {r.actor_name || r.actor_email || `#${r.actor_id || '—'}`}
                               </TableCell>
                               <TableCell>
-                                <Badge variant="outline" className="text-[10px]">{r.action}</Badge>
+                                <Badge variant="outline" className="text-[10px]">{labelOf(r.action)}</Badge>
                               </TableCell>
                               <TableCell className="text-[11px] text-white/50 font-mono">{r.ip_address || '—'}</TableCell>
                             </TableRow>
@@ -1974,19 +1976,19 @@ const HRDashboard = () => {
                                   <div className="text-xs text-white/45 mt-2 flex flex-wrap items-center gap-2">
                                     {trigEvent ? (
                                       <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-400/30">
-                                        on: {trigEvent}
+                                        {eventLabel(trigEvent)}
                                       </Badge>
                                     ) : (
                                       <span className="italic">Runs on demand only</span>
                                     )}
                                     {trigExtras.map(([k, v]) => (
                                       <Badge key={k} variant="outline" className="text-[10px]">
-                                        {k}: {String(v)}
+                                        {FILTER_LABELS[k] || humanize(k)}: {String(v)}
                                       </Badge>
                                     ))}
                                     <span className="text-white/40">· {stepCount} step{stepCount === 1 ? '' : 's'}</span>
                                     {w.timeout_seconds > 0 && (
-                                      <span className="text-white/40">· timeout {w.timeout_seconds}s</span>
+                                      <span className="text-white/40">· gives up after {w.timeout_seconds}s</span>
                                     )}
                                   </div>
                                 </div>
@@ -2051,22 +2053,14 @@ const HRDashboard = () => {
                               placeholder="e.g. Standard onboarding" />
                           </div>
                           <div>
-                            <Label>Trigger event</Label>
+                            <Label>Runs automatically</Label>
                             <Select
                               value={wfDialog.wf.trigger_event || ''}
                               onValueChange={(v) => setWfDialog((s) => ({ ...s, wf: { ...s.wf, trigger_event: v === '__none__' ? '' : v } }))}>
-                              <SelectTrigger><SelectValue placeholder="Pick an event" /></SelectTrigger>
+                              <SelectTrigger><SelectValue placeholder="Pick when it runs" /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="__none__">(none — manual run only)</SelectItem>
-                                <SelectItem value="employee_hired">employee_hired</SelectItem>
-                                <SelectItem value="employee_offboarding_started">employee_offboarding_started</SelectItem>
-                                <SelectItem value="employee_leaving">employee_leaving</SelectItem>
-                                <SelectItem value="employee_on_leave">employee_on_leave</SelectItem>
-                                <SelectItem value="employee_on_probation">employee_on_probation</SelectItem>
-                                <SelectItem value="employee_30_days">employee_30_days</SelectItem>
-                                <SelectItem value="leave_request_submitted">leave_request_submitted</SelectItem>
-                                <SelectItem value="leave_request_approved">leave_request_approved</SelectItem>
-                                <SelectItem value="leave_request_rejected">leave_request_rejected</SelectItem>
+                                <SelectItem value="__none__">Never — only when someone runs it</SelectItem>
+                                {WORKFLOW_EVENTS.map((e) => <SelectItem key={e.value} value={e.value}>{e.label}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </div>
@@ -2079,7 +2073,7 @@ const HRDashboard = () => {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
-                            <Label>Filter: leave_type (optional)</Label>
+                            <Label>Only for this leave type (optional)</Label>
                             <Input
                               value={wfDialog.wf.trigger_filters?.leave_type || ''}
                               onChange={(e) => setWfDialog((s) => ({ ...s, wf: {
@@ -2089,7 +2083,7 @@ const HRDashboard = () => {
                               placeholder="vacation / sick / parental / ..." />
                           </div>
                           <div>
-                            <Label>Filter: department (optional)</Label>
+                            <Label>Only for this department (optional)</Label>
                             <Input
                               value={wfDialog.wf.trigger_filters?.department || ''}
                               onChange={(e) => setWfDialog((s) => ({ ...s, wf: {
@@ -2110,7 +2104,7 @@ const HRDashboard = () => {
                             <input type="checkbox" checked={!!wfDialog.wf.is_active}
                               onChange={(e) => setWfDialog((s) => ({ ...s, wf: { ...s.wf, is_active: e.target.checked } }))}
                               className="h-4 w-4" />
-                            <span>Active (auto-runs on event)</span>
+                            <span>Active (runs automatically when it should)</span>
                           </label>
                           <label className="flex items-center gap-2 text-sm select-none">
                             <input type="checkbox" checked={!!wfDialog.wf.requires_approval}
@@ -2119,7 +2113,7 @@ const HRDashboard = () => {
                             <span>Requires approval before running</span>
                           </label>
                           <div>
-                            <Label className="mr-2">Timeout (s)</Label>
+                            <Label className="mr-2">Give up after (seconds, 0 = never)</Label>
                             <Input type="number" min={0} className="w-28 inline-block"
                               value={wfDialog.wf.timeout_seconds}
                               onChange={(e) => setWfDialog((s) => ({ ...s, wf: { ...s.wf, timeout_seconds: Number(e.target.value) || 0 } }))} />
@@ -2183,7 +2177,7 @@ const HRDashboard = () => {
                               </Badge>
                               {t.trigger_event && (
                                 <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-400/30">
-                                  on: {t.trigger_event}
+                                  {eventLabel(t.trigger_event)}
                                 </Badge>
                               )}
                               {t.requires_approval && (
@@ -2254,7 +2248,7 @@ const HRDashboard = () => {
                                       in_progress: 'bg-violet-500/10 text-violet-300 border-violet-400/30',
                                       awaiting_approval: 'bg-violet-500/10 text-violet-300 border-violet-400/30',
                                     }[row.status] || 'bg-white/[0.04] text-white/70'
-                                  }`}>{row.status}</Badge>
+                                  }`}>{labelOf(row.status)}</Badge>
                                 </TableCell>
                                 <TableCell className="text-xs">{row.steps_completed ?? '—'}</TableCell>
                                 <TableCell className="text-xs">{row.completed_at ? new Date(row.completed_at).toLocaleString() : '—'}</TableCell>

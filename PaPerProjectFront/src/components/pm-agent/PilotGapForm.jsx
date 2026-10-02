@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { AlertTriangle, ArrowRight, CalendarClock, Check, Trash2, UserPlus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -281,7 +282,7 @@ const PilotGapForm = ({
                     <option value="">{noUsers ? 'No team members yet' : 'Unassigned'}</option>
                     {users.map((u) => (
                       <option key={u.id} value={String(u.id)}>
-                        {u.name}{u.role ? ` — ${u.role}` : ''}
+                        {u.name}{u.role ? ` — ${labelOf(u.role)}` : ''}
                         {u.on_leave?.length ? ` · ${u.on_leave[0].label}` : ''}
                       </option>
                     ))}

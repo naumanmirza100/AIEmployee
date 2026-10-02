@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { labelOf } from '@/utils/labels';
 import { useSearchParams } from 'react-router-dom';
 import { format, startOfDay } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -131,7 +132,7 @@ const Interviews = ({ onUpdate }) => {
       PENDING: 'bg-yellow-500', SCHEDULED: 'bg-green-500', COMPLETED: 'bg-blue-500',
       CANCELLED: 'bg-red-500', RESCHEDULED: 'bg-purple-500',
     };
-    return <Badge className={variants[status] || 'bg-gray-500'}>{status}</Badge>;
+    return <Badge className={variants[status] || 'bg-gray-500'}>{labelOf(status)}</Badge>;
   };
 
   const getOutcomeBadge = (outcome) => {
@@ -510,7 +511,7 @@ const Interviews = ({ onUpdate }) => {
                         <span className="text-muted-foreground">{interview.candidate_phone}</span>
                       </div>
                     )}
-                    <Badge variant="outline" className="text-[10px] sm:text-xs">{interview.interview_type}</Badge>
+                    <Badge variant="outline" className="text-[10px] sm:text-xs">{labelOf(interview.interview_type)}</Badge>
                   </div>
 
                   {interview.scheduled_datetime && (

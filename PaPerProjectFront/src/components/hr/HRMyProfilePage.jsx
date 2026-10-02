@@ -8,6 +8,7 @@
  * request inline without bouncing through the admin tabs.
  */
 import React, { useEffect, useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Link } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -178,7 +179,7 @@ export default function HRMyProfilePage() {
             <Field icon={User} label="Manager" value={e.manager_name || '—'} />
             <Field icon={User} label="Phone" value={e.phone || '—'} />
             <Field icon={User} label="Timezone" value={e.timezone_name || 'UTC'} />
-            <Field icon={User} label="Status" value={e.employment_status} />
+            <Field icon={User} label="Status" value={labelOf(e.employment_status)} />
           </CardContent>
         </Card>
 
@@ -197,7 +198,7 @@ export default function HRMyProfilePage() {
               <div className="space-y-1.5">
                 {balances.map((b, idx) => (
                   <div key={idx} className="flex items-baseline justify-between text-sm">
-                    <span className="text-white/75 capitalize">{b.leave_type.replace(/_/g, ' ')}</span>
+                    <span className="text-white/75">{labelOf(b.leave_type)}</span>
                     <span className="font-mono text-violet-300">{b.remaining.toFixed(1)}d</span>
                   </div>
                 ))}
@@ -222,12 +223,12 @@ export default function HRMyProfilePage() {
               {leaves.slice(0, 10).map((lr) => (
                 <div key={lr.id} className="flex items-baseline justify-between gap-2 flex-wrap rounded-lg border border-white/[0.08] bg-white/[0.02] p-2 text-sm">
                   <div className="flex items-baseline gap-2 min-w-0">
-                    <Badge variant="outline" className="text-[10px]">{lr.leave_type}</Badge>
+                    <Badge variant="outline" className="text-[10px]">{labelOf(lr.leave_type)}</Badge>
                     <span className="text-white/75">{lr.start_date} → {lr.end_date}</span>
                     <span className="text-white/45 text-xs">({lr.days_requested}d)</span>
                   </div>
                   <Badge variant="outline" className={`text-[10px] ${STATUS_BADGE[lr.status] || ''}`}>
-                    {lr.status}
+                    {labelOf(lr.status)}
                   </Badge>
                 </div>
               ))}
@@ -253,8 +254,8 @@ export default function HRMyProfilePage() {
                 <div key={d.id} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-2.5 text-sm">
                   <div className="font-medium text-white/90 truncate">{d.title}</div>
                   <div className="flex gap-1 mt-1 flex-wrap">
-                    <Badge variant="outline" className="text-[10px]">{d.document_type}</Badge>
-                    <Badge variant="outline" className="text-[10px]">{d.confidentiality}</Badge>
+                    <Badge variant="outline" className="text-[10px]">{labelOf(d.document_type)}</Badge>
+                    <Badge variant="outline" className="text-[10px]">{labelOf(d.confidentiality)}</Badge>
                     {d.version > 1 && (
                       <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-400/30">v{d.version}</Badge>
                     )}
@@ -291,7 +292,7 @@ export default function HRMyProfilePage() {
                       : g.status === 'in_progress' ? 'bg-violet-500/10 text-violet-300 border-violet-400/30'
                       : 'bg-amber-500/10 text-amber-300 border-amber-400/30'
                     }`}>
-                      {g.status.replace(/_/g, ' ')}
+                      {labelOf(g.status)}
                     </Badge>
                   </div>
                   <div className="flex items-center gap-2 mt-1.5">
@@ -389,10 +390,10 @@ export default function HRMyProfilePage() {
                   <div className="min-w-0">
                     <div className="text-white/85 truncate">{m.title}</div>
                     <div className="text-[11px] text-white/45">
-                      {m.meeting_type} · {(m.scheduled_at || '').slice(0, 16).replace('T', ' ')}
+                      {labelOf(m.meeting_type)} · {(m.scheduled_at || '').slice(0, 16).replace('T', ' ')}
                     </div>
                   </div>
-                  <Badge variant="outline" className="text-[10px]">{m.status}</Badge>
+                  <Badge variant="outline" className="text-[10px]">{labelOf(m.status)}</Badge>
                 </div>
               ))}
             </div>

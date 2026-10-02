@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { labelOf } from '@/utils/labels';
 import { createPortal } from 'react-dom';
 import {
   MessageCircle, X, Send, Loader2, Sparkles, GraduationCap,
@@ -552,7 +553,7 @@ const PMFloatingChat = () => {
                             className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded hover:bg-white/[0.05] transition group">
                             <Target className="h-3.5 w-3.5 text-white/50 shrink-0" />
                             <span className="text-xs text-white/70 truncate group-hover:text-white/90">
-                              {r.kind}: {r.title}
+                              {labelOf(r.kind)}: {r.title}
                             </span>
                             <span className="text-[10px] text-white/30 ml-auto shrink-0">{relativeTime(r.at)}</span>
                           </button>

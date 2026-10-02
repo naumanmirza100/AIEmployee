@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { labelOf } from '@/utils/labels';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -948,7 +949,7 @@ const JobDescriptions = ({ onUpdate, onGoToSettings }) => {
                               : app.status === 'REJECTED' ? 'text-red-300 bg-red-400/10 border border-red-400/25'
                               : app.status === 'INTERVIEW' ? 'text-violet-300 bg-violet-400/10 border border-violet-400/25'
                               : 'text-white/40 bg-white/5 border border-white/10'}`}>
-                            {app.status || 'PENDING'}
+                            {labelOf(app.status || 'PENDING')}
                           </span>
                         </div>
                         <div className="flex items-center gap-3 mt-0.5">

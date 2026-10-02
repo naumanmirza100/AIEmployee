@@ -17,6 +17,7 @@ import AutomationView from './AutomationView';
 import SettingsView from './SettingsView';
 import MacroPickerDialog from './MacroPickerDialog';
 import TicketTaskDialog from './TicketTaskDialog';
+import { labelOf, labelled } from '@/utils/labels';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -334,8 +335,8 @@ export function FrontlineNotificationsTab() {
                   <div key={t.id} className="flex justify-between items-center p-2 border rounded text-sm">
                     <span>{t.name}</span>
                     <div className="flex items-center gap-1">
-                      {t.use_llm_personalization && <Badge variant="secondary" className="text-xs">LLM</Badge>}
-                      <Badge variant="outline">{t.channel}</Badge>
+                      {t.use_llm_personalization && <Badge variant="secondary" className="text-xs">AI</Badge>}
+                      <Badge variant="outline">{labelOf(t.channel)}</Badge>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditTemplate(t)} title="Edit"><Pencil className="h-4 w-4" /></Button>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteTemplate(t)} title="Delete"><Trash2 className="h-4 w-4" /></Button>
                     </div>
@@ -349,7 +350,7 @@ export function FrontlineNotificationsTab() {
                 {scheduled.length === 0 ? <p className="text-sm text-muted-foreground">No scheduled notifications.</p> : scheduled.slice(0, 20).map((n) => (
                   <div key={n.id} className="flex justify-between items-center p-2 border rounded text-sm">
                     <span>{n.recipient_email} · {new Date(n.scheduled_at).toLocaleString()}</span>
-                    <Badge variant={n.status === 'sent' ? 'default' : n.status === 'failed' ? 'destructive' : 'secondary'}>{n.status}</Badge>
+                    <Badge variant={n.status === 'sent' ? 'default' : n.status === 'failed' ? 'destructive' : 'secondary'}>{labelOf(n.status)}</Badge>
                   </div>
                 ))}
               </div>
@@ -568,9 +569,9 @@ export function FrontlineWorkflowsTab() {
     if (s.type === 'send_email') return `Send email: template ${s.template_id || '?'} → ${(s.recipient_email || '').slice(0, 30)}${(s.recipient_email || '').length > 30 ? '…' : ''}`;
     if (s.type === 'update_ticket') {
       const parts = [];
-      if (s.status) parts.push(`status=${s.status}`);
+      if (s.status) parts.push(`status → ${labelOf(s.status)}`);
       if (s.resolution) parts.push('resolution');
-      if (s.ticket_id) parts.push(`ticket_id=${s.ticket_id}`);
+      if (s.ticket_id) parts.push(`ticket #${s.ticket_id}`);
       return `Update ticket: ${parts.length ? parts.join(', ') : '(no fields)'}`;
     }
     if (s.type === 'webhook') return `Webhook: ${(s.method || 'POST')} ${(s.url || '').slice(0, 40)}${(s.url || '').length > 40 ? '…' : ''}`;
@@ -579,7 +580,7 @@ export function FrontlineWorkflowsTab() {
       const cu = stepBuilderCompanyUsers.find((u) => u.id === s.assign_to_company_user_id);
       return `Assign ticket → ${cu ? (cu.full_name || cu.email || `#${cu.id}`) : `user #${s.assign_to_company_user_id}`}`;
     }
-    return `Step: ${s.type || 'unknown'}`;
+    return `Step: ${labelOf(s.type) || 'unknown'}`;
   };
 
   const load = async () => {
@@ -819,7 +820,7 @@ export function FrontlineWorkflowsTab() {
                   <div key={ex.id} className="flex justify-between items-center p-2 border rounded text-sm gap-2">
                     <span className="truncate min-w-0">{ex.workflow_name} · {new Date(ex.started_at).toLocaleString()}</span>
                     <div className="flex items-center gap-1 shrink-0">
-                      <Badge variant={ex.status === 'completed' ? 'default' : ex.status === 'failed' ? 'destructive' : 'secondary'}>{ex.status}</Badge>
+                      <Badge variant={ex.status === 'completed' ? 'default' : ex.status === 'failed' ? 'destructive' : 'secondary'}>{labelOf(ex.status)}</Badge>
                       {/* Approve / Reject only render when the execution is
                           actually paused waiting for a human. Avoids cluttering
                           rows that have nothing to action. */}
@@ -896,7 +897,7 @@ export function FrontlineWorkflowsTab() {
                       <SelectTrigger className="w-[120px]"><SelectValue placeholder="Any" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="_any">Any</SelectItem>
-                        {PRIORITY_OPTIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                        {PRIORITY_OPTIONS.map((p) => <SelectItem key={p} value={p}>{labelOf(p)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1591,7 +1592,7 @@ export function HandoffQueueTab() {
                   <TableCell className="text-sm text-muted-foreground">
                     {t.handoff_requested_at ? new Date(t.handoff_requested_at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '—'}
                   </TableCell>
-                  <TableCell><Badge variant="outline" className="text-xs">{t.priority}</Badge></TableCell>
+                  <TableCell><Badge variant="outline" className="text-xs">{labelOf(t.priority)}</Badge></TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       {/* Best placed to take it right now: free on the shared calendar,
@@ -1627,7 +1628,7 @@ export function HandoffQueueTab() {
               {drawer.ticket ? (
                 <span className="flex flex-wrap items-center gap-2 text-xs">
                   <Badge variant="secondary">{reasonLabel(drawer.ticket.handoff_reason)}</Badge>
-                  <Badge variant="outline">{drawer.ticket.handoff_status}</Badge>
+                  <Badge variant="outline">{labelOf(drawer.ticket.handoff_status)}</Badge>
                   {drawer.ticket.contact && (
                     <span className="text-muted-foreground">
                       · {drawer.ticket.contact.name || drawer.ticket.contact.email}
@@ -2101,7 +2102,7 @@ export function FrontlineAnalyticsTab() {
                       </CardHeader>
                       <CardContent>
                         <ResponsiveContainer width="100%" height={220}>
-                          <BarChart data={nlResult.analytics_data.tickets_by_status} layout="vertical" margin={{ top: 8, right: 8, left: 60, bottom: 0 }}>
+                          <BarChart data={labelled(nlResult.analytics_data.tickets_by_status, 'status')} layout="vertical" margin={{ top: 8, right: 8, left: 60, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                             <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                             <YAxis type="category" dataKey="status" width={56} tick={{ fontSize: 11 }} />
@@ -2119,7 +2120,7 @@ export function FrontlineAnalyticsTab() {
                       </CardHeader>
                       <CardContent>
                         <ResponsiveContainer width="100%" height={220}>
-                          <BarChart data={nlResult.analytics_data.tickets_by_category} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                          <BarChart data={labelled(nlResult.analytics_data.tickets_by_category, 'category')} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                             <XAxis dataKey="category" tick={{ fontSize: 11 }} />
                             <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
@@ -2228,7 +2229,7 @@ export function FrontlineAnalyticsTab() {
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={data.tickets_by_status} layout="vertical" margin={{ top: 8, right: 8, left: 60, bottom: 0 }}>
+                      <BarChart data={labelled(data.tickets_by_status, 'status')} layout="vertical" margin={{ top: 8, right: 8, left: 60, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                         <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                         <YAxis type="category" dataKey="status" width={56} tick={{ fontSize: 11 }} />
@@ -2250,7 +2251,7 @@ export function FrontlineAnalyticsTab() {
                 </CardHeader>
                 <CardContent>
                   <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={data.tickets_by_category} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <BarChart data={labelled(data.tickets_by_category, 'category')} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                       <XAxis dataKey="category" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
@@ -2266,7 +2267,7 @@ export function FrontlineAnalyticsTab() {
               <h4 className="font-medium mb-2">By status</h4>
               <div className="flex flex-wrap gap-2">
                 {(data.tickets_by_status || []).map((s) => (
-                  <Badge key={s.status} variant="outline">{s.status}: {s.count}</Badge>
+                  <Badge key={s.status} variant="outline">{labelOf(s.status)}: {s.count}</Badge>
                 ))}
               </div>
             </div>
@@ -2274,7 +2275,7 @@ export function FrontlineAnalyticsTab() {
               <h4 className="font-medium mb-2">By category</h4>
               <div className="flex flex-wrap gap-2">
                 {(data.tickets_by_category || []).map((c) => (
-                  <Badge key={c.category} variant="secondary">{c.category}: {c.count}</Badge>
+                  <Badge key={c.category} variant="secondary">{labelOf(c.category)}: {c.count}</Badge>
                 ))}
               </div>
             </div>
@@ -5449,9 +5450,9 @@ const FrontlineDashboard = () => {
                               {t.description && <div className="text-xs text-muted-foreground line-clamp-1">{t.description}</div>}
                             </div>
                           </TableCell>
-                          <TableCell><Badge variant="outline">{t.status}</Badge></TableCell>
-                          <TableCell><Badge variant="secondary">{t.priority}</Badge></TableCell>
-                          <TableCell className="capitalize">{t.category?.replace('_', ' ')}</TableCell>
+                          <TableCell><Badge variant="outline">{labelOf(t.status)}</Badge></TableCell>
+                          <TableCell><Badge variant="secondary">{labelOf(t.priority)}</Badge></TableCell>
+                          <TableCell>{labelOf(t.category)}</TableCell>
                           <TableCell className="text-sm">
                             {t.sla_due_at ? (
                               <span className="flex items-center gap-1 flex-wrap">
@@ -5723,8 +5724,8 @@ const FrontlineDashboard = () => {
                             </div>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            <Badge variant="outline" className="text-xs">{t.priority}</Badge>
-                            <Badge variant="secondary" className="text-xs">{t.status}</Badge>
+                            <Badge variant="outline" className="text-xs">{labelOf(t.priority)}</Badge>
+                            <Badge variant="secondary" className="text-xs">{labelOf(t.status)}</Badge>
                           </div>
                         </div>
                       ))}
@@ -5916,10 +5917,7 @@ const FrontlineDashboard = () => {
                 onValueChange={(v) => setBulkActionDialog((s) => ({ ...s, value: v }))}>
                 <SelectTrigger><SelectValue placeholder="Pick a status" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="open">open</SelectItem>
-                  <SelectItem value="in_progress">in_progress</SelectItem>
-                  <SelectItem value="resolved">resolved</SelectItem>
-                  <SelectItem value="closed">closed</SelectItem>
+                  {['open', 'in_progress', 'resolved', 'closed'].map((v) => <SelectItem key={v} value={v}>{labelOf(v)}</SelectItem>)}
                 </SelectContent>
               </Select>
             )}
@@ -5928,10 +5926,7 @@ const FrontlineDashboard = () => {
                 onValueChange={(v) => setBulkActionDialog((s) => ({ ...s, value: v }))}>
                 <SelectTrigger><SelectValue placeholder="Pick a priority" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">low</SelectItem>
-                  <SelectItem value="medium">medium</SelectItem>
-                  <SelectItem value="high">high</SelectItem>
-                  <SelectItem value="urgent">urgent</SelectItem>
+                  {['low', 'medium', 'high', 'urgent'].map((v) => <SelectItem key={v} value={v}>{labelOf(v)}</SelectItem>)}
                 </SelectContent>
               </Select>
             )}
@@ -5940,13 +5935,9 @@ const FrontlineDashboard = () => {
                 onValueChange={(v) => setBulkActionDialog((s) => ({ ...s, value: v }))}>
                 <SelectTrigger><SelectValue placeholder="Pick a category" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="technical">technical</SelectItem>
-                  <SelectItem value="billing">billing</SelectItem>
-                  <SelectItem value="account">account</SelectItem>
-                  <SelectItem value="feature_request">feature_request</SelectItem>
-                  <SelectItem value="bug">bug</SelectItem>
-                  <SelectItem value="knowledge_gap">knowledge_gap</SelectItem>
-                  <SelectItem value="other">other</SelectItem>
+                  {['technical', 'billing', 'account', 'feature_request', 'bug', 'knowledge_gap', 'other'].map((v) => (
+                    <SelectItem key={v} value={v}>{labelOf(v)}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             )}

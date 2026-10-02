@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { labelOf } from '@/utils/labels';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -720,7 +721,7 @@ function ApplicationTab({ application }) {
 
       <div className="flex items-center justify-between text-xs text-white/30 pt-1 border-t border-white/10">
         <span>Applied: {application.applied_at ? new Date(application.applied_at).toLocaleString() : '—'}</span>
-        <Badge variant="outline" className="text-xs capitalize">{application.status}</Badge>
+        <Badge variant="outline" className="text-xs">{labelOf(application.status)}</Badge>
       </div>
     </div>
   );
@@ -820,9 +821,9 @@ function InterviewsHistoryTab({ interviews }) {
         <div id={`REC-cvrecords-interview-row-${iv.id}`} data-testid={`REC-cvrecords-interview-row-${iv.id}`} key={iv.id} className="border border-white/10 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge className={`${statusColors[iv.status] || 'bg-gray-500'} text-xs`}>{iv.status}</Badge>
+              <Badge className={`${statusColors[iv.status] || 'bg-gray-500'} text-xs`}>{labelOf(iv.status)}</Badge>
               {iv.outcome && <Badge className={`${outcomeColors[iv.outcome] || 'bg-gray-500'} text-xs`}>{outcomeLabels[iv.outcome] || iv.outcome}</Badge>}
-              <Badge variant="outline" className="text-xs">{iv.interview_type}</Badge>
+              <Badge variant="outline" className="text-xs">{labelOf(iv.interview_type)}</Badge>
             </div>
             <span className="text-xs text-white/30">{iv.created_at ? new Date(iv.created_at).toLocaleDateString() : ''}</span>
           </div>

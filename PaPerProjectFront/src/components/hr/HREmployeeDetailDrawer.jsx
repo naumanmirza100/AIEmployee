@@ -10,6 +10,7 @@
  *   * Recent meetings
  */
 import React, { useEffect, useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -484,7 +485,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
   };
 
   const handleAdjustBalance = async () => {
-    if (!emp?.id) return;
+    if (!employeeId) return;
     const v = parseFloat(balanceForm.value);
     if (Number.isNaN(v)) {
       toast({ title: 'Enter a numeric value', variant: 'destructive' });
@@ -502,11 +503,11 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
       };
       const key = (balanceForm.mode === 'set' ? 'set_' : 'delta_') + balanceForm.field;
       payload[key] = v;
-      await hrAgentService.adjustHRLeaveBalance(emp.id, payload);
+      await hrAgentService.adjustHRLeaveBalance(employeeId, payload);
       toast({ title: 'Balance adjusted' });
       setBalanceForm((s) => ({ ...s, open: false, saving: false }));
       // Refresh the drawer so the new balance shows up.
-      const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
+      const refreshed = await hrAgentService.getHREmployeeDetail(employeeId);
       setData(refreshed?.data || null);
     } catch (e) {
       toast({
@@ -626,8 +627,8 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                   <KV icon={Mail} label="Email" value={e.work_email} />
                   <KV icon={Briefcase} label="Title" value={e.job_title} />
                   <KV icon={Building2} label="Department" value={e.department_name || e.department} />
-                  <KV icon={User} label="Status" value={e.employment_status} />
-                  <KV icon={CalendarClock} label="Type" value={e.employment_type?.replace(/_/g, ' ')} />
+                  <KV icon={User} label="Status" value={labelOf(e.employment_status)} />
+                  <KV icon={CalendarClock} label="Type" value={labelOf(e.employment_type)} />
                   <KV icon={CalendarClock} label="Start" value={e.start_date} />
                   {e.probation_end_date && <KV icon={CalendarClock} label="Probation ends" value={e.probation_end_date} />}
                   {e.timezone_name && <KV icon={CalendarClock} label="Timezone" value={e.timezone_name} />}
@@ -675,7 +676,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                       title="Click to adjust this balance"
                       className="group rounded-lg border border-white/[0.08] bg-white/[0.02] p-3 text-left hover:border-violet-400/30 hover:bg-white/[0.04] transition-colors"
                     >
-                      <div className="text-[10px] uppercase tracking-wider text-white/50">{b.leave_type}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-white/50">{labelOf(b.leave_type)}</div>
                       <div className="text-xl font-bold text-white mt-0.5">{b.remaining}</div>
                       <div className="text-[10px] text-white/40 mt-0.5">
                         {b.accrued_days} accrued · {b.used_days} used
@@ -723,7 +724,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                           )}
                           {row.grade && <Badge variant="outline" className="text-[10px]">{row.grade}</Badge>}
                           {row.reason && (
-                            <span className="text-[10px] text-white/50">{String(row.reason).replace(/_/g, ' ')}</span>
+                            <span className="text-[10px] text-white/50">{labelOf(row.reason)}</span>
                           )}
                         </div>
                         <div className="text-xs text-white/50 mt-0.5">
@@ -763,7 +764,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                         </div>
                         <div className="flex items-center gap-1.5">
                           <Badge variant="outline" className={`text-[10px] ${STATUS_BADGE[row.status === 'closed' ? 'approved' : (row.visible_to_employee ? 'approved' : 'pending')] || ''}`}>
-                            {String(row.status || '').replace(/_/g, ' ')}
+                            {labelOf(row.status)}
                           </Badge>
                           {row.status === 'closed' && row.visible_to_employee && (
                             <Button variant="outline" size="sm"
@@ -815,7 +816,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                             : g.status === 'in_progress' ? 'bg-violet-500/10 text-violet-300 border-violet-400/30'
                             : 'bg-amber-500/10 text-amber-300 border-amber-400/30'
                           }`}>
-                            {g.status.replace(/_/g, ' ')}
+                            {labelOf(g.status)}
                           </Badge>
                           <Button variant="outline" size="sm" className="h-5 px-1.5 text-[10px]"
                             onClick={() => openEditGoal(g)}>
@@ -867,8 +868,8 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                         <div className="flex items-center justify-between gap-2 flex-wrap">
                           <div className="font-medium text-sm text-white/90 truncate">{d.title}</div>
                           <div className="flex gap-1 flex-wrap">
-                            <Badge variant="outline" className="text-[10px]">{d.document_type}</Badge>
-                            <Badge variant="outline" className="text-[10px]">{d.confidentiality}</Badge>
+                            <Badge variant="outline" className="text-[10px]">{labelOf(d.document_type)}</Badge>
+                            <Badge variant="outline" className="text-[10px]">{labelOf(d.confidentiality)}</Badge>
                             {d.processing_status === 'failed' && (
                               <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-400/30">failed</Badge>
                             )}
@@ -902,13 +903,13 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                     <div key={lr.id} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-2.5 flex items-center justify-between gap-2 text-sm">
                       <div className="min-w-0">
                         <div className="text-white/85">
-                          {lr.leave_type} · {lr.start_date} → {lr.end_date}
+                          {labelOf(lr.leave_type)} · {lr.start_date} → {lr.end_date}
                           <span className="text-white/45"> · {lr.days_requested}d</span>
                         </div>
                         {lr.reason && <div className="text-xs text-white/50 truncate">{lr.reason}</div>}
                       </div>
                       <Badge variant="outline" className={`text-[10px] shrink-0 ${STATUS_BADGE[lr.status] || ''}`}>
-                        {lr.status}
+                        {labelOf(lr.status)}
                       </Badge>
                     </div>
                   ))}
@@ -928,10 +929,10 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                       <div className="min-w-0">
                         <div className="text-white/85 truncate">{m.title}</div>
                         <div className="text-xs text-white/50">
-                          {m.meeting_type} · {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : 'unscheduled'}
+                          {labelOf(m.meeting_type)} · {m.scheduled_at ? new Date(m.scheduled_at).toLocaleString() : 'unscheduled'}
                         </div>
                       </div>
-                      <Badge variant="outline" className="text-[10px] shrink-0">{m.status}</Badge>
+                      <Badge variant="outline" className="text-[10px] shrink-0">{labelOf(m.status)}</Badge>
                     </div>
                   ))}
                 </div>
@@ -959,7 +960,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                   {auditLog.rows.map((log) => (
                     <div key={log.id} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-2.5 text-xs">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-violet-300">{log.action}</span>
+                        <span className="text-violet-300">{labelOf(log.action)}</span>
                         <span className="text-white/40 shrink-0">{new Date(log.created_at).toLocaleString()}</span>
                       </div>
                       {log.actor_name && <div className="text-white/50 mt-0.5">by {log.actor_name}</div>}
@@ -1013,7 +1014,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {['candidate','onboarding','active','on_leave','probation','notice','offboarded'].map((s) => (
-                  <SelectItem key={s} value={s}>{s.replace(/_/g, ' ')}</SelectItem>
+                  <SelectItem key={s} value={s}>{labelOf(s)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -1024,7 +1025,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {['full_time','part_time','contract','intern'].map((s) => (
-                  <SelectItem key={s} value={s}>{s.replace(/_/g, ' ')}</SelectItem>
+                  <SelectItem key={s} value={s}>{labelOf(s)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

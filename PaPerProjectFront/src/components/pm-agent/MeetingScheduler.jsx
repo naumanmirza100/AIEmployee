@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { labelOf } from '@/utils/labels';
 import MeetingDraftForm from '@/components/common/MeetingDraftForm';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,7 +37,7 @@ const STATUS_CONFIG = {
   pending: { color: 'text-amber-400', bg: 'bg-amber-500/20', icon: Clock, label: 'Pending' },
   accepted: { color: 'text-emerald-400', bg: 'bg-emerald-500/20', icon: CheckCircle, label: 'Accepted' },
   rejected: { color: 'text-red-400', bg: 'bg-red-500/20', icon: XCircle, label: 'Rejected' },
-  counter_proposed: { color: 'text-violet-400', bg: 'bg-violet-500/20', icon: ArrowRightLeft, label: 'Counter Proposed' },
+  counter_proposed: { color: 'text-violet-400', bg: 'bg-violet-500/20', icon: ArrowRightLeft, label: 'New Time Proposed' },
   withdrawn: { color: 'text-white/55', bg: 'bg-white/[0.05]', icon: Trash2, label: 'Withdrawn' },
 };
 
@@ -712,7 +713,7 @@ export default function MeetingScheduler() {
                             const psc = STATUS_CONFIG[p.status] || STATUS_CONFIG.pending;
                             return (
                               <span key={pi} className={`text-[10px] px-2 py-0.5 rounded-full border ${psc.bg} ${psc.color} border-white/10`}>
-                                {p.name}: {p.status}
+                                {p.name}: {STATUS_CONFIG[p.status]?.label || labelOf(p.status)}
                               </span>
                             );
                           })}
@@ -739,7 +740,7 @@ export default function MeetingScheduler() {
                             <div key={ri} className="text-xs text-white/55 flex items-center gap-2">
                               <span className="font-medium text-white/65">{r.responder_name}</span>
                               <span className={`px-1.5 py-0.5 rounded text-[10px] ${STATUS_CONFIG[r.action]?.bg || 'bg-white/[0.05]'} ${STATUS_CONFIG[r.action]?.color || 'text-white/55'}`}>
-                                {r.action}
+                                {STATUS_CONFIG[r.action]?.label || labelOf(r.action)}
                               </span>
                               {r.proposed_time && <span>→ {new Date(r.proposed_time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
                               {r.reason && <span className="italic">"{r.reason}"</span>}

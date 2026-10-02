@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -147,9 +148,9 @@ export default function ProjectsListView({ projects = [], loading, onProjectCrea
                       <CardTitle className="text-base text-white truncate">{project.name}</CardTitle>
                     </div>
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <Badge className={`border ${statusClass}`}>{project.status}</Badge>
+                      <Badge className={`border ${statusClass}`}>{labelOf(project.status)}</Badge>
                       {project.priority && (
-                        <Badge variant="outline" className={priorityClass}>{project.priority}</Badge>
+                        <Badge variant="outline" className={priorityClass}>{labelOf(project.priority)}</Badge>
                       )}
                       <span className="text-xs text-white/45 inline-flex items-center gap-1">
                         <ListTodo className="h-3 w-3" />
@@ -186,7 +187,7 @@ export default function ProjectsListView({ projects = [], loading, onProjectCrea
                             <span className="w-1.5 h-1.5 rounded-full bg-white/25 shrink-0" />
                             <span className="flex-1 truncate">{t.title}</span>
                             {t.status && (
-                              <span className="text-[10px] uppercase tracking-wider text-white/40">{t.status}</span>
+                              <span className="text-[10px] uppercase tracking-wider text-white/40">{labelOf(t.status)}</span>
                             )}
                           </li>
                         ))}

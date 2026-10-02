@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,9 @@ const CHANNEL_TYPES = [
 ];
 
 const SEVERITY_OPTIONS = ['info', 'warning', 'critical'];
+
+// "warning,critical" -> "Warning, Critical"
+const labelList = (csv) => String(csv).split(',').map((s) => labelOf(s.trim())).filter(Boolean).join(', ');
 
 const NOTIFICATION_TYPES = [
   'overdue_task', 'blocked_task', 'unassigned_high_priority', 'deadline_approaching',
@@ -375,9 +379,9 @@ export default function NotificationSettings() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate">{ch.name}</p>
                       <p className="text-xs text-white/55 truncate">
-                        {ch.channel_type} · {ch.target}
+                        {CHANNEL_TYPES.find((c) => c.value === ch.channel_type)?.label || labelOf(ch.channel_type)} · {ch.target}
                       </p>
-                      <p className="text-xs text-white/40">severities: {ch.severities || 'all'}{ch.types ? ` · types: ${ch.types}` : ''}</p>
+                      <p className="text-xs text-white/40">Severities: {ch.severities ? labelList(ch.severities) : 'all'}{ch.types ? ` · Types: ${labelList(ch.types)}` : ''}</p>
                       {ch.last_error && (
                         <p className="text-xs text-red-400 mt-1">Last error: {ch.last_error}</p>
                       )}
@@ -416,7 +420,7 @@ export default function NotificationSettings() {
               <Select value={newTemplate.notification_type} onValueChange={(v) => setNewTemplate({ ...newTemplate, notification_type: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {NOTIFICATION_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  {NOTIFICATION_TYPES.map((t) => <SelectItem key={t} value={t}>{labelOf(t)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -437,7 +441,7 @@ export default function NotificationSettings() {
               <Select value={newTemplate.default_severity} onValueChange={(v) => setNewTemplate({ ...newTemplate, default_severity: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {SEVERITY_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  {SEVERITY_OPTIONS.map((s) => <SelectItem key={s} value={s}>{labelOf(s)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -465,7 +469,7 @@ export default function NotificationSettings() {
                         <Select value={editTemplateForm.notification_type} onValueChange={(v) => setEditTemplateForm({ ...editTemplateForm, notification_type: v })}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {NOTIFICATION_TYPES.map((tp) => <SelectItem key={tp} value={tp}>{tp}</SelectItem>)}
+                            {NOTIFICATION_TYPES.map((tp) => <SelectItem key={tp} value={tp}>{labelOf(tp)}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -486,7 +490,7 @@ export default function NotificationSettings() {
                         <Select value={editTemplateForm.default_severity} onValueChange={(v) => setEditTemplateForm({ ...editTemplateForm, default_severity: v })}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {SEVERITY_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                            {SEVERITY_OPTIONS.map((s) => <SelectItem key={s} value={s}>{labelOf(s)}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -507,7 +511,7 @@ export default function NotificationSettings() {
                     <Checkbox checked={t.is_active} onCheckedChange={() => toggleTemplateActive(t)} className="mt-1" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate">
-                        {t.name} <span className="text-xs text-white/40">· {t.notification_type} · {t.default_severity}</span>
+                        {t.name} <span className="text-xs text-white/40">· {labelOf(t.notification_type)} · {labelOf(t.default_severity)}</span>
                       </p>
                       <p className="text-xs text-white/55 truncate mt-1">{t.title_template}</p>
                       <p className="text-xs text-white/40 line-clamp-2">{t.message_template}</p>

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Loader2, UserPlus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -121,7 +122,7 @@ export default function HiredToHRDialog({ interview, open, onOpenChange, onDone 
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm space-y-2">
             <p>
               HR already has <strong>{existing.full_name}</strong> ({existing.work_email},{' '}
-              {existing.employment_status}). Link this hire to that record instead of adding someone new?
+              {labelOf(existing.employment_status).toLowerCase()}). Link this hire to that record instead of adding someone new?
             </p>
             <Button size="sm" variant="outline" onClick={linkExisting} disabled={saving}>Link to this record</Button>
           </div>

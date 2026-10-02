@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -476,7 +477,7 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
                           )}
                           {task.risk_level && (
                             <Badge variant="outline" className="text-xs">
-                              Risk: {task.risk_level}
+                              Risk: {labelOf(task.risk_level)}
                             </Badge>
                           )}
                           {task.impact_on_others && (
@@ -1043,7 +1044,7 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
                             → {suggestion.suggested_assignee}
                           </Badge>
                           {suggestion.delegation_type && (
-                            <Badge variant="secondary">{suggestion.delegation_type}</Badge>
+                            <Badge variant="secondary">{labelOf(suggestion.delegation_type)}</Badge>
                           )}
                           {suggestion.skill_match_score && (
                             <Badge variant="outline">Match: {suggestion.skill_match_score}%</Badge>
