@@ -90,3 +90,23 @@ def mirror_contact_to_hubspot(sender, instance, created, **kwargs):
         transaction.on_commit(lambda: sync_contact_to_hubspot.delay(contact_id))
     except Exception as e:
         logger.exception("mirror_contact_to_hubspot dispatch failed: %s", e)
+
+
+# A project task made from a ticket (Frontline_agent/ticket_tasks.py): when it
+# is done, the ticket hears about it. Never allowed to break the task's save.
+def _task_saved(sender, instance, created=False, raw=False, **kwargs):
+    if raw or created:
+        return
+    try:
+        from Frontline_agent.ticket_tasks import task_changed
+        task_changed(instance)
+    except Exception:
+        logger.exception("ticket_tasks: could not update tickets for task %s", instance.pk)
+
+
+def _connect_task_signal():
+    from core.models import Task
+    post_save.connect(_task_saved, sender=Task, weak=False, dispatch_uid='frontline-ticket-task-done')
+
+
+_connect_task_signal()

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { LogOut, Bell, Key, User, Menu } from 'lucide-react';
+import { LogOut, Bell, Key, User, Menu, ListChecks, Settings } from 'lucide-react';
 import AgentSidebar, { EXPANDED_W, COLLAPSED_W } from '@/components/common/AgentSidebar';
 import ThemeToggle from '@/components/common/ThemeToggle';
 import {
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { API_BASE_URL } from '@/config/apiConfig';
+import { fetchMyWork, urgentCount } from '@/utils/myWork';
 
 const DashboardNavbar = ({
   icon: Icon,
@@ -75,7 +76,7 @@ const DashboardNavbar = ({
   // login, not only Project Manager's, despite the endpoint's name.
   const usesCompanyFeed = isCompanyUser && !localStorage.getItem('auth_token');
   const notifEndpoint = usesCompanyFeed
-    ? `${API_BASE_URL}/project-manager/ai/notifications`
+    ? `${API_BASE_URL}/company/notifications`
     : `${API_BASE_URL}/notifications`;
 
   useEffect(() => {
@@ -100,6 +101,17 @@ const DashboardNavbar = ({
     return () => clearInterval(interval);
   }, []);
 
+  // "My work" for a dashboard login: how much is overdue or due today, across
+  // the agents. Employee logins have it in the My Space sidebar instead.
+  const [urgentWork, setUrgentWork] = useState(0);
+  useEffect(() => {
+    if (!usesCompanyFeed) return undefined;
+    const load = () => fetchMyWork().then((items) => setUrgentWork(urgentCount(items))).catch(() => {});
+    load();
+    const interval = setInterval(load, 120000);
+    return () => clearInterval(interval);
+  }, [usesCompanyFeed]);
+
   // Close panel on outside click
   useEffect(() => {
     const handleClick = (e) => {
@@ -115,7 +127,7 @@ const DashboardNavbar = ({
     try {
       if (isCompanyUser && !localStorage.getItem('auth_token')) {
         // PMNotifications use a different mark-read endpoint
-        await fetch(`${API_BASE_URL}/project-manager/ai/notifications/read`, {
+        await fetch(`${API_BASE_URL}/company/notifications/read`, {
           method: 'POST',
           headers: { 'Authorization': `Token ${authToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ notification_ids: [id] }),
@@ -136,7 +148,7 @@ const DashboardNavbar = ({
       if (isCompanyUser && !localStorage.getItem('auth_token')) {
         const allIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
         if (allIds.length) {
-          await fetch(`${API_BASE_URL}/project-manager/ai/notifications/read`, {
+          await fetch(`${API_BASE_URL}/company/notifications/read`, {
             method: 'POST',
             headers: { 'Authorization': `Token ${authToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ notification_ids: allIds }),
@@ -207,6 +219,21 @@ const DashboardNavbar = ({
             </div>
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <ThemeToggle />
+              {usesCompanyFeed && (
+                <button
+                  onClick={() => navigate('/my-work')}
+                  className="h-8 w-8 sm:h-9 sm:w-9 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors relative"
+                  title={urgentWork > 0 ? `My work: ${urgentWork} overdue or due today` : 'My work'}
+                  aria-label="My work"
+                >
+                  <ListChecks className="h-4 w-4" />
+                  {urgentWork > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 h-4 min-w-[1rem] px-0.5 rounded-full bg-amber-500 text-[10px] font-bold text-pure-white flex items-center justify-center">
+                      {urgentWork > 9 ? '9+' : urgentWork}
+                    </span>
+                  )}
+                </button>
+              )}
               {/* Notification Bell */}
               <div className="relative" ref={notifRef}>
                 <button
@@ -231,11 +258,23 @@ const DashboardNavbar = ({
                   >
                     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                       <span className="text-sm font-semibold text-foreground">Notifications</span>
-                      {unreadCount > 0 && (
-                        <button onClick={markAllRead} className="text-[11px] text-violet-400 hover:text-violet-300">
-                          Mark all read
-                        </button>
-                      )}
+                      <div className="flex items-center gap-3">
+                        {unreadCount > 0 && (
+                          <button onClick={markAllRead} className="text-[11px] text-violet-400 hover:text-violet-300">
+                            Mark all read
+                          </button>
+                        )}
+                        {usesCompanyFeed && (
+                          <button
+                            onClick={() => { setShowNotifPanel(false); navigate('/company/settings/notifications'); }}
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Notification settings"
+                            aria-label="Notification settings"
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {notifications.length === 0 ? (
                       <div className="p-6 text-center text-sm text-muted-foreground">No notifications</div>
@@ -338,6 +377,15 @@ const DashboardNavbar = ({
                       >
                         <Key className="mr-2 h-4 w-4" />
                         API Keys
+                      </DropdownMenuItem>
+                    )}
+                    {usesCompanyFeed && (
+                      <DropdownMenuItem
+                        onClick={() => navigate('/company/settings/notifications')}
+                        className="cursor-pointer"
+                      >
+                        <Bell className="mr-2 h-4 w-4" />
+                        Notification settings
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuSeparator />

@@ -262,11 +262,9 @@ def send_weekly_analytics_digest():
         for row in FrontlineMeeting.objects.filter(created_at__gte=window_start)
         .values('company_id').annotate(n=Count('id'))
     }
-    recipients_by_company = {}
-    for company_id, email in (CompanyUser.objects
-                              .filter(is_active=True).exclude(email='')
-                              .values_list('company_id', 'email')):
-        recipients_by_company.setdefault(company_id, []).append(email)
+    logins_by_company = {}
+    for cu in CompanyUser.objects.filter(is_active=True).exclude(email=''):
+        logins_by_company.setdefault(cu.company_id, []).append(cu)
 
     for company in Company.objects.filter(is_active=True):
         stats = ticket_stats.get(company.id)
@@ -300,7 +298,9 @@ def send_weekly_analytics_digest():
         ]
         body = "\n".join(body_lines)
 
-        recipients = recipients_by_company.get(company.id) or []
+        # Only those who still want it ("Weekly Frontline summary").
+        from core.notification_settings import wanting_email
+        recipients = [cu.email for cu in wanting_email(logins_by_company.get(company.id) or [], 'weekly_digest')]
         if not recipients:
             continue
         try:

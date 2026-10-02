@@ -3,6 +3,7 @@
 import { companyApi } from './companyAuthService';
 
 import { API_BASE_URL } from '@/config/apiConfig';
+import { streamAnswer } from '@/utils/ndjsonStream';
 
 /**
  * Get company authentication token from localStorage
@@ -194,6 +195,15 @@ export const suggestInterviewQuestions = async (cvRecordId, jobDescriptionId) =>
 export const recruitmentQA = async (question) => {
   const response = await companyApi.post('/recruitment/qa', { question });
   return response;
+};
+
+/**
+ * Recruitment Q&A with the answer shown as it is written: calls
+ * `onText(answerSoFar)` as text arrives and resolves like `recruitmentQA`.
+ */
+export const recruitmentQAStream = async (question, { onText, signal } = {}) => {
+  const done = await streamAnswer('/recruitment/qa/stream', { question }, { onText, signal });
+  return { status: 'success', data: done.data };
 };
 
 /**
@@ -798,6 +808,7 @@ export default {
   updateQualificationSettings,
   getRecruitmentAnalytics,
   recruitmentQA,
+  recruitmentQAStream,
   listQAChats,
   createQAChat,
   updateQAChat,

@@ -858,6 +858,26 @@ export const deactivateHREmployee = async (employeeId, reason = '') => {
   }
 };
 
+/** HR-admin only. What a leaver still owns in every agent, and who each group can go to. */
+export const getEmployeeHandover = async (employeeId) => {
+  try {
+    return await companyApi.get(`/hr/employees/${employeeId}/handover`);
+  } catch (error) {
+    console.error('Get employee handover error:', error);
+    throw error;
+  }
+};
+
+/** HR-admin only. Move each chosen group: `{ tasks: userId, tickets: companyUserId, reports: employeeId, interviews: userId }`. */
+export const handOverEmployeeWork = async (employeeId, assignments) => {
+  try {
+    return await companyApi.post(`/hr/employees/${employeeId}/handover`, { assignments });
+  } catch (error) {
+    console.error('Employee handover error:', error);
+    throw error;
+  }
+};
+
 /** HR-admin only. Reverse a deactivation. `target_status` defaults to
  * 'active' on the server side; pass explicitly to restore a specific
  * pre-offboard status (probation / on_leave / notice / etc.). */
@@ -1304,6 +1324,8 @@ export default {
   listHRLeaveBalances,
   adjustHRLeaveBalance,
   deactivateHREmployee,
+  getEmployeeHandover,
+  handOverEmployeeWork,
   reactivateHREmployee,
   listHRScheduledNotifications,
   hrMeetingSchedule,

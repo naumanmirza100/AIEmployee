@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Bell, Check, Search, RefreshCw, Loader2, ChevronLeft,
-  AlertTriangle, CheckCircle2, Inbox, Clock, ExternalLink,
+  AlertTriangle, CheckCircle2, Inbox, Clock, ExternalLink, Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -131,7 +131,7 @@ const NotificationsPage = () => {
   const authToken = localStorage.getItem('auth_token') || localStorage.getItem('company_auth_token');
   const isPM = isCompanyUser && !localStorage.getItem('auth_token');
   const notifEndpoint = isPM
-    ? `${API_BASE_URL}/project-manager/ai/notifications`
+    ? `${API_BASE_URL}/company/notifications`
     : `${API_BASE_URL}/notifications`;
 
   // Company users get the same profile block the dashboard shows. Project users
@@ -175,7 +175,7 @@ const NotificationsPage = () => {
   const markAsRead = async (id) => {
     try {
       if (isPM) {
-        await fetch(`${API_BASE_URL}/project-manager/ai/notifications/read`, {
+        await fetch(`${API_BASE_URL}/company/notifications/read`, {
           method: 'POST',
           headers: { Authorization: `Token ${authToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ notification_ids: [id] }),
@@ -195,7 +195,7 @@ const NotificationsPage = () => {
       if (isPM) {
         const allIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
         if (allIds.length) {
-          await fetch(`${API_BASE_URL}/project-manager/ai/notifications/read`, {
+          await fetch(`${API_BASE_URL}/company/notifications/read`, {
             method: 'POST',
             headers: { Authorization: `Token ${authToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ notification_ids: allIds }),
@@ -317,6 +317,16 @@ const NotificationsPage = () => {
                 ? <Loader2 className="h-4 w-4 animate-spin" />
                 : <RefreshCw className="h-4 w-4" />}
             </Button>
+            {isPM && (
+              <Button
+                variant="outline"
+                onClick={() => navigate('/company/settings/notifications')}
+                className="border-[var(--line-3)] bg-[var(--panel-2)] text-white/70 hover:bg-white/5 hover:text-white shrink-0"
+              >
+                <Settings className="h-4 w-4 mr-1" />
+                Settings
+              </Button>
+            )}
             {unreadCount > 0 && (
               <Button
                 onClick={markAllRead}

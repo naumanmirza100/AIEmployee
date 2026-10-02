@@ -78,3 +78,23 @@ class FrontlineAlertTests(FrontlineTestCase):
                             {'to_company_user_id': self.member.id}, ticket_id=self.ticket.id)
         self.assertEqual(code, 200)
         self.assertEqual(len(bell(self.member)), 1)
+
+    # ---- reading the bell ----------------------------------------------------
+
+    def test_a_company_without_the_pm_agent_can_read_its_bell(self):
+        # The feed used to be reachable only under /project-manager/, which is
+        # gated on buying the PM agent: this company (Frontline only) had a
+        # bell that could never load.
+        trigger_handoff(self.ticket, 'customer_requested')
+        client = self.http(self.admin)
+        code, body = self.send(client, 'get', '/api/company/notifications')
+        self.assertEqual(code, 200, body)
+        [alert] = body['data']['notifications']
+        self.assertIn('Customer waiting', alert['title'])
+        self.assertEqual(alert['link'], '/frontline/dashboard?tab=handoffs')
+        code, _ = self.send(client, 'post', '/api/company/notifications/read',
+                            {'notification_ids': [alert['id']]})
+        self.assertEqual(code, 200)
+        self.assertEqual(self.send(client, 'get', '/api/company/notifications')[1]['data']['unread_count'], 0)
+        # The PM address stays gated, as before.
+        self.assertEqual(self.send(client, 'get', '/api/project-manager/ai/notifications')[0], 403)

@@ -124,6 +124,34 @@ def _pm_people_made_busy(meeting, participant, action, counter_time=None):
 
 # ==================== MEETING RESPONSE (Project User) ====================
 
+def _email_organizer_reply(meeting, organizer, invitee_name, action):
+    """Email the organizer an invitee's reply, with the calendar file when they accept."""
+    ics_attachment = None
+    if action == 'accepted':
+        try:
+            from project_manager_agent.ics_generator import generate_meeting_ics
+            ics_attachment = generate_meeting_ics(meeting, action='REQUEST')
+        except Exception:
+            pass
+    try:
+        from django.conf import settings as django_settings
+        from django.core.mail import EmailMultiAlternatives
+        from_email = getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
+        email_body = f'<p><strong>{invitee_name}</strong> has {action.replace("_", " ")} the meeting <strong>"{meeting.title}"</strong>.</p>'
+        email_msg = EmailMultiAlternatives(
+            subject=f'Meeting Update: {meeting.title}',
+            body='',
+            from_email=from_email,
+            to=[organizer.email],
+        )
+        email_msg.attach_alternative(email_body, 'text/html')
+        if ics_attachment:
+            email_msg.attach('meeting.ics', ics_attachment, 'text/calendar; method=REQUEST')
+        email_msg.send(fail_silently=True)
+    except Exception as e:
+        logger.warning(f'Failed to send meeting email to organizer: {e}')
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def meeting_respond(request, meeting_id):
@@ -134,7 +162,6 @@ def meeting_respond(request, meeting_id):
     try:
         from project_manager_agent.models import ScheduledMeeting, MeetingResponse, MeetingParticipant
         from django.core.mail import send_mail
-        from django.conf import settings as django_settings
 
         user = request.user
         action = request.data.get('action', '').strip()
@@ -209,70 +236,32 @@ def meeting_respond(request, meeting_id):
         except ScheduleConflict as clash:
             return clash.response()
 
-        # Notify the organizer (CompanyUser) via PMNotification
-        from project_manager_agent.models import PMNotification
+        # Tell the organizer (a dashboard login), the way they've chosen
+        # (core.notification_settings, "Replies to meetings you organise").
+        from core.notification_settings import wants_email
+        from core.notification_utils import notify_company_users
         organizer = meeting.organizer
         invitee_name = user.get_full_name() or user.username
         time_display = meeting.proposed_time.strftime('%A, %B %d, %Y at %I:%M %p') if meeting.proposed_time else 'TBD'
-
+        reason_text = f' Reason: {reason}' if reason else ''
         if action == 'accepted':
-            PMNotification.objects.create(
-                company_user=organizer,
-                notification_type='custom',
-                severity='info',
-                title=f'Meeting Accepted: {meeting.title}',
-                message=f'{invitee_name} accepted the meeting "{meeting.title}" scheduled for {time_display}.',
-                data={'meeting_id': meeting.id, 'type': 'meeting_accepted'},
-            )
+            title, severity = f'Meeting Accepted: {meeting.title}', 'info'
+            body = f'{invitee_name} accepted the meeting "{meeting.title}" scheduled for {time_display}.'
         elif action == 'rejected':
-            reason_text = f' Reason: {reason}' if reason else ''
-            PMNotification.objects.create(
-                company_user=organizer,
-                notification_type='custom',
-                severity='warning',
-                title=f'Meeting Rejected: {meeting.title}',
-                message=f'{invitee_name} rejected the meeting "{meeting.title}".{reason_text}',
-                data={'meeting_id': meeting.id, 'type': 'meeting_rejected', 'reason': reason},
-            )
-        elif action == 'counter_proposed':
-            new_time_display = counter_time.strftime('%A, %B %d, %Y at %I:%M %p')
-            reason_text = f' Reason: {reason}' if reason else ''
-            PMNotification.objects.create(
-                company_user=organizer,
-                notification_type='custom',
-                severity='info',
-                title=f'New Time Proposed: {meeting.title}',
-                message=f'{invitee_name} suggested a new time for "{meeting.title}": {new_time_display}.{reason_text}',
-                data={'meeting_id': meeting.id, 'type': 'meeting_counter_proposed', 'new_time': counter_time.isoformat(), 'reason': reason},
-            )
+            title, severity = f'Meeting Rejected: {meeting.title}', 'warning'
+            body = f'{invitee_name} rejected the meeting "{meeting.title}".{reason_text}'
+        else:
+            title, severity = f'New Time Proposed: {meeting.title}', 'info'
+            body = (f'{invitee_name} suggested a new time for "{meeting.title}": '
+                    f"{counter_time.strftime('%A, %B %d, %Y at %I:%M %p')}.{reason_text}")
+        notify_company_users([organizer], title=title, message=body, severity=severity,
+                             link='/project-manager/dashboard?tab=meeting-scheduler', kind='pm_meeting_reply',
+                             email=False, data={'meeting_id': meeting.id, 'type': f'meeting_{action}'})
 
-        # Generate .ics for organizer when invitee accepts
-        ics_attachment = None
-        if action == 'accepted':
-            try:
-                from project_manager_agent.ics_generator import generate_meeting_ics
-                ics_attachment = generate_meeting_ics(meeting, action='REQUEST')
-            except Exception:
-                pass
-
-        # Also send email to organizer
-        try:
-            from django.core.mail import EmailMultiAlternatives
-            from_email = getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
-            email_body = f'<p><strong>{invitee_name}</strong> has {action.replace("_", " ")} the meeting <strong>"{meeting.title}"</strong>.</p>'
-            email_msg = EmailMultiAlternatives(
-                subject=f'Meeting Update: {meeting.title}',
-                body='',
-                from_email=from_email,
-                to=[organizer.email],
-            )
-            email_msg.attach_alternative(email_body, 'text/html')
-            if ics_attachment:
-                email_msg.attach('meeting.ics', ics_attachment, 'text/calendar; method=REQUEST')
-            email_msg.send(fail_silently=True)
-
-        except Exception as e:
-            logger.warning(f'Failed to send meeting email to organizer: {e}')
+        # And their email, with the calendar file when someone accepts — unless
+        # they've turned it off.
+        if wants_email(organizer, 'meeting_replies'):
+            _email_organizer_reply(meeting, organizer, invitee_name, action)
 
         return Response({
             'status': 'success',
@@ -651,7 +640,7 @@ def meeting_email_action(request, action, token):
     their mail client; we render directly instead of a JSON API response).
     """
     from project_manager_agent.models import (
-        ScheduledMeeting, MeetingParticipant, MeetingResponse, PMNotification,
+        ScheduledMeeting, MeetingParticipant, MeetingResponse,
     )
 
     if action not in ('accepted', 'rejected'):
@@ -727,24 +716,17 @@ def meeting_email_action(request, action, token):
     try:
         invitee_name = participant.user.get_full_name() or participant.user.username
         time_display = meeting.proposed_time.strftime('%A, %B %d, %Y at %I:%M %p') if meeting.proposed_time else 'TBD'
+        from core.notification_utils import notify_company_users
         if action == 'accepted':
-            PMNotification.objects.create(
-                company_user=meeting.organizer,
-                notification_type='custom',
-                severity='info',
-                title=f'Meeting Accepted: {meeting.title}',
-                message=f'{invitee_name} accepted via email — "{meeting.title}" scheduled for {time_display}.',
-                data={'meeting_id': meeting.id, 'via': 'email_link'},
-            )
+            title, severity = f'Meeting Accepted: {meeting.title}', 'info'
+            body = f'{invitee_name} accepted via email — "{meeting.title}" scheduled for {time_display}.'
         else:
-            PMNotification.objects.create(
-                company_user=meeting.organizer,
-                notification_type='custom',
-                severity='warning',
-                title=f'Meeting Rejected: {meeting.title}',
-                message=f'{invitee_name} rejected "{meeting.title}" via email.',
-                data={'meeting_id': meeting.id, 'via': 'email_link'},
-            )
+            title, severity = f'Meeting Rejected: {meeting.title}', 'warning'
+            body = f'{invitee_name} rejected "{meeting.title}" via email.'
+        # Emailed too, if they've asked for that: this path sends no email of its own.
+        notify_company_users([meeting.organizer], title=title, message=body, severity=severity,
+                             link='/project-manager/dashboard?tab=meeting-scheduler', kind='pm_meeting_reply',
+                             data={'meeting_id': meeting.id, 'via': 'email_link'})
     except Exception:
         logger.exception('Failed to create organizer notification for email-link action')
 

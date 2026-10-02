@@ -383,7 +383,8 @@ MIDDLEWARE = [
     # detail payloads ship 100-300KB of `body_html` per click; gzip
     # cuts that to ~20-40KB and makes "Loading message…" near-instant.
     # Sits before CommonMiddleware (per Django docs) and after security.
-    'django.middleware.gzip.GZipMiddleware',
+    # Streamed Q&A answers are left uncompressed, or they arrive all at once.
+    'api.middleware.gzip.GZipExceptStreamsMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS middleware (should be early)
      'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',

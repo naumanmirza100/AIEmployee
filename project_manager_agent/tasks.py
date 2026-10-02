@@ -77,6 +77,7 @@ def send_meeting_reminders():
         ).exists()
 
         if not already_notified_organizer:
+            from core.notification_settings import wants_email
             from project_manager_agent.notifications import dispatch_pm_notification
             dispatch_pm_notification(
                 company_user=meeting.organizer,
@@ -90,7 +91,10 @@ def send_meeting_reminders():
                     'reminder_text': reminder_text,
                     'time_display': time_display,
                 },
-                extra_emails=[meeting.organizer.email] if meeting.organizer.email else [],
+                # Always in the bell (that row is how it's sent only once); by
+                # email unless they've turned "Meeting reminders" email off.
+                extra_emails=([meeting.organizer.email]
+                              if wants_email(meeting.organizer, 'meeting_reminders') else []),
             )
             reminders_sent += 1
 

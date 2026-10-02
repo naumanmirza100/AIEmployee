@@ -1331,7 +1331,7 @@ def update_interview(request, interview_id):
                         ensure_free(sorted(added), interview.scheduled_datetime,
                                     interview.duration_minutes, tz_name=stored_zone(interview),
                                     viewer_source='recruitment', reveal_private=True,
-                                    exclude=[('recruitment', interview.id)])
+                                    exclude=[('recruitment', interview.id)], suggest=False)
                         interview.interviewers.set(valid)
                 except ScheduleConflict as clash:
                     return clash.response()
@@ -3474,6 +3474,48 @@ def recruitment_qa(request):
             'status': 'error',
             'message': str(e),
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def recruitment_qa_stream(request):
+    """`recruitment_qa`, with the answer sent as it is written: one JSON object
+    per line —
+      {"type": "token", "value": "..."}               as text arrives
+      {"type": "done", "data": {answer, insights}}    what `recruitment_qa` returns
+      {"type": "error", "message": "..."}
+    """
+    from api.streaming import ndjson_response
+    data = request.data if isinstance(request.data, dict) else {}
+    question = (data.get('question') or '').strip()
+    if not question:
+        return Response({'status': 'error', 'message': 'question is required.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    company_user = request.user
+    # Key and quota problems answer before the stream starts, as a normal
+    # error response the client already knows how to show.
+    groq_client = _make_agents(company_user.company).get('groq_client')
+    if not groq_client:
+        return Response({'status': 'error', 'message': 'AI service not available.'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    agent = RecruitmentQAAgent(groq_client=groq_client)
+
+    def events():
+        try:
+            for event in agent.process_stream(question=question, company_user=company_user):
+                if event.get('type') == 'done':
+                    result = event['result']
+                    event = {'type': 'done', 'data': {'answer': result.get('answer', ''),
+                                                      'insights': result.get('insights', [])}}
+                yield event
+        except KeyServiceError as exc:
+            yield {'type': 'error', 'message': str(exc)}
+        except Exception:
+            logger.exception("recruitment_qa_stream error")
+            yield {'type': 'error', 'message': 'An error occurred while processing your question. Please try again.'}
+
+    return ndjson_response(events())
 
 
 # ---------- Recruitment QA Chats (persisted in DB) ----------

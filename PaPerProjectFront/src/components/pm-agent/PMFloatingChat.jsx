@@ -38,7 +38,8 @@ const MODES = {
   qa: {
     label: 'Knowledge Q&A',
     icon: MessageSquare,
-    call: (q, history) => pmAgentService.knowledgeQA(q, null, history),
+    // Streams: the answer shows as it is written (`onText`).
+    call: (q, history, opts) => pmAgentService.knowledgeQAStream(q, null, history, opts),
     placeholder:  "Ask a question about your projects, tasks, or team…",
     empty:        "Ask the Q&A agent a question about your project data. It answers with citations from the actual projects, tasks, and team activity.",
     samples: [
@@ -85,6 +86,8 @@ const PMFloatingChat = () => {
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  // Knowledge Q&A's answer so far, while it streams in.
+  const [streamText, setStreamText] = useState('');
   const [uploading, setUploading] = useState(false);
 
   // Slash-menu state
@@ -154,7 +157,7 @@ const PMFloatingChat = () => {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [currentConv.messages, sending, uploading]);
+  }, [currentConv.messages, sending, uploading, streamText]);
 
   // ---- Helpers ---------------------------------------------------------
 
@@ -258,7 +261,7 @@ const PMFloatingChat = () => {
     try {
       // Multi-turn context — last 6 messages
       const history = currentConv.messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
-      const res = await MODES[mode].call(q, history);
+      const res = await MODES[mode].call(q, history, { onText: setStreamText });
       if (res && (res.status === 'success' || res.data)) {
         const data = res.data || res;
         pushMessage({
@@ -275,6 +278,7 @@ const PMFloatingChat = () => {
       pushMessage({ role: 'assistant', content: `Error: ${e.message || 'Something went wrong.'}`, error: true });
     } finally {
       setSending(false);
+      setStreamText('');
     }
   };
 
@@ -591,7 +595,14 @@ const PMFloatingChat = () => {
                   </div>
                 </div>
               ))}
-              {(sending || uploading) && (
+              {sending && streamText && (
+                <div className="flex justify-start" aria-live="polite">
+                  <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-white/[0.06] text-white/90 border border-white/10">
+                    <div className="whitespace-pre-wrap break-words">{streamText}</div>
+                  </div>
+                </div>
+              )}
+              {(sending || uploading) && !streamText && (
                 <div className="flex justify-start">
                   <div className="bg-white/[0.06] border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-white/60" />

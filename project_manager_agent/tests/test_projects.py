@@ -123,6 +123,16 @@ class CompanyUpdateTests(PMTestCase):
         code, body = self.update({'name': 'Edited by colleague'}, project=self.colleague_project)
         self.assertEqual(code, 200, body)
 
+    def test_the_project_manager_can_be_changed_within_the_company(self):
+        code, body = self.update({'project_manager_id': self.other_pm.id})
+        self.assertEqual(code, 200, body)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.project_manager, self.other_pm)
+        code, _ = self.update({'project_manager_id': self.rival_pm.id})
+        self.assertEqual(code, 400)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.project_manager, self.other_pm)
+
     def test_another_companys_project_is_not_found(self):
         code, body = self.update({'name': 'Stolen'}, project=self.rival_project)
         self.assertEqual(code, 404)
@@ -181,6 +191,16 @@ class EmployeeProjectTests(PMTestCase):
                                {'name': 'Renamed by assignee'}, method='put',
                                project_id=self.colleague_project.id)
         self.assertEqual(code, 200, body)
+
+    def test_but_cannot_make_themselves_its_manager(self):
+        self.task(project=self.colleague_project, title='Mine', assignee=self.other_pm)
+        code, body = self.call(employee.update_project_manager_project, self.other_pm,
+                               {'project_manager_id': self.other_pm.id}, method='put',
+                               project_id=self.colleague_project.id)
+        self.assertEqual(code, 403, body)
+        self.assertIn('dashboard', body['message'])
+        self.colleague_project.refresh_from_db()
+        self.assertIsNone(self.colleague_project.project_manager_id)
 
 
 class ProjectDeleteTests(PMTestCase):

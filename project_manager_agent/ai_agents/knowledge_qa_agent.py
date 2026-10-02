@@ -560,6 +560,57 @@ class KnowledgeQAAgent(BaseAgent):
         Returns:
             Dict: Answer with relevant information and enhancements
         """
+        prepared = self._prepare_answer(question, context, available_users, session_id, chat_history)
+        if 'result' in prepared:
+            return prepared['result']
+        try:
+            # Reset last_llm_usage before the main QA call so we can capture token usage.
+            self.last_llm_usage = None
+            response = self._call_llm(prepared['prompt'], self.system_prompt, temperature=0.7,
+                                      max_tokens=prepared['max_tokens'])
+            return self._finish_answer(prepared, response)
+        except Exception as e:
+            from core.api_key_service import KeyServiceError
+            if isinstance(e, KeyServiceError):
+                raise
+            self.log_action("Error answering question", {"error": str(e)})
+            return {
+                "success": False,
+                "error": str(e),
+                "answer": "I'm sorry, I encountered an error while processing your question. Please try again."
+            }
+
+    def answer_question_stream(self, question: str, context: Optional[Dict] = None,
+                               available_users: Optional[List[Dict]] = None,
+                               session_id: Optional[str] = None,
+                               chat_history: Optional[List[Dict]] = None):
+        """`answer_question`, as the answer is written. Yields
+        ``{'type': 'token', 'value': '...'}`` as text arrives, then
+        ``{'type': 'done', 'result': <what answer_question returns>}`` — or
+        ``{'type': 'error', 'message': '...'}``. An answer that needs no model
+        (a count worked out from the data) arrives as one token."""
+        prepared = self._prepare_answer(question, context, available_users, session_id, chat_history)
+        if 'result' in prepared:
+            result = prepared['result']
+            if result.get('answer'):
+                yield {'type': 'token', 'value': result['answer']}
+            yield {'type': 'done', 'result': result}
+            return
+        self.last_llm_usage = None
+        collected = []
+        for event in self._call_llm_stream(prepared['prompt'], self.system_prompt, temperature=0.7,
+                                           max_tokens=prepared['max_tokens']):
+            if event.get('type') == 'token':
+                collected.append(event['value'])
+                yield event
+            elif event.get('type') == 'error':
+                yield event
+                return
+        yield {'type': 'done', 'result': self._finish_answer(prepared, ''.join(collected))}
+
+    def _prepare_answer(self, question, context, available_users, session_id, chat_history):
+        """Everything before the model call: the prompt and its token budget —
+        or, when the data answers it outright, {'result': ...}."""
         self.log_action("Answering question", {"question": question[:50], "session_id": session_id})
         
         # Enhanced: Get conversation history (prefer explicit chat_history from request, else session-based)
@@ -789,12 +840,12 @@ Return a helpful text response (NOT JSON)."""
             # This avoids hallucinations and makes results match the DB/ORM ground truth.
             local_answer = _try_answer_count_question_locally(question, context)
             if local_answer is not None:
-                return {
+                return {"result": {
                     "success": True,
                     "answer": local_answer,
                     "question": question,
                     "token_usage": None,
-                }
+                }}
 
             # Fallback to LLM if we couldn't recognize the pattern.
             aggregates_str = _build_aggregates_context(context, available_users)
@@ -875,73 +926,65 @@ INSTRUCTIONS:
 - Keep the response well-structured. Use markdown (bold for names, bullet lists for details, headings for sections).
 - If the question is about specific data that isn't in the context, say so briefly."""
             max_tokens = 800
+
+        return {"question": question, "context": context, "session_id": session_id,
+                "prompt": prompt, "max_tokens": max_tokens, "relevant_results": relevant_results}
+
+    def _finish_answer(self, prepared, response):
+        """Everything after the model call: polish, memory, insights, charts."""
+        question, context = prepared['question'], prepared['context']
+        session_id, relevant_results = prepared['session_id'], prepared['relevant_results']
+        # Enhanced: Improve answer quality
+        enhanced_answer = KnowledgeQAEnhancements.enhance_answer_quality(
+            question, response, context or {}
+        )
         
-        try:
-            # Reset last_llm_usage before the main QA call so we can capture token usage.
-            self.last_llm_usage = None
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.7, max_tokens=max_tokens)
-            
-            # Enhanced: Improve answer quality
-            enhanced_answer = KnowledgeQAEnhancements.enhance_answer_quality(
-                question, response, context or {}
-            )
-            
-            # Add semantic search results to answer
-            if relevant_results:
-                enhanced_answer['semantic_search_results'] = relevant_results
-            
-            # Enhanced: Add to conversation history
-            if session_id:
-                try:
-                    KnowledgeQAEnhancements.add_to_conversation(
-                        session_id, question, response, context
+        # Add semantic search results to answer
+        if relevant_results:
+            enhanced_answer['semantic_search_results'] = relevant_results
+        
+        # Enhanced: Add to conversation history
+        if session_id:
+            try:
+                KnowledgeQAEnhancements.add_to_conversation(
+                    session_id, question, response, context
+                )
+            except Exception as e:
+                self.log_action("Error saving conversation", {"error": str(e)})
+        
+        # Enhanced: Generate proactive insights
+        insights = []
+        charts = {}
+        if context:
+            try:
+                insights = KnowledgeQAEnhancements.generate_proactive_insights(context)
+                
+                # Generate charts for insights if available
+                if insights:
+                    charts['insights'] = ChartGenerator.generate_insights_chart(insights)
+                
+                # Generate status distribution chart if tasks available
+                if context.get('tasks'):
+                    charts['status_distribution'] = ChartGenerator.generate_status_distribution_chart(
+                        context['tasks']
                     )
-                except Exception as e:
-                    self.log_action("Error saving conversation", {"error": str(e)})
-            
-            # Enhanced: Generate proactive insights
-            insights = []
-            charts = {}
-            if context:
-                try:
-                    insights = KnowledgeQAEnhancements.generate_proactive_insights(context)
-                    
-                    # Generate charts for insights if available
-                    if insights:
-                        charts['insights'] = ChartGenerator.generate_insights_chart(insights)
-                    
-                    # Generate status distribution chart if tasks available
-                    if context.get('tasks'):
-                        charts['status_distribution'] = ChartGenerator.generate_status_distribution_chart(
-                            context['tasks']
-                        )
-                except Exception as e:
-                    self.log_action("Error generating insights/charts", {"error": str(e)})
-            
-            result = {
-                "success": True,
-                **enhanced_answer,
-                "proactive_insights": insights,
-                "question": question,
-                # Expose Groq token usage for this QA call (if available)
-                "token_usage": self.last_llm_usage,
-            }
-            
-            # Add charts if available
-            if charts:
-                result['charts'] = charts
-            
-            return result
-        except Exception as e:
-            from core.api_key_service import KeyServiceError
-            if isinstance(e, KeyServiceError):
-                raise
-            self.log_action("Error answering question", {"error": str(e)})
-            return {
-                "success": False,
-                "error": str(e),
-                "answer": "I'm sorry, I encountered an error while processing your question. Please try again."
-            }
+            except Exception as e:
+                self.log_action("Error generating insights/charts", {"error": str(e)})
+        
+        result = {
+            "success": True,
+            **enhanced_answer,
+            "proactive_insights": insights,
+            "question": question,
+            # Expose Groq token usage for this QA call (if available)
+            "token_usage": self.last_llm_usage,
+        }
+        
+        # Add charts if available
+        if charts:
+            result['charts'] = charts
+        
+        return result
     
     def search_project_history(self, query: str, project_id: int) -> Dict:
         """

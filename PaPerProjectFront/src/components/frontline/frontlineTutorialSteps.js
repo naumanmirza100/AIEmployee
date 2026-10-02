@@ -211,7 +211,7 @@ export const NOTIFICATIONS_TOUR = {
     {
       selector: '[data-tour-notif="prefs"]',
       title: 'Your notification preferences',
-      body: 'Master toggles for email and in-app notifications, plus per-event switches (ticket created, updated, assigned, workflow emails). Turn off what you don\'t want — silence is a feature.',
+      body: 'Which emails you get, and what reaches your bell from every agent, is chosen on one notification settings page. This opens it.',
       placement: 'bottom',
     },
     {
@@ -481,7 +481,7 @@ export const HINTS = {
   // Notifications
   notifPrefs: {
     title: 'Notification preferences',
-    body: 'Master toggles for email and in-app, plus per-event switches (ticket created, updated, assigned, workflow emails). Turn off what you don\'t want.',
+    body: 'Ticket emails, automation emails, tickets assigned to you and the weekly summary are now switched on and off on the one notification settings page, with every other agent\'s.',
   },
   notifTemplateCreate: {
     title: 'Create template',

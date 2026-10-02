@@ -627,39 +627,27 @@ def _add_business_hours(now, hours_to_add, oh_cfg):
 
 
 def _should_send_notification_to_recipient(company_id, recipient_email, channel, event_type=None):
-    """
-    Check if the recipient (by email, same company) has notification preferences that allow this send.
-    event_type: 'ticket_created' | 'ticket_updated' | 'ticket_assigned' | None (manual/workflow -> use workflow_email_enabled).
-    Returns True if we should send, False if user opted out.
+    """Whether a recipient who is one of the company's dashboard logins
+    (matched by email) wants this notification. Their choices are on the one
+    notification settings page (core.notification_settings); anyone else — a
+    customer, an outside address — isn't asked.
+
+    event_type: 'ticket_created' | 'ticket_updated' | 'ticket_assigned' | None
+    (send-now, scheduled and workflow emails: "Other automation emails").
     """
     if not recipient_email or not company_id:
         return True
     try:
-        # select_related on the reverse OneToOne: reading `prefs` below was a
-        # second query per recipient, and this runs inside notification
-        # fan-out loops (FL-PERF-13).
         cu = (CompanyUser.objects
-              .filter(company_id=company_id, email=recipient_email.strip(), is_active=True)
-              .select_related('frontline_notification_preferences')
+              .filter(company_id=company_id, email__iexact=recipient_email.strip(), is_active=True)
               .first())
         if not cu:
             return True
-        prefs = getattr(cu, 'frontline_notification_preferences', None)
-        if not prefs:
-            return True
         if channel == 'email':
-            if not prefs.email_enabled:
-                return False
-            if event_type == 'ticket_created':
-                return prefs.ticket_created_email
-            if event_type == 'ticket_updated':
-                return prefs.ticket_updated_email
-            if event_type == 'ticket_assigned':
-                return prefs.ticket_assigned_email
-            # manual send or workflow send_email step
-            return prefs.workflow_email_enabled
-        if channel == 'in_app':
-            return prefs.in_app_enabled
+            from core.notification_settings import wants_email
+            topic = {'ticket_created': 'ticket_created', 'ticket_updated': 'ticket_updated',
+                     'ticket_assigned': 'tickets_assigned'}.get(event_type, 'automation_emails')
+            return wants_email(cu, topic)
         return True
     except KeyServiceError:
         raise
@@ -714,6 +702,15 @@ def frontline_dashboard(request):
                         'document_type': d.document_type,
                         'is_indexed': d.is_indexed,
                         'processed': d.processed,
+                        # The documents tab reads its list from here; without
+                        # these a failed upload showed as "Queued", with no
+                        # reason and no Retry.
+                        'processing_status': d.processing_status,
+                        'processing_error': d.processing_error or None,
+                        'chunks_processed': d.chunks_processed,
+                        'chunks_total': d.chunks_total,
+                        'file_size': d.file_size,
+                        'is_outdated': getattr(d, 'is_outdated', False),
                         'created_at': d.created_at.isoformat(),
                     }
                     for d in recent_documents
@@ -2383,7 +2380,9 @@ def list_ticket_tasks(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def list_tickets(request):
-    """List support tickets with filters and pagination. Scoped to tickets created by this company user."""
+    """List support tickets with filters and pagination. Scoped to tickets this
+    company user created or is assigned — a ticket handed to them (a hand-off,
+    or a leaver's handover) is theirs to work even though someone else raised it."""
     try:
         company_user = request.user
         user = _get_or_create_user_for_company_user(company_user)
@@ -2391,7 +2390,7 @@ def list_tickets(request):
         # to be shared across companies (or whose id collides) could see another
         # tenant's tickets. Belt-and-suspenders alongside created_by.
         qs = Ticket.objects.filter(
-            company=company_user.company, created_by=user,
+            Q(created_by=user) | Q(assigned_to=user), company=company_user.company,
         ).order_by('-created_at')
 
         status_filter = request.GET.get('status')
@@ -2457,6 +2456,15 @@ def list_tickets(request):
                 .values_list('ticket_id', 'c')
             )
 
+        # The project task each ticket became, if any (one query for the page).
+        from core.models import Task as _Task
+        task_ids = [t.pm_task_id for t in tickets if t.pm_task_id]
+        task_map = {}
+        if task_ids:
+            from Frontline_agent.ticket_tasks import task_summary
+            task_map = {task.id: task_summary(task)
+                        for task in _Task.objects.filter(pk__in=task_ids).select_related('project')}
+
         def _ticket_row(t):
             is_snoozed = bool(t.snoozed_until and t.snoozed_until > now)
             row = {
@@ -2478,6 +2486,7 @@ def list_tickets(request):
                 'is_sla_paused': t.sla_paused_at is not None,
                 'last_triaged_at': t.last_triaged_at.isoformat() if t.last_triaged_at else None,
                 'notes_count': notes_count_map.get(t.id, 0),
+                'pm_task': task_map.get(t.pm_task_id),
                 'intent': t.intent,
                 'entities': t.entities,
             }
@@ -2524,8 +2533,8 @@ def list_tickets_aging(request):
         at_risk_threshold = now + timedelta(hours=2)
         resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
         qs = Ticket.objects.filter(
+            Q(created_by=user) | Q(assigned_to=user),
             company=company_user.company,   # FL-SEC-4: was scoped by creator only
-            created_by=user,
             sla_due_at__isnull=False,
             sla_paused_at__isnull=True,  # paused tickets don't age
         ).exclude(status__in=resolved_statuses).order_by('sla_due_at')
@@ -3412,38 +3421,44 @@ def delete_notification_template(request, template_id):
         return Response({'status': 'error', 'message': _SERVER_ERROR_MESSAGE}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+#: Frontline's old email switches, and the topic each now lives in on the one
+#: notification settings page (core.notification_settings). `email_enabled`
+#: was the master for the automation emails, so it maps to those three.
+_PREFERENCE_TOPICS = {
+    'ticket_created_email': 'ticket_created',
+    'ticket_updated_email': 'ticket_updated',
+    'ticket_assigned_email': 'tickets_assigned',
+    'workflow_email_enabled': 'automation_emails',
+}
+
+
+def _preferences_payload(company_user, prefs):
+    from core import notification_settings as ns
+    data = {field: ns.choices([company_user], topic)[company_user.id][1]
+            for field, topic in _PREFERENCE_TOPICS.items()}
+    data['email_enabled'] = any(ns.choices([company_user], t)[company_user.id][1] for t in ns.FRONTLINE_AUTOMATION)
+    data.update({
+        'in_app_enabled': prefs.in_app_enabled,
+        'timezone_name': prefs.timezone_name,
+        'quiet_hours_enabled': prefs.quiet_hours_enabled,
+        'quiet_hours_start': prefs.quiet_hours_start,
+        'quiet_hours_end': prefs.quiet_hours_end,
+        'updated_at': prefs.updated_at.isoformat(),
+        'settings_page': ns.SETTINGS_PATH,
+    })
+    return data
+
+
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def get_notification_preferences(request):
-    """Get current user's notification preferences. Creates default if missing."""
+    """Current user's Frontline notification preferences. The email switches
+    now live on the one notification settings page and are read from there;
+    quiet hours are still Frontline's own."""
     try:
-        company_user = request.user
-        prefs, _ = FrontlineNotificationPreferences.objects.get_or_create(
-            company_user=company_user,
-            defaults={
-                'email_enabled': True,
-                'in_app_enabled': True,
-                'ticket_created_email': True,
-                'ticket_updated_email': True,
-                'ticket_assigned_email': True,
-                'workflow_email_enabled': True,
-            },
-        )
-        data = {
-            'email_enabled': prefs.email_enabled,
-            'in_app_enabled': prefs.in_app_enabled,
-            'ticket_created_email': prefs.ticket_created_email,
-            'ticket_updated_email': prefs.ticket_updated_email,
-            'ticket_assigned_email': prefs.ticket_assigned_email,
-            'workflow_email_enabled': prefs.workflow_email_enabled,
-            'timezone_name': prefs.timezone_name,
-            'quiet_hours_enabled': prefs.quiet_hours_enabled,
-            'quiet_hours_start': prefs.quiet_hours_start,
-            'quiet_hours_end': prefs.quiet_hours_end,
-            'updated_at': prefs.updated_at.isoformat(),
-        }
-        return Response({'status': 'success', 'data': data})
+        prefs, _ = FrontlineNotificationPreferences.objects.get_or_create(company_user=request.user)
+        return Response({'status': 'success', 'data': _preferences_payload(request.user, prefs)})
     except KeyServiceError:
         raise
     except Exception as e:
@@ -3455,33 +3470,21 @@ def get_notification_preferences(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def update_notification_preferences(request):
-    """Update current user's notification preferences."""
+    """Update current user's notification preferences: email switches go to
+    the one notification settings page, quiet hours stay here."""
     try:
+        from core import notification_settings as ns
         company_user = request.user
-        prefs, _ = FrontlineNotificationPreferences.objects.get_or_create(
-            company_user=company_user,
-            defaults={
-                'email_enabled': True,
-                'in_app_enabled': True,
-                'ticket_created_email': True,
-                'ticket_updated_email': True,
-                'ticket_assigned_email': True,
-                'workflow_email_enabled': True,
-            },
-        )
+        prefs, _ = FrontlineNotificationPreferences.objects.get_or_create(company_user=company_user)
         data = request.data if isinstance(request.data, dict) else (json.loads(request.body or '{}'))
         if 'email_enabled' in data:
-            prefs.email_enabled = bool(data['email_enabled'])
+            for topic in ns.FRONTLINE_AUTOMATION:
+                ns.set_choice(company_user, topic, email=bool(data['email_enabled']))
+        for field, topic in _PREFERENCE_TOPICS.items():
+            if field in data:
+                ns.set_choice(company_user, topic, email=bool(data[field]))
         if 'in_app_enabled' in data:
             prefs.in_app_enabled = bool(data['in_app_enabled'])
-        if 'ticket_created_email' in data:
-            prefs.ticket_created_email = bool(data['ticket_created_email'])
-        if 'ticket_updated_email' in data:
-            prefs.ticket_updated_email = bool(data['ticket_updated_email'])
-        if 'ticket_assigned_email' in data:
-            prefs.ticket_assigned_email = bool(data['ticket_assigned_email'])
-        if 'workflow_email_enabled' in data:
-            prefs.workflow_email_enabled = bool(data['workflow_email_enabled'])
         # Quiet-hours controls
         if 'timezone_name' in data:
             tz_name = str(data['timezone_name'] or 'UTC').strip()[:64]
@@ -3493,22 +3496,7 @@ def update_notification_preferences(request):
         if 'quiet_hours_end' in data:
             prefs.quiet_hours_end = str(data['quiet_hours_end'] or '08:00')[:5]
         prefs.save()
-        return Response({
-            'status': 'success',
-            'data': {
-                'email_enabled': prefs.email_enabled,
-                'in_app_enabled': prefs.in_app_enabled,
-                'ticket_created_email': prefs.ticket_created_email,
-                'ticket_updated_email': prefs.ticket_updated_email,
-                'ticket_assigned_email': prefs.ticket_assigned_email,
-                'workflow_email_enabled': prefs.workflow_email_enabled,
-                'timezone_name': prefs.timezone_name,
-                'quiet_hours_enabled': prefs.quiet_hours_enabled,
-                'quiet_hours_start': prefs.quiet_hours_start,
-                'quiet_hours_end': prefs.quiet_hours_end,
-                'updated_at': prefs.updated_at.isoformat(),
-            },
-        })
+        return Response({'status': 'success', 'data': _preferences_payload(company_user, prefs)})
     except KeyServiceError:
         raise
     except Exception as e:
@@ -3816,7 +3804,6 @@ def public_unsubscribe(request):
     """
     try:
         from Frontline_agent.notification_utils import read_unsubscribe_token
-        from Frontline_agent.models import FrontlineNotificationPreferences
         from core.models import CompanyUser
 
         token = (request.GET.get('t') or (request.data or {}).get('t') or '').strip()
@@ -3831,25 +3818,32 @@ def public_unsubscribe(request):
             return Response({'status': 'error', 'message': 'Recipient not found.'},
                             status=status.HTTP_404_NOT_FOUND)
 
-        prefs, _ = FrontlineNotificationPreferences.objects.get_or_create(company_user=company_user)
+        # The link is in Frontline's automation emails, so it turns those off
+        # on the one notification settings page — where they can be turned
+        # back on — and nothing else.
+        from core import notification_settings as ns
+
+        def subscribed():
+            return any(ns.wants_email(company_user, t) for t in ns.FRONTLINE_AUTOMATION)
 
         if request.method == 'GET':
+            on = subscribed()
             return Response({'status': 'success', 'data': {
                 'recipient_email': company_user.email,
-                'email_enabled': prefs.email_enabled,
+                'email_enabled': on,
                 'scope': scope,
                 'message': ('You are currently opted IN to emails.'
-                            if prefs.email_enabled else 'You are already unsubscribed.'),
+                            if on else 'You are already unsubscribed.'),
             }})
 
         # POST: perform unsubscribe
         if scope == 'email':
-            prefs.email_enabled = False
-            prefs.save(update_fields=['email_enabled', 'updated_at'])
+            for topic in ns.FRONTLINE_AUTOMATION:
+                ns.set_choice(company_user, topic, email=False)
         # Reserved: other scopes (e.g. sms) could toggle other channels here.
         return Response({'status': 'success', 'data': {
             'recipient_email': company_user.email,
-            'email_enabled': prefs.email_enabled,
+            'email_enabled': subscribed(),
             'message': 'You have been unsubscribed. It may take a few minutes for in-flight messages to stop.',
         }})
     except KeyServiceError:
@@ -6781,6 +6775,14 @@ def list_handoff_queue(request):
 
         qs = qs.order_by('-handoff_requested_at', '-created_at')[:200]
         rows = [_serialize_ticket_for_handoff(t) for t in qs]
+        # Who's best placed to take a waiting customer right now: the same
+        # person for every pending row, so it's worked out once.
+        if any(r.get('handoff_status') == 'pending' for r in rows):
+            from Frontline_agent.routing import suggest_assignee
+            suggestion = suggest_assignee(company)
+            for row in rows:
+                if row.get('handoff_status') == 'pending':
+                    row['suggested_assignee'] = suggestion
         return Response({'status': 'success', 'data': rows, 'count': len(rows)})
     except Exception:
         logger.exception("list_handoff_queue failed")
@@ -8187,6 +8189,45 @@ def merge_contacts(request):
 # ============================================================================
 # Handoff release (H1)
 # ============================================================================
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([FrontlineCRUDThrottle])
+def ticket_pm_task(request, ticket_id):
+    """Turn a ticket into a Project Manager task (Frontline_agent/ticket_tasks.py).
+
+    GET: the review form (pre-filled from the ticket, with projects and
+    people). POST ``{project_id, title, description, priority, assignee_id,
+    due_date}`` creates the task through PM's service layer and links it.
+    """
+    from Frontline_agent import ticket_tasks
+    from project_manager_agent.services.errors import ServiceError
+    company = request.user.company
+    ticket = Ticket.objects.filter(pk=ticket_id, company=company).select_related('contact', 'pm_task__project').first()
+    if not ticket:
+        return Response({'status': 'error', 'message': 'Ticket not found'}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': ticket_tasks.form(ticket, request.user)})
+
+    if not ticket_tasks.pm_available(company):
+        return Response({'status': 'error', 'code': 'no_pm',
+                         'message': "Your company doesn't have the Project Manager agent."},
+                        status=status.HTTP_403_FORBIDDEN)
+    if ticket.pm_task_id:
+        return Response({'status': 'error', 'code': 'already_linked',
+                         'message': 'This ticket already has a project task.',
+                         'data': ticket_tasks.task_summary(ticket.pm_task)},
+                        status=status.HTTP_409_CONFLICT)
+    try:
+        task = ticket_tasks.create_task(ticket, request.user, request.data or {})
+    except ServiceError as exc:
+        return Response({'status': 'error', 'message': exc.message}, status=exc.http_status)
+    _write_frontline_audit_log(request.user, company, 'ticket.pm_task', 'ticket', ticket.id,
+                               after={'task_id': task.id, 'project_id': task.project_id})
+    return Response({'status': 'success', 'data': ticket_tasks.task_summary(task)},
+                    status=status.HTTP_201_CREATED)
+
 
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])

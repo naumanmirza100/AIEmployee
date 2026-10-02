@@ -10,6 +10,7 @@ import { getEmployeeNavItems, EMPLOYEE_SECTION_FROM_PATH } from '@/utils/employe
 import userTaskService from '@/services/userTaskService';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { isOverdue } from '@/utils/taskHelpers';
+import { fetchMyWork, urgentCount } from '@/utils/myWork';
 
 /**
  * EmployeeLayout — shared shell for the `/me/*` route group.
@@ -32,6 +33,7 @@ const EmployeeLayout = () => {
   const section = EMPLOYEE_SECTION_FROM_PATH(location.pathname);
 
   const [counts, setCounts] = useState({
+    urgentWork: 0,
     overdueTasks: 0,
     pendingMeetings: 0,
     unreadNotifications: 0,
@@ -41,7 +43,7 @@ const EmployeeLayout = () => {
     const token = localStorage.getItem('auth_token') || localStorage.getItem('company_auth_token');
     if (!token) return;
     try {
-      const [tRes, mRes, nRes] = await Promise.all([
+      const [tRes, mRes, nRes, work] = await Promise.all([
         userTaskService.getMyTasks().catch(() => ({ status: 'error' })),
         fetch(`${API_BASE_URL}/meetings`, { headers: { 'Authorization': `Token ${token}` } })
           .then((r) => r.ok ? r.json() : { data: { meetings: [] } })
@@ -49,6 +51,7 @@ const EmployeeLayout = () => {
         fetch(`${API_BASE_URL}/notifications`, { headers: { 'Authorization': `Token ${token}` } })
           .then((r) => r.ok ? r.json() : { data: [] })
           .catch(() => ({ data: [] })),
+        fetchMyWork().catch(() => []),
       ]);
 
       const tasks = tRes?.status === 'success' ? (tRes.data || []) : [];
@@ -66,6 +69,7 @@ const EmployeeLayout = () => {
       const overdue = tasks.filter(isOverdue).length;
 
       setCounts({
+        urgentWork: urgentCount(work),
         overdueTasks: overdue,
         pendingMeetings: pending,
         unreadNotifications: unread,

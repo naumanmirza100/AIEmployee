@@ -28,10 +28,17 @@ def handoff_requested(ticket):
         return 0
     recipients = CompanyUser.objects.filter(company_id=ticket.company_id, is_active=True,
                                             role__in=HANDOFF_ALERT_ROLES)
+    # The suggestion is extra: it must never stop the hand-off being raised.
+    try:
+        from Frontline_agent.routing import suggest_assignee
+        best = suggest_assignee(ticket.company)
+    except Exception:
+        best = None
+    who = f" Best placed: {best['name']} ({best['reason']})." if best else ''
     return notify_company_users(
         recipients,
         title=f"Customer waiting for a person: {ticket.title[:120]}",
-        message=f"{_HANDOFF_WHY.get(ticket.handoff_reason, '')} Take it from Hand-offs.".strip(),
+        message=f"{_HANDOFF_WHY.get(ticket.handoff_reason, '')}{who} Take it from Hand-offs.".strip(),
         link='/frontline/dashboard?tab=handoffs',
         severity='warning',
         kind='frontline_handoff',

@@ -67,6 +67,9 @@ import TasksView from '@/pages/me/TasksView';
 import MeetingsView from '@/pages/me/MeetingsView';
 import ProfileView from '@/pages/me/ProfileView';
 import NotificationsView from '@/pages/me/NotificationsView';
+import WorkView from '@/pages/me/WorkView';
+import MyWorkPage from '@/pages/MyWorkPage';
+import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
 import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
 import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
 import OperationsDashboard from '@/components/operations/OperationsDashboard';
@@ -144,6 +147,7 @@ import { useTranslation } from 'react-i18next';
             <Route element={<EmployeeLayout />}>
               <Route path="/me" element={<Navigate to="/me/home" replace />} />
               <Route path="/me/home" element={<HomeView />} />
+              <Route path="/me/work" element={<WorkView />} />
               <Route path="/me/tasks" element={<TasksView />} />
               <Route path="/me/meetings" element={<MeetingsView />} />
               <Route path="/me/notifications" element={<NotificationsView />} />
@@ -158,8 +162,12 @@ import { useTranslation } from 'react-i18next';
             <Route path="/company/dashboard" element={<CompanyDashboardPage />} />
             <Route path="/company/dashboard/:tab" element={<CompanyDashboardPage />} />
             <Route path="/company/settings/api-keys" element={<AgentKeysSettingsPage />} />
+            {/* What each login hears about from every agent, in the bell and by email */}
+            <Route path="/company/settings/notifications" element={<NotificationSettingsPage />} />
             {/* Full-detail notification list — the navbar dropdown links here */}
             <Route path="/notifications" element={<NotificationsPage />} />
+            {/* Everything waiting for a dashboard login, across the agents */}
+            <Route path="/my-work" element={<MyWorkPage />} />
             <Route path="/company/profile" element={<CompanyProfilePage />} />
             <Route path="/company/profile/:tab" element={<CompanyProfilePage />} />
             

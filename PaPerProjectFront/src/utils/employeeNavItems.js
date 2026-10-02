@@ -1,4 +1,4 @@
-import { Home, CheckSquare, Calendar, User, Bell } from 'lucide-react';
+import { Home, CheckSquare, Calendar, User, Bell, ListChecks } from 'lucide-react';
 
 /**
  * Nav items for the employee (individual user) sidebar shell.
@@ -11,10 +11,10 @@ import { Home, CheckSquare, Calendar, User, Bell } from 'lucide-react';
  *   { section, label, icon, path, onClick, basePath?, badge?, badgeTone? }
  *
  * `counts` is optional; when provided, matching items get a badge:
- *   { overdueTasks, pendingMeetings, unreadNotifications }
+ *   { urgentWork, overdueTasks, pendingMeetings, unreadNotifications }
  */
 export function getEmployeeNavItems(navigate, counts = {}) {
-  const { overdueTasks = 0, pendingMeetings = 0, unreadNotifications = 0 } = counts;
+  const { urgentWork = 0, overdueTasks = 0, pendingMeetings = 0, unreadNotifications = 0 } = counts;
   return [
     {
       section: 'me-home',
@@ -23,6 +23,17 @@ export function getEmployeeNavItems(navigate, counts = {}) {
       path: '/me/home',
       basePath: '/me/home',
       onClick: () => navigate('/me/home'),
+    },
+    {
+      // Everything waiting, from every agent; the badge counts what's overdue or due today.
+      section: 'me-work',
+      label: 'My Work',
+      icon: ListChecks,
+      path: '/me/work',
+      basePath: '/me/work',
+      onClick: () => navigate('/me/work'),
+      badge: urgentWork,
+      badgeTone: urgentWork > 0 ? 'danger' : undefined,
     },
     {
       section: 'me-tasks',
@@ -65,6 +76,7 @@ export function getEmployeeNavItems(navigate, counts = {}) {
 
 export const EMPLOYEE_SECTION_FROM_PATH = (pathname) => {
   if (pathname.startsWith('/me/home')) return 'me-home';
+  if (pathname.startsWith('/me/work')) return 'me-work';
   if (pathname.startsWith('/me/tasks')) return 'me-tasks';
   if (pathname.startsWith('/me/meetings')) return 'me-meetings';
   if (pathname.startsWith('/me/notifications')) return 'me-notifications';

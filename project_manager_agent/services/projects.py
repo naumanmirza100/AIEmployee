@@ -7,7 +7,7 @@ from django.db import transaction
 from core.models import Industry, Project, Subtask, Task
 
 from . import parsing
-from .errors import ServiceError
+from .errors import ServiceError, forbidden
 
 PROJECT_CHOICE_FIELDS = (
     ('status', Project.STATUS_CHOICES),
@@ -105,6 +105,17 @@ def update_project(actor, project_id, data):
     if 'industry_id' in data:
         project.industry = _industry(data.get('industry_id'))
         changed.append('industry')
+    if 'project_manager_id' in data:
+        # Who leads a project is the company's call (HR's handover uses it). An
+        # employee login may edit any project it has a task in, so letting that
+        # path change the manager would let anyone make themselves manager.
+        if getattr(actor, 'kind', '') != 'dashboard':
+            raise forbidden("Only a company dashboard login can change who manages a project.")
+        raw = data.get('project_manager_id')
+        if not (project.project_manager_id and not parsing.is_empty(raw)
+                and str(raw) == str(project.project_manager_id)):
+            project.project_manager = actor.resolve_assignee(raw)
+        changed.append('project_manager')
     if 'budget_min' in data:
         project.budget_min = parsing.budget(data.get('budget_min'), 'budget_min')
         changed.append('budget_min')

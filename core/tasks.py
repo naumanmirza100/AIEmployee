@@ -9,6 +9,13 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+@shared_task(name='core.tasks.send_notification_email')
+def send_notification_email(company_user_id, topic_key, title, message, link=None):
+    """One alert by email to one dashboard login (core.notification_settings)."""
+    from core.notification_settings import deliver
+    return deliver(company_user_id, topic_key, title, message, link)
+
+
 @shared_task(name='core.tasks.reset_weekly_token_quotas')
 def reset_weekly_token_quotas():
     """Apply every managed-token reset that is due right now.

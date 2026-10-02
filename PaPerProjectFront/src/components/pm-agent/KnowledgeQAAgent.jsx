@@ -163,6 +163,9 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
+  // The question being answered, and the answer so far as it streams in —
+  // shown at once, before the chat is saved.
+  const [pending, setPending] = useState(null);
   const [loadingChats, setLoadingChats] = useState(true);
   const [inputMode, setInputMode] = useState('search');
   const [expandedGraph, setExpandedGraph] = useState(null); // { chart, chartTitle }
@@ -226,6 +229,9 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
 
     try {
       setLoading(true);
+      setQuestion('');
+      setPending({ question: q, projectTitle, answer: '' });
+      setTimeout(scrollToBottom, 50);
       let assistantMsg;
       const userMsg = {
         role: 'user',
@@ -254,7 +260,10 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
           throw new Error(graphRes.message || 'Failed to generate graph');
         }
       } else {
-        const response = await pmAgentService.knowledgeQA(q, projectId, currentMessages);
+        const response = await pmAgentService.knowledgeQAStream(q, projectId, currentMessages, {
+          chatId: selectedChatId || undefined,
+          onText: (text) => setPending((p) => (p ? { ...p, answer: text } : p)),
+        });
         if (response.status === 'success' && response.data) {
           const data = response.data;
           const answerText = data.answer || 'No answer provided.';
@@ -301,10 +310,10 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
           setSelectedChatId(newChatData.id);
         } else throw new Error(createRes.message || 'Failed to create chat');
       }
-      setQuestion('');
       setTimeout(scrollToBottom, 100);
     } catch (error) {
       console.error('Knowledge Q&A error:', error);
+      setQuestion(q);
       toast({
         title: 'Error',
         description: apiErrorMessage(error, 'Something went wrong. Please try again.'),
@@ -312,8 +321,14 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
       });
     } finally {
       setLoading(false);
+      setPending(null);
     }
   };
+
+  // Keep the growing answer in view.
+  useEffect(() => {
+    if (pending?.answer) messagesEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [pending?.answer]);
 
   const newChat = () => {
     setSelectedChatId(null);
@@ -620,14 +635,14 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
           </CardHeader>
           <CardContent className="p-0 flex flex-col flex-1 min-h-0">
             <div data-tour-pm-kqa="results" className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
-            {!selectedChatId && chats.length === 0 && (
+            {!selectedChatId && chats.length === 0 && !pending && (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                 <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
                 <p className="font-medium">Ask your first question</p>
                 <p className="text-sm">Select a project (optional) and type your question below.</p>
               </div>
             )}
-            {!selectedChatId && chats.length > 0 && (
+            {!selectedChatId && chats.length > 0 && !pending && (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                 <MessageCircle className="h-12 w-12 mb-4 opacity-50" />
                 <p className="font-medium">Select a conversation or ask a new question</p>
@@ -690,13 +705,30 @@ const KnowledgeQAAgent = ({ projects = [] }) => {
                 </div>
               </div>
             ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Processing...</span>
+            {pending && (
+              <>
+                <div className="flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-primary text-primary-foreground">
+                    <p className="text-sm whitespace-pre-wrap">{pending.question}</p>
+                    {pending.projectTitle && <p className="text-xs opacity-80 mt-1">Project: {pending.projectTitle}</p>}
+                  </div>
                 </div>
-              </div>
+                <div className="flex justify-start" aria-live="polite">
+                  {pending.answer ? (
+                    <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-muted border">
+                      <div
+                        className="text-sm text-foreground break-words qa-markdown-response"
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(pending.answer) }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="bg-muted border rounded-2xl px-4 py-3 flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">{inputMode === 'graph' ? 'Drawing the chart...' : 'Thinking...'}</span>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
             <div ref={messagesEndRef} />
             </div>

@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2, Search, BarChart2, Save, LayoutDashboard, Maximize2, Check, History, ChevronsLeft, ChevronsRight, Bot, Sparkles, Activity, Users, TrendingUp } from 'lucide-react';
-import { recruitmentQA, listQAChats, createQAChat, updateQAChat, deleteQAChat, generateGraph, savePrompt, getSavedPrompts, isPromptOnDashboard } from '@/services/recruitmentAgentService';
+import { recruitmentQAStream, listQAChats, createQAChat, updateQAChat, deleteQAChat, generateGraph, savePrompt, getSavedPrompts, isPromptOnDashboard } from '@/services/recruitmentAgentService';
 import { renderChart } from './ChartRenderer';
 
 // ...existing code...
@@ -235,6 +235,8 @@ const AiInterviewQuestions = () => {
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
+  // The question being answered, and the answer so far as it streams in.
+  const [pending, setPending] = useState(null);
   const [loadingChats, setLoadingChats] = useState(true);
   const [deleteConfirmChatId, setDeleteConfirmChatId] = useState(null);
   const [inputMode, setInputMode] = useState('search'); // 'search' | 'graph'
@@ -290,6 +292,11 @@ const AiInterviewQuestions = () => {
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
+  // Keep the growing answer in view.
+  useEffect(() => {
+    if (pending?.answer) messagesEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [pending?.answer]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!question.trim()) {
@@ -299,6 +306,9 @@ const AiInterviewQuestions = () => {
     const q = question.trim();
     try {
       setLoading(true);
+      setQuestion('');
+      setPending({ question: q, answer: '' });
+      setTimeout(scrollToBottom, 50);
       if (inputMode === 'graph') {
         const result = await generateGraph(q);
         if (result.status === 'success' && result.data) {
@@ -344,7 +354,9 @@ const AiInterviewQuestions = () => {
         return;
       }
 
-      const result = await recruitmentQA(q);
+      const result = await recruitmentQAStream(q, {
+        onText: (text) => setPending((p) => (p ? { ...p, answer: text } : p)),
+      });
       if (result.status === 'success' && result.data) {
         const response = result.data;
         const answer = response.answer || 'No answer provided.';
@@ -407,9 +419,11 @@ const AiInterviewQuestions = () => {
         throw new Error(result.message || 'Failed to get response');
       }
     } catch (error) {
+      setQuestion(q);
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
       setLoading(false);
+      setPending(null);
     }
   };
 
@@ -926,7 +940,21 @@ const AiInterviewQuestions = () => {
                 )}
               </div>
             ))}
-            {loading && (
+            {pending && (
+              <div className="flex flex-col items-end">
+                <div className="rounded-2xl max-w-[80%]" style={{ background: 'linear-gradient(135deg, hsl(var(--brand-600)) 0%, hsl(var(--brand-accent)) 100%)', padding: '10px 16px' }}>
+                  <p style={{ fontSize: '0.9rem', color: '#fff', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{pending.question}</p>
+                </div>
+              </div>
+            )}
+            {pending?.answer && (
+              <div id="REC-aiquestions-messages-streaming" className="flex flex-col items-start" aria-live="polite">
+                <div className="rounded-2xl max-w-[88%]" style={{ background: 'linear-gradient(135deg, hsl(var(--sfr-120c28) / 0.97) 0%, hsl(var(--sfr-0e0a20) / 0.97) 100%)', border: '1px solid rgba(167,139,250,0.2)', padding: '14px 18px' }}>
+                  <div style={{ lineHeight: 1.7 }} dangerouslySetInnerHTML={{ __html: markdownToHtml(pending.answer) }} />
+                </div>
+              </div>
+            )}
+            {loading && !pending?.answer && (
               <div id="REC-aiquestions-messages-loading" data-testid="REC-aiquestions-messages-loading" className="flex justify-start">
                 <div className="rounded-2xl px-4 py-3 flex items-center gap-2" style={{ background: 'hsl(var(--sfr-120c28) / 0.97)', border: '1px solid rgba(167,139,250,0.2)' }}>
                   <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'hsl(var(--pt-a78bfa))' }} />

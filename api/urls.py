@@ -48,6 +48,8 @@ from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
 from api.views.health import health_check, ping
 from api.views import public_jobs
+from api.views import my_work
+from api.views import notification_settings
 
 app_name = 'api'
 
@@ -246,6 +248,7 @@ urlpatterns = [
     re_path(r'^project-manager/ai/generate-subtasks/?$', pm_agent.generate_subtasks, name='pm_generate_subtasks'),
     re_path(r'^project-manager/ai/timeline-gantt/?$', pm_agent.timeline_gantt, name='pm_timeline_gantt'),
     re_path(r'^project-manager/ai/knowledge-qa/?$', pm_agent.knowledge_qa, name='pm_knowledge_qa'),
+    re_path(r'^project-manager/ai/knowledge-qa/stream/?$', pm_agent.knowledge_qa_stream, name='pm_knowledge_qa_stream'),  # POST (streaming)
     re_path(r'^project-manager/ai/generate-graph/?$', pm_agent.pm_generate_graph, name='pm_generate_graph'),
     re_path(r'^project-manager/ai/knowledge-qa/chats/?$', pm_agent.list_knowledge_qa_chats, name='pm_knowledge_qa_chats_list'),
     re_path(r'^project-manager/ai/knowledge-qa/chats/create/?$', pm_agent.create_knowledge_qa_chat, name='pm_knowledge_qa_chats_create'),
@@ -277,6 +280,17 @@ urlpatterns = [
     re_path(r'^project-manager/ai/calendar-schedule/?$', pm_agent.calendar_schedule, name='pm_calendar_schedule'),
     re_path(r'^project-manager/ai/notifications/scan/?$', pm_agent.scan_notifications, name='pm_scan_notifications'),
     re_path(r'^project-manager/ai/notifications/?$', pm_agent.list_notifications, name='pm_list_notifications'),
+    # The same company feed at a neutral address. Every agent's alerts land in
+    # it, but /project-manager/ is gated on buying the PM agent, so a company
+    # without it had a bell that could never load (api/middleware/module_access).
+    re_path(r'^company/notifications/?$', pm_agent.list_notifications, name='company_list_notifications'),
+    re_path(r'^company/notifications/read/?$', pm_agent.mark_notifications_read, name='company_mark_notifications_read'),
+    # One list of what the caller has to do, across the agents (core/my_work.py).
+    re_path(r'^company/my-work/?$', my_work.company_my_work, name='company_my_work'),  # GET
+    re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET
+    # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
+    re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
+            name='company_notification_settings'),  # GET/PATCH
     re_path(r'^project-manager/ai/notifications/read/?$', pm_agent.mark_notifications_read, name='pm_mark_notifications_read'),
     re_path(r'^project-manager/ai/team-performance/?$', pm_agent.team_performance, name='pm_team_performance'),
     re_path(r'^project-manager/ai/time-estimation/?$', pm_agent.time_estimation, name='pm_time_estimation'),
@@ -328,6 +342,7 @@ urlpatterns = [
     re_path(r'^recruitment/agents/job-description/parse/?$', recruitment_agent.api_job_description_parse, name='recruitment_api_job_description_parse'),  # POST
     re_path(r'^recruitment/ai/suggest-interview-questions/?$', recruitment_agent.suggest_interview_questions, name='recruitment_suggest_interview_questions'),  # POST
     re_path(r'^recruitment/qa/?$', recruitment_agent.recruitment_qa, name='recruitment_qa'),  # POST
+    re_path(r'^recruitment/qa/stream/?$', recruitment_agent.recruitment_qa_stream, name='recruitment_qa_stream'),  # POST (streaming)
     re_path(r'^recruitment/qa/chats/?$', recruitment_agent.list_qa_chats, name='recruitment_qa_chats_list'),  # GET
     re_path(r'^recruitment/qa/chats/create/?$', recruitment_agent.create_qa_chat, name='recruitment_qa_chats_create'),  # POST
     re_path(r'^recruitment/qa/chats/(?P<chat_id>\d+)/update/?$', recruitment_agent.update_qa_chat, name='recruitment_qa_chats_update'),  # PATCH/PUT
@@ -505,6 +520,7 @@ urlpatterns = [
     # Handoff release (H1)
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/release-handoff/?$', frontline_agent.release_handoff, name='frontline_release_handoff'),  # POST
     re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/reassign-handoff/?$', frontline_agent.reassign_ticket_handoff, name='frontline_reassign_handoff'),  # POST
+    re_path(r'^frontline/tickets/(?P<ticket_id>\d+)/task/?$', frontline_agent.ticket_pm_task, name='frontline_ticket_pm_task'),  # GET/POST
 
     re_path(r'^frontline/tickets/?$', frontline_agent.list_tickets, name='frontline_list_tickets'),  # GET
     re_path(r'^frontline/tickets/aging/?$', frontline_agent.list_tickets_aging, name='frontline_list_tickets_aging'),  # GET
@@ -868,6 +884,7 @@ urlpatterns = [
     re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/?$', hr_agent.list_leave_balances, name='hr_list_leave_balances'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/adjust/?$', hr_agent.adjust_leave_balance, name='hr_adjust_leave_balance'),  # POST
     re_path(r'^hr/employees/(?P<employee_id>\d+)/deactivate/?$', hr_agent.deactivate_employee, name='hr_deactivate_employee'),  # POST
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/handover/?$', hr_agent.employee_handover, name='hr_employee_handover'),  # GET/POST
     re_path(r'^hr/employees/(?P<employee_id>\d+)/reactivate/?$', hr_agent.reactivate_employee, name='hr_reactivate_employee'),  # POST
 
     # Compensation history (HR-admin only)
