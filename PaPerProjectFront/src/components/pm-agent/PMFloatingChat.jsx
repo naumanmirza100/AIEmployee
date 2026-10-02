@@ -12,6 +12,7 @@ import { listPMRecentlyViewed } from './pmLocalStore';
 import useQuickChatHistory from '@/hooks/useQuickChatHistory';
 import pmAgentService from '@/services/pmAgentService';
 import PilotGapForm from './PilotGapForm';
+import ChatMarkdown from '@/components/shared/ChatMarkdown';
 import { useToast } from '@/components/ui/use-toast';
 import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle } from '../frontline/chatShellUtils';
 
@@ -602,7 +603,13 @@ const PMFloatingChat = () => {
                             : 'bg-white/[0.06] text-white/90 border border-white/10'
                     }`}
                   >
-                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    {m.role === 'user' || m.error || m.system ? (
+                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    ) : (
+                      // Answers come as markdown (bold, lists), as in HR's and Frontline's chats.
+                      // The streamed text below stays plain until it is complete.
+                      <ChatMarkdown>{m.content || ''}</ChatMarkdown>
+                    )}
                     {m.draft && (
                       <PilotGapForm
                         data={m.draft}
