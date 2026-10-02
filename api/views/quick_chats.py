@@ -50,7 +50,7 @@ def list_quick_chats(request):
     if problem:
         return _error(problem)
     chats = (QuickChat.objects.filter(company_user=request.user, agent=agent, mode=mode)
-             .order_by('-updated_at')[:KEEP])
+             .order_by('-updated_at', '-id')[:KEEP])
     return Response({'status': 'success', 'data': [_payload(c) for c in chats]})
 
 
@@ -82,7 +82,7 @@ def quick_chat(request, client_id):
         defaults={'mode': mode, 'title': title, 'messages': messages})
     # Keep the newest few, as the browser's list did.
     stale = (QuickChat.objects.filter(company_user=request.user, agent=agent, mode=mode)
-             .order_by('-updated_at').values_list('pk', flat=True)[KEEP:])
+             .order_by('-updated_at', '-id').values_list('pk', flat=True)[KEEP:])
     QuickChat.objects.filter(pk__in=list(stale)).delete()
     return Response({'status': 'success', 'data': {'id': chat.client_id,
                                                    'updated_at': int(chat.updated_at.timestamp() * 1000)}})
