@@ -643,9 +643,13 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         wanted = {"attendees": "who should attend", "time": "when it should be",
                   "duration": "how long it should last"}
         asks = [wanted[m] for m in missing]
-        asked = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + " and " + asks[-1]
-        response = (f"Before I book this, I need to know {asked}. "
-                    "Fill it in below, check the details, and confirm.")
+        if asks:
+            asked = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + " and " + asks[-1]
+            response = (f"Before I book this, I need to know {asked}. "
+                        "Fill it in below, check the details, and confirm.")
+        else:
+            response = ("Here's the meeting as I understood it. Check the details and confirm — "
+                        "nobody is invited until you do.")
 
         return {
             "action": "needs_input",
@@ -938,10 +942,10 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             missing.append("time")
         if not self._duration_mentioned(message) and not (template or {}).get("duration_minutes"):
             missing.append("duration")
-        if missing:
-            return self._needs_input(message, parsed, invitees, missing, template, company_users)
-
-        return self._schedule_result(invitees, parsed, message, company_users)
+        # Every booking is reviewed before anyone is invited, even a request
+        # that said everything: the form shows who, when and how long as
+        # understood, and nothing is booked or emailed until it's confirmed.
+        return self._needs_input(message, parsed, invitees, missing, template, company_users)
 
     def schedule_from_pending(self, pending_intent: Dict, proposed_time: str,
                               company_users: List[Dict] = None) -> Dict:

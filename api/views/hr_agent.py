@@ -2288,10 +2288,15 @@ def _hr_details_form(*, company, parsed, missing, participant_ids, sched, unknow
     wanted = {'attendees': 'who should attend', 'time': 'when it should be',
               'duration': 'how long it should last'}
     asks = [wanted[m] for m in missing]
-    asked = asks[0] if len(asks) == 1 else ', '.join(asks[:-1]) + ' and ' + asks[-1]
+    if asks:
+        asked = asks[0] if len(asks) == 1 else ', '.join(asks[:-1]) + ' and ' + asks[-1]
+        reply = (f"Before I book this, I need to know {asked}. "
+                 "Fill it in below, check the details, and confirm.")
+    else:
+        reply = ("Here's the meeting as I understood it. Check the details and confirm — "
+                 "nobody is invited until you do.")
     return Response({'status': 'success', 'data': {
-        'reply': (f"Before I book this, I need to know {asked}. "
-                  "Fill it in below, check the details, and confirm."),
+        'reply': reply,
         'meeting': None,
         'parsed': parsed,
         'action': 'needs_input',
@@ -3737,7 +3742,10 @@ def hr_meeting_schedule(request):
                 # Named someone who can't be invited (no login): the form
                 # says so and lets the user choose again, rather than refuse.
                 unreachable = _hr_invitable(company, validated_ids)[1]
-            if missing or unreachable:
+            # A request typed in the chat is always reviewed before anyone is
+            # invited, even one that said everything; only the confirmed form
+            # (`picked`) books.
+            if picked is None or missing or unreachable:
                 return _hr_details_form(
                     company=company, parsed=parsed, missing=missing,
                     participant_ids=sorted(validated_ids), sched=sched,

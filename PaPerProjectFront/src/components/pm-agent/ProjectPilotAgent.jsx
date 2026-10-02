@@ -142,11 +142,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   // than the whole conversation.
   const [confirmingIndex, setConfirmingIndex] = useState(null);
   const [confirmedIndexes, setConfirmedIndexes] = useState(() => new Set());
+  const [cancelledIndexes, setCancelledIndexes] = useState(() => new Set());
 
-  const confirmPilotDraft = async (messageIndex, draft, answers) => {
+  const confirmPilotDraft = async (messageIndex, draft, answers, skip = []) => {
     try {
       setConfirmingIndex(messageIndex);
-      const response = await pmAgentService.projectPilotConfirm(draft.actions || [], answers);
+      const response = await pmAgentService.projectPilotConfirm(draft.actions || [], answers, skip);
       if (response.status !== 'success') {
         throw new Error(response.message || 'Failed to create');
       }
@@ -154,10 +155,8 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       const failed = results.filter((r) => !r.success);
       setConfirmedIndexes((prev) => new Set(prev).add(messageIndex));
       toast({
-        title: failed.length ? 'Created with problems' : 'Created',
-        description: failed.length
-          ? `${results.length - failed.length} created, ${failed.length} failed: ${failed[0].error}`
-          : response.data?.answer || 'Done.',
+        title: failed.length ? 'Done, with problems' : 'Done',
+        description: response.data?.answer || 'Done.',
         variant: failed.length ? 'destructive' : undefined,
       });
       if (results.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
@@ -207,7 +206,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
         };
         const assistantMsg = {
           role: 'assistant',
-          content: answerText || (cannotDo || 'No response.'),
+          // `cannot_do` is a flag; with no answer it used to show as "True".
+          content: answerText || (typeof cannotDo === 'string' ? cannotDo
+            : 'I couldn’t tell what to change. Name the project or task and what to do — e.g. “Update task Header: set status to done”.'),
           responseData: {
             answer: answerText,
             action_results: actionResults,
@@ -299,7 +300,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
         };
         const assistantMsg = {
           role: 'assistant',
-          content: answerText || (cannotDo || 'No response.'),
+          // `cannot_do` is a flag; with no answer it used to show as "True".
+          content: answerText || (typeof cannotDo === 'string' ? cannotDo
+            : 'I couldn’t tell what to change. Name the project or task and what to do — e.g. “Update task Header: set status to done”.'),
           responseData: {
             answer: answerText,
             action_results: actionResults,
@@ -945,7 +948,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           data={msg.responseData}
                           busy={confirmingIndex === i}
                           done={confirmedIndexes.has(i)}
-                          onConfirm={(answers) => confirmPilotDraft(i, msg.responseData, answers)}
+                          cancelled={cancelledIndexes.has(i)}
+                          onConfirm={(answers, skip) => confirmPilotDraft(i, msg.responseData, answers, skip)}
+                          onCancel={() => setCancelledIndexes((prev) => new Set(prev).add(i))}
                         />
                       )}
                       {msg.responseData?.confirmation_required && (() => {

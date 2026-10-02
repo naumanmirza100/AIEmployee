@@ -15,6 +15,7 @@ import {
   listPMRecentlyViewed,
 } from './pmLocalStore';
 import pmAgentService from '@/services/pmAgentService';
+import PilotGapForm from './PilotGapForm';
 import { useToast } from '@/components/ui/use-toast';
 import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle } from '../frontline/chatShellUtils';
 
@@ -165,6 +166,29 @@ const PMFloatingChat = () => {
     setCurrentConv((c) => ({ ...c, messages: [...c.messages, msg] }));
   };
 
+  // A Pilot proposal waiting for review lives on its message; this moves it
+  // along (open → busy → done / cancelled).
+  const setDraftState = (draftId, draftState) => {
+    setCurrentConv((c) => ({
+      ...c,
+      messages: c.messages.map((m) => (m.draftId === draftId ? { ...m, draftState } : m)),
+    }));
+  };
+
+  const confirmDraft = async (msg, answers, skip) => {
+    setDraftState(msg.draftId, 'busy');
+    try {
+      const res = await pmAgentService.projectPilotConfirm(msg.draft.actions || [], answers, skip);
+      if (res?.status !== 'success') throw new Error(res?.message || 'Could not make the changes.');
+      setDraftState(msg.draftId, 'done');
+      const failed = (res.data?.action_results || []).some((r) => !r.success);
+      pushMessage({ role: 'assistant', content: res.data?.answer || 'Done.', error: failed, mode: 'pilot' });
+    } catch (e) {
+      setDraftState(msg.draftId, 'open');
+      pushMessage({ role: 'assistant', content: `Error: ${e.message || 'Something went wrong.'}`, error: true });
+    }
+  };
+
   const startNewConversation = () => {
     setCurrentConv({ id: newConversationId(), messages: [] });
     setInput('');
@@ -262,7 +286,17 @@ const PMFloatingChat = () => {
       // Multi-turn context — last 6 messages
       const history = currentConv.messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
       const res = await MODES[mode].call(q, history, { onText: setStreamText });
-      if (res && (res.status === 'success' || res.data)) {
+      if (res?.status === 'needs_input') {
+        // Pilot never changes anything without review: show the card.
+        pushMessage({
+          role: 'assistant',
+          content: res.data?.answer || 'Review this, then confirm.',
+          draft: res.data,
+          draftId: `d_${Date.now()}`,
+          draftState: 'open',
+          mode,
+        });
+      } else if (res && (res.status === 'success' || res.data)) {
         const data = res.data || res;
         pushMessage({
           role: 'assistant',
@@ -569,7 +603,7 @@ const PMFloatingChat = () => {
               ) : currentConv.messages.map((m, i) => (
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
-                    className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                    className={`${m.draft ? 'w-full' : 'max-w-[85%]'} rounded-lg px-3 py-2 text-sm ${
                       m.role === 'user'
                         ? 'bg-cyan-500/25 text-white border border-cyan-400/30'
                         : m.error
@@ -580,6 +614,17 @@ const PMFloatingChat = () => {
                     }`}
                   >
                     <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    {m.draft && (
+                      <PilotGapForm
+                        data={m.draft}
+                        compact
+                        busy={m.draftState === 'busy'}
+                        done={m.draftState === 'done'}
+                        cancelled={m.draftState === 'cancelled'}
+                        onConfirm={(answers, skip) => confirmDraft(m, answers, skip)}
+                        onCancel={() => setDraftState(m.draftId, 'cancelled')}
+                      />
+                    )}
                     {m.role === 'assistant' && !m.error && !m.system && (m.citations?.length > 0 || m.source) && (
                       <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
                         <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Sources</p>

@@ -3,7 +3,10 @@ import { AlertTriangle, CalendarClock, Check, Clock, Search, Users, X } from 'lu
 import { Button } from '@/components/ui/button';
 
 /**
- * Details form for a meeting request that left something out.
+ * Review form for a meeting request, before anything is booked.
+ *
+ * Every request typed into a scheduler comes here first — one that said
+ * everything just has nothing marked missing.
  *
  * When a scheduling request doesn't say who, when or how long, the agent no
  * longer guesses (a silent 30 minutes), dead-ends ("couldn't find that user")
@@ -100,7 +103,11 @@ const MeetingDraftForm = ({ draft = {}, missing = [], options = {}, note, onConf
         <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
         <div className="text-sm">
           <p className="font-semibold text-foreground">Review this meeting</p>
-          <p className="text-muted-foreground">Fill in what&apos;s missing, check the rest, then confirm.</p>
+          <p className="text-muted-foreground">
+            {missing.length
+              ? 'Fill in what’s missing, check the rest, then confirm.'
+              : 'Check the details, then confirm — nobody is invited until you do.'}
+          </p>
         </div>
       </div>
 

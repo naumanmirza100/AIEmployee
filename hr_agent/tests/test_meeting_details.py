@@ -50,10 +50,14 @@ class HRMeetingDetailsTests(HRTestCase):
                 'message': 'Book it.', 'pending_intent': draft,
                 'proposed_time': when.isoformat(), 'timezone': 'UTC'})[1]['data']
 
-    def test_a_complete_request_is_booked_without_a_form(self):
+    def test_a_complete_request_is_still_reviewed_before_booking(self):
+        # It used to book straight away.
         data = self.ask('Schedule a 1:1 with Ali Staff tomorrow at 3pm for 45 minutes',
                         scheduled_at=self.tomorrow_3pm.isoformat(), duration_minutes=45)
-        self.assertEqual(data['action'], 'scheduled', data['reply'])
+        self.assertEqual((data['action'], data['missing']), ('needs_input', []))
+        self.assertFalse(HRMeeting.objects.exists())
+        booked = self.confirm(data['draft'], self.tomorrow_3pm)
+        self.assertEqual(booked['action'], 'scheduled', booked['reply'])
         self.assertEqual(HRMeeting.objects.get().duration_minutes, 45)
 
     def test_an_unstated_length_is_asked_not_assumed(self):
@@ -145,6 +149,6 @@ class HRMeetingDetailsTests(HRTestCase):
         day = (timezone.now().astimezone(karachi) + timedelta(days=1)).date()
         data = self.ask('Schedule a 1:1 with Ali Staff tomorrow at 3pm for 30 minutes',
                         tz='Asia/Karachi', scheduled_at=f'{day.isoformat()}T15:00:00')
-        self.assertEqual(data['action'], 'scheduled', data['reply'])
-        booked = HRMeeting.objects.get().scheduled_at.astimezone(dt_timezone.utc)
+        self.assertEqual(data['action'], 'needs_input', data['reply'])
+        booked = datetime.fromisoformat(data['draft']['proposed_time']).astimezone(dt_timezone.utc)
         self.assertEqual((booked.date(), booked.hour), (day, 10))

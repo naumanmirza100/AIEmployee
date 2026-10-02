@@ -72,11 +72,14 @@ class MissingDetailsTests(PMTestCase):
             return self.agent.process(message, self.users, timezone.now().isoformat(),
                                       organizer_id=self.dash.id)
 
-    def test_a_complete_request_is_booked_without_a_form(self):
+    def test_a_complete_request_is_still_reviewed_before_booking(self):
+        # It used to book (and email the invitees) straight away.
         result = self.run_agent('schedule a meeting with Pat on Friday at 3pm for 45 minutes',
                                 proposed_time=self.later.isoformat(), duration_minutes=45)
-        self.assertEqual(result['action'], 'schedule')
-        self.assertEqual(result['data']['duration_minutes'], 45)
+        self.assertEqual((result['action'], result['missing']), ('needs_input', []))
+        self.assertIn('nobody is invited until you do', result['response'])
+        booked = self.agent.schedule_from_pending(result['draft'], result['draft']['proposed_time'])
+        self.assertEqual((booked['action'], booked['data']['duration_minutes']), ('schedule', 45))
 
     def test_an_unstated_length_is_asked_not_assumed(self):
         # It used to become a silent 30 minutes.
@@ -121,13 +124,13 @@ class MissingDetailsTests(PMTestCase):
         # template's 15 used to lose to that default.
         result = self.run_agent('set up a standup with Pat tomorrow at 9',
                                 proposed_time=self.later.isoformat())
-        self.assertEqual(result['action'], 'schedule')
-        self.assertEqual(result['data']['duration_minutes'], 15)
+        self.assertEqual(result['missing'], [])
+        self.assertEqual(result['draft']['duration_minutes'], 15)
 
     def test_a_stated_length_beats_the_template(self):
         result = self.run_agent('set up a 45 minute standup with Pat tomorrow at 9',
                                 proposed_time=self.later.isoformat(), duration_minutes=45)
-        self.assertEqual(result['data']['duration_minutes'], 45)
+        self.assertEqual(result['draft']['duration_minutes'], 45)
 
     def test_a_length_chosen_in_the_form_beats_the_template(self):
         draft = self.run_agent('set up a standup with Pat')['draft']
@@ -166,7 +169,7 @@ class OrganiserTimezoneTests(PMTestCase):
                                return_value=parsed(proposed_time=naive, duration_minutes=30)):
             result = self.agent.process('meet Pat at 3pm for 30 min', self.users,
                                         timezone.now().isoformat(), organizer_id=self.dash.id)
-        booked = datetime.fromisoformat(result['data']['proposed_time'])
+        booked = datetime.fromisoformat(result['draft']['proposed_time'])
         # It must carry its offset out of the agent. A naive value is what the
         # view used to read as UTC — and asserting on a naive value would be
         # meaningless anyway: `.astimezone()` then assumes whatever zone the
@@ -186,3 +189,53 @@ class OrganiserTimezoneTests(PMTestCase):
         prompt = call.call_args.args[0] if call.call_args.args else call.call_args.kwargs['prompt']
         self.assertIn('Asia/Karachi', prompt)
         self.assertIn('+05:00', prompt)
+
+
+class RescheduleReviewTests(PMTestCase):
+    """Moving a meeting emails everyone invited; it used to happen the moment
+    "reschedule my meeting with Pat" was typed, on whichever meeting with Pat
+    was newest. Now the move is shown first and made only once confirmed."""
+
+    def setUp(self):
+        super().setUp()
+        from project_manager_agent.models import MeetingParticipant, ScheduledMeeting
+        self.old = (timezone.now() + timedelta(days=2)).replace(microsecond=0)
+        self.new = self.old + timedelta(days=1)
+        self.meeting = ScheduledMeeting.objects.create(organizer=self.dash, invitee=self.pm,
+                                                       title='Planning', proposed_time=self.old)
+        MeetingParticipant.objects.create(meeting=self.meeting, user=self.pm, status='accepted')
+
+    def send(self, data, actor=None):
+        from api.views import pm_agent
+        agent_says = {'action': 'reschedule', 'data': {'invitee_ids': [self.pm.id],
+                                                       'invitee_names': ['Pat Tester'],
+                                                       'new_time': self.new.isoformat()}}
+        with mock.patch.object(MeetingSchedulerAgent, 'process', return_value=agent_says), \
+                mock.patch('api.views.pm_agent._send_meeting_email') as email:
+            code, body = self.call(pm_agent.meeting_schedule, actor or self.dash, data)
+        self.assertEqual(code, 200, body)
+        return body['data'], email
+
+    def test_the_move_is_shown_not_made(self):
+        data, email = self.send({'message': 'reschedule my meeting with Pat to Friday'})
+        self.assertEqual(data['action'], 'reschedule_review')
+        self.assertEqual((data['reschedule']['meeting_id'], data['reschedule']['participants']),
+                         (self.meeting.id, ['Pat Tester']))
+        self.meeting.refresh_from_db()
+        self.assertEqual(self.meeting.proposed_time, self.old)
+        email.assert_not_called()
+
+    def test_confirming_moves_that_meeting_and_tells_everyone(self):
+        data, email = self.send({'message': 'Move it.', 'confirm_reschedule': {
+            'meeting_id': self.meeting.id, 'new_time': self.new.isoformat()}})
+        self.assertEqual(data['action'], 'rescheduled', data)
+        self.meeting.refresh_from_db()
+        self.assertEqual(self.meeting.proposed_time, self.new)
+        email.assert_called_once()
+
+    def test_only_a_meeting_you_organise_can_be_moved(self):
+        data, _ = self.send({'message': 'Move it.', 'confirm_reschedule': {
+            'meeting_id': self.meeting.id, 'new_time': self.new.isoformat()}}, actor=self.dash_colleague)
+        self.assertEqual(data['action'], 'not_found')
+        self.meeting.refresh_from_db()
+        self.assertEqual(self.meeting.proposed_time, self.old)

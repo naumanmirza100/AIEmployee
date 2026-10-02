@@ -469,7 +469,17 @@ class Interview(models.Model):
         return f"Interview: {self.candidate_name} - {self.job_role} ({self.status})"
     
     def get_recruiter_settings(self):
-        """Get recruiter email settings, with defaults if not set"""
+        """The recruiter's email settings, with defaults if none are saved.
+
+        The dashboard saves them against the dashboard login (`company_user`);
+        only older interviews name an employee-login `recruiter`. This used to
+        look at `recruiter` alone, so settings saved on the dashboard — the
+        follow-up timing and the on/off switches — were never used.
+        """
+        if self.company_user_id:
+            found = RecruiterEmailSettings.objects.filter(company_user_id=self.company_user_id).first()
+            if found is not None:
+                return found
         if self.recruiter:
             try:
                 return self.recruiter.recruiter_email_settings
@@ -517,6 +527,14 @@ class Interview(models.Model):
             return self.min_hours_between_followups
         settings = self.get_recruiter_settings()
         return settings.min_hours_between_followups
+
+    def sends_followups(self):
+        """The recruiter's "send follow-ups automatically" switch."""
+        return self.get_recruiter_settings().auto_send_followups
+
+    def sends_reminders(self):
+        """The recruiter's "send reminders automatically" switch."""
+        return self.get_recruiter_settings().auto_send_reminders
 
     def is_job_schedule_expired(self):
         """Check if the job's interview scheduling date range has passed.
