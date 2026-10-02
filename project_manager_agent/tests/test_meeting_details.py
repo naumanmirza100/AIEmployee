@@ -190,6 +190,13 @@ class OrganiserTimezoneTests(PMTestCase):
         self.assertIn('Asia/Karachi', prompt)
         self.assertIn('+05:00', prompt)
 
+    def test_the_confirmation_says_the_time_on_the_organisers_clock(self):
+        # A time confirmed from the review form arrives in UTC; 05:00 UTC is
+        # 10:00 in Karachi. The message used to say 05:00.
+        text = self.agent.generate_response('scheduled', {
+            'proposed_time': '2026-10-06T05:00:00Z', 'title': 'Sync', 'invitee_names': ['Pat Tester']})
+        self.assertIn('**When:** Tuesday, October 06, 2026 at 10:00 AM (Asia/Karachi, UTC+05:00)', text)
+
 
 class RescheduleReviewTests(PMTestCase):
     """Moving a meeting emails everyone invited; it used to happen the moment

@@ -58,6 +58,22 @@ def clock_label(dt):
     return f"{dt:%I:%M %p}".lstrip('0')
 
 
+def zone_caption(tz_name, at=None) -> str:
+    """'Asia/Karachi (UTC+05:00)'. The offset is the one in force at `at`."""
+    moment = (at or timezone.now()).astimezone(zone_info(tz_name))
+    offset = moment.strftime('%z')
+    offset = f"UTC{offset[:3]}:{offset[3:]}" if offset else 'UTC'
+    return tz_name if tz_name == 'UTC' else f"{tz_name} ({offset})"
+
+
+def when_label(dt, tz_name) -> str:
+    """'Monday, October 06, 2026 at 10:00 AM (Asia/Karachi, UTC+05:00)' — an
+    instant on `tz_name`'s clock, saying which zone that is."""
+    moment = _aware(dt).astimezone(zone_info(tz_name))
+    zone = zone_caption(tz_name, dt).replace(' (', ', ').rstrip(')')
+    return f"{moment:%A, %B %d, %Y} at {clock_label(moment)} ({zone})"
+
+
 def _aware(dt):
     return timezone.make_aware(dt, dt_timezone.utc) if timezone.is_naive(dt) else dt
 

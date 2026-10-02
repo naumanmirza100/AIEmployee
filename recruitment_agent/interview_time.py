@@ -19,7 +19,7 @@ from datetime import datetime
 from django.utils import timezone
 
 from core.scheduling import zone_name as _valid_zone
-from core.scheduling.conflicts import clock_label, zone_info
+from core.scheduling.conflicts import when_label, zone_caption, zone_info  # noqa: F401 (zone_caption is used from here)
 
 
 def settings_for(interview):
@@ -111,19 +111,9 @@ def slot_key(dt, tz_name) -> str:
     return f"{local(dt, tz_name):%Y-%m-%dT%H:%M}"
 
 
-def zone_caption(tz_name, at=None) -> str:
-    """'Asia/Karachi (UTC+05:00)'. The offset is the one in force at `at`."""
-    moment = local(at or timezone.now(), tz_name)
-    offset = moment.strftime('%z')
-    offset = f"UTC{offset[:3]}:{offset[3:]}" if offset else 'UTC'
-    return tz_name if tz_name == 'UTC' else f"{tz_name} ({offset})"
-
-
 def label(dt, tz_name) -> str:
     """'Monday, October 06, 2026 at 10:00 AM (Asia/Karachi, UTC+05:00)'."""
-    moment = local(dt, tz_name)
-    zone = zone_caption(tz_name, dt).replace(' (', ', ').rstrip(')')
-    return f"{moment:%A, %B %d, %Y} at {clock_label(moment)} ({zone})"
+    return when_label(dt, tz_name)
 
 
 def remember_timezone(company_user, raw) -> None:

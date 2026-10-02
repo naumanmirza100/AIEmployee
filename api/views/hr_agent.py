@@ -3807,7 +3807,10 @@ def hr_meeting_schedule(request):
 
             # Build a strong success reply so the frontend never has to guess.
             names_display = ', '.join(e.full_name for e in all_matched_emps) or 'the participants'
-            time_display = sched.strftime('%A, %B %d, %Y at %I:%M %p')
+            # On the organiser's clock, saying which zone: a time confirmed from
+            # the form is UTC, and used to be shown as its UTC digits.
+            from core.scheduling.conflicts import when_label
+            time_display = when_label(sched, tz_name)
             override_reply = (
                 f"**Meeting Scheduled Successfully!**\n\n"
                 f"**Title:** {m.title}\n"

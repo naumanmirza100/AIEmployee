@@ -43,12 +43,12 @@ class HRMeetingDetailsTests(HRTestCase):
             return self.call(views.hr_meeting_schedule, self.admin,
                              {'message': message, 'timezone': tz})[1]['data']
 
-    def confirm(self, draft, when):
+    def confirm(self, draft, when, tz='UTC'):
         with mock.patch('api.views.hr_agent.HRAgent._call_llm',
                         side_effect=AssertionError('confirming must not call the model')):
             return self.call(views.hr_meeting_schedule, self.admin, {
                 'message': 'Book it.', 'pending_intent': draft,
-                'proposed_time': when.isoformat(), 'timezone': 'UTC'})[1]['data']
+                'proposed_time': when.isoformat(), 'timezone': tz})[1]['data']
 
     def test_a_complete_request_is_still_reviewed_before_booking(self):
         # It used to book straight away.
@@ -152,3 +152,13 @@ class HRMeetingDetailsTests(HRTestCase):
         self.assertEqual(data['action'], 'needs_input', data['reply'])
         booked = datetime.fromisoformat(data['draft']['proposed_time']).astimezone(dt_timezone.utc)
         self.assertEqual((booked.date(), booked.hour), (day, 10))
+
+    def test_the_confirmation_says_the_time_on_the_users_clock(self):
+        # The form sends an exact (UTC) time; 05:00 UTC is 10:00 in Karachi.
+        # The message used to say 05:00.
+        draft = self.ask('Schedule a 1:1 with Ali Staff tomorrow at 3pm for 30 minutes',
+                         scheduled_at=self.tomorrow_3pm.isoformat())['draft']
+        when = (timezone.now() + timedelta(days=2)).replace(hour=5, minute=0, second=0, microsecond=0)
+        data = self.confirm(draft, when, tz='Asia/Karachi')
+        self.assertEqual(data['action'], 'scheduled', data['reply'])
+        self.assertIn('at 10:00 AM (Asia/Karachi, UTC+05:00)', data['reply'])

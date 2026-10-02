@@ -422,8 +422,14 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             invitee_str = ", ".join(f"**{n}**" for n in invitees) if invitees else meeting_data.get("invitee_name", "the invitee")
             time_str = meeting_data.get("proposed_time", "")
             try:
+                # On the organiser's clock, saying which zone. A time confirmed
+                # from the review form arrives in UTC, and used to be shown as
+                # its UTC digits under a card showing the local time.
+                from core.scheduling.conflicts import when_label
                 dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                time_display = dt.strftime("%A, %B %d, %Y at %I:%M %p")
+                if timezone.is_naive(dt):
+                    dt = dt.replace(tzinfo=self._organiser_zone())
+                time_display = when_label(dt, getattr(self, 'timezone_name', 'UTC') or 'UTC')
             except Exception:
                 time_display = time_str
             duration = meeting_data.get("duration_minutes", 30)
