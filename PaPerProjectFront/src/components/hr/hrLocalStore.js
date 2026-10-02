@@ -1,10 +1,7 @@
-// HR-specific localStorage helpers for the floating Quick Chat.
-// Separate keys from Frontline so histories and recents don't clobber
-// each other across the two dashboards.
+// HR's "recently viewed" list for the floating Quick Chat, kept in this
+// browser. (Its chat history is on the server: hooks/useQuickChatHistory.)
 
-const CHAT_HISTORY_KEY = 'hr_fc_history_v1';
 const RECENTLY_VIEWED_KEY = 'hr_recently_viewed_v1';
-const CHAT_HISTORY_LIMIT = 20;
 const RECENTLY_VIEWED_LIMIT = 6;
 
 function safeReadJson(key, fallback) {
@@ -24,25 +21,6 @@ function safeWriteJson(key, value) {
   } catch (_) {
     /* quota exceeded or unavailable — ignore */
   }
-}
-
-// --- Chat history -------------------------------------------------------
-
-export function listHRChatHistory() {
-  const arr = safeReadJson(CHAT_HISTORY_KEY, []);
-  return Array.isArray(arr) ? arr : [];
-}
-
-export function saveHRChatConversation(conversation) {
-  if (!conversation || !conversation.id) return;
-  const current = listHRChatHistory().filter((c) => c.id !== conversation.id);
-  const next = [conversation, ...current].slice(0, CHAT_HISTORY_LIMIT);
-  safeWriteJson(CHAT_HISTORY_KEY, next);
-}
-
-export function deleteHRChatConversation(id) {
-  const next = listHRChatHistory().filter((c) => c.id !== id);
-  safeWriteJson(CHAT_HISTORY_KEY, next);
 }
 
 // --- Recently viewed ---------------------------------------------------

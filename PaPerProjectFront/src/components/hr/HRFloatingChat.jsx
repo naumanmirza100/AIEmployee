@@ -9,12 +9,8 @@ import InfoHint, { useHints } from '../frontline/InfoHint';
 import FrontlineTutorial, { resetTutorial } from '../frontline/FrontlineTutorial';
 import { useTutorialNudge } from '../frontline/tourUtils';
 import { HR_FLOATING_CHAT_TOUR, HR_HINTS } from './hrTutorialSteps';
-import {
-  listHRChatHistory,
-  saveHRChatConversation,
-  deleteHRChatConversation,
-  listHRRecentlyViewed,
-} from './hrLocalStore';
+import { listHRRecentlyViewed } from './hrLocalStore';
+import useQuickChatHistory from '@/hooks/useQuickChatHistory';
 import hrAgentService from '@/services/hrAgentService';
 import { useToast } from '@/components/ui/use-toast';
 import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle, ElapsedTimer } from '../frontline/chatShellUtils';
@@ -68,7 +64,9 @@ const HRFloatingChat = () => {
 
   const [tourOpen, setTourOpen] = useState(false);
 
-  const [history, setHistory] = useState(() => listHRChatHistory());
+  // History, kept on the server (see useQuickChatHistory)
+  const { history, refresh: refreshHistory, save: saveConversation, remove: removeConversation } =
+    useQuickChatHistory('hr');
   // Draggable + resizable geometry, persisted per storage key.
   const { containerStyle: geomStyle, dragHandleProps, resizeHandleProps } = useDraggableResizable('hr_fc');
   const [recents, setRecents] = useState(() => listHRRecentlyViewed());
@@ -77,7 +75,6 @@ const HRFloatingChat = () => {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const refreshHistory = () => setHistory(listHRChatHistory());
   const refreshRecents = () => setRecents(listHRRecentlyViewed());
 
   useEffect(() => { if (open) { refreshHistory(); refreshRecents(); } }, [open]);
@@ -87,8 +84,7 @@ const HRFloatingChat = () => {
     if (!messages.length) return;
     const firstUser = messages.find((m) => m.role === 'user');
     const title = (firstUser?.content || 'Untitled').slice(0, 60);
-    saveHRChatConversation({ id: conversationId, title, messages, updated_at: Date.now() });
-    refreshHistory();
+    saveConversation({ id: conversationId, title, messages });
   }, [messages, conversationId]);
 
   // Global Ctrl/Cmd+K shortcut
@@ -127,10 +123,9 @@ const HRFloatingChat = () => {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
   const clearCurrentConversation = () => {
-    deleteHRChatConversation(conversationId);
+    removeConversation(conversationId);
     setMessages([]);
     setInput('');
-    refreshHistory();
     setTimeout(() => inputRef.current?.focus(), 50);
   };
   const openHistoryEntry = (entry) => {
@@ -142,8 +137,7 @@ const HRFloatingChat = () => {
   const removeHistoryEntry = (id) => {
     // UX-13: confirm before deleting a floating-chat history entry.
     if (!window.confirm('Delete this conversation from history?')) return;
-    deleteHRChatConversation(id);
-    refreshHistory();
+    removeConversation(id);
   };
 
   // ---- Slash commands --------------------------------------------------

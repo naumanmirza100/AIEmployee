@@ -21,12 +21,8 @@ import InfoHint, { useHints } from './InfoHint';
 import FrontlineTutorial, { resetTutorial } from './FrontlineTutorial';
 import { useTutorialNudge } from './tourUtils';
 import { FLOATING_CHAT_TOUR, HINTS } from './frontlineTutorialSteps';
-import {
-  listChatHistory,
-  saveChatConversation,
-  deleteChatConversation,
-  listRecentlyViewed,
-} from './frontlineLocalStore';
+import { listRecentlyViewed } from './frontlineLocalStore';
+import useQuickChatHistory from '@/hooks/useQuickChatHistory';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { useToast } from '@/components/ui/use-toast';
 import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle, ElapsedTimer } from './chatShellUtils';
@@ -110,8 +106,9 @@ const FrontlineFloatingChat = () => {
   // Tour state
   const [tourOpen, setTourOpen] = useState(false);
 
-  // Reactive stores (re-read from localStorage when we need to show them)
-  const [history, setHistory] = useState(() => listChatHistory());
+  // History, kept on the server (see useQuickChatHistory)
+  const { history, refresh: refreshHistory, save: saveConversation, remove: removeConversation } =
+    useQuickChatHistory('frontline');
   // Draggable + resizable geometry, persisted per storage key.
   const { containerStyle: geomStyle, dragHandleProps, resizeHandleProps } = useDraggableResizable('frontline_fc');
   const [recents, setRecents] = useState(() => listRecentlyViewed());
@@ -120,7 +117,6 @@ const FrontlineFloatingChat = () => {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const refreshHistory = () => setHistory(listChatHistory());
   const refreshRecents = () => setRecents(listRecentlyViewed());
 
   // Refresh stores whenever the chat opens (someone else may have viewed a
@@ -137,13 +133,7 @@ const FrontlineFloatingChat = () => {
     if (!messages.length) return;
     const firstUser = messages.find((m) => m.role === 'user');
     const title = (firstUser?.content || 'Untitled').slice(0, 60);
-    saveChatConversation({
-      id: conversationId,
-      title,
-      messages,
-      updated_at: Date.now(),
-    });
-    refreshHistory();
+    saveConversation({ id: conversationId, title, messages });
   }, [messages, conversationId]);
 
   // Global Ctrl/Cmd+K shortcut to open the chat from anywhere in the dashboard.
@@ -191,10 +181,9 @@ const FrontlineFloatingChat = () => {
   const clearCurrentConversation = () => {
     // UX-13: don't wipe the current conversation without a confirm.
     if (!window.confirm('Clear this conversation? This cannot be undone.')) return;
-    deleteChatConversation(conversationId);
+    removeConversation(conversationId);
     setMessages([]);
     setInput('');
-    refreshHistory();
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
@@ -208,8 +197,7 @@ const FrontlineFloatingChat = () => {
   const removeHistoryEntry = (id) => {
     // UX-13: same guard on individual history entries.
     if (!window.confirm('Delete this conversation from history?')) return;
-    deleteChatConversation(id);
-    refreshHistory();
+    removeConversation(id);
   };
 
   // ----- Slash-command handling -------------------------------------------

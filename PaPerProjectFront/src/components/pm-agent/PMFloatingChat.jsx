@@ -8,12 +8,8 @@ import InfoHint, { useHints } from '../frontline/InfoHint';
 import FrontlineTutorial, { resetTutorial } from '../frontline/FrontlineTutorial';
 import { useTutorialNudge } from '../frontline/tourUtils';
 import { PM_FLOATING_CHAT_TOUR, PM_HINTS } from './pmTutorialSteps';
-import {
-  listPMChatHistory,
-  savePMChatConversation,
-  deletePMChatConversation,
-  listPMRecentlyViewed,
-} from './pmLocalStore';
+import { listPMRecentlyViewed } from './pmLocalStore';
+import useQuickChatHistory from '@/hooks/useQuickChatHistory';
 import pmAgentService from '@/services/pmAgentService';
 import PilotGapForm from './PilotGapForm';
 import { useToast } from '@/components/ui/use-toast';
@@ -22,7 +18,7 @@ import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandl
 const PM_LAST_MODE_KEY = 'pm_fc_last_mode_v1';
 
 // Two "modes" — the same UI drives both, backed by different service methods
-// and different localStorage histories.
+// and a history each (kept on the server, see useQuickChatHistory).
 const MODES = {
   pilot: {
     label: 'Project Pilot',
@@ -99,8 +95,9 @@ const PMFloatingChat = () => {
   // Tour state
   const [tourOpen, setTourOpen] = useState(false);
 
-  // Stores — refresh whenever mode changes or chat is opened
-  const [history, setHistory] = useState(() => listPMChatHistory('pilot'));
+  // History (on the server, per mode) — refreshed whenever mode changes or chat is opened
+  const { history, refresh: refreshHistory, save: saveConversation, remove: removeConversation } =
+    useQuickChatHistory('pm', mode);
   const { containerStyle: geomStyle, dragHandleProps, resizeHandleProps } = useDraggableResizable('pm_fc', { defaultWidth: 440, defaultHeight: 600 });
   const [recents, setRecents] = useState(() => listPMRecentlyViewed());
 
@@ -108,7 +105,6 @@ const PMFloatingChat = () => {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const refreshHistory = () => setHistory(listPMChatHistory(mode));
   const refreshRecents = () => setRecents(listPMRecentlyViewed());
 
   // ---- Effects ---------------------------------------------------------
@@ -123,13 +119,7 @@ const PMFloatingChat = () => {
     if (!currentConv.messages.length) return;
     const firstUser = currentConv.messages.find((m) => m.role === 'user');
     const title = (firstUser?.content || 'Untitled').slice(0, 60);
-    savePMChatConversation(mode, {
-      id: currentConv.id,
-      title,
-      messages: currentConv.messages,
-      updated_at: Date.now(),
-    });
-    refreshHistory();
+    saveConversation({ id: currentConv.id, title, messages: currentConv.messages });
   }, [currentConv.messages, currentConv.id, mode]);
 
   // Global Ctrl/Cmd+K shortcut
@@ -197,10 +187,9 @@ const PMFloatingChat = () => {
   };
 
   const clearCurrentConversation = () => {
-    deletePMChatConversation(mode, currentConv.id);
+    removeConversation(currentConv.id);
     setCurrentConv({ id: newConversationId(), messages: [] });
     setInput('');
-    refreshHistory();
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
@@ -210,7 +199,7 @@ const PMFloatingChat = () => {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
-  const removeHistoryEntry = (id) => { deletePMChatConversation(mode, id); refreshHistory(); };
+  const removeHistoryEntry = (id) => { removeConversation(id); };
 
   const switchMode = (nextMode) => {
     if (nextMode === mode) return;
