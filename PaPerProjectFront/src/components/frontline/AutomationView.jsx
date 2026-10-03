@@ -1,6 +1,7 @@
 import React from 'react';
 import { SubTabsShell, TabsContent } from './FrontlineSubTabs';
-import { FrontlineWorkflowsTab, FrontlineNotificationsTab } from './FrontlineDashboard';
+import { FrontlineWorkflowsTab } from './FrontlineWorkflowsTab';
+import { FrontlineNotificationsTab } from './FrontlineNotificationsTab';
 
 /**
  * AutomationView — Automation tab body: [Workflows | Notifications] sub-tabs.

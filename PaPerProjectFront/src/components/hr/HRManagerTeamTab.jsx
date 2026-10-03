@@ -7,6 +7,7 @@
  * = caller isn't a manager.
  */
 import React, { useEffect, useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -102,7 +103,7 @@ export default function HRManagerTeamTab({ onOpenEmployee }) {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[m.employment_status] || 'bg-white/40'}`} />
-                      <span className="text-[10px] text-white/55 uppercase tracking-wider">{m.employment_status}</span>
+                      <span className="text-[10px] text-white/55 uppercase tracking-wider">{labelOf(m.employment_status)}</span>
                     </div>
                   </div>
 
@@ -119,7 +120,7 @@ export default function HRManagerTeamTab({ onOpenEmployee }) {
                       <div className="flex flex-wrap gap-1">
                         {m.leave_balances.map((b, idx) => (
                           <Badge key={idx} variant="outline" className="text-[10px]">
-                            {b.leave_type}: {b.remaining.toFixed(1)}d
+                            {labelOf(b.leave_type)}: {b.remaining.toFixed(1)}d
                           </Badge>
                         ))}
                       </div>
@@ -135,7 +136,7 @@ export default function HRManagerTeamTab({ onOpenEmployee }) {
                       </div>
                       {m.pending_leave_requests.slice(0, 3).map((lr) => (
                         <div key={lr.id} className="text-[11px] text-white/70">
-                          {lr.leave_type} · {lr.start_date} → {lr.end_date} ({lr.days_requested}d)
+                          {labelOf(lr.leave_type)} · {lr.start_date} → {lr.end_date} ({lr.days_requested}d)
                         </div>
                       ))}
                     </div>

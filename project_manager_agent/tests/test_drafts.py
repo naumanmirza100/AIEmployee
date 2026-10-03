@@ -177,15 +177,26 @@ class ConfirmEndpointTests(PMTestCase):
         self.assertIsNone(task.assignee_id)
         self.assertIsNone(task.due_date)
 
-    def test_actions_other_than_creates_are_ignored(self):
-        victim = self.task(title='Keep me')
+    def test_reviewed_changes_are_made_and_unticked_ones_are_not(self):
+        """Every action is reviewed now, so confirm makes updates and deletes
+        too — it used to drop them, silently losing half of a mixed proposal."""
+        goner = self.task(title='Delete me')
+        keeper = self.task(title='Keep me')
+        renamed = self.task(title='Old name', status='todo')
         code, body = self.call(pm_agent.project_pilot_confirm, self.dash, {
-            'actions': [{'action': 'delete_task', 'task_id': victim.id}],
+            'actions': [{'action': 'delete_task', 'task_id': goner.id},
+                        {'action': 'delete_task', 'task_id': keeper.id},
+                        {'action': 'update_task', 'task_id': renamed.id,
+                         'updates': {'status': 'In Progress', 'title': 'New name'}}],
             'answers': {},
+            'skip': [1],
         })
-        self.assertEqual(code, 200)
-        self.assertTrue(Task.objects.filter(pk=victim.pk).exists())
-        self.assertEqual(body['data']['action_results'], [])
+        self.assertEqual(code, 200, body)
+        self.assertFalse(Task.objects.filter(pk=goner.pk).exists())
+        self.assertTrue(Task.objects.filter(pk=keeper.pk).exists())
+        renamed.refresh_from_db()
+        self.assertEqual((renamed.title, renamed.status), ('New name', 'in_progress'))
+        self.assertEqual(body['data']['answer'], 'Updated 1 task. Deleted 1 task.')
 
     def test_it_will_not_reach_into_another_company(self):
         code, body = self.call(pm_agent.project_pilot_confirm, self.dash, {

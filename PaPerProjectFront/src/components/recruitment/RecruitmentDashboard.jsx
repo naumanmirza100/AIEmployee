@@ -30,7 +30,7 @@ import RecruitmentApiTester from './RecruitmentApiTester';
 import AiInterviewQuestions from './AiInterviewQuestions';
 // import AIGraphGenerator from './AIGraphGenerator';
 import SavedPrompts from './SavedPrompts';
-import { renderChart } from './ChartRenderer';
+import { renderChart } from '@/components/common/ChartRenderer';
 import { FlaskConical, HelpCircle, Sparkles } from 'lucide-react';
 
 // Tab items configuration

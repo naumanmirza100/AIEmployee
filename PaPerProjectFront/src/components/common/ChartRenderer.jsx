@@ -1,4 +1,8 @@
 import React from 'react';
+import { labelOf } from '@/utils/labels';
+
+// Draws the charts the agents' AI makes from a prompt (Recruitment, Frontline)
+// and their Q&A answers. One copy for all of them.
 
 const gridLineOpacity = 0.22;
 /** Stronger grid visibility for line/bar/scatter (like pie) */
@@ -309,9 +313,23 @@ const SimpleHeatMap = ({ data, title }) => {
   );
 };
 
+/**
+ * Bar and pie charts take {label: value}. A list of rows ([{status: 'open',
+ * count: 3}, ...], how Frontline's analytics come) becomes that, with codes
+ * shown as words. Frontline kept its own copy of these charts to accept it.
+ */
+function asCounts(data) {
+  if (!Array.isArray(data)) return data;
+  return Object.fromEntries(data.map((d) => {
+    const key = d.category ?? d.status ?? d.priority ?? d.label ?? d.name ?? String(d);
+    return [labelOf(key) || String(key), Number(d.count ?? d.value ?? 0)];
+  }));
+}
+
 export function renderChart(chartData) {
   if (!chartData) return null;
-  const { type, data, title, color, colors, orientation } = chartData;
+  const { type, title, color, colors, orientation } = chartData;
+  const data = type === 'bar' || type === 'pie' || !type ? asCounts(chartData.data) : chartData.data;
   switch (type) {
     case 'bar':
       return orientation === 'vertical'

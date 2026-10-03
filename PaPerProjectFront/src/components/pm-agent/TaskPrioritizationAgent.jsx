@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -65,7 +66,7 @@ const PROGRESS_PRESETS = {
       { at: 0,  label: 'Reading project tasks…' },
       { at: 5,  label: 'AI breaking down each task into subtasks…' },
       { at: 30, label: 'Generating 70+ subtasks — this is the slow part…' },
-      { at: 60, label: 'Saving subtasks to the project…' },
+      { at: 60, label: 'Getting them ready for you to review…' },
     ],
   },
 };
@@ -80,6 +81,73 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
   const [runningAction, setRunningAction] = useState(null);
   const [result, setResult] = useState(null);
   const { toast } = useToast();
+  // Suggestions are reviewed before anything changes: the ticked priority
+  // changes, and the kept subtasks per task (task_id -> Set of indexes).
+  const [pickedPriorities, setPickedPriorities] = useState(() => new Set());
+  const [prioritiesApplied, setPrioritiesApplied] = useState(false);
+  const [keptSubtasks, setKeptSubtasks] = useState({});
+  const [subtasksSaved, setSubtasksSaved] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const startReview = (data) => {
+    setPickedPriorities(new Set((data?.priority_changes || []).map((c) => c.task_id)));
+    setPrioritiesApplied(false);
+    setKeptSubtasks(Object.fromEntries((data?.proposals || []).map((p) => [
+      p.task_id, new Set(p.subtasks.map((_, i) => i)),
+    ])));
+    setSubtasksSaved(false);
+  };
+
+  const applyPriorities = async () => {
+    const changes = (result?.data?.priority_changes || [])
+      .filter((c) => pickedPriorities.has(c.task_id))
+      .map((c) => ({ task_id: c.task_id, priority: c.to }));
+    if (!changes.length) return;
+    setApplying(true);
+    try {
+      const res = await pmAgentService.applyTaskPriorities(changes);
+      const failed = res.data?.failed || [];
+      setPrioritiesApplied(true);
+      toast({
+        title: failed.length ? 'Some priorities not changed' : 'Priorities updated',
+        description: `${res.data?.updated?.length || 0} changed${failed.length ? `, ${failed.length} refused: ${failed[0].error}` : ''}.`,
+        variant: failed.length ? 'destructive' : undefined,
+      });
+    } catch (error) {
+      toast(toastForError(error, 'Could not change the priorities'));
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const keptCount = Object.values(keptSubtasks).reduce((n, set) => n + set.size, 0);
+
+  const saveSubtasks = async () => {
+    const proposals = (result?.data?.proposals || [])
+      .map((p) => ({
+        task_id: p.task_id,
+        reasoning: p.reasoning,
+        subtasks: p.subtasks.filter((_, i) => keptSubtasks[p.task_id]?.has(i)),
+      }))
+      .filter((p) => p.subtasks.length);
+    if (!proposals.length) return;
+    setApplying(true);
+    try {
+      const res = await pmAgentService.saveGeneratedSubtasks(proposals);
+      setSubtasksSaved(true);
+      toast({ title: 'Subtasks saved', description: `${res.data?.saved_count || 0} added. Find them under each task on the Tasks tab.` });
+    } catch (error) {
+      toast(toastForError(error, 'Could not save the subtasks'));
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const toggleIn = (set, value) => {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value); else next.add(value);
+    return next;
+  };
 
   // Ensure projects is always an array
   const safeProjects = Array.isArray(projects) ? projects : [];
@@ -123,9 +191,11 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
 
       if (response.status === 'success') {
         setResult(response);
+        startReview(response.data);
+        const n = response.data?.priority_changes?.length || 0;
         toast({
-          title: 'Success',
-          description: 'Task analysis completed',
+          title: 'Analysis ready',
+          description: n ? `${n} priority change${n === 1 ? '' : 's'} suggested — review them below.` : 'Task analysis completed',
         });
       } else {
         toast({
@@ -162,9 +232,11 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
 
       if (response.status === 'success') {
         setResult(response);
+        startReview(response.data);
+        const n = response.data?.proposed_count || 0;
         toast({
-          title: 'Success',
-          description: `Generated ${response.data?.saved_count || 0} subtasks`,
+          title: n ? 'Subtasks ready to review' : 'Nothing to add',
+          description: n ? `${n} proposed — keep the ones you want, then save.` : (response.message || 'No new subtasks.'),
         });
       } else {
         toast({
@@ -317,6 +389,37 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
             <CardTitle className="flex items-center gap-1.5">Analysis Results <InfoHint {...PM_HINTS.pmTpResults} /></CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Suggested priority changes: nothing changes until applied. */}
+            {result.data?.priority_changes?.length > 0 && (
+              <div className="rounded-lg border border-violet-500/30 bg-white/[0.03] p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Suggested priority changes</p>
+                  <p className="text-xs text-muted-foreground">Nothing has changed yet. Untick any you don&apos;t want, then apply.</p>
+                </div>
+                <div className="space-y-1">
+                  {result.data.priority_changes.map((c) => (
+                    <label key={c.task_id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={pickedPriorities.has(c.task_id)}
+                        disabled={prioritiesApplied || applying}
+                        onChange={() => setPickedPriorities((s) => toggleIn(s, c.task_id))}
+                      />
+                      <span className="text-foreground">{c.title}</span>
+                      <span className="text-muted-foreground">{c.from_label} → <span className="font-medium text-foreground">{c.to_label}</span></span>
+                    </label>
+                  ))}
+                </div>
+                {prioritiesApplied ? (
+                  <p className="text-sm text-emerald-500">Applied.</p>
+                ) : (
+                  <Button size="sm" disabled={applying || pickedPriorities.size === 0} onClick={applyPriorities}>
+                    {applying ? 'Applying…' : `Apply ${pickedPriorities.size} change${pickedPriorities.size === 1 ? '' : 's'}`}
+                  </Button>
+                )}
+              </div>
+            )}
+
             {/* Tasks with priorities and order - SHOW FIRST */}
             {result.data?.tasks && result.data.tasks.length > 0 && (
               <div className="space-y-3 mb-6">
@@ -374,7 +477,7 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
                           )}
                           {task.risk_level && (
                             <Badge variant="outline" className="text-xs">
-                              Risk: {task.risk_level}
+                              Risk: {labelOf(task.risk_level)}
                             </Badge>
                           )}
                           {task.impact_on_others && (
@@ -941,7 +1044,7 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
                             → {suggestion.suggested_assignee}
                           </Badge>
                           {suggestion.delegation_type && (
-                            <Badge variant="secondary">{suggestion.delegation_type}</Badge>
+                            <Badge variant="secondary">{labelOf(suggestion.delegation_type)}</Badge>
                           )}
                           {suggestion.skill_match_score && (
                             <Badge variant="outline">Match: {suggestion.skill_match_score}%</Badge>
@@ -1011,25 +1114,46 @@ const TaskPrioritizationAgent = ({ projects = [], onOpenPilot }) => {
             {/* Subtask Generation Results (UX-16: tell the user WHERE the
                 generated subtasks appear now — they nest under each task's
                 row on the Tasks tab, and used to appear only as this toast). */}
-            {result.data?.saved_count !== undefined && (
-              <div className="p-4 bg-emerald-50 border border-emerald-200/40 rounded-lg dark:bg-emerald-950 dark:border-emerald-800">
-                <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
-                  {result.data.saved_count === 0
-                    ? 'No new subtasks were generated'
-                    : `Generated ${result.data.saved_count} subtask${result.data.saved_count === 1 ? '' : 's'} successfully`}
-                </p>
-                {result.data.reasoning_updated_count > 0 && (
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
-                    Updated reasoning for {result.data.reasoning_updated_count} tasks
-                  </p>
-                )}
-                {result.data.saved_count > 0 && (
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
-                    They now nest under each task on the <b>Tasks</b> tab —
-                    open a task's row to review or edit them.
-                  </p>
-                )}
-              </div>
+            {Array.isArray(result.data?.proposals) && (
+              result.data.proposals.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No new subtasks were generated.</p>
+              ) : (
+                <div className="rounded-lg border border-violet-500/30 bg-white/[0.03] p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Proposed subtasks</p>
+                    <p className="text-xs text-muted-foreground">
+                      Nothing is saved yet. Untick any you don&apos;t want, then save — they&apos;ll nest under each task on the Tasks tab.
+                    </p>
+                  </div>
+                  {result.data.proposals.map((p) => (
+                    <div key={p.task_id} className="space-y-1">
+                      <p className="text-sm font-medium text-foreground">{p.task_title}</p>
+                      {p.subtasks.map((st, i) => (
+                        <label key={i} className="flex items-start gap-2 pl-2 text-sm">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={!!keptSubtasks[p.task_id]?.has(i)}
+                            disabled={subtasksSaved || applying}
+                            onChange={() => setKeptSubtasks((k) => ({ ...k, [p.task_id]: toggleIn(k[p.task_id] || new Set(), i) }))}
+                          />
+                          <span>
+                            <span className="text-foreground">{st.title}</span>
+                            {st.description && <span className="block text-xs text-muted-foreground">{st.description}</span>}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                  {subtasksSaved ? (
+                    <p className="text-sm text-emerald-500">Saved — they&apos;re under each task on the <b>Tasks</b> tab.</p>
+                  ) : (
+                    <Button size="sm" disabled={applying || keptCount === 0} onClick={saveSubtasks}>
+                      {applying ? 'Saving…' : `Save ${keptCount} subtask${keptCount === 1 ? '' : 's'}`}
+                    </Button>
+                  )}
+                </div>
+              )
             )}
 
             {/* General Answer */}

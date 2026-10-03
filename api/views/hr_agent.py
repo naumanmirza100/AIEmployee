@@ -1583,7 +1583,12 @@ def create_hr_workflow(request):
 def execute_hr_workflow(request, workflow_id):
     """Run an HR workflow with the supplied context. Returns 202 + the paused
     snapshot when a `wait` step is hit (the resume task takes over); 200 on
-    immediate completion; 500 on executor error."""
+    immediate completion; 500 on executor error.
+
+    `context.employee_id` runs it for that employee: their details are filled
+    in as an event would (name, work email…). `simulate: true` is the preview
+    the dashboard shows before running — each step says what it would do, and
+    nothing is sent, changed or recorded."""
     try:
         company = request.user.company
         user = _hr_get_or_create_user_for_company_user(request.user)
@@ -1593,18 +1598,30 @@ def execute_hr_workflow(request, workflow_id):
                             status=status.HTTP_404_NOT_FOUND)
         data = request.data or {}
         context_data = dict(data.get('context') or {})
+        simulate = bool(data.get('simulate'))
+        if context_data.get('employee_id'):
+            emp = Employee.objects.filter(company=company, pk=context_data['employee_id']).first()
+            if emp is None:
+                return Response({'status': 'error', 'message': 'Employee not found'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            from hr_agent.signals import _employee_context
+            context_data = {**_employee_context(emp, event='manual_run'), **context_data}
         # Always seed company_id so HR step handlers can scope inserts (e.g. schedule_meeting).
         context_data.setdefault('company_id', company.id)
+
+        from hr_agent.workflow_engine import execute_workflow as _exec
+        if simulate:
+            success, result_data, err = _exec(w, context_data, user, simulate=True)
+            return Response({'status': 'success',
+                             'data': {'simulated': True, 'ok': success, 'error': err,
+                                      'result_data': result_data}})
 
         exec_obj = HRWorkflowExecution.objects.create(
             workflow=w, workflow_name=w.name, executed_by=user,
             employee_id=context_data.get('employee_id') or None,
             status='in_progress', context_data=context_data,
         )
-
-        from hr_agent.workflow_engine import execute_workflow as _exec
-        success, result_data, err = _exec(w, context_data, user, simulate=bool(data.get('simulate')),
-                                          execution=exec_obj)
+        success, result_data, err = _exec(w, context_data, user, simulate=False, execution=exec_obj)
 
         if result_data and result_data.get('paused'):
             return Response({
@@ -2288,10 +2305,15 @@ def _hr_details_form(*, company, parsed, missing, participant_ids, sched, unknow
     wanted = {'attendees': 'who should attend', 'time': 'when it should be',
               'duration': 'how long it should last'}
     asks = [wanted[m] for m in missing]
-    asked = asks[0] if len(asks) == 1 else ', '.join(asks[:-1]) + ' and ' + asks[-1]
+    if asks:
+        asked = asks[0] if len(asks) == 1 else ', '.join(asks[:-1]) + ' and ' + asks[-1]
+        reply = (f"Before I book this, I need to know {asked}. "
+                 "Fill it in below, check the details, and confirm.")
+    else:
+        reply = ("Here's the meeting as I understood it. Check the details and confirm — "
+                 "nobody is invited until you do.")
     return Response({'status': 'success', 'data': {
-        'reply': (f"Before I book this, I need to know {asked}. "
-                  "Fill it in below, check the details, and confirm."),
+        'reply': reply,
         'meeting': None,
         'parsed': parsed,
         'action': 'needs_input',
@@ -3737,7 +3759,10 @@ def hr_meeting_schedule(request):
                 # Named someone who can't be invited (no login): the form
                 # says so and lets the user choose again, rather than refuse.
                 unreachable = _hr_invitable(company, validated_ids)[1]
-            if missing or unreachable:
+            # A request typed in the chat is always reviewed before anyone is
+            # invited, even one that said everything; only the confirmed form
+            # (`picked`) books.
+            if picked is None or missing or unreachable:
                 return _hr_details_form(
                     company=company, parsed=parsed, missing=missing,
                     participant_ids=sorted(validated_ids), sched=sched,
@@ -3799,7 +3824,10 @@ def hr_meeting_schedule(request):
 
             # Build a strong success reply so the frontend never has to guess.
             names_display = ', '.join(e.full_name for e in all_matched_emps) or 'the participants'
-            time_display = sched.strftime('%A, %B %d, %Y at %I:%M %p')
+            # On the organiser's clock, saying which zone: a time confirmed from
+            # the form is UTC, and used to be shown as its UTC digits.
+            from core.scheduling.conflicts import when_label
+            time_display = when_label(sched, tz_name)
             override_reply = (
                 f"**Meeting Scheduled Successfully!**\n\n"
                 f"**Title:** {m.title}\n"

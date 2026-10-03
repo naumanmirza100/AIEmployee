@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import {
   DndContext,
   DragOverlay,
@@ -68,7 +69,7 @@ function StatusBadge({ status }) {
   };
   return (
     <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded text-white ${map[status] || 'bg-gray-500/80'}`}>
-      {status}
+      {labelOf(status)}
     </span>
   );
 }
@@ -300,7 +301,7 @@ function KanbanCard({ interview, isDragOverlay, onStatusChange, onOutcomeChange,
           {interview.outcome && <OutcomeBadge outcome={interview.outcome} />}
           {interview.interview_type && (
             <span className="text-[10px] px-1.5 py-0.5 rounded border border-white/10 text-white/40">
-              {interview.interview_type}
+              {labelOf(interview.interview_type)}
             </span>
           )}
         </div>

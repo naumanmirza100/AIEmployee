@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -253,7 +254,7 @@ const ManualTaskCreation = ({ onTaskCreated, onSuccess, defaultProjectId }) => {
                 <SelectContent>
                   {projects.map(project => (
                     <SelectItem key={project.id} value={project.id.toString()}>
-                      {project.name} ({project.status})
+                      {project.name} ({labelOf(project.status)})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -367,7 +368,7 @@ const ManualTaskCreation = ({ onTaskCreated, onSuccess, defaultProjectId }) => {
                   <SelectItem value="none">Unassigned</SelectItem>
                   {users.map(user => (
                     <SelectItem key={user.id} value={user.id.toString()}>
-                      {user.name || user.username} {user.role ? `(${user.role})` : ''}
+                      {user.name || user.username} {user.role ? `(${labelOf(user.role)})` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>

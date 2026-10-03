@@ -63,6 +63,9 @@ def check_and_send_followup_emails():
                 if interview.is_job_schedule_expired():
                     logger.info(f"Skipping follow-up for interview #{interview.id} - job schedule date range expired")
                     continue
+                # The recruiter turned automatic follow-ups off.
+                if not interview.sends_followups():
+                    continue
 
                 # Skip if interview is in the past
                 if interview.scheduled_datetime and interview.scheduled_datetime < now:
@@ -121,6 +124,9 @@ def check_and_send_followup_emails():
                 # Skip if job's scheduling date range has expired
                 if interview.is_job_schedule_expired():
                     logger.info(f"Skipping reminder for interview #{interview.id} - job schedule date range expired")
+                    continue
+                # The recruiter turned automatic reminders off.
+                if not interview.sends_reminders():
                     continue
 
                 # Get recruiter settings for reminder timing

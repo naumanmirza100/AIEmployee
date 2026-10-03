@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Send, MessageSquare, Plus, MessageCircle, Trash2, Search, BarChart2, Save, LayoutDashboard, Maximize2, Check, History, ChevronsLeft, ChevronsRight, Bot, Sparkles, Activity, Users, TrendingUp } from 'lucide-react';
 import { recruitmentQAStream, listQAChats, createQAChat, updateQAChat, deleteQAChat, generateGraph, savePrompt, getSavedPrompts, isPromptOnDashboard } from '@/services/recruitmentAgentService';
-import { renderChart } from './ChartRenderer';
+import { renderChart } from '@/components/common/ChartRenderer';
 
 // ...existing code...
 

@@ -224,6 +224,19 @@ class InterviewSchedulingTests(TestCase):
         block = CalendarBlock.objects.get(source='recruitment', user=self.rae)
         self.assertEqual(block.starts_at, self.at(11))
 
+    def test_a_new_meeting_link_can_be_resent_to_the_candidate(self, reschedule_email, confirmation_email, _meet):
+        # It called a function that isn't defined there; the NameError was
+        # caught and logged, so the email never went.
+        from api.views.recruitment_agent import update_interview
+        self.book()
+        confirmation_email.reset_mock()
+        code, body = self.call(update_interview, 'patch', {'meeting_link': 'https://meet.example/new',
+                                                           'resend_confirmation': True},
+                               interview_id=self.interview.id)
+        self.assertEqual(code, 200, body)
+        confirmation_email.assert_called_once()
+        self.assertEqual(confirmation_email.call_args.args[0].meeting_link, 'https://meet.example/new')
+
     def test_interviewers_must_be_colleagues(self, *_):
         from api.views.recruitment_agent import update_interview
         outsider = employee_login(Company.objects.create(name='Other', email='o@test.local'),

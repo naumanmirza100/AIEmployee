@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -647,7 +648,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                                       }
                                       className="text-[10px] px-1.5 py-0 h-5"
                                     >
-                                      {task.priority}
+                                      {labelOf(task.priority)}
                                     </Badge>
                                   </div>
                                   
@@ -657,7 +658,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                                       Status:
                                     </span>
                                     <span className="text-xs text-muted-foreground capitalize">
-                                      {task.status}
+                                      {labelOf(task.status)}
                                     </span>
                                   </div>
                                 </div>
@@ -919,7 +920,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                                     className="text-white border-0"
                                     style={{ backgroundColor: badgeColor }}
                                   >
-                                    {task.status}
+                                    {labelOf(task.status)}
                                   </Badge>
                                 );
                               })()}
@@ -1053,7 +1054,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                               <div className="w-48 flex-shrink-0">
                                 <p className="font-medium text-sm">{task.title}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  {task.assignee || 'Unassigned'} • {task.priority}
+                                  {task.assignee || 'Unassigned'} • {labelOf(task.priority)}
                                 </p>
                               </div>
                               <div className="flex-1 relative">
@@ -1082,7 +1083,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                                   task.status === 'blocked' ? 'destructive' :
                                   'secondary'
                                 }>
-                                  {task.status}
+                                  {labelOf(task.status)}
                                 </Badge>
                               </div>
                             </div>
@@ -1093,7 +1094,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                                 <p className="text-xs font-medium text-muted-foreground">Status Changes:</p>
                                 {task.status_changes.slice(0, 3).map((change, changeIdx) => (
                                   <div key={changeIdx} className="text-xs text-muted-foreground">
-                                    {change.from_status || 'Created'} → {change.to_status} on {new Date(change.changed_at).toLocaleString()}
+                                    {change.from_status ? labelOf(change.from_status) : 'Created'} → {labelOf(change.to_status)} on {new Date(change.changed_at).toLocaleString()}
                                     {change.changed_by && ` by ${change.changed_by}`}
                                   </div>
                                 ))}
@@ -1274,7 +1275,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                           suggestion.priority === 'medium' ? 'default' :
                           'secondary'
                         }>
-                          {suggestion.priority || 'medium'}
+                          {labelOf(suggestion.priority || 'medium')}
                         </Badge>
                       </div>
                     </div>
@@ -1433,7 +1434,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                         <div>
                           <span className="text-muted-foreground">Confidence Level: </span>
                           <Badge variant={result.data.recommendations.confidence_level === 'high' ? 'default' : result.data.recommendations.confidence_level === 'medium' ? 'secondary' : 'outline'}>
-                            {result.data.recommendations.confidence_level || 'medium'}
+                            {labelOf(result.data.recommendations.confidence_level || 'medium')}
                           </Badge>
                         </div>
                         {result.data.recommendations.key_risks && result.data.recommendations.key_risks.length > 0 && (
@@ -1505,7 +1506,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                                     <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                                       {task.priority && (
                                         <Badge variant="outline" className="text-xs capitalize">
-                                          {task.priority}
+                                          {labelOf(task.priority)}
                                         </Badge>
                                       )}
                                       {task.due_date && (

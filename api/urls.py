@@ -50,6 +50,7 @@ from api.views.health import health_check, ping
 from api.views import public_jobs
 from api.views import my_work
 from api.views import notification_settings
+from api.views import quick_chats
 
 app_name = 'api'
 
@@ -245,7 +246,9 @@ urlpatterns = [
     re_path(r'^project-manager/ai/project-pilot/confirm/?$', pm_agent.project_pilot_confirm, name='pm_project_pilot_confirm'),
     re_path(r'^project-manager/ai/project-pilot/jobs/(?P<job_id>\d+)/status/?$', pm_agent.project_pilot_job_status, name='pm_project_pilot_job_status'),
     re_path(r'^project-manager/ai/task-prioritization/?$', pm_agent.task_prioritization, name='pm_task_prioritization'),
+    re_path(r'^project-manager/ai/task-prioritization/apply/?$', pm_agent.apply_task_priorities, name='pm_apply_task_priorities'),  # POST: the ticked suggestions
     re_path(r'^project-manager/ai/generate-subtasks/?$', pm_agent.generate_subtasks, name='pm_generate_subtasks'),
+    re_path(r'^project-manager/ai/generate-subtasks/save/?$', pm_agent.save_generated_subtasks, name='pm_save_generated_subtasks'),  # POST: the kept proposals
     re_path(r'^project-manager/ai/timeline-gantt/?$', pm_agent.timeline_gantt, name='pm_timeline_gantt'),
     re_path(r'^project-manager/ai/knowledge-qa/?$', pm_agent.knowledge_qa, name='pm_knowledge_qa'),
     re_path(r'^project-manager/ai/knowledge-qa/stream/?$', pm_agent.knowledge_qa_stream, name='pm_knowledge_qa_stream'),  # POST (streaming)
@@ -291,6 +294,10 @@ urlpatterns = [
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
     re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
             name='company_notification_settings'),  # GET/PATCH
+    # Floating Quick Chat history (PM, HR, Frontline), on the server (api/views/quick_chats.py).
+    re_path(r'^quick-chats/?$', quick_chats.list_quick_chats, name='quick_chats_list'),  # GET
+    re_path(r'^quick-chats/(?P<client_id>[A-Za-z0-9_-]{1,64})/?$', quick_chats.quick_chat,
+            name='quick_chat'),  # PUT/POST/DELETE
     re_path(r'^project-manager/ai/notifications/read/?$', pm_agent.mark_notifications_read, name='pm_mark_notifications_read'),
     re_path(r'^project-manager/ai/team-performance/?$', pm_agent.team_performance, name='pm_team_performance'),
     re_path(r'^project-manager/ai/time-estimation/?$', pm_agent.time_estimation, name='pm_time_estimation'),

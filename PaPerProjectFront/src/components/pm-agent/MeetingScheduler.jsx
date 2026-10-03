@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { labelOf } from '@/utils/labels';
 import MeetingDraftForm from '@/components/common/MeetingDraftForm';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,7 +37,7 @@ const STATUS_CONFIG = {
   pending: { color: 'text-amber-400', bg: 'bg-amber-500/20', icon: Clock, label: 'Pending' },
   accepted: { color: 'text-emerald-400', bg: 'bg-emerald-500/20', icon: CheckCircle, label: 'Accepted' },
   rejected: { color: 'text-red-400', bg: 'bg-red-500/20', icon: XCircle, label: 'Rejected' },
-  counter_proposed: { color: 'text-violet-400', bg: 'bg-violet-500/20', icon: ArrowRightLeft, label: 'Counter Proposed' },
+  counter_proposed: { color: 'text-violet-400', bg: 'bg-violet-500/20', icon: ArrowRightLeft, label: 'New Time Proposed' },
   withdrawn: { color: 'text-white/55', bg: 'bg-white/[0.05]', icon: Trash2, label: 'Withdrawn' },
 };
 
@@ -182,6 +183,7 @@ export default function MeetingScheduler() {
           missing: data.missing || [],
           options: data.options || null,
           note: data.note || null,
+          reschedule: data.reschedule || null,
         },
       };
 
@@ -194,7 +196,7 @@ export default function MeetingScheduler() {
 
       await addMessagePairToChat(userMsg, assistantMsg, msg);
 
-      if (data.action === 'scheduled' && data.meeting) {
+      if ((data.action === 'scheduled' || data.action === 'rescheduled') && data.meeting) {
         fetchMeetings();
       }
     } catch (err) {
@@ -543,6 +545,16 @@ export default function MeetingScheduler() {
                                 }}
                               />
                             )}
+                            {msg.responseData?.reschedule && i === currentMessages.length - 1 && (
+                              <RescheduleReview
+                                move={msg.responseData.reschedule}
+                                busy={loading}
+                                onConfirm={(move) => handleSend(
+                                  `Move it: "${move.title}" to ${prettyWhen(move.new_time)}.`,
+                                  { confirm_reschedule: { meeting_id: move.meeting_id, new_time: move.new_time } },
+                                )}
+                              />
+                            )}
                             {msg.responseData?.needsTime && i === currentMessages.length - 1 && (
                               <NeedsTimePicker
                                 pendingIntent={msg.responseData.pendingIntent}
@@ -701,7 +713,7 @@ export default function MeetingScheduler() {
                             const psc = STATUS_CONFIG[p.status] || STATUS_CONFIG.pending;
                             return (
                               <span key={pi} className={`text-[10px] px-2 py-0.5 rounded-full border ${psc.bg} ${psc.color} border-white/10`}>
-                                {p.name}: {p.status}
+                                {p.name}: {STATUS_CONFIG[p.status]?.label || labelOf(p.status)}
                               </span>
                             );
                           })}
@@ -728,7 +740,7 @@ export default function MeetingScheduler() {
                             <div key={ri} className="text-xs text-white/55 flex items-center gap-2">
                               <span className="font-medium text-white/65">{r.responder_name}</span>
                               <span className={`px-1.5 py-0.5 rounded text-[10px] ${STATUS_CONFIG[r.action]?.bg || 'bg-white/[0.05]'} ${STATUS_CONFIG[r.action]?.color || 'text-white/55'}`}>
-                                {r.action}
+                                {STATUS_CONFIG[r.action]?.label || labelOf(r.action)}
                               </span>
                               {r.proposed_time && <span>→ {new Date(r.proposed_time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
                               {r.reason && <span className="italic">"{r.reason}"</span>}
@@ -813,6 +825,35 @@ export default function MeetingScheduler() {
 // backend responds with `needs_time`. On confirm we synthesise a message
 // that includes the participants + duration so the LLM doesn't have to
 // remember the previous turn.
+const prettyWhen = (iso) => (iso ? new Date(iso).toLocaleString(undefined, {
+  weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+}) : '—');
+
+/** Moving a meeting emails everyone invited, so the move is shown first:
+ *  which meeting, from when to when, who is told. */
+function RescheduleReview({ move, busy, onConfirm }) {
+  return (
+    <div className="mt-3 rounded-xl border border-border bg-card p-4 space-y-3 text-left">
+      <p className="text-sm font-semibold text-foreground">Move this meeting?</p>
+      <div className="rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground space-y-1">
+        <p className="font-medium">{move.title}</p>
+        <p className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+          <span className="line-through">{prettyWhen(move.old_time)}</span>
+          <span>→</span>
+          <span className="font-medium text-foreground">{prettyWhen(move.new_time)}</span>
+          <span>· {move.duration_minutes} min</span>
+        </p>
+        {move.participants?.length > 0 && (
+          <p className="text-xs text-muted-foreground">Emailed: {move.participants.join(', ')}</p>
+        )}
+      </div>
+      <Button size="sm" disabled={busy} onClick={() => onConfirm(move)}>
+        {busy ? 'Moving…' : 'Confirm and move'}
+      </Button>
+    </div>
+  );
+}
+
 function NeedsTimePicker({ pendingIntent, disabled, onConfirm }) {
   const [datetime, setDatetime] = useState(() => {
     // Default to 09:00 tomorrow — the start of the working day, and the first

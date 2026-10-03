@@ -23,7 +23,7 @@ import {
   toggleDashboardPrompt,
   isPromptOnDashboard,
 } from '@/services/recruitmentAgentService';
-import { renderChart } from './ChartRenderer';
+import { renderChart } from '@/components/common/ChartRenderer';
 
 const SavedPrompts = () => {
   const { toast } = useToast();

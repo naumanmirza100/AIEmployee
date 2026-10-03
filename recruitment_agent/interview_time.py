@@ -19,26 +19,31 @@ from datetime import datetime
 from django.utils import timezone
 
 from core.scheduling import zone_name as _valid_zone
-from core.scheduling.conflicts import clock_label, zone_info
+from core.scheduling.conflicts import when_label, zone_caption, zone_info  # noqa: F401 (zone_caption is used from here)
 
 
 def settings_for(interview):
-    """The recruiter's interview settings that apply to `interview`: the job's
-    own, else the recruiter's defaults (company login first, then the legacy
-    auth-user recruiter)."""
+    """The interview settings that apply to `interview`: the job's own, whoever
+    set them up; else the defaults of the recruiter running it (company login
+    first, then the legacy auth-user recruiter), then of the job's owner."""
     from recruitment_agent.models import RecruiterInterviewSettings
+    from recruitment_agent.sharing import job_interview_settings
 
     job = (interview.cv_record.job_description
            if interview.cv_record_id and interview.cv_record and interview.cv_record.job_description_id
            else None)
+    found = job_interview_settings(job)
+    if found:
+        return found
     owners = []
     if interview.company_user_id:
         owners.append({'company_user_id': interview.company_user_id})
     if interview.recruiter_id:
         owners.append({'recruiter_id': interview.recruiter_id})
+    if job is not None and job.company_user_id:
+        owners.append({'company_user_id': job.company_user_id})
     for owner in owners:
-        qs = RecruiterInterviewSettings.objects.filter(**owner)
-        found = (qs.filter(job=job).first() if job else None) or qs.filter(job__isnull=True).first()
+        found = RecruiterInterviewSettings.objects.filter(job__isnull=True, **owner).first()
         if found:
             return found
     return None
@@ -106,19 +111,9 @@ def slot_key(dt, tz_name) -> str:
     return f"{local(dt, tz_name):%Y-%m-%dT%H:%M}"
 
 
-def zone_caption(tz_name, at=None) -> str:
-    """'Asia/Karachi (UTC+05:00)'. The offset is the one in force at `at`."""
-    moment = local(at or timezone.now(), tz_name)
-    offset = moment.strftime('%z')
-    offset = f"UTC{offset[:3]}:{offset[3:]}" if offset else 'UTC'
-    return tz_name if tz_name == 'UTC' else f"{tz_name} ({offset})"
-
-
 def label(dt, tz_name) -> str:
     """'Monday, October 06, 2026 at 10:00 AM (Asia/Karachi, UTC+05:00)'."""
-    moment = local(dt, tz_name)
-    zone = zone_caption(tz_name, dt).replace(' (', ', ').rstrip(')')
-    return f"{moment:%A, %B %d, %Y} at {clock_label(moment)} ({zone})"
+    return when_label(dt, tz_name)
 
 
 def remember_timezone(company_user, raw) -> None:

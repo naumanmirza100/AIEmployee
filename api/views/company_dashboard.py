@@ -41,31 +41,11 @@ logger = logging.getLogger(__name__)
 @permission_classes([IsCompanyUserOnly])
 def project_manager_dashboard(request):
     """
-    Get project manager dashboard data - Only accessible to company users with project_manager role
+    Project Manager dashboard data, for any active login of a company that has
+    the agent (see the note on access at the top of api/views/pm_agent.py).
     """
     try:
         company_user = request.user
-        
-        # Check if user can access project manager features (project_manager or company_user role)
-        if not hasattr(company_user, 'can_access_project_manager_features'):
-            logger.error(f"CompanyUser {company_user.id} does not have can_access_project_manager_features method")
-            return Response(
-                {
-                    'status': 'error',
-                    'message': 'Invalid user type. Please contact support.'
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
-        if not company_user.can_access_project_manager_features():
-            return Response(
-                {
-                    'status': 'error',
-                    'message': 'Access denied. Project manager or company user role required.'
-                },
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         company = company_user.company
         if not company:
             logger.error(f"CompanyUser {company_user.id} does not have an associated company")

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { labelOf } from '@/utils/labels';
 import { useSearchParams } from 'react-router-dom';
 import { format, startOfDay } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -131,7 +132,7 @@ const Interviews = ({ onUpdate }) => {
       PENDING: 'bg-yellow-500', SCHEDULED: 'bg-green-500', COMPLETED: 'bg-blue-500',
       CANCELLED: 'bg-red-500', RESCHEDULED: 'bg-purple-500',
     };
-    return <Badge className={variants[status] || 'bg-gray-500'}>{status}</Badge>;
+    return <Badge className={variants[status] || 'bg-gray-500'}>{labelOf(status)}</Badge>;
   };
 
   const getOutcomeBadge = (outcome) => {
@@ -480,6 +481,12 @@ const Interviews = ({ onUpdate }) => {
                       <Briefcase className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
                       <CardDescription className="text-xs sm:text-sm truncate">
                         {interview.job_title || interview.job_role}
+                        {/* The company shares interviews: say whose this is. */}
+                        {interview.recruiter && (
+                          <span data-testid={`REC-interviews-recruiter-${interview.id}`}>
+                            {' · '}Run by {interview.recruiter.is_you ? 'you' : interview.recruiter.name}
+                          </span>
+                        )}
                       </CardDescription>
                     </div>
                   </div>
@@ -504,7 +511,7 @@ const Interviews = ({ onUpdate }) => {
                         <span className="text-muted-foreground">{interview.candidate_phone}</span>
                       </div>
                     )}
-                    <Badge variant="outline" className="text-[10px] sm:text-xs">{interview.interview_type}</Badge>
+                    <Badge variant="outline" className="text-[10px] sm:text-xs">{labelOf(interview.interview_type)}</Badge>
                   </div>
 
                   {interview.scheduled_datetime && (

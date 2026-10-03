@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -254,13 +255,13 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const getDecisionBadge = (decision) => {
     switch (decision) {
       case 'INTERVIEW':
-        return <Badge className="bg-green-500">INTERVIEW</Badge>;
+        return <Badge className="bg-green-500">Interview</Badge>;
       case 'HOLD':
-        return <Badge className="bg-yellow-500">HOLD</Badge>;
+        return <Badge className="bg-yellow-500">Hold</Badge>;
       case 'REJECT':
-        return <Badge className="bg-red-500">REJECT</Badge>;
+        return <Badge className="bg-red-500">Reject</Badge>;
       default:
-        return <Badge variant="outline">{decision || 'N/A'}</Badge>;
+        return <Badge variant="outline">{labelOf(decision) || 'N/A'}</Badge>;
     }
   };
 
@@ -541,7 +542,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                             {getDecisionBadge(qualified.decision)}
                             {qualified.priority && (
                               <Badge variant="outline" className="text-[10px] sm:text-xs">
-                                {qualified.priority}
+                                {labelOf(qualified.priority)} priority
                               </Badge>
                             )}
                           </div>

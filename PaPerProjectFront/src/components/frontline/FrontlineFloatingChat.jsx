@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { QuickChatHistoryList, SlashCommandMenu, relativeTime } from '@/components/common/QuickChatParts';
 import { createPortal } from 'react-dom';
 import {
   MessageCircle,
@@ -21,12 +22,8 @@ import InfoHint, { useHints } from './InfoHint';
 import FrontlineTutorial, { resetTutorial } from './FrontlineTutorial';
 import { useTutorialNudge } from './tourUtils';
 import { FLOATING_CHAT_TOUR, HINTS } from './frontlineTutorialSteps';
-import {
-  listChatHistory,
-  saveChatConversation,
-  deleteChatConversation,
-  listRecentlyViewed,
-} from './frontlineLocalStore';
+import { listRecentlyViewed } from './frontlineLocalStore';
+import useQuickChatHistory from '@/hooks/useQuickChatHistory';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import { useToast } from '@/components/ui/use-toast';
 import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle, ElapsedTimer } from './chatShellUtils';
@@ -110,8 +107,9 @@ const FrontlineFloatingChat = () => {
   // Tour state
   const [tourOpen, setTourOpen] = useState(false);
 
-  // Reactive stores (re-read from localStorage when we need to show them)
-  const [history, setHistory] = useState(() => listChatHistory());
+  // History, kept on the server (see useQuickChatHistory)
+  const { history, refresh: refreshHistory, save: saveConversation, remove: removeConversation } =
+    useQuickChatHistory('frontline');
   // Draggable + resizable geometry, persisted per storage key.
   const { containerStyle: geomStyle, dragHandleProps, resizeHandleProps } = useDraggableResizable('frontline_fc');
   const [recents, setRecents] = useState(() => listRecentlyViewed());
@@ -120,7 +118,6 @@ const FrontlineFloatingChat = () => {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const refreshHistory = () => setHistory(listChatHistory());
   const refreshRecents = () => setRecents(listRecentlyViewed());
 
   // Refresh stores whenever the chat opens (someone else may have viewed a
@@ -137,13 +134,7 @@ const FrontlineFloatingChat = () => {
     if (!messages.length) return;
     const firstUser = messages.find((m) => m.role === 'user');
     const title = (firstUser?.content || 'Untitled').slice(0, 60);
-    saveChatConversation({
-      id: conversationId,
-      title,
-      messages,
-      updated_at: Date.now(),
-    });
-    refreshHistory();
+    saveConversation({ id: conversationId, title, messages });
   }, [messages, conversationId]);
 
   // Global Ctrl/Cmd+K shortcut to open the chat from anywhere in the dashboard.
@@ -191,10 +182,9 @@ const FrontlineFloatingChat = () => {
   const clearCurrentConversation = () => {
     // UX-13: don't wipe the current conversation without a confirm.
     if (!window.confirm('Clear this conversation? This cannot be undone.')) return;
-    deleteChatConversation(conversationId);
+    removeConversation(conversationId);
     setMessages([]);
     setInput('');
-    refreshHistory();
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
@@ -208,8 +198,7 @@ const FrontlineFloatingChat = () => {
   const removeHistoryEntry = (id) => {
     // UX-13: same guard on individual history entries.
     if (!window.confirm('Delete this conversation from history?')) return;
-    deleteChatConversation(id);
-    refreshHistory();
+    removeConversation(id);
   };
 
   // ----- Slash-command handling -------------------------------------------
@@ -281,9 +270,12 @@ const FrontlineFloatingChat = () => {
         if (res && res.status === 'success' && res.data) {
           const t = res.data;
           const ticketId = t.id || t.ticket_id;
+          // The ticket stays open; a knowledge-base answer is only suggested.
           pushMessage({
             role: 'assistant',
-            content: `Ticket #${ticketId} created${t.auto_resolved ? ' and auto-resolved by AI.' : '.'}${t.response ? '\n\n' + t.response : ''}`,
+            content: t.suggested_resolution
+              ? `Ticket #${ticketId} created and left open. The knowledge base suggests:\n\n${t.suggested_resolution}\n\nIt's saved as a note on the ticket; resolve it from Tickets if it's right.`
+              : `Ticket #${ticketId} created.`,
             system: true,
           });
           toast({ title: 'Ticket created', description: `#${ticketId}: ${title}` });
@@ -531,15 +523,6 @@ const FrontlineFloatingChat = () => {
 
   // ----- Render helpers ---------------------------------------------------
 
-  const relativeTime = (ts) => {
-    if (!ts) return '';
-    const diff = (Date.now() - ts) / 1000;
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return `${Math.floor(diff / 86400)}d ago`;
-  };
-
   return (
     <>
       {/* Floating launcher — visible only when the chat is closed */}
@@ -648,36 +631,8 @@ const FrontlineFloatingChat = () => {
 
           {/* Body: either the chat area or the history sidebar */}
           {showHistory ? (
-            <div className="flex-1 overflow-y-auto p-3 space-y-1.5" style={{ background: 'var(--panel-3)' }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Recent conversations</p>
-                <span className="text-[10px] text-white/40">{history.length} saved</span>
-              </div>
-              {history.length === 0 ? (
-                <p className="text-sm text-white/50 text-center py-8">No saved conversations yet.</p>
-              ) : (
-                history.map((h) => (
-                  <div key={h.id}
-                    className={`group flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition
-                      ${h.id === conversationId ? 'bg-amber-400/10 border border-amber-400/30' : 'hover:bg-white/[0.04] border border-transparent'}`}
-                    onClick={() => openHistoryEntry(h)}
-                  >
-                    <MessageCircle className="h-3.5 w-3.5 shrink-0 text-white/40" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-white/85 truncate">{h.title}</div>
-                      <div className="text-[10px] text-white/40">
-                        {relativeTime(h.updated_at)} · {(h.messages || []).length} messages
-                      </div>
-                    </div>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); removeHistoryEntry(h.id); }}
-                      title="Delete this conversation" aria-label="Delete this conversation"
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded text-white/40 hover:text-rose-400 hover:bg-white/[0.06] transition">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
+            <QuickChatHistoryList history={history} currentId={conversationId}
+              accent="amber" onOpen={openHistoryEntry} onRemove={removeHistoryEntry} />
           ) : (
             <div data-tour-fc="messages" className="flex-1 overflow-y-auto p-3 space-y-2.5" style={{ background: 'var(--panel-3)' }}>
               {messages.length === 0 ? (
@@ -882,31 +837,8 @@ const FrontlineFloatingChat = () => {
               )}
               {/* Slash-command menu */}
               {slashOpen && filteredCommands.length > 0 && (
-                <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[var(--line-2)] bg-[var(--panel-4)] shadow-2xl overflow-hidden">
-                  <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-white/40 font-semibold">
-                    Commands · ↑↓ Tab/Enter to insert
-                  </div>
-                  <div className="max-h-48 overflow-y-auto">
-                    {filteredCommands.map((c, i) => {
-                      const Icon = c.icon;
-                      return (
-                        <button key={c.key} type="button" onMouseDown={(e) => { e.preventDefault(); applyCommand(c); }}
-                          onMouseEnter={() => setSlashActive(i)}
-                          className={`w-full flex items-start gap-2 px-3 py-2 text-left transition
-                            ${i === slashActive ? 'bg-amber-400/10' : 'hover:bg-white/[0.03]'}`}>
-                          <Icon className="h-4 w-4 shrink-0 text-amber-300 mt-0.5" />
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-white">
-                              {c.label}
-                              <span className="text-white/40 font-normal ml-1">{c.hint}</span>
-                            </div>
-                            <div className="text-[11px] text-white/60 mt-0.5">{c.description}</div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <SlashCommandMenu commands={filteredCommands} active={slashActive} accent="amber"
+                  onPick={applyCommand} onHover={setSlashActive} />
               )}
 
               <div className="p-2.5 flex gap-2 items-end">

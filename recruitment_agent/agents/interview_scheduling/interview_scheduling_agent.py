@@ -716,11 +716,12 @@ class InterviewSchedulingAgent:
                 status__in=['SCHEDULED', 'CONFIRMED'],
                 scheduled_datetime=selected_datetime,
             ).exclude(id=interview_id)
-            # Same job: only interviews for this job can block the slot
+            # Same job: only interviews for this job can block the slot, whichever
+            # colleague invited them (the job's slots are shared)
             if interview.cv_record and interview.cv_record.job_description_id:
                 existing_q = existing_q.filter(cv_record__job_description_id=interview.cv_record.job_description_id)
-            # Same org (company_user or recruiter)
-            if interview.company_user_id:
+            # No job: the same recruiter's (company_user or recruiter)
+            elif interview.company_user_id:
                 existing_q = existing_q.filter(company_user_id=interview.company_user_id)
             else:
                 existing_q = existing_q.filter(recruiter=recruiter)
@@ -981,7 +982,7 @@ class InterviewSchedulingAgent:
         ).exclude(id=interview_id)
         if interview.cv_record and interview.cv_record.job_description_id:
             existing_q = existing_q.filter(cv_record__job_description_id=interview.cv_record.job_description_id)
-        if interview.company_user_id:
+        elif interview.company_user_id:
             existing_q = existing_q.filter(company_user_id=interview.company_user_id)
         else:
             existing_q = existing_q.filter(recruiter=interview.recruiter)

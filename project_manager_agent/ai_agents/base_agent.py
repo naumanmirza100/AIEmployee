@@ -34,9 +34,10 @@ def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -
     return Decimal(str(round(cost, 6)))
 
 
-def _record_llm_usage(*, company_id, agent_name, model, usage_dict, duration_ms, success):
+def _record_llm_usage(*, company_id, agent_name, model, usage_dict, duration_ms, success, agent=None):
     """Persist a single LLM call row. Silent no-op if company_id is missing or the
-    write fails — cost tracking must never break the request."""
+    write fails — cost tracking must never break the request. `agent` is the
+    agent the call is for ('hr_agent', ...); `agent_name` the class making it."""
     if not company_id:
         return
     try:
@@ -48,6 +49,7 @@ def _record_llm_usage(*, company_id, agent_name, model, usage_dict, duration_ms,
         from Frontline_agent.models import LLMUsage
         LLMUsage.objects.create(
             company_id=company_id,
+            agent=agent or '',
             agent_name=agent_name or 'unknown',
             model=model or 'unknown',
             prompt_tokens=prompt_tokens,
@@ -85,8 +87,9 @@ def _estimate_usage(messages, text):
 
 class BaseAgent:
     """
-    Base class for all AI agents in the Project Manager system.
-    Provides common functionality like Groq API integration and logging.
+    The one way PM, HR, Frontline and Recruitment call the AI: the company's
+    key (Groq or OpenAI) from the key service, quota counted, every call
+    logged in LLMUsage. Recruitment uses it through recruitment_agent.core.
     """
     
     def __init__(self, model=None):
@@ -151,15 +154,16 @@ class BaseAgent:
             return OpenAI(api_key=ctx.api_key), ctx
         raise ValueError(f"Unsupported provider '{ctx.provider}' configured for company key")
 
-    def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=1024):
+    def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=1024, json_mode=False):
         """
-        Make a call to the Groq LLM API.
+        Make a call to the company's LLM (Groq or OpenAI).
 
         Args:
             prompt (str): User prompt/question
             system_prompt (str): System prompt for context
             temperature (float): Sampling temperature (0-1)
             max_tokens (int): Maximum tokens in response
+            json_mode (bool): Ask for a JSON object (the prompt must say JSON)
 
         Returns:
             str: LLM response text
@@ -181,6 +185,7 @@ class BaseAgent:
                 "agent instance before making LLM calls. Keys are never read from environment variables."
             )
         effective_model = effective_model  # already set above
+        extra = {'response_format': {'type': 'json_object'}} if json_mode else {}
         try:
             messages = []
 
@@ -199,7 +204,8 @@ class BaseAgent:
                 model=effective_model,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                **extra,
             )
             
             # Capture token usage information if the client provides it
@@ -238,6 +244,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
+                agent=getattr(self, 'agent_key_name', None),
                 model=effective_model,
                 usage_dict=usage_dict,
                 duration_ms=int((_time.time() - _start) * 1000),
@@ -264,6 +271,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
+                agent=getattr(self, 'agent_key_name', None),
                 model=effective_model,
                 usage_dict=None,
                 duration_ms=int((_time.time() - _start) * 1000),
@@ -280,7 +288,8 @@ class BaseAgent:
                         model=self.fallback_model,
                         messages=messages,
                         temperature=temperature,
-                        max_tokens=max_tokens
+                        max_tokens=max_tokens,
+                        **extra,
                     )
                     # Best-effort usage capture for the fallback call too
                     fb_usage_info = getattr(response, "usage", None)
@@ -297,6 +306,7 @@ class BaseAgent:
                     _record_llm_usage(
                         company_id=getattr(self, 'company_id', None),
                         agent_name=self.agent_name,
+                        agent=getattr(self, 'agent_key_name', None),
                         model=self.fallback_model,
                         usage_dict=fb_usage_dict,
                         duration_ms=int((_time.time() - _fallback_start) * 1000),
@@ -317,6 +327,7 @@ class BaseAgent:
                     _record_llm_usage(
                         company_id=getattr(self, 'company_id', None),
                         agent_name=self.agent_name,
+                        agent=getattr(self, 'agent_key_name', None),
                         model=self.fallback_model,
                         usage_dict=None,
                         duration_ms=int((_time.time() - _fallback_start) * 1000),
@@ -363,6 +374,8 @@ class BaseAgent:
 
         collected = []
         reported = None
+        charged = False
+        stream = None
         extra = {}
         if key_ctx and key_ctx.provider == 'openai':
             # OpenAI only reports usage on a stream when asked; Groq always
@@ -395,6 +408,7 @@ class BaseAgent:
             # every streamed answer (HR and Frontline Q&A) was free.
             usage_dict = reported or _estimate_usage(messages, full_text)
             self.last_llm_usage = usage_dict
+            charged = True
             if key_ctx and usage_dict.get('total_tokens'):
                 try:
                     from core.api_key_service import record_usage
@@ -407,6 +421,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
+                agent=getattr(self, 'agent_key_name', None),
                 model=effective_model,
                 usage_dict=usage_dict,
                 duration_ms=elapsed_ms,
@@ -427,6 +442,7 @@ class BaseAgent:
             _record_llm_usage(
                 company_id=getattr(self, 'company_id', None),
                 agent_name=self.agent_name,
+                agent=getattr(self, 'agent_key_name', None),
                 model=effective_model,
                 usage_dict=None,
                 duration_ms=elapsed_ms,
@@ -435,6 +451,33 @@ class BaseAgent:
             logger.error(f"{self.agent_name} streaming LLM error: {exc}")
             raise_if_auth_error(exc, key_ctx)
             yield {'type': 'error', 'message': str(exc)}
+        finally:
+            close = getattr(stream, 'close', None)
+            if close:
+                try:
+                    close()
+                except Exception:
+                    pass
+            if not charged and collected:
+                # The reader stopped part-way, or the stream broke after some
+                # text: the model still wrote those tokens.
+                usage_dict = reported or _estimate_usage(messages, ''.join(collected))
+                self.last_llm_usage = usage_dict
+                if key_ctx and usage_dict.get('total_tokens'):
+                    try:
+                        from core.api_key_service import record_usage
+                        record_usage(key_ctx, usage_dict['total_tokens'])
+                    except Exception as e:
+                        logger.warning("quota decrement failed on a stopped stream: %s", e)
+                _record_llm_usage(
+                    company_id=getattr(self, 'company_id', None),
+                    agent=getattr(self, 'agent_key_name', None),
+                    agent_name=self.agent_name,
+                    model=effective_model,
+                    usage_dict=usage_dict,
+                    duration_ms=int((_time.time() - _start) * 1000),
+                    success=True,
+                )
 
     def log_action(self, action, details=None):
         """

@@ -646,7 +646,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
             <CardHeader>
               <CardTitle>Email Settings</CardTitle>
               <CardDescription>
-                Configure email timing preferences for follow-ups and reminders
+                Configure email timing preferences for follow-ups and reminders.
+                These are yours: they apply to candidates of the jobs you posted. Jobs a colleague posted use theirs.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -782,6 +783,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
               <CardTitle>Interview Settings</CardTitle>
               <CardDescription>
                 Configure interview scheduling preferences for each job. Each job can have separate time slots and scheduling settings.
+                A job's settings are shared by everyone in your company who works on it.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -1339,7 +1341,8 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
             <CardHeader>
               <CardTitle>Qualification Settings</CardTitle>
               <CardDescription>
-                Configure decision thresholds for candidate qualification (INTERVIEW/HOLD/REJECT)
+                Configure decision thresholds for candidate qualification (INTERVIEW/HOLD/REJECT).
+                These are yours: they screen CVs for the jobs you posted. Jobs a colleague posted use theirs.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">

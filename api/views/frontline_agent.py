@@ -2914,52 +2914,63 @@ def resume_ticket_sla(request, ticket_id):
 def retriage_ticket(request, ticket_id):
     """Re-run classification (category + priority + intent + entities) on a ticket.
 
-    Typically called after the description has been updated. If the LLM suggests
-    a different category/priority, the ticket is updated accordingly.
+    Typically called after the description has been updated. Without `apply`
+    it only proposes: the suggested category and priority come back next to
+    the current ones and nothing is saved — it used to change the ticket
+    straight away. With `apply: true` it saves the proposal it is sent back
+    (`category`, `priority`, `intent`, `entities`), without asking the AI again.
     """
     try:
         ticket, err = _get_company_ticket_or_404(request, ticket_id)
         if err:
             return err
+        valid_categories = {'technical', 'billing', 'account', 'feature_request', 'bug', 'other'}
+        valid_priorities = {'low', 'medium', 'high', 'urgent'}
+        data = request.data if isinstance(request.data, dict) else {}
+        old_category, old_priority = ticket.category, ticket.priority
+
+        if data.get('apply'):
+            updated_fields = ['last_triaged_at', 'updated_at']
+            category = str(data.get('category') or '').lower()
+            priority = str(data.get('priority') or '').lower()
+            if category in valid_categories and category != ticket.category:
+                ticket.category = category
+                updated_fields.append('category')
+            if priority in valid_priorities and priority != ticket.priority:
+                ticket.priority = priority
+                updated_fields.append('priority')
+            if data.get('intent'):
+                ticket.intent = str(data['intent'])[:200]
+                updated_fields.append('intent')
+            if isinstance(data.get('entities'), dict):
+                ticket.entities = data['entities']
+                updated_fields.append('entities')
+            ticket.last_triaged_at = timezone.now()
+            ticket.save(update_fields=list(set(updated_fields)))
+            return Response({'status': 'success', 'data': {
+                'id': ticket.id, 'applied': True,
+                'old_category': old_category, 'new_category': ticket.category,
+                'old_priority': old_priority, 'new_priority': ticket.priority,
+                'intent': ticket.intent, 'entities': ticket.entities,
+                'last_triaged_at': ticket.last_triaged_at.isoformat(),
+            }})
+
         company = request.user.company
         agent = FrontlineAgent(company_id=company.id)
         llm_extraction = agent._extract_ticket_intent(ticket.title, ticket.description) or {}
         classification = agent.ticket_service.classify_ticket(ticket.title, ticket.description)
-
-        old_category, old_priority = ticket.category, ticket.priority
-        updated_fields = ['last_triaged_at', 'updated_at']
-
-        valid_categories = {'technical', 'billing', 'account', 'feature_request', 'bug', 'other'}
-        valid_priorities = {'low', 'medium', 'high', 'urgent'}
-
         suggested_cat = (llm_extraction.get('suggested_category')
                          or classification.get('category') or '').lower()
         suggested_pri = (llm_extraction.get('suggested_priority')
                          or classification.get('priority') or '').lower()
-
-        if suggested_cat in valid_categories and suggested_cat != ticket.category:
-            ticket.category = suggested_cat
-            updated_fields.append('category')
-        if suggested_pri in valid_priorities and suggested_pri != ticket.priority:
-            ticket.priority = suggested_pri
-            updated_fields.append('priority')
-        if llm_extraction.get('intent'):
-            ticket.intent = llm_extraction['intent']
-            updated_fields.append('intent')
-        if llm_extraction.get('entities'):
-            ticket.entities = llm_extraction['entities']
-            updated_fields.append('entities')
-
-        ticket.last_triaged_at = timezone.now()
-        ticket.save(update_fields=list(set(updated_fields)))
-
         return Response({'status': 'success', 'data': {
-            'id': ticket.id,
-            'old_category': old_category, 'new_category': ticket.category,
-            'old_priority': old_priority, 'new_priority': ticket.priority,
-            'intent': ticket.intent,
-            'entities': ticket.entities,
-            'last_triaged_at': ticket.last_triaged_at.isoformat(),
+            'id': ticket.id, 'applied': False,
+            'old_category': old_category,
+            'new_category': suggested_cat if suggested_cat in valid_categories else old_category,
+            'old_priority': old_priority,
+            'new_priority': suggested_pri if suggested_pri in valid_priorities else old_priority,
+            'intent': llm_extraction.get('intent') or ticket.intent,
+            'entities': llm_extraction.get('entities') or ticket.entities,
         }})
     except KeyServiceError:
         raise
@@ -2992,9 +3003,11 @@ def create_ticket(request):
         if not title:
             title = description[:100] if description else 'Support Request'
         
-        # Initialize agent with company_id
+        # Initialize agent with company_id. A ticket staff file here stays open:
+        # a knowledge-base answer comes back as `suggested_resolution` for them
+        # to accept ("Resolve with this answer"), instead of the AI closing it.
         agent = FrontlineAgent(company_id=company.id)
-        result = agent.process_ticket(title, description, user.id)
+        result = agent.process_ticket(title, description, user.id, auto_resolve=False)
         
         if not result.get('success', False):
             return Response(
@@ -3008,6 +3021,13 @@ def create_ticket(request):
             # FrontlineAgent path can never leak an unrelated ticket through.
             ticket = Ticket.objects.filter(id=ticket_id, company=company).first()
             if ticket:
+                if result.get('suggested_resolution'):
+                    # Kept on the ticket, so whoever opens it sees the suggestion.
+                    from Frontline_agent.models import TicketNote
+                    TicketNote.objects.create(
+                        ticket=ticket, author=None, is_internal=True,
+                        body="Suggested answer from the knowledge base (not sent):\n\n"
+                             + result['suggested_resolution'])
                 _run_notification_triggers(company.id, 'ticket_created', ticket)
                 _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
         return Response({
@@ -7231,6 +7251,7 @@ def update_ticket(request, ticket_id):
       - `priority`                     (low/medium/high/urgent)
       - `category`                     (free-form short label)
       - `assigned_to_company_user_id`  (CompanyUser id; null to unassign)
+      - `resolution`                   (text: how it was resolved)
     """
     company = request.user.company
     t = Ticket.objects.filter(id=ticket_id, company=company).first()
@@ -7259,6 +7280,9 @@ def update_ticket(request, ticket_id):
     if 'category' in d and d['category'] is not None:
         t.category = str(d['category']).strip()[:20]
         fields.append('category')
+    if d.get('resolution') is not None:
+        t.resolution = str(d['resolution']).strip()[:5000] or None
+        fields.append('resolution')
     if 'assigned_to_company_user_id' in d:
         cu_id = d.get('assigned_to_company_user_id')
         if cu_id in (None, '', 0):
@@ -7275,7 +7299,7 @@ def update_ticket(request, ticket_id):
 
     if not fields:
         return Response({'status': 'error',
-                         'message': 'Pass at least one of: status, priority, category, assigned_to_company_user_id'},
+                         'message': 'Pass at least one of: status, priority, category, assigned_to_company_user_id, resolution'},
                         status=status.HTTP_400_BAD_REQUEST)
 
     fields.append('updated_at')

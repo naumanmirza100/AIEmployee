@@ -1361,21 +1361,16 @@ def get_available_slots_for_interview(request, token):
     duration = timedelta(minutes=(settings.interview_time_gap if settings else None)
                          or interview.duration_minutes or 30)
 
-    # Taken slots: only interviews for the *same job* and same org (company_user/recruiter)
+    # Taken slots: interviews for the *same job*, whoever invited them (the job's
+    # slots are shared); without a job, the same recruiter's
     now = timezone.now()
     base_q = Interview.objects.filter(
         status__in=['SCHEDULED', 'CONFIRMED'],
         scheduled_datetime__isnull=False
     ).exclude(id=interview.id)
 
-    if job and company_user:
-        scheduled_interviews = base_q.filter(
-            company_user=company_user, cv_record__job_description_id=job.id
-        )
-    elif job and recruiter:
-        scheduled_interviews = base_q.filter(
-            recruiter=recruiter, cv_record__job_description_id=job.id
-        )
+    if job:
+        scheduled_interviews = base_q.filter(cv_record__job_description_id=job.id)
     elif company_user:
         scheduled_interviews = base_q.filter(company_user=company_user)
     elif recruiter:

@@ -378,13 +378,14 @@ def inspect(actions, available_users=None, *, today=None, project=None):
 
 
 def chat_text(actions, answer=None, gaps=None):
-    """The sentence to show above the gap form. `gaps` is `inspect`'s result,
-    which says why the form is showing: missing details, people on leave, or both.
+    """The sentence to show above the review card. `gaps` is `inspect`'s
+    result: missing details, people on leave, or neither — every proposal that
+    changes anything is reviewed now, not only one with gaps.
 
     The agent's `answer` is often not prose at all but the JSON the actions
     were parsed out of. Passed through, it put a screen of raw JSON in the chat
     above the form. Use it only when it reads as a sentence; otherwise say in
-    plain words what is about to be created.
+    plain words what is about to happen.
     """
     on_leave_note = (" Some tasks go to people who are on leave before they're due — "
                      "check them below.") if gaps and gaps.get('leave_warnings') else ''
@@ -392,27 +393,33 @@ def chat_text(actions, answer=None, gaps=None):
     if text and text[0] not in '[{' and '"action"' not in text:
         return text + on_leave_note
 
-    counts = {'create_project': 0, 'create_task': 0}
+    counts = {}
     for action in actions or []:
-        if isinstance(action, dict) and action.get('action') in counts:
-            counts[action['action']] += 1
+        if isinstance(action, dict) and action.get('action'):
+            counts[action['action']] = counts.get(action['action'], 0) + 1
 
-    parts = []
-    for kind, noun in (('create_project', 'project'), ('create_task', 'task')):
-        n = counts[kind]
-        if n:
-            parts.append('%d %s%s' % (n, noun, '' if n == 1 else 's'))
-    what = ' and '.join(parts) or 'this'
-    missing = gaps is None or bool(gaps.get('items'))
+    def plural(n, noun):
+        return '%d %s%s' % (n, noun, '' if n == 1 else 's')
+
+    phrases = []
+    for verb, words in (('create', 'create'), ('update', 'change'), ('delete', 'delete')):
+        nouns = [plural(counts[f'{verb}_{noun}'], noun) for noun in ('project', 'task')
+                 if counts.get(f'{verb}_{noun}')]
+        if nouns:
+            phrases.append('%s %s' % (words, ' and '.join(nouns)))
+    what = ', '.join(phrases) or 'this'
+    missing = bool(gaps and gaps.get('items'))
     on_leave = bool(gaps and gaps.get('leave_warnings'))
-    if on_leave and not missing:
+    if missing:
+        text = ("Here's the plan: %s. A few details are missing — fill in what you "
+                "know below, then confirm." % what)
+        if on_leave:
+            text += " Some tasks also go to people who are on leave before they're due."
+        return text
+    if on_leave:
         return ("Here's the plan: %s. Some tasks go to people who are on leave before "
                 "they're due — check them below, then confirm." % what)
-    text = ("Here's the plan: %s. A few details are missing — fill in what you "
-            "know below, then confirm." % what)
-    if on_leave:
-        text += " Some tasks also go to people who are on leave before they're due."
-    return text
+    return "Here's the plan: %s. Check it below — nothing changes until you confirm." % what
 
 
 def apply_answers(actions, answers):

@@ -12,13 +12,13 @@ from django.shortcuts import get_object_or_404
 
 from recruitment_agent.models import (
     JobDescription, CareerApplication, JobApplication, CVRecord,
-    RecruiterInterviewSettings, RecruiterQualificationSettings, RecruiterEmailSettings,
 )
 from api.serializers.career import JobDescriptionSerializer, CareerApplicationSerializer, JobApplicationSerializer
 from api.permissions import IsCompanyUser, IsCompanyUserOnly
 from api.authentication import CompanyUserTokenAuthentication
 from core.models import CompanyUser, Company, CompanyModulePurchase
 from api.views.recruitment_agent import _make_agents
+from recruitment_agent import sharing
 
 
 def _company_has_recruitment_agent(company):
@@ -142,8 +142,8 @@ def list_company_jobs(request):
         company_user = request.user
         company = company_user.company
         
-        # Filter jobs by company_user - each user only sees their own jobs
-        jobs = JobDescription.objects.filter(company_user=company_user).order_by('-created_at')
+        # The company's jobs, whoever posted them
+        jobs = sharing.jobs(company_user).order_by('-created_at')
         
         # Filter by is_active if provided
         is_active = request.GET.get('is_active')
@@ -175,8 +175,7 @@ def update_company_job(request, id):
         # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
         company_user = request.user
         company = company_user.company
-        # Users can only update their own jobs
-        job = get_object_or_404(JobDescription, id=id, company_user=company_user)
+        job = get_object_or_404(sharing.jobs(company_user), id=id)
         
         # When description is updated, always regenerate keywords
         description_changed = 'description' in request.data
@@ -233,7 +232,7 @@ def get_company_job_applications(request, jobId):
     """Get job applications for a specific job (Company only)"""
     try:
         company_user = request.user
-        job = get_object_or_404(JobDescription, id=jobId, company_user=company_user)
+        job = get_object_or_404(sharing.jobs(company_user), id=jobId)
 
         applications = JobApplication.objects.filter(job=job).order_by('-applied_at')
         serializer = JobApplicationSerializer(applications, many=True, context={'request': request})
@@ -261,9 +260,7 @@ def update_company_application_status(request, id):
         # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
         company_user = request.user
         company = company_user.company
-        # Users can only update applications for their own jobs
-        company_user = request.user
-        application = get_object_or_404(JobApplication, id=id, job__company_user=company_user)
+        application = get_object_or_404(JobApplication, id=id, job__in=sharing.jobs(company_user))
 
         new_status = request.data.get('status')
 
@@ -322,12 +319,10 @@ def process_job_applicants(request, jobId):
                 'module_name': 'recruitment_agent',
             }, status=status.HTTP_403_FORBIDDEN)
 
-        job = get_object_or_404(JobDescription, id=jobId, company_user=company_user)
+        job = get_object_or_404(sharing.jobs(company_user), id=jobId)
 
         # Verify interview settings are complete (same guard as process_cvs)
-        interview_settings = RecruiterInterviewSettings.objects.filter(
-            company_user=company_user, job=job
-        ).first()
+        interview_settings = sharing.job_interview_settings(job)
         missing_fields = []
         if not interview_settings:
             missing_fields.append('Interview settings not configured')
@@ -384,31 +379,15 @@ def process_job_applicants(request, jobId):
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        # Qualification thresholds
-        interview_threshold = None
-        hold_threshold = None
-        try:
-            qual_settings = RecruiterQualificationSettings.objects.filter(company_user=company_user).first()
-            if qual_settings and qual_settings.use_custom_thresholds:
-                interview_threshold = qual_settings.interview_threshold
-                hold_threshold = qual_settings.hold_threshold
-        except Exception as e:
-            logger.warning(f'Error fetching qualification settings: {e}')
+        # The job owner's screening thresholds
+        settings_owner = sharing.owner(job, company_user)
+        interview_threshold, hold_threshold = sharing.thresholds(settings_owner)
 
         # Email / interview defaults
         auto_interview_type = 'ONLINE'
         if interview_settings and getattr(interview_settings, 'default_interview_type', None):
             auto_interview_type = interview_settings.default_interview_type
-        try:
-            email_settings_obj = RecruiterEmailSettings.objects.get(company_user=company_user)
-            email_settings = {
-                'followup_delay_hours': email_settings_obj.followup_delay_hours,
-                'reminder_hours_before': email_settings_obj.reminder_hours_before,
-                'max_followup_emails': email_settings_obj.max_followup_emails,
-                'min_hours_between_followups': email_settings_obj.min_hours_between_followups,
-            }
-        except RecruiterEmailSettings.DoesNotExist:
-            email_settings = None
+        email_settings = sharing.email_settings(settings_owner)
 
         results = []
         for idx, app in enumerate(unprocessed):

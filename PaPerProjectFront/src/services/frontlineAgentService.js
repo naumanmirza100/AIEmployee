@@ -532,6 +532,12 @@ export const resumeTicketSla = async (ticketId) => {
 };
 
 /** Re-run LLM triage on a ticket (e.g. after description update). */
+export const applyRetriage = async (ticketId, { new_category, new_priority, intent, entities }) => companyApi.post(
+  `/frontline/tickets/${ticketId}/retriage`,
+  { apply: true, category: new_category, priority: new_priority, intent, entities },
+);
+
+/** Re-triage proposes only; `applyRetriage` saves the proposal it is given. */
 export const retriageTicket = async (ticketId) => {
   const response = await companyApi.post(`/frontline/tickets/${ticketId}/retriage`, {});
   return response;
@@ -1365,6 +1371,7 @@ export default {
   pauseTicketSla,
   resumeTicketSla,
   retriageTicket,
+  applyRetriage,
   listMeetings,
   createMeeting,
   getMeeting,

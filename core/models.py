@@ -852,21 +852,6 @@ class CompanyUser(models.Model):
         """Check if user is a project manager"""
         return self.role == 'project_manager'
     
-    def can_access_project_manager_features(self):
-        """Any active company user may use the Project Manager agent.
-
-        This used to be ``self.role in ['project_manager', 'company_user']`` —
-        two of the twelve roles in ROLE_CHOICES, and not the ``admin`` the field
-        defaults to. So the first user of a brand new company was refused even
-        with the module bought and paid for.
-
-        Which agents a company may use is decided by its purchases, and
-        ``api.middleware.module_access`` already enforces that for the
-        ``project-manager`` prefix. No other agent gates on role. The role list
-        therefore bought no safety and only locked legitimate owners out.
-        """
-        return bool(self.is_active)
-    
     def is_recruitment_agent(self):
         """Check if user is a recruitment agent"""
         return self.role == 'recruitment_agent'
@@ -1831,6 +1816,34 @@ class NotificationSetting(models.Model):
 
     def __str__(self):
         return f"{self.company_user_id} · {self.topic}: bell={self.in_app} email={self.email}"
+
+
+class QuickChat(models.Model):
+    """One conversation in an agent's floating Quick Chat (PM, HR, Frontline),
+    kept on the server so it follows its login to any browser or device. It
+    used to live in the browser alone: lost on another computer or after
+    clearing it, and shown to whoever logged in next on a shared one.
+
+    `client_id` is the id the browser gave it; the browser saves the whole
+    conversation each time, as it did locally."""
+    AGENT_CHOICES = [('pm', 'Project Manager'), ('hr', 'HR'), ('frontline', 'Frontline')]
+
+    company_user = models.ForeignKey('CompanyUser', on_delete=models.CASCADE, related_name='quick_chats')
+    agent = models.CharField(max_length=20, choices=AGENT_CHOICES)
+    mode = models.CharField(max_length=20, blank=True, default='', help_text="PM: 'pilot' or 'qa'")
+    client_id = models.CharField(max_length=64)
+    title = models.CharField(max_length=255, default='Chat')
+    messages = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('company_user', 'agent', 'client_id')]
+        indexes = [models.Index(fields=['company_user', 'agent', 'mode', '-updated_at'],
+                                name='core_quickchat_list_idx')]
+
+    def __str__(self):
+        return f"{self.agent}/{self.mode or '-'} · {self.title[:40]}"
 
 
 # Task Monitoring & Activity Tracking
