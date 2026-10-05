@@ -1,6 +1,7 @@
 // Company Auth Service
 
 import { API_BASE_URL } from '@/config/apiConfig';
+import { rememberReturnTo, signedOutOnPurpose } from '@/utils/returnTo';
 /**
  * Get company authentication token from localStorage
  */
@@ -54,6 +55,8 @@ const handleExpiredSession = (errorData) => {
 
   clearCompanySession();
   const reason = /inactive/i.test(detail) ? 'inactive' : 'expired';
+  // After signing in again they go back to the page they were on.
+  rememberReturnTo(`${window.location.pathname}${window.location.search}`);
   window.location.replace(`/company/login?session=${reason}`);
   return true;
 };
@@ -342,6 +345,7 @@ export const companyApi = {
 };
 
 const logoutCompany = async () => {
+  signedOutOnPurpose();
   try {
     await companyApi.post('/company/logout/', {});
   } catch (_) {

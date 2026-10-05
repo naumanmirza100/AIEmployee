@@ -75,6 +75,13 @@ const DashboardNavbar = ({
   // A company login reads the company feed: every agent's alerts for that
   // login, not only Project Manager's, despite the endpoint's name.
   const usesCompanyFeed = isCompanyUser && !localStorage.getItem('auth_token');
+  // An employee (My Space) login. Its alerts live on /me/notifications; the
+  // general Notifications page is the company's and the platform admin's, and
+  // showed an employee the admin menu. A platform admin has no profile block
+  // passed in with a role, so the page they are on tells them apart.
+  const isEmployeeLogin = !isCompanyUser && !!localStorage.getItem('auth_token')
+    && typeof window !== 'undefined' && /^\/(me|user)(\/|$)/.test(window.location.pathname);
+  const allNotificationsPath = isEmployeeLogin ? '/me/notifications' : '/notifications';
   const notifEndpoint = usesCompanyFeed
     ? `${API_BASE_URL}/company/notifications`
     : `${API_BASE_URL}/notifications`;
@@ -292,12 +299,19 @@ const DashboardNavbar = ({
                               // that pass their own handler (User / PM dashboards) keep
                               // their tab-switching behaviour; everywhere else we open the
                               // full-detail page, since the dropdown truncates.
+                              // An employee's alert opens the page it is about, when it
+                              // names one inside the app. Some reminders keep an internal
+                              // marker in that field, so only a value starting with "/"
+                              // is followed.
+                              const target = [n.action_url, n.link].find((v) => typeof v === 'string' && v.startsWith('/me/'));
                               if (usesCompanyFeed && n.link) {
                                 navigate(n.link);
+                              } else if (isEmployeeLogin && target) {
+                                navigate(target);
                               } else if (onNotificationClick) {
                                 onNotificationClick(n);
                               } else {
-                                navigate('/notifications');
+                                navigate(allNotificationsPath);
                               }
                             }}
                             className={`w-full text-left px-4 py-3 hover:bg-accent transition-colors ${!n.is_read ? 'bg-violet-500/5' : ''}`}
@@ -321,7 +335,7 @@ const DashboardNavbar = ({
                     <button
                       onClick={() => {
                         setShowNotifPanel(false);
-                        navigate('/notifications');
+                        navigate(allNotificationsPath);
                       }}
                       className="app-panel-surface w-full px-4 py-2.5 text-center text-[11px] font-medium text-violet-400 hover:text-violet-300 hover:bg-accent border-t border-border transition-colors sticky bottom-0"
                     >

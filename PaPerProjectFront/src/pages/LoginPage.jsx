@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { takeReturnTo } from '@/utils/returnTo';
 import { Lock, Mail, Loader2, Shield, Eye, EyeOff } from 'lucide-react';
 
 const LoginPage = () => {
@@ -58,10 +59,14 @@ const LoginPage = () => {
       // to the server with a dashboard login's key they do not have: nearly
       // every feature was refused. Their own project screen is linked from
       // My Space home.
+      const asked = new URLSearchParams(location.search);
       if (userData?.userType === 'admin' || userData?.is_staff) {
+        takeReturnTo(null);
         navigate(from, { replace: true });
       } else {
-        navigate('/me/home', { replace: true });
+        // On to the My Space page an alert pointed at, else My Space home.
+        const next = takeReturnTo(asked, (p) => p.startsWith('/me'));
+        navigate(next || '/me/home', { replace: true });
       }
     } catch (error) {
       toast({

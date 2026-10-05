@@ -211,7 +211,7 @@ def check_stale_meetings():
                 notification_type='meeting_request',
                 title=f"Pending Meeting: {meeting.title}",
                 message=f'Reminder: {meeting.organizer.full_name} is waiting for your response to "{meeting.title}".',
-                action_url=f'/meetings/{meeting.id}/respond',
+                action_url='/me/meetings',
             )
         reminders_sent += 1
 

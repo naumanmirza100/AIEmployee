@@ -70,6 +70,7 @@ import NotificationsView from '@/pages/me/NotificationsView';
 import WorkView from '@/pages/me/WorkView';
 import MyWorkPage from '@/pages/MyWorkPage';
 import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
+import { ReturnToTracker } from '@/utils/returnTo';
 import DoNotEmailPage from '@/pages/DoNotEmailPage';
 import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
 import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
@@ -102,6 +103,7 @@ import { useTranslation } from 'react-i18next';
       return (
         <>
           <ScrollToTop />
+          <ReturnToTracker />
           <Routes location={location}>
             {/* Admin routes without header/footer */}
             <Route path="/login" element={<LoginPage />} />

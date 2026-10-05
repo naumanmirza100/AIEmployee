@@ -4084,7 +4084,7 @@ def meeting_schedule(request):
                     user=p.user, type='meeting_rescheduled', notification_type='meeting_request',
                     title=f"Meeting Rescheduled: {meeting.title}",
                     message=f'{company_user.full_name} rescheduled "{meeting.title}" to {new_time_display}.',
-                    action_url=f'/meetings/{meeting.id}/respond',
+                    action_url='/me/meetings',
                 )
                 if p.user.email:
                     _send_meeting_email(
@@ -4253,7 +4253,7 @@ def meeting_schedule(request):
                     notification_type='meeting_request',
                     title=f"Meeting Request from {company_user.full_name}",
                     message=f'{company_user.full_name} wants to schedule "{meeting.title}" on {time_display} ({meeting.duration_minutes} min). Please accept or reject.',
-                    action_url=f'/meetings/{meeting.id}/respond',
+                    action_url='/me/meetings',
                 )
                 if u.email:
                     participants_str = ", ".join(invitee_names)
@@ -4435,7 +4435,7 @@ def meeting_respond(request):
                 user=meeting.invitee, type='meeting_accepted', notification_type='meeting_request',
                 title=f"Meeting Confirmed: {meeting.title}",
                 message=f'{company_user.full_name} confirmed the meeting "{meeting.title}" on {time_display}.',
-                action_url=f'/meetings/{meeting.id}/respond',
+                action_url='/me/meetings',
             )
             if invitee_email:
                 _send_meeting_email(recipient_email=invitee_email, subject=f"Meeting Confirmed: {meeting.title}",
@@ -4460,7 +4460,7 @@ def meeting_respond(request):
                 user=meeting.invitee, type='meeting_counter_proposed', notification_type='meeting_request',
                 title=f"New Time Proposed: {meeting.title}",
                 message=f'{company_user.full_name} suggested a new time for "{meeting.title}": {new_time_display}.{reason_text}',
-                action_url=f'/meetings/{meeting.id}/respond',
+                action_url='/me/meetings',
             )
             if invitee_email:
                 _send_meeting_email(recipient_email=invitee_email, subject=f"New Time Proposed: {meeting.title}",

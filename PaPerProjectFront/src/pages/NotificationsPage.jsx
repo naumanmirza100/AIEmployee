@@ -138,8 +138,16 @@ const NotificationsPage = () => {
   // authenticate differently, so they keep the plain navbar.
   const companyUser = useMemo(() => (isCompanyUser ? getCompanyUser() : null), [isCompanyUser]);
   // An admin signs in with auth_token only — they get the admin shell instead.
-  const isAdminUser = !isCompanyUser && !!localStorage.getItem('auth_token');
-  const { logout: adminLogout, user: adminUser } = useAuth();
+  // So does every employee, and this page took any such login for the
+  // platform admin: an employee who clicked the bell saw the admin menu and
+  // the label "Admin". Who is an admin is asked of the session, and an
+  // employee is sent to their own notifications page.
+  const { logout: adminLogout, user: adminUser, isAdmin, loading: authLoading } = useAuth();
+  const signedInAsUser = !isCompanyUser && !!localStorage.getItem('auth_token');
+  const isAdminUser = signedInAsUser && !authLoading && !!isAdmin();
+  useEffect(() => {
+    if (signedInAsUser && !authLoading && !isAdmin()) navigate('/me/notifications', { replace: true });
+  }, [signedInAsUser, authLoading]); // eslint-disable-line react-hooks/exhaustive-deps
   const handleLogout = async () => {
     if (isAdminUser) {
       try { await adminLogout(); } catch (e) { console.error('Logout error:', e); }

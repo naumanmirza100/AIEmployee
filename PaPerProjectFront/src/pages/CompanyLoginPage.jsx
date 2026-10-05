@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { companyAuthService } from '@/services';
+import { takeReturnTo } from '@/utils/returnTo';
 import { Building2, Loader2, LogIn, Eye, EyeOff, KeyRound, ArrowLeft, MailCheck, Check, AlertCircle } from 'lucide-react';
 
 const SESSION_NOTICES = {
@@ -67,7 +68,11 @@ const CompanyLoginPage = () => {
           description: `Logged in as ${response.data.user.fullName}`,
         });
 
-        navigate('/company/dashboard');
+        // On to the page they were sent here from (an alert email's link,
+        // an expired session), else the home dashboard. Not an employee page:
+        // this login cannot open those.
+        const next = takeReturnTo(searchParams, (p) => !p.startsWith('/me') && !p.startsWith('/user/') && !p.startsWith('/admin'));
+        navigate(next || '/company/dashboard');
       }
     } catch (error) {
       toast({
