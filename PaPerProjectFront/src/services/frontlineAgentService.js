@@ -272,7 +272,14 @@ export const knowledgeQA = async (question, options = {}) => {
  * signal}.
  */
 export const knowledgeQAStream = async (question, options = {}) => {
-  const { onMeta, onToken, onDone, onError, signal } = options;
+  const { onMeta, onToken, onDone, signal } = options;
+  const callbacks = options;
+  // An error sent inside the stream (out of AI tokens, a key the provider
+  // refused) only reached callers that passed onError. The chats do not, so
+  // they showed an empty answer. It is now thrown once the stream has ended,
+  // where each chat's own catch shows it.
+  let streamError = null;
+  const onError = (err) => { streamError = err; callbacks.onError?.(err); };
   const { API_BASE_URL } = await import('@/config/apiConfig');
   const token = localStorage.getItem('company_auth_token');
   const body = { question };
@@ -305,6 +312,7 @@ export const knowledgeQAStream = async (question, options = {}) => {
     for (const line of text.split('\n')) {
       if (line.trim()) _dispatchFrontlineStreamEvent(JSON.parse(line), { onMeta, onToken, onDone, onError });
     }
+    if (streamError) throw streamError;
     return null;
   }
   const reader = response.body.getReader();
@@ -343,6 +351,7 @@ export const knowledgeQAStream = async (question, options = {}) => {
     onError?.(err);
     throw err;
   }
+  if (streamError) throw streamError;
   return { answer, meta, doneEvent };
 };
 

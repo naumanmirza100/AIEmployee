@@ -1882,7 +1882,7 @@ def knowledge_qa_stream(request):
       {"type": "done", "data": {...}, "session_id"} what `knowledge_qa` returns
       {"type": "error", "message": "..."}
     """
-    from api.streaming import ndjson_response
+    from api.streaming import error_event, ndjson_response
     try:
         error, inputs = _knowledge_qa_inputs(request)
         if error is not None:
@@ -1906,7 +1906,7 @@ def knowledge_qa_stream(request):
                     event = {"type": "done", "data": event["result"], "session_id": inputs["session_id"]}
                 yield event
         except KeyServiceError as exc:
-            yield {"type": "error", "message": str(exc)}
+            yield error_event(exc)
         except Exception:
             logger.exception("knowledge_qa_stream: agent failed")
             yield {"type": "error", "message": "Knowledge Q&A failed. Please try again."}

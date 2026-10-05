@@ -55,6 +55,7 @@ from core.scheduling import (
 )
 from core.scheduling.identity import login_user_ids_for_employees, member_ids
 from core.api_key_service import KeyServiceError
+from api.streaming import error_event
 # Re-use Frontline's hardened helpers — file validation + broker probe.
 from Frontline_agent.document_processor import DocumentProcessor
 
@@ -760,10 +761,10 @@ def hr_knowledge_qa_stream(request):
             except KeyServiceError as exc:
                 # Surface quota/key errors as a stream event rather than a
                 # non-streaming HTTP error — client is already reading a body.
-                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+                yield _json.dumps(error_event(exc)) + '\n'
             except Exception as exc:
                 logger.exception("hr_knowledge_qa_stream: agent raised")
-                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+                yield _json.dumps(error_event(exc)) + '\n'
 
             # Compliance log — mirror what the sync endpoint does. Cited docs
             # are effectively "read" by the LLM into an answer, so we log

@@ -3374,7 +3374,7 @@ def recruitment_qa_stream(request):
       {"type": "done", "data": {answer, insights}}    what `recruitment_qa` returns
       {"type": "error", "message": "..."}
     """
-    from api.streaming import ndjson_response
+    from api.streaming import error_event, ndjson_response
     data = request.data if isinstance(request.data, dict) else {}
     question = (data.get('question') or '').strip()
     if not question:
@@ -3398,7 +3398,7 @@ def recruitment_qa_stream(request):
                                                       'insights': result.get('insights', [])}}
                 yield event
         except KeyServiceError as exc:
-            yield {'type': 'error', 'message': str(exc)}
+            yield error_event(exc)
         except Exception:
             logger.exception("recruitment_qa_stream error")
             yield {'type': 'error', 'message': 'An error occurred while processing your question. Please try again.'}

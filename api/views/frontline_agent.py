@@ -37,6 +37,7 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.models import CompanyUser, Company
 from core.api_key_service import KeyServiceError
+from api.streaming import error_event
 from core.scheduling import (
     ScheduleConflict, booking_guard, ensure_free, find_conflicts, login_user_id_for_company_user,
     suggest_slots, zone_name,
@@ -2253,10 +2254,10 @@ def knowledge_qa_stream(request):
                                     continue
                     yield _json.dumps(event) + '\n'
             except KeyServiceError as exc:
-                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+                yield _json.dumps(error_event(exc)) + '\n'
             except Exception as exc:
                 logger.exception("knowledge_qa_stream: agent raised")
-                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+                yield _json.dumps(error_event(exc)) + '\n'
 
         response = StreamingHttpResponse(
             _event_stream(),
