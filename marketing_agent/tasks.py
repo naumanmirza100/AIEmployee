@@ -129,8 +129,13 @@ def retry_failed_emails_task(self):
             created_at__gte=cutoff_time
         ).select_related('lead', 'email_template', 'campaign')[:50]
         
+        from marketing_agent.services.subscription import PayingCampaigns
+        paying = PayingCampaigns()      # no retries for a lapsed subscription
+
         retried_count = 0
         for email_history in failed_emails:
+            if not paying.allows(email_history.campaign):
+                continue
             try:
                 from marketing_agent.services.email_service import email_service
                 # EmailSendHistory has no email_account FK, so we resolve via
@@ -191,7 +196,12 @@ def auto_start_campaigns_task():
         started_count = 0
         notified_no_sequences = 0
         
+        from marketing_agent.services.subscription import PayingCampaigns
+        paying = PayingCampaigns()      # a lapsed subscription starts nothing
+
         for campaign in campaigns_due:
+            if not paying.allows(campaign):
+                continue
             user = campaign.owner
             sequences = EmailSequence.objects.filter(campaign=campaign)
             has_sequence_with_steps = any(seq.steps.exists() for seq in sequences)
@@ -263,7 +273,12 @@ def monitor_campaigns_task():
         campaigns_checked = 0
         errors = []
         
+        from marketing_agent.services.subscription import PayingCampaigns
+        paying = PayingCampaigns()      # no monitoring (or AI spend) for a lapsed subscription
+
         for campaign in all_campaigns:
+            if not paying.allows(campaign):
+                continue
             try:
                 # Check campaign for all notification types
                 result = agent.check_campaign(campaign.owner.id, campaign.id)

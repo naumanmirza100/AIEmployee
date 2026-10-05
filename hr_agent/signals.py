@@ -211,6 +211,12 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
         logger.debug("HR signal: skipping (already inside a workflow run, event=%s)", event)
         return
 
+    # An automation is the HR agent working by itself. Without an active
+    # subscription it stops, like the screens do (core/modules.py).
+    from core.modules import has_module
+    if not has_module(company_id, 'hr_agent'):
+        return
+
     user = _system_user()
     workflows = HRWorkflow.objects.filter(company_id=company_id, is_active=True)
     for w in workflows:

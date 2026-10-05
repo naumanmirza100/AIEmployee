@@ -42,6 +42,11 @@ def run_workflow_triggers_on_ticket_update(sender, instance, created, **kwargs):
         # dropping all signals. The next code path will still run.
         logger.exception("workflow_context guard import failed — proceeding without guard")
     try:
+        # Ticket automations are the agent working by itself: not for a company
+        # whose Frontline subscription is not active (core/modules.py).
+        from core.modules import has_module
+        if not has_module(instance.company_id, 'frontline_agent'):
+            return
         from api.views.frontline_agent import _run_workflow_triggers
         user = getattr(instance, 'created_by', None)
         if not user:

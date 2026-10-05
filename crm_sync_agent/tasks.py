@@ -27,10 +27,15 @@ def process_crm_sync_queue(self, company_id: int | None = None):
     from crm_sync_agent.models import CRMSyncQueue
     from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
 
+    from core.modules import active_company_ids
+
     now = timezone.now()
+    # Nothing is pushed to a CRM for a company whose CRM Sync subscription is
+    # not active (core/modules.py). Its queue waits.
+    paying = active_company_ids('crm_sync_agent')
 
     if company_id:
-        companies = Company.objects.filter(pk=company_id)
+        companies = Company.objects.filter(pk=company_id, id__in=paying)
     else:
         # Only fetch companies that actually have pending work
         company_ids = (
@@ -42,7 +47,7 @@ def process_crm_sync_queue(self, company_id: int | None = None):
             .values_list('company_id', flat=True)
             .distinct()
         )
-        companies = Company.objects.filter(pk__in=company_ids)
+        companies = Company.objects.filter(pk__in=company_ids, id__in=paying)
 
     total_stats = {'processed': 0, 'succeeded': 0, 'failed': 0, 'skipped': 0}
 
@@ -97,7 +102,10 @@ def ping_crm_integrations():
     from crm_sync_agent.models import CRMIntegration
     from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
 
-    integrations = CRMIntegration.objects.filter(is_active=True).select_related('company')
+    from core.modules import active_company_ids
+    integrations = (CRMIntegration.objects
+                    .filter(is_active=True, company_id__in=active_company_ids('crm_sync_agent'))
+                    .select_related('company'))
     results = {'ok': 0, 'failed': 0}
 
     for integration in integrations:

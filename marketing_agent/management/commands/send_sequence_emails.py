@@ -108,7 +108,14 @@ class Command(BaseCommand):
         total_skipped = 0
         total_stopped = 0
 
+        # No sequence emails for a company whose Marketing subscription is not
+        # active (marketing_agent/services/subscription.py).
+        from marketing_agent.services.subscription import PayingCampaigns
+        paying = PayingCampaigns()
+
         for campaign in campaigns:
+            if not paying.allows(campaign):
+                continue
             # Get active main sequences (not sub-sequences)
             sequences = campaign.email_sequences.filter(is_active=True, is_sub_sequence=False)
 

@@ -11,7 +11,7 @@ from unittest import mock
 from django.test import TestCase
 from django.utils import timezone
 
-from core.models import Company, CompanyUser
+from core.models import Company, CompanyModulePurchase, CompanyUser
 from recruitment_agent import tasks
 from recruitment_agent.models import Interview, RecruiterEmailSettings
 
@@ -20,6 +20,8 @@ class EmailSwitchTests(TestCase):
 
     def setUp(self):
         company = Company.objects.create(name='Acme', email='acme@test.local')
+        self.purchase = CompanyModulePurchase.objects.create(
+            company=company, module_name='recruitment_agent', status='active', is_complimentary=True)
         self.recruiter = CompanyUser.objects.create(company=company, email='rae@test.local', full_name='Rae',
                                                     role='admin', password_hash='x', is_active=True)
         self.settings, _ = RecruiterEmailSettings.objects.update_or_create(
@@ -52,6 +54,14 @@ class EmailSwitchTests(TestCase):
         agent = self.run_job()
         agent.send_followup_reminder.assert_called_once_with(self.waiting.id)
         agent.send_pre_interview_reminder.assert_called_once()
+
+    def test_nothing_goes_out_once_the_subscription_is_not_active(self):
+        # The screens lock when Recruitment lapses; candidates must not keep hearing from it.
+        self.purchase.status = 'cancelled'
+        self.purchase.save()
+        agent = self.run_job()
+        agent.send_followup_reminder.assert_not_called()
+        agent.send_pre_interview_reminder.assert_not_called()
 
     def test_nothing_goes_out_when_switched_off(self):
         self.settings.auto_send_followups = False

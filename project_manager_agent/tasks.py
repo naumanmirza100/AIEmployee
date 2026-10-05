@@ -28,8 +28,16 @@ def send_meeting_reminders():
     now = timezone.now()
     from_email = getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
 
+    from django.db.models import Q
+    from core.modules import active_company_ids
+    # Reminders and recurring work are the agent acting by itself: only for
+    # companies whose subscription is active (core/modules.py). A row with no
+    # company to check runs as before.
+    paying = active_company_ids('project_manager_agent')
+
     # Find meetings happening in the next 65 minutes that are accepted/pending
     upcoming = ScheduledMeeting.objects.filter(
+        Q(organizer__company_id__in=paying) | Q(organizer__company__isnull=True),
         proposed_time__gt=now,
         proposed_time__lte=now + timedelta(minutes=65),
         status__in=['accepted', 'pending', 'partially_accepted'],
@@ -148,7 +156,15 @@ def check_stale_meetings():
     now = timezone.now()
     from_email = getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
 
+    from django.db.models import Q
+    from core.modules import active_company_ids
+    # Reminders and recurring work are the agent acting by itself: only for
+    # companies whose subscription is active (core/modules.py). A row with no
+    # company to check runs as before.
+    paying = active_company_ids('project_manager_agent')
+
     stale_48h = ScheduledMeeting.objects.filter(
+        Q(organizer__company_id__in=paying) | Q(organizer__company__isnull=True),
         status='pending',
         created_at__lte=now - timedelta(hours=48),
         created_at__gt=now - timedelta(days=7),
@@ -202,6 +218,7 @@ def check_stale_meetings():
     # Auto-withdraw meetings older than 7 days with no response
     auto_withdrawn = 0
     very_stale = ScheduledMeeting.objects.filter(
+        Q(organizer__company_id__in=paying) | Q(organizer__company__isnull=True),
         status='pending',
         created_at__lte=now - timedelta(days=7),
     ).select_related('organizer', 'invitee').prefetch_related('participants__user')
@@ -286,7 +303,15 @@ def generate_recurring_tasks():
     generated = 0
     deactivated = 0
 
+    from django.db.models import Q
+    from core.modules import active_company_ids
+    # Reminders and recurring work are the agent acting by itself: only for
+    # companies whose subscription is active (core/modules.py). A row with no
+    # company to check runs as before.
+    paying = active_company_ids('project_manager_agent')
+
     active_recurrences = TaskRecurrence.objects.filter(
+        Q(template_task__project__company_id__in=paying) | Q(template_task__project__company__isnull=True),
         is_active=True, next_run_date__lte=today,
     ).select_related('template_task', 'template_task__project', 'template_task__assignee')
 

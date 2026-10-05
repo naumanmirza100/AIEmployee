@@ -20,7 +20,9 @@ def send_meeting_reminders():
     now = timezone.now()
     window_end = now + timedelta(minutes=15)
 
+    from core.modules import active_company_ids
     upcoming = ExecutiveMeeting.objects.filter(
+        organizer__company_id__in=active_company_ids('exec_meeting_agent'),   # not for a lapsed agent
         status='scheduled',
         scheduled_at__gte=now,
         scheduled_at__lte=window_end,
@@ -111,9 +113,11 @@ def run_proactive_notifications():
     if not target_user_ids:
         return {'scanned': 0, 'total_created': 0}
 
+    from core.modules import active_company_ids
     active_users = CompanyUser.objects.filter(
         id__in=target_user_ids,
         is_active=True,
+        company_id__in=active_company_ids('exec_meeting_agent'),   # not for a lapsed agent
     ).select_related('company')[:100]
 
     total_created = 0

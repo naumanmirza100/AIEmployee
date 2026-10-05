@@ -24,9 +24,8 @@ DUE_IN_WORKDAYS = {'urgent': 2, 'high': 5, 'medium': 10, 'low': 20}
 
 
 def pm_available(company) -> bool:
-    from core.models import CompanyModulePurchase
-    return bool(company) and CompanyModulePurchase.objects.filter(
-        company=company, module_name='project_manager_agent', status='active').exists()
+    from core.modules import has_module
+    return bool(company) and has_module(company, 'project_manager_agent')
 
 
 def _add_workdays(start, days):
