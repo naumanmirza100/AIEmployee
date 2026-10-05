@@ -16,9 +16,28 @@ from core.models import CompanyUser
 from core.notification_utils import notify_company_users
 
 #: Who hears about a customer waiting for a person: the company's admins,
-#: plus anyone given the Frontline agent role. The hand-off queue itself stays
-#: open to every login.
+#: plus anyone given the Support (Frontline agent) role. The hand-off queue
+#: itself stays open to every login.
 HANDOFF_ALERT_ROLES = ('owner', 'admin', 'frontline_agent')
+
+
+def handoff_recipients(company_id):
+    """The logins to tell about a customer waiting for a person.
+
+    Admins and the people given the Support role. A company that has given
+    nobody that role has not said who handles support, so everyone is told:
+    it used to be the admins alone, which in practice meant the founder's
+    login and nobody else. Each login's own notification settings still apply.
+    """
+    logins = CompanyUser.objects.filter(company_id=company_id, is_active=True)
+    if logins.filter(role='frontline_agent').exists():
+        return logins.filter(role__in=HANDOFF_ALERT_ROLES)
+    return logins
+
+
+def hears_handoffs(company_user) -> bool:
+    return bool(company_user and company_user.is_active
+                and handoff_recipients(company_user.company_id).filter(pk=company_user.pk).exists())
 
 HANDOFF_WHY = {
     'customer_requested': 'The customer asked for a person.',
@@ -31,8 +50,7 @@ HANDOFF_WHY = {
 def handoff_requested(ticket):
     if not ticket.company_id:
         return 0
-    recipients = CompanyUser.objects.filter(company_id=ticket.company_id, is_active=True,
-                                            role__in=HANDOFF_ALERT_ROLES)
+    recipients = handoff_recipients(ticket.company_id)
     # The suggestion is extra: it must never stop the hand-off being raised.
     try:
         from Frontline_agent.routing import suggest_assignee
@@ -81,10 +99,8 @@ def handoffs_still_waiting(now=None):
         minutes = int((now - ticket.handoff_requested_at).total_seconds() // 60)
         hours, rest = divmod(minutes, 60)
         waited = f"{hours} h {rest} min" if rest else f"{hours} h"
-        recipients = CompanyUser.objects.filter(company_id=ticket.company_id, is_active=True,
-                                                role__in=HANDOFF_ALERT_ROLES)
         notify_company_users(
-            recipients,
+            handoff_recipients(ticket.company_id),
             title=f"Still waiting for a person ({waited}): {ticket.title[:100]}",
             message=f"{HANDOFF_WHY.get(ticket.handoff_reason, '')} Nobody has taken it yet. Take it from Hand-offs.".strip(),
             link='/frontline/dashboard?tab=handoffs',

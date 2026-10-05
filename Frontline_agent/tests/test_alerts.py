@@ -28,6 +28,11 @@ class FrontlineAlertTests(FrontlineTestCase):
         self.assertEqual(alert.data['link'], '/frontline/dashboard?tab=handoffs')
         self.assertEqual(alert.severity, 'warning')
 
+    def test_with_nobody_given_the_support_role_everyone_is_told(self):
+        # It used to be the admins alone, which in practice was the founder's login.
+        trigger_handoff(self.ticket, 'customer_requested')
+        self.assertEqual((len(bell(self.admin)), len(bell(self.member))), (1, 1))
+
     def test_and_anyone_given_the_frontline_role(self):
         agent = self.dashboard_login(self.company, 'fay@test.local', 'Fay Agent', 'frontline_agent')
         trigger_handoff(self.ticket, 'low_confidence')
@@ -77,7 +82,7 @@ class FrontlineAlertTests(FrontlineTestCase):
         code, _ = self.call(views.reassign_ticket_handoff, self.admin,
                             {'to_company_user_id': self.member.id}, ticket_id=self.ticket.id)
         self.assertEqual(code, 200)
-        self.assertEqual(len(bell(self.member)), 1)
+        self.assertEqual(len([a for a in bell(self.member) if 'assigned to you' in a.title]), 1)
 
     # ---- reading the bell ----------------------------------------------------
 

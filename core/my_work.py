@@ -195,8 +195,8 @@ def _tickets(person, now):
 
 
 def _hears_handoffs(person) -> bool:
-    from Frontline_agent.alerts import HANDOFF_ALERT_ROLES
-    return (person.company_user.role or '').lower() in HANDOFF_ALERT_ROLES
+    from Frontline_agent.alerts import hears_handoffs
+    return hears_handoffs(person.company_user)
 
 
 def _handoffs_waiting(person, now):

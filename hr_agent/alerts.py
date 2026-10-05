@@ -37,10 +37,14 @@ def leave_request_submitted(leave_request):
     if not emp or not emp.company_id:
         return 0
     recipients = hr_admins(emp.company_id)
-    manager = emp.manager if emp.manager_id else None
-    if manager is not None and manager.company_user_id:
-        recipients.append(manager.company_user)
-    recipients = [cu for cu in recipients if cu.id != emp.company_user_id]
+    # The manager's dashboard login, by the link on their HR record or, as
+    # nothing ever sets that link, by their work address.
+    from hr_agent.handover import dashboard_login
+    manager_login = dashboard_login(emp.manager) if emp.manager_id else None
+    if manager_login is not None:
+        recipients.append(manager_login)
+    own_login = dashboard_login(emp)
+    recipients = [cu for cu in recipients if own_login is None or cu.id != own_login.id]
 
     return notify_company_users(
         recipients,

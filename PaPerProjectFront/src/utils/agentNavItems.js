@@ -25,6 +25,7 @@ import {
   Bell,
   Mail,
   MailX,
+  UserCog,
   RefreshCw,
   MessageSquare,
   Monitor,
@@ -300,6 +301,7 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
     { label: 'Projects',        icon: FolderKanban, path: '/company/dashboard/projects' },
     { label: 'Applications',    icon: Users,        path: '/company/dashboard/applications' },
     { label: 'Users',           icon: UserCheck,    path: '/company/dashboard/users' },
+    { label: 'Logins & roles',  icon: UserCog,      path: '/company/settings/team' },
     { label: 'All Users Tasks', icon: ListTodo,     path: '/company/dashboard/all-tasks' },
     ...(purchasedModules.includes('frontline_agent')
       ? [{ label: 'Ticket Tasks', icon: Ticket, path: '/company/dashboard/ticket-tasks' }]

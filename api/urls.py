@@ -51,6 +51,7 @@ from api.views import public_jobs
 from api.views import my_work
 from api.views import notification_settings
 from api.views import do_not_email
+from api.views import company_logins
 from api.views import quick_chats
 
 app_name = 'api'
@@ -296,6 +297,9 @@ urlpatterns = [
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
     re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
             name='company_notification_settings'),  # GET/PATCH
+    # The company's dashboard logins and their roles (api/views/company_logins.py).
+    re_path(r'^company/logins/?$', company_logins.company_logins, name='company_logins'),  # GET/POST
+    re_path(r'^company/logins/(?P<login_id>\d+)/?$', company_logins.company_login, name='company_login'),  # PATCH
     # Addresses the company must not send outreach to, for every agent (core/do_not_email.py).
     re_path(r'^company/do-not-email/?$', do_not_email.company_do_not_email, name='company_do_not_email'),  # GET/POST
     re_path(r'^company/do-not-email/(?P<entry_id>\d+)/?$', do_not_email.company_do_not_email_entry,
