@@ -828,6 +828,15 @@ def add_campaign_lead(request, campaign_id):
                 {'status': 'error', 'message': 'Email is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        from core.do_not_email import reason_for
+        blocked_as = reason_for(company_user.company_id, email)
+        if blocked_as:
+            why = 'its emails bounced' if blocked_as == 'bounced' else 'this person asked not to be emailed'
+            return Response(
+                {'status': 'error', 'error': 'do_not_email',
+                 'message': f"{email} is on your company's do-not-email list ({why}), so it was not added."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         lead, created = Lead.objects.get_or_create(
             email=email, owner=user,
             defaults={
@@ -961,7 +970,7 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
             'total_rows': int,
             'created_count': int,        # rows successfully added/updated
             'rejected_count': int,       # rows skipped — missing required fields
-            'rejected_reasons': {'missing_email': int, 'missing_name': int, 'other': int},
+            'rejected_reasons': {'missing_email': int, 'missing_name': int, 'do_not_email': int, 'other': int},
         }
     """
     try:
@@ -989,7 +998,11 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
         return ''
     total_rows = len(df)
     created_count = 0
-    rejected_reasons = {'missing_email': 0, 'missing_name': 0, 'other': 0}
+    rejected_reasons = {'missing_email': 0, 'missing_name': 0, 'do_not_email': 0, 'other': 0}
+    # Addresses the company must not email are left out (core/do_not_email.py).
+    from core.do_not_email import blocked_among
+    from marketing_agent.services.do_not_email import company_id_for_campaign
+    do_not_email = blocked_among(company_id_for_campaign(campaign), (str(v) for v in df['email'].dropna()))
     # Per-row rejection detail so the UI can tell the user exactly which row /
     # field / reason failed. Row number is spreadsheet-friendly: header = row 1,
     # so the first data row is row 2 (index 0 → row 2).
@@ -1017,6 +1030,10 @@ def _upload_leads_from_file(campaign, user, uploaded_file):
                 if not first and not last:
                     rejected_reasons['missing_name'] += 1
                     rejected_rows.append({'row': row_no, 'field': 'name', 'reason': 'Missing name (first/last or name)', 'value': email})
+                    continue
+                if email in do_not_email:
+                    rejected_reasons['do_not_email'] += 1
+                    rejected_rows.append({'row': row_no, 'field': 'email', 'reason': "On your company's do-not-email list", 'value': email})
                     continue
                 lead, created = Lead.objects.get_or_create(
                     email=email, owner=user,

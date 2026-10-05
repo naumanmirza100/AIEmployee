@@ -50,6 +50,7 @@ from api.views.health import health_check, ping, version
 from api.views import public_jobs
 from api.views import my_work
 from api.views import notification_settings
+from api.views import do_not_email
 from api.views import quick_chats
 
 app_name = 'api'
@@ -295,6 +296,10 @@ urlpatterns = [
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
     re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
             name='company_notification_settings'),  # GET/PATCH
+    # Addresses the company must not send outreach to, for every agent (core/do_not_email.py).
+    re_path(r'^company/do-not-email/?$', do_not_email.company_do_not_email, name='company_do_not_email'),  # GET/POST
+    re_path(r'^company/do-not-email/(?P<entry_id>\d+)/?$', do_not_email.company_do_not_email_entry,
+            name='company_do_not_email_entry'),  # DELETE
     # Floating Quick Chat history (PM, HR, Frontline), on the server (api/views/quick_chats.py).
     re_path(r'^quick-chats/?$', quick_chats.list_quick_chats, name='quick_chats_list'),  # GET
     re_path(r'^quick-chats/(?P<client_id>[A-Za-z0-9_-]{1,64})/?$', quick_chats.quick_chat,

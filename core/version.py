@@ -13,4 +13,4 @@ GET /api/version and show "being updated" while the server is behind
 the two numbers equal in the repository.
 """
 
-API_LEVEL = 2
+API_LEVEL = 3

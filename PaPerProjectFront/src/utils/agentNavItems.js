@@ -24,6 +24,7 @@ import {
   PenTool,
   Bell,
   Mail,
+  MailX,
   RefreshCw,
   MessageSquare,
   Monitor,
@@ -128,6 +129,8 @@ const ALL_AGENTS = [
       { label: 'Documents',     icon: FileText,    path: '/marketing/dashboard', tab: 'documents' },
       { label: 'Notifications', icon: Bell,        path: '/marketing/dashboard', tab: 'notifications' },
       { label: 'Saved Graphs',  icon: Sparkles,    path: '/marketing/dashboard', tab: 'saved-graphs' },
+      // One list for the company, shared with AI SDR (core/do_not_email.py).
+      { label: 'Do-not-email list', icon: MailX,   path: '/company/settings/do-not-email' },
     ],
   },
   {
@@ -211,6 +214,7 @@ const ALL_AGENTS = [
       { label: 'Analytics', icon: BarChart3,       path: '/ai-sdr/analytics' },
       { label: 'CRM Sync',  icon: RefreshCw,       path: '/ai-sdr/crm-sync' },
       { label: 'Settings',  icon: Settings,        path: '/ai-sdr/settings' },
+      { label: 'Do-not-email list', icon: MailX,   path: '/company/settings/do-not-email' },
     ],
   },
   {

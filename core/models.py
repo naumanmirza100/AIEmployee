@@ -1818,6 +1818,28 @@ class NotificationSetting(models.Model):
         return f"{self.company_user_id} · {self.topic}: bell={self.in_app} email={self.email}"
 
 
+class DoNotEmail(models.Model):
+    """An address this company must not send outreach to: it unsubscribed,
+    bounced, or was added by hand. One list for every agent that does outreach,
+    read and written through `core.do_not_email`. `email` is lower-cased."""
+    REASON_CHOICES = [('unsubscribed', 'Unsubscribed'), ('bounced', 'Bounced'), ('manual', 'Added by hand')]
+
+    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='do_not_email')
+    email = models.CharField(max_length=254)
+    reason = models.CharField(max_length=20, choices=REASON_CHOICES, default='unsubscribed')
+    source = models.CharField(max_length=30, blank=True, default='')
+    note = models.CharField(max_length=255, blank=True, default='')
+    added_by = models.ForeignKey('CompanyUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('company', 'email')]
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f"{self.company_id} · {self.email} ({self.reason})"
+
+
 class QuickChat(models.Model):
     """One conversation in an agent's floating Quick Chat (PM, HR, Frontline),
     kept on the server so it follows its login to any browser or device. It

@@ -375,6 +375,16 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
                 interest_level = 'not_analyzed'
                 analysis = f'AI analysis failed: {str(e)}'
         
+        # Asked to stop: onto the company's do-not-email list, so every campaign
+        # stops, and AI SDR too (core/do_not_email.py). It used to end this one
+        # sequence only.
+        if interest_level == 'unsubscribe':
+            try:
+                from marketing_agent.services.do_not_email import block_for
+                block_for(campaign, lead.email, note=f'Asked to stop in a reply to "{campaign.name}"')
+            except Exception:
+                logger.exception("Could not add %s to the do-not-email list", lead.email)
+
         # Create Reply record
         reply_record = None
         try:
@@ -417,7 +427,9 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
                 is_active=True,
                 interest_level=target_interest
             )
-            if not sub_sequences.exists() and target_interest != 'any':
+            # The catch-all 'any reply' follow-up is not for someone who asked
+            # to stop; only a follow-up set up for unsubscribe replies answers them.
+            if not sub_sequences.exists() and target_interest not in ('any', 'unsubscribe'):
                 sub_sequences = EmailSequence.objects.filter(
                     parent_sequence=contact.sequence,
                     is_sub_sequence=True,
