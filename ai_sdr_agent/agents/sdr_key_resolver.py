@@ -19,6 +19,35 @@ logger = logging.getLogger(__name__)
 AGENT_KEY = 'ai_sdr_agent'
 
 
+class _Reporting:
+    """`client.chat.completions`, except that a key the provider refuses is
+    raised as `BadAPIKey`. Every AI SDR agent already lets a KeyServiceError
+    through; anything else it catches and carries on without AI, which is how
+    a wrong key used to go unnoticed for good."""
+
+    def __init__(self, completions, ctx):
+        self._completions = completions
+        self._ctx = ctx
+
+    def create(self, *args, **kwargs):
+        try:
+            return self._completions.create(*args, **kwargs)
+        except Exception as exc:
+            from core.api_key_service import raise_if_auth_error
+            raise_if_auth_error(exc, self._ctx)
+            raise
+
+
+class _CheckedGroq:
+    def __init__(self, client, ctx):
+        self._client = client
+        self.chat = type('Chat', (), {})()
+        self.chat.completions = _Reporting(client.chat.completions, ctx)
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
 def resolve_sdr_groq_client(company) -> Tuple[Optional[object], Optional[object]]:
     """Return (groq_client, ctx) for the given company using the platform key service.
 
@@ -32,7 +61,7 @@ def resolve_sdr_groq_client(company) -> Tuple[Optional[object], Optional[object]
     try:
         from groq import Groq
         client = Groq(api_key=ctx.api_key)
-        return client, ctx
+        return _CheckedGroq(client, ctx), ctx
     except Exception as exc:
         logger.error("SDR Groq SDK init failed: %s", exc)
         return None, None

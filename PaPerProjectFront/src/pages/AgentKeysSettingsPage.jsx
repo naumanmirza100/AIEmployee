@@ -45,6 +45,9 @@ const modeBadge = (a) => {
   if (p === 'none') active = 'disabled';
   else if (p === 'free') active = freeExhausted ? 'free_exhausted' : 'free';
   else if (p === 'managed' && hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
+  // 'managed' chosen with no managed key runs on free tokens, even when the
+  // company has its own key saved. The badge used to say "BYOK Active" here.
+  else if (p === 'managed') active = freeExhausted ? 'free_exhausted' : 'platform';
   else if (a.byok) active = byokCapHit ? 'byok_exhausted' : 'byok';
   else if (hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
   else active = freeExhausted ? 'free_exhausted' : 'platform';
@@ -1570,7 +1573,7 @@ const AgentKeysSettingsPage = () => {
               BYOK Spending Cap
             </DialogTitle>
             <DialogDescription className="text-white/60">
-              {byokLimitModal.agent?.agent_label} — set a soft limit on how many tokens your own API key can spend. Leave blank to remove the cap.
+              {byokLimitModal.agent?.agent_label} — set a limit on how many tokens your own API key can spend. Leave blank to remove the cap.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-3">
@@ -1592,7 +1595,7 @@ const AgentKeysSettingsPage = () => {
                 onChange={(e) => setByokLimitModal({ ...byokLimitModal, limitInput: e.target.value })}
               />
               <p className="text-xs text-white/40 flex items-center gap-1">
-                <Info className="w-3 h-3" /> This is a soft cap — it never blocks usage, just shows a progress bar.
+                <Info className="w-3 h-3" /> When the cap is reached this agent stops until you raise or remove it.
               </p>
             </div>
             {byokLimitModal.agent?.quota?.byok_tokens_info > 0 && (

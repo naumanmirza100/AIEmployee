@@ -270,6 +270,12 @@ def upsert_byok_key(request):
         byok_notified_90pct=False,
         byok_notified_100pct=False,
     )
+    # Use the key that was just saved. Every agent starts on the 'managed'
+    # preference, which made resolve_for_call skip the company's own key: the
+    # agent went on spending free tokens while the page said "BYOK Active".
+    # An agent the company switched off ('none') stays off.
+    AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).exclude(
+        preferred_pool='none').update(preferred_pool='byok')
 
     # In-app notification to the user who added/updated the key
     try:
@@ -304,6 +310,10 @@ def revoke_byok_key(request, agent_name):
     deleted, _ = CompanyAPIKey.objects.filter(
         company=company, agent_name=agent_name, mode='byok',
     ).delete()
+    # With no key of its own left, the agent goes back to the default order:
+    # a managed key if there is one, else free tokens.
+    AgentTokenQuota.objects.filter(company=company, agent_name=agent_name, preferred_pool='byok').update(
+        preferred_pool='managed')
     return Response({'status': 'success', 'deleted': deleted})
 
 
@@ -344,8 +354,9 @@ def set_byok_limit(request):
     """Set or clear the user's self-imposed BYOK spending cap.
 
     Body: { agent_name, limit }  — limit: integer tokens, 0 = no limit (clear).
-    This is a soft cap: calls are never blocked, but the UI shows a progress bar
-    and warns when usage approaches/exceeds the cap.
+    The cap is real: once the key has used this many tokens the agent stops
+    (`ByokCapReached` in resolve_for_call) until the cap is raised or removed.
+    The page and the alerts used to call it a soft cap that never blocks.
     """
     company = request.user.company
     agent_name = (request.data.get('agent_name') or '').strip()
