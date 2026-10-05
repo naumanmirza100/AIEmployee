@@ -275,31 +275,26 @@ def _url_host(url):
 FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY', '').strip()
 FIELD_ENCRYPTION_KEY_FALLBACKS = os.getenv('FIELD_ENCRYPTION_KEY_FALLBACKS', '').strip()
 
-# SECRET_KEY: set DJANGO_SECRET_KEY on any real server. Do that only AFTER
-# FIELD_ENCRYPTION_KEY is set and `manage.py reencrypt_secrets` has run —
-# otherwise every stored API key becomes unreadable (they were encrypted with
-# a key derived from this one). The default below is public (it's in git): fine
-# for local development only.
-SECRET_KEY = (os.getenv('DJANGO_SECRET_KEY', '').strip()
-              or 'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45')
+# SECRET_KEY, DEBUG and ALLOWED_HOSTS are decided once, in env_security.py,
+# which says how. In short:
+#   SECRET_KEY     SECRET_KEY or DJANGO_SECRET_KEY; else the public key in git
+#                  (local development only). Change it on a real server only
+#                  AFTER FIELD_ENCRYPTION_KEY is set and `manage.py
+#                  reencrypt_secrets` has run, or every stored API key becomes
+#                  unreadable.
+#   DEBUG          DEBUG or DJANGO_DEBUG; else on for `manage.py runserver` and
+#                  off everywhere else (a deployed server, Celery, commands).
+#                  With it on, anyone who triggers an error gets the full error
+#                  page and CORS accepts requests from every website.
+#   ALLOWED_HOSTS  ALLOWED_HOSTS or DJANGO_ALLOWED_HOSTS; else any host while
+#                  DEBUG, otherwise localhost plus the host of SITE_URL /
+#                  BACKEND_URL.
+# They used to be set a second time lower in this file, and that copy won.
+from project_manager_ai import env_security as _env_security
 
-# DEBUG: set DJANGO_DEBUG=1 or 0 to decide. When unset, it is on only for the
-# local dev server (`manage.py runserver`) and off everywhere else: a deployed
-# server (gunicorn, Passenger, …), Celery and management commands. With DEBUG on,
-# anyone who triggers an error gets the full error page (settings, SQL, local
-# variables) and CORS accepts requests from every website.
-_debug_flag = _env_flag('DJANGO_DEBUG')
-DEBUG = (_debug_flag if _debug_flag is not None
-         else any(arg.startswith('runserver') for arg in sys.argv[1:2]))
-
-# ALLOWED_HOSTS: comma-separated in DJANGO_ALLOWED_HOSTS. Without it: any host
-# while DEBUG (localhost, ngrok tunnels, …); otherwise localhost plus the host of
-# SITE_URL / BACKEND_URL, so a deployment that already sets those keeps working.
-_allowed_hosts = [h.strip() for h in os.getenv('DJANGO_ALLOWED_HOSTS', '').split(',') if h.strip()]
-if not _allowed_hosts:
-    _allowed_hosts = ['*'] if DEBUG else ['localhost', '127.0.0.1'] + [
-        h for h in (_url_host(os.getenv('SITE_URL')), _url_host(os.getenv('BACKEND_URL'))) if h]
-ALLOWED_HOSTS = list(dict.fromkeys(_allowed_hosts))
+SECRET_KEY = _env_security.secret_key(os.environ)
+DEBUG = _env_security.debug(os.environ, sys.argv)
+ALLOWED_HOSTS = _env_security.allowed_hosts(os.environ, DEBUG)
 
 
 # Local sentence-transformers embedding config. To enable, also set
@@ -318,24 +313,8 @@ def _startup_print(*args, **kwargs):
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# All three read from the environment so a deployed box can be locked down
-# without editing this file. The defaults keep local development working
-# exactly as before: DEBUG on, every host allowed.
-SECRET_KEY = os.getenv(
-    'SECRET_KEY',
-    'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45',
-)
-
-# Anything other than a literal "False" (case-insensitive) leaves DEBUG on, so
-# an unset or malformed value never silently disables error pages in dev.
-DEBUG = os.getenv('DEBUG', 'True').strip().lower() != 'false'
-
-# Comma-separated, e.g. ALLOWED_HOSTS=187.7.18.101,api.payperproject.com
-# Django rejects every request with 400 when DEBUG is off and the Host header
-# is not listed here, so set it on any box running DEBUG=False.
-ALLOWED_HOSTS = [
-    h.strip() for h in os.getenv('ALLOWED_HOSTS', '*').split(',') if h.strip()
-]
+# SECRET_KEY, DEBUG and ALLOWED_HOSTS are set once, near the top of this file
+# (env_security.py). A second copy used to sit here and overrode it.
 
 # Browsers require the scheme here for POSTs from an HTTPS origin; without it
 # the frontend gets "CSRF verification failed" on every write once it is
