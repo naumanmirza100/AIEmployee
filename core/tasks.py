@@ -181,6 +181,15 @@ _NEVER_STARTED = ("Processing never started. The background worker may be down. 
 _STOPPED = ("Processing stopped before it finished. The background worker may have "
             "restarted. Press Retry to process it again.")
 
+# Operations processes an upload inside the web server, so a restart or a
+# deploy partway leaves it on "Processing" for good. A summary has no
+# "last touched" time, only when it was created, and summarising a very large
+# file can honestly take a while, so it is given longer before it is called
+# stuck.
+OPERATIONS_SUMMARY_STALL_MINUTES = 120
+_OPERATIONS_STOPPED = ("Processing stopped before it finished. The server may have restarted. "
+                       "Press Retry if it is offered; otherwise delete this and upload the file again.")
+
 
 def stalled_documents(model, now=None):
     """`model`'s documents stuck in `pending` / `processing` (Frontline and HR
@@ -198,7 +207,7 @@ def is_stalled(document, now=None):
 
 @shared_task(name='core.tasks.fail_stalled_documents')
 def fail_stalled_documents():
-    """Mark Frontline and HR documents that stopped processing as failed.
+    """Mark Frontline, HR and Operations documents that stopped processing as failed.
 
     They used to show "processing" forever: when the queue is reachable but no
     worker takes the job, or a worker dies partway, nothing ever updated the
@@ -216,6 +225,32 @@ def fail_stalled_documents():
             doc.processing_status = 'failed'
             doc.save(update_fields=['processing_status', 'processing_error', 'updated_at'])
             failed += 1
+    failed += fail_stalled_operations_documents()
     if failed:
         logger.warning('fail_stalled_documents: marked %d stuck document(s) failed', failed)
     return f'Marked {failed} stuck document(s) failed'
+
+
+def fail_stalled_operations_documents(now=None) -> int:
+    """Operations' documents and summaries stuck in `pending` / `processing`.
+
+    Operations had its own clean-up command (`recover_stuck_operations`) but
+    nothing ran it, so a stuck document stayed stuck: no Retry, and the same
+    file could not be uploaded again until the row was deleted by hand.
+    """
+    from operations_agent.models import OperationsDocument, OperationsDocumentSummary
+
+    now = now or timezone.now()
+    failed = 0
+    # Each model says how long ago it last moved in a different field.
+    for model, moved, minutes in ((OperationsDocument, 'updated_at', DOCUMENT_STALL_MINUTES),
+                                  (OperationsDocumentSummary, 'created_at', OPERATIONS_SUMMARY_STALL_MINUTES)):
+        try:
+            failed += (model.objects
+                       .filter(processing_status__in=('pending', 'processing'),
+                               **{f'{moved}__lt': now - timedelta(minutes=minutes)})
+                       .update(processing_status='failed', processing_error=_OPERATIONS_STOPPED))
+        except Exception:
+            # One agent's table must not stop the others' documents being recovered.
+            logger.exception('fail_stalled_documents: could not check %s', model.__name__)
+    return failed
