@@ -6,6 +6,10 @@ company can update its instance independently of the canonical source.
 
 The shapes match `hr_agent.workflow_engine.STEP_HANDLERS` exactly — that means
 adding a new step type requires the engine to support it first.
+`hr_agent/tests/test_builtin_workflows.py` runs each one to the end.
+
+A meeting step is marked `continue_on_error`: a new hire often has no login on
+the day they are added, and that should not stop their welcome email.
 """
 from __future__ import annotations
 
@@ -46,6 +50,7 @@ BUILTIN_WORKFLOWS: dict[str, dict[str, Any]] = {
                 'duration_minutes': 60,
                 'offset_days_from_start': 0,
                 'with_manager': True,
+                'continue_on_error': True,
             },
             {
                 'type': 'assign_training',
@@ -58,6 +63,7 @@ BUILTIN_WORKFLOWS: dict[str, dict[str, Any]] = {
                 'duration_minutes': 30,
                 'offset_days_from_start': 30,
                 'with_manager': True,
+                'continue_on_error': True,
             },
         ],
     },
@@ -84,6 +90,7 @@ BUILTIN_WORKFLOWS: dict[str, dict[str, Any]] = {
                 'duration_minutes': 45,
                 'offset_days_from_now': 3,
                 'with_hr': True,
+                'continue_on_error': True,
             },
             {
                 'type': 'send_email',
@@ -130,6 +137,7 @@ BUILTIN_WORKFLOWS: dict[str, dict[str, Any]] = {
                 'duration_minutes': 30,
                 'offset_days_from_now': 1,
                 'with_manager': True,
+                'continue_on_error': True,
             },
             {
                 'type': 'send_email',

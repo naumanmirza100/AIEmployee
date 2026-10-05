@@ -465,7 +465,10 @@ def resume_hr_workflow_execution(self, execution_id: int):
         return {'status': 'failed', 'execution_id': execution_id, 'reason': 'not_subscribed'}
 
     snap = execution.pause_state or {}
-    remaining_steps = list(snap.get('remaining_steps') or [])
+    # A workflow that needs approval before it starts was never paused partway:
+    # it has no snapshot, and every step is still to do. (Approving one used to
+    # mark it completed without running any of them.)
+    remaining_steps = list(snap['remaining_steps'] or []) if 'remaining_steps' in snap else list(workflow.steps or [])
     results_so_far = list(snap.get('results_so_far') or [])
     elapsed_active = float(snap.get('elapsed_active_seconds') or 0.0)
     context_data = dict(snap.get('context_data') or execution.context_data or {})

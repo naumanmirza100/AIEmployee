@@ -51,18 +51,74 @@ def leave_request_submitted(leave_request):
     )
 
 
+def run_outcome(execution) -> str:
+    """How a workflow run stands, in a few words: 'done', 'failed: ...'."""
+    result = execution.result_data if isinstance(execution.result_data, dict) else {}
+    if execution.status == 'failed':
+        return f"failed: {execution.error_message or 'a step did not work'}"
+    if execution.status == 'awaiting_approval':
+        return 'waiting for approval'
+    if execution.status == 'completed':
+        skipped = int(result.get('steps_skipped') or 0)
+        return f"done, {skipped} step{'' if skipped == 1 else 's'} skipped" if skipped else 'done'
+    return 'running'
+
+
 def new_starter_from_recruitment(employee, added_by='', onboarding=()):
-    """To HR admins, when Recruitment hands over someone it has hired."""
+    """To HR admins, when Recruitment hands over someone it has hired.
+
+    Says how each onboarding run really went. It used to say "Onboarding
+    started" for a run that had already failed.
+    """
+    from hr_agent.models import HRWorkflowExecution
     when = f", starting {employee.start_date:%d %b %Y}" if employee.start_date else ''
     by = f" Added by {added_by}." if added_by else ''
-    runs = (f" Onboarding started: {', '.join(onboarding)}." if onboarding
-            else ' No onboarding workflow is set up in HR yet.')
+    ran = [f"{e.workflow_name} ({run_outcome(e)})"
+           for e in HRWorkflowExecution.objects.filter(employee_id=employee.id).order_by('id')]
+    if ran:
+        runs = f" Onboarding: {'; '.join(ran)}."
+    elif onboarding:
+        runs = f" Onboarding started: {', '.join(onboarding)}."
+    else:
+        runs = ' No onboarding workflow is set up in HR yet.'
     return notify_company_users(
         hr_admins(employee.company_id),
         title=f"New hire from Recruitment: {employee.full_name}",
         message=f"{employee.job_title or 'New starter'}{when}.{by}{runs}",
         link='/hr/dashboard?tab=employees',
         kind='hr_new_starter',
+    )
+
+
+def workflow_needs_a_look(execution):
+    """To HR admins, when a run fails or finishes without one of its steps.
+    Nobody was told before, so a new hire could go without an orientation
+    meeting and HR would not know. Once per run: the run remembers it was
+    said, so a later save of the same row does not say it again."""
+    workflow = execution.workflow
+    if not workflow or not workflow.company_id:
+        return 0
+    result = execution.result_data if isinstance(execution.result_data, dict) else {}
+    missed = [r for r in (result.get('results') or []) if r.get('skipped') or (r.get('done') is False)]
+    if execution.status != 'failed' and not missed:
+        return 0
+    if result.get('alerted_for') == execution.status:
+        return 0
+    result = {**result, 'alerted_for': execution.status}
+    type(execution).objects.filter(pk=execution.pk).update(result_data=result)
+    execution.result_data = result
+    who = (execution.context_data or {}).get('employee_name')
+    why = '; '.join(str(r.get('error') or r.get('type') or 'a step')[:160] for r in missed[:3])
+    failed = execution.status == 'failed'
+    return notify_company_users(
+        hr_admins(workflow.company_id),
+        title=(f"Workflow failed: {execution.workflow_name or workflow.name}" if failed
+               else f"Workflow finished with a step skipped: {execution.workflow_name or workflow.name}"),
+        message=((f"For {who}. " if who else '') + (why or execution.error_message or 'A step did not work.')
+                 + ' See the run under Workflows.')[:500],
+        link='/hr/dashboard?tab=workflows',
+        severity='warning',
+        kind='hr_workflow_failed',
     )
 
 

@@ -364,7 +364,14 @@ def workflow_execution_post_save(sender, instance: HRWorkflowExecution, created,
                                  update_fields=None, **kwargs):
     """Tell HR admins when a run stops for approval. It stops either as it is
     created (a workflow that needs approval to start) or at an approval step
-    partway through, which saves `status` via update_fields."""
+    partway through, which saves `status` via update_fields. And tell them when
+    a run fails, or finishes having skipped a step."""
+    if instance.status in ('failed', 'completed'):
+        try:
+            alerts.workflow_needs_a_look(instance)
+        except Exception:
+            logger.exception("Could not alert HR admins about workflow run %s", instance.pk)
+        return
     if instance.status != 'awaiting_approval':
         return
     if created or (update_fields and 'status' in update_fields):
