@@ -1,7 +1,7 @@
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 
@@ -11,11 +11,16 @@ from api.permissions import IsOwnerOrAdmin
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])  # Temporarily changed from IsAuthenticated for testing
+@permission_classes([IsAuthenticated])
 def list_projects(request):
-    """List projects with filtering"""
+    """List the caller's own projects (staff: all), with filtering.
+
+    This was AllowAny "temporarily for testing", and a request with no login got
+    every project of every company. Project Manager keeps its projects in this
+    same table.
+    """
     try:
-        user = getattr(request, 'user', None) if hasattr(request, 'user') and request.user.is_authenticated else None
+        user = request.user
         query = Project.objects.all()
         
         # Filter by status
@@ -23,8 +28,8 @@ def list_projects(request):
         if status_filter:
             query = query.filter(status=status_filter)
         
-        # Filter by user's projects (if not admin and user is authenticated)
-        if user and not user.is_staff:
+        # Everyone but platform staff sees only projects they own or manage.
+        if not user.is_staff:
             query = query.filter(Q(owner=user) | Q(project_manager=user))
         
         # Filter by industry
