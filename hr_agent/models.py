@@ -124,6 +124,9 @@ class Employee(models.Model):
     # the row itself isn't deleted, only PII fields are zeroed.
     anonymized_at = models.DateTimeField(null=True, blank=True,
                                          help_text='When PII on this row was scrubbed. Non-null = anonymized.')
+    access_ended = models.JSONField(
+        default=dict, blank=True,
+        help_text='Logins switched off when this person was offboarded (hr_agent/access.py). Empty = none.')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

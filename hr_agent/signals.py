@@ -290,6 +290,14 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
 def employee_post_save(sender, instance: Employee, created, **kwargs):
     if not instance.company_id:
         return
+    # Their logins follow the status, however it was changed: off when they
+    # are offboarded, back on if they return. Never breaks the save itself.
+    try:
+        from hr_agent.access import sync_access
+        with transaction.atomic():
+            sync_access(instance)
+    except Exception:
+        logger.exception("Could not bring logins in line with HR status for employee %s", instance.pk)
     if created:
         ctx = _employee_context(instance, event='employee_hired')
         _run_matching_workflows(company_id=instance.company_id,

@@ -4949,6 +4949,16 @@ def update_employee(request, employee_id):
                 if not ok:
                     return Response({'status': 'error', 'message': err},
                                     status=status.HTTP_400_BAD_REQUEST)
+                if val == 'offboarded' and emp.employment_status != 'offboarded':
+                    # Offboarding switches the person's logins off (hr_agent.access).
+                    from hr_agent.handover import dashboard_login as _dashboard_login
+                    own_login = _dashboard_login(emp)
+                    if own_login is not None and own_login.pk == request.user.pk:
+                        return Response({
+                            'status': 'error',
+                            'message': "You can't offboard your own record: it would switch off the login "
+                                       "you are using. Ask another HR admin to do it.",
+                        }, status=status.HTTP_400_BAD_REQUEST)
                 emp.employment_status = val
                 fields.append('employment_status')
             if 'employment_type' in d:
@@ -5066,7 +5076,12 @@ def employee_handover(request, employee_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def deactivate_employee(request, employee_id):
-    """Mark an employee as offboarded. HR-admin only.
+    """Mark an employee as offboarded and switch their logins off. HR-admin only.
+
+    The logins are switched off by `hr_agent.access` when the status is saved
+    (it used to change the status only, while the dialog said access was
+    revoked). `access` in the answer says what was switched off, and whether a
+    dashboard login was left on because it is the company's last admin.
 
     Body:
       * ``reason`` (str, optional) — free text; goes into the audit log.
@@ -5086,20 +5101,31 @@ def deactivate_employee(request, employee_id):
             'id': emp.id, 'employment_status': emp.employment_status,
             'already_offboarded': True,
         }})
+    from hr_agent.handover import dashboard_login as _dashboard_login
+    own_login = _dashboard_login(emp)
+    if own_login is not None and own_login.pk == request.user.pk:
+        return Response({'status': 'error',
+                         'message': "You can't deactivate your own record: it would switch off the login you are "
+                                    "using. Ask another HR admin to do it."},
+                        status=status.HTTP_400_BAD_REQUEST)
+    from hr_agent import access as _access
     d = request.data or {}
     reason = (d.get('reason') or '').strip()[:500]
     previous_status = emp.employment_status
     emp.employment_status = 'offboarded'
     emp.save(update_fields=['employment_status', 'updated_at'])
+    emp.refresh_from_db(fields=['access_ended'])
+    access = _access.summary(emp)
     _write_audit_log(
         request.user, request.user.company,
         'employee.deactivate', 'employee', emp.id,
         before={'employment_status': previous_status},
-        after={'employment_status': 'offboarded', 'reason': reason},
+        after={'employment_status': 'offboarded', 'reason': reason, 'access': access},
     )
     return Response({'status': 'success', 'data': {
         'id': emp.id, 'employment_status': emp.employment_status,
         'previous_status': previous_status,
+        'access': access,
     }})
 
 
@@ -5135,17 +5161,21 @@ def reactivate_employee(request, employee_id):
                         status=status.HTTP_400_BAD_REQUEST)
     reason = (d.get('reason') or '').strip()[:500]
     previous_status = emp.employment_status
+    had_ended = dict(emp.access_ended or {})
     emp.employment_status = target
     emp.save(update_fields=['employment_status', 'updated_at'])
+    # The logins offboarding switched off are back on (hr_agent.access).
+    logins_restored = bool(had_ended.get('user_ids') or had_ended.get('company_user_id'))
     _write_audit_log(
         request.user, request.user.company,
         'employee.reactivate', 'employee', emp.id,
         before={'employment_status': previous_status},
-        after={'employment_status': target, 'reason': reason},
+        after={'employment_status': target, 'reason': reason, 'logins_restored': logins_restored},
     )
     return Response({'status': 'success', 'data': {
         'id': emp.id, 'employment_status': emp.employment_status,
         'previous_status': previous_status,
+        'logins_restored': logins_restored,
     }})
 
 
@@ -6421,6 +6451,12 @@ def anonymize_employee(request, employee_id):
         'full_name': emp.full_name, 'work_email': emp.work_email,
         'phone': emp.phone or '', 'date_of_birth': emp.date_of_birth.isoformat() if emp.date_of_birth else None,
     }
+
+    # Someone whose record is erased keeps no way in. Done before the scrub,
+    # while the record still carries the email that finds their dashboard login.
+    if not emp.access_ended:
+        from hr_agent.access import end_access
+        end_access(emp)
 
     # Scrub PII fields on the employee row.
     redact_tag = f'[redacted #{emp.id}]'
