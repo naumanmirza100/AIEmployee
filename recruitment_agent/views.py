@@ -657,50 +657,6 @@ def get_interview_details(request, interview_id):
 # Manual sending has been disabled to ensure consistent automatic processing
 # Run: python manage.py send_interview_reminders (via cron/scheduler)
 
-@csrf_exempt
-@require_http_methods(["GET", "POST"])
-def auto_check_interview_followups(request):
-    """
-    Automatic endpoint to check and send follow-up emails.
-    This can be called by cron jobs, scheduled tasks, or automatically.
-    No authentication required for automated systems (can be secured with API key if needed).
-    """
-    print("\n" + "="*70)
-    print("🔧 MANUAL FOLLOW-UP CHECK TRIGGERED")
-    print("="*70)
-    try:
-        from recruitment_agent.tasks import check_and_send_followup_emails
-        from recruitment_agent.models import Interview
-        
-        # Show current pending interviews
-        pending = Interview.objects.filter(status='PENDING', invitation_sent_at__isnull=False)
-        print(f"📋 Found {pending.count()} PENDING interview(s)")
-        for interview in pending:
-            print(f"   • Interview #{interview.id}: {interview.candidate_name} - Invited: {interview.invitation_sent_at}")
-        
-        # Run the automatic check
-        stats = check_and_send_followup_emails()
-        
-        print("="*70 + "\n")
-        
-        return JsonResponse({
-            "success": True,
-            "message": "Follow-up email check completed",
-            "stats": stats,
-            "pending_interviews_count": pending.count()
-        })
-    except Exception as e:
-        import traceback
-        print(f"❌ ERROR: {str(e)}")
-        print(traceback.format_exc())
-        print("="*70 + "\n")
-        return JsonResponse({
-            "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }, status=500)
-
-
 @login_required
 @require_http_methods(["GET", "POST"])
 def recruiter_email_settings(request):
@@ -1726,24 +1682,6 @@ def delete_job_description(request, job_description_id):
         return JsonResponse({"error": "Job description not found"}, status=404)
     except Exception as e:
         return JsonResponse({"error": f"Delete failed: {str(e)}"}, status=500)
-
-
-@login_required
-def view_parsed_cv(request, cv_id):
-    """Debug view to see parsed CV data in formatted JSON"""
-    try:
-        cv_record = CVRecord.objects.get(id=cv_id)
-        parsed_data = json.loads(cv_record.parsed_json) if cv_record.parsed_json else None
-
-        # Return JSON response for easy viewing
-        return JsonResponse({
-            'cv_record_id': cv_record.id,
-            'file_name': cv_record.file_name,
-            'parsed_data': parsed_data,
-            'created_at': cv_record.created_at.isoformat() if cv_record.created_at else None,
-        }, json_dumps_params={'indent': 2, 'ensure_ascii': False})
-    except CVRecord.DoesNotExist:
-        return JsonResponse({"error": "CV record not found"}, status=404)
 
 
 def candidate_application_status(request, token):

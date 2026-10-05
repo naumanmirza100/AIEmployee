@@ -21,11 +21,10 @@ The middleware automatically checks every 30 minutes:
 - ✅ Sends pre-interview reminders automatically
 - ✅ No performance impact (runs in background)
 
-### 3. **API Endpoint (For External Scheduling)**
-Optional endpoint for external schedulers:
-- URL: `/recruitment/api/interviews/auto-check/`
-- Can be called by external cron jobs if needed
-- Returns statistics about emails sent
+### 3. **API Endpoint (removed)**
+There used to be an address anyone could call to trigger the check
+(`/recruitment/api/interviews/auto-check/`). It needed no login and answered
+with internal details, and the check already runs by itself, so it is gone.
 
 ## Automatic Email Logic
 

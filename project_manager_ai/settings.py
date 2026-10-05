@@ -599,6 +599,16 @@ LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 LOGIN_URL = '/login/'
 
+# The old server-rendered site: sign-up, login, dashboards and the session
+# pages under /recruitment/, /frontline/ and /marketing/. It predates
+# companies. Its sign-up page gives anyone on the internet an account, and its
+# Recruitment pages show and change every company's candidates and jobs. The
+# React app uses none of it, so it is OFF unless LEGACY_SITE_ENABLED=1.
+# That switch is for local work only: never on a server that holds real data.
+# The links people get by email (pick an interview time, track an application,
+# email tracking, book a sales call) are separate and always on.
+LEGACY_SITE_ENABLED = bool(_env_flag('LEGACY_SITE_ENABLED'))
+
 
 # --------------------
 # AI / API Settings
