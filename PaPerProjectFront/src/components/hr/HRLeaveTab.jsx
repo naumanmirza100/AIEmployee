@@ -31,6 +31,7 @@ import {
   Loader2, Plus, RefreshCw, Check, X, ClipboardList, Pencil, Ban,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
+import HRHolidaysCard from './HRHolidaysCard';
 
 const STATUS_BADGE = {
   pending: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
@@ -524,6 +525,9 @@ export default function HRLeaveTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* The days the leave count above skips. There was no screen for them. */}
+      <HRHolidaysCard />
     </div>
   );
 }

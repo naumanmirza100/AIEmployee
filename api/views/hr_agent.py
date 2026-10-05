@@ -4563,7 +4563,33 @@ def list_holidays(request):
             qs = qs.filter(date__year=int(year))
         except ValueError:
             pass
-    return Response({'status': 'success', 'data': [_serialize_holiday(h) for h in qs[:1000]]})
+    return Response({'status': 'success', 'data': [_serialize_holiday(h) for h in qs[:1000]],
+                     # Whether this login may add or remove one, so the screen can say so.
+                     'can_manage': _is_hr_admin(request.user)})
+
+
+def _booked_on(company, day):
+    """Meetings and interviews already on the shared calendar for `day`.
+
+    A company holiday makes every agent refuse new bookings that day, but it
+    cancels nothing: whoever adds one is shown what is already there, so they
+    can tell the people involved. Leave is not a booking and is left out.
+    """
+    from core.models import CalendarBlock
+    seen, found = set(), []
+    blocks = (CalendarBlock.objects.filter(company=company, starts_at__date=day)
+              .exclude(source='leave').order_by('starts_at'))
+    for block in blocks:
+        key = (block.source, block.source_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append({'title': block.title or block.get_source_display(), 'source': block.source,
+                      'starts_at': block.starts_at.isoformat()})
+    return found
+
+
+_HOLIDAYS_ARE_FOR_HR_ADMINS = 'Only an HR admin can add or remove a company holiday.'
 
 
 @api_view(['POST'])
@@ -4572,6 +4598,11 @@ def list_holidays(request):
 @throttle_classes([HRCRUDThrottle])
 def create_holiday(request):
     from hr_agent.models import Holiday
+    # A holiday stops bookings in every agent and changes how leave days are
+    # counted. Any dashboard login could add or remove one.
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _HOLIDAYS_ARE_FOR_HR_ADMINS},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = request.data or {}
     name = (d.get('name') or '').strip()
@@ -4603,7 +4634,10 @@ def create_holiday(request):
                      'Holiday', h.id, before,
                      after={'name': h.name, 'date': h.date.isoformat(),
                             'region': h.region, 'is_working_day': h.is_working_day})
-    return Response({'status': 'success', 'data': _serialize_holiday(h)},
+    # Only a day off for the whole company blocks the shared calendar.
+    blocks_calendar = not h.is_working_day and not h.region
+    return Response({'status': 'success', 'data': _serialize_holiday(h),
+                     'already_booked': _booked_on(company, h.date) if blocks_calendar else []},
                     status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
@@ -4613,6 +4647,9 @@ def create_holiday(request):
 @throttle_classes([HRCRUDThrottle])
 def delete_holiday(request, holiday_id):
     from hr_agent.models import Holiday
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _HOLIDAYS_ARE_FOR_HR_ADMINS},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     h = Holiday.objects.filter(pk=holiday_id, company=company).first()
     if not h:
@@ -4855,10 +4892,18 @@ def _is_hr_admin(company_user) -> bool:
 
 
 def _write_audit_log(actor_cu, company, action: str, target_type: str, target_id: int,
-                     *, before: dict | None = None, after: dict | None = None,
-                     created: dict | None = None, deleted: dict | None = None) -> None:
+                     before: dict | None = None, after: dict | None = None,
+                     *, created: dict | None = None, deleted: dict | None = None) -> None:
     """Fire-and-forget audit log writer. Never raises — a logging failure
-    must not roll back the main operation."""
+    must not roll back the main operation.
+
+    `before` and `after` may be given by position. They used to be
+    keyword-only, and seven callers passed `before` by position (updating a
+    department, a notification template, a leave request or an accrual policy,
+    adding a holiday, closing or reopening a review cycle): each saved its
+    change and then failed here with a TypeError, so the screen reported an
+    error for something that had worked, and nothing was logged.
+    """
     try:
         if created is not None:
             diff = {'created': created}
