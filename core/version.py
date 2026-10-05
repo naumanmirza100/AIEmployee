@@ -9,8 +9,8 @@ PaPerProjectFront/src/config/apiLevel.js to the same number, in any change
 where the screens start needing something new from the server (a new address,
 a field they rely on, an answer that changed shape). The screens ask
 GET /api/version and show "being updated" while the server is behind
-(components/common/ServerVersionNotice.jsx). core/tests_version.py keeps the
-two numbers equal in the repository.
+(components/common/ServerVersionNotice.jsx). core/tests_error_alerts.py keeps
+the two numbers equal in the repository.
 """
 
 API_LEVEL = 1

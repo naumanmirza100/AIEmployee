@@ -858,6 +858,30 @@ def _handle_subscription_deleted(subscription):
         )
 
 
+def _paid_period(invoice, stripe_sub_id):
+    """The period a paid invoice buys: (start, end), or (None, None).
+
+    NOT the invoice's own period_start / period_end. For a subscription invoice
+    those look back one period (Stripe's own wording), so on a renewal they end
+    at the moment of renewal. Copying them put `current_period_end` in the past
+    and locked the agent as soon as the renewal was paid. Ask the subscription;
+    if Stripe cannot be reached, the invoice's lines carry the period paid for.
+    """
+    try:
+        start, end = _extract_period(stripe.Subscription.retrieve(stripe_sub_id))
+        if end:
+            return start, end
+    except Exception as exc:
+        logger.warning('Invoice paid: could not read sub %s from Stripe (%s); using the invoice lines.',
+                       stripe_sub_id, exc)
+    periods = [line.get('period') or {} for line in ((invoice.get('lines') or {}).get('data') or [])]
+    periods = [p for p in periods if p.get('end')]
+    if not periods:
+        return None, None
+    latest = max(periods, key=lambda p: p['end'])
+    return _ts_to_dt(latest.get('start')), _ts_to_dt(latest['end'])
+
+
 def _handle_invoice_paid(invoice):
     """Handle invoice.paid — successful recurring payment. Extend access."""
     stripe_sub_id = _invoice_subscription_id(invoice)
@@ -870,17 +894,17 @@ def _handle_invoice_paid(invoice):
     if not purchase:
         return
 
-    # Update billing period from the invoice
     update_fields = ['updated_at']
 
-    ps = _ts_to_dt(invoice.get('period_start'))
-    pe = _ts_to_dt(invoice.get('period_end'))
-    if ps:
-        purchase.current_period_start = ps
-        update_fields.append('current_period_start')
-    if pe:
+    # A payment only ever extends access: an old invoice settled late must not
+    # pull the end date back.
+    ps, pe = _paid_period(invoice, stripe_sub_id)
+    if pe and (purchase.current_period_end is None or pe > purchase.current_period_end):
         purchase.current_period_end = pe
         update_fields.append('current_period_end')
+        if ps:
+            purchase.current_period_start = ps
+            update_fields.append('current_period_start')
 
     # If was past_due, reactivate
     if purchase.status == 'past_due':

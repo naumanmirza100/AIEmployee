@@ -169,3 +169,83 @@ class StripeReconcileTests(TestCase):
         with mock.patch('logging.Logger.error') as said:
             reconcile_task(full=True)
         said.assert_not_called()
+
+
+class InvoicePaidTests(TestCase):
+    """A paid invoice extends access; it must never end it.
+
+    Stripe's invoice carries its own period_start / period_end, which for a
+    subscription look back one period: on a renewal they end at the moment of
+    renewal. The handler used to copy them, which would have locked every
+    agent the hour its renewal was paid.
+    """
+
+    def setUp(self):
+        self.company = Company.objects.create(name='Acme', email='acme@test.local')
+        self.now = timezone.now().replace(microsecond=0)
+        self.renewed_at = self.now - timedelta(hours=1)          # the old period ended an hour ago
+        self.next_month = self.renewed_at + timedelta(days=30)
+        self.purchase = CompanyModulePurchase.objects.create(
+            company=self.company, module_name='hr_agent', status='active', stripe_subscription_id='sub_r',
+            current_period_end=self.next_month, billing_interval='month')
+
+    def renewal_invoice(self, lines=True):
+        """The invoice Stripe sends about an hour after a renewal."""
+        invoice = {'id': 'in_1', 'subscription': 'sub_r',
+                   'period_start': int((self.renewed_at - timedelta(days=30)).timestamp()),
+                   'period_end': int(self.renewed_at.timestamp())}          # looks back: already past
+        if lines:
+            invoice['lines'] = {'data': [{'period': {'start': int(self.renewed_at.timestamp()),
+                                                     'end': int(self.next_month.timestamp())}}]}
+        return invoice
+
+    def stripe_answers(self, answer):
+        patcher = mock.patch.object(module_purchase.stripe.Subscription, 'retrieve', side_effect=answer)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def paid(self, invoice):
+        module_purchase._handle_invoice_paid(invoice)
+        self.purchase.refresh_from_db()
+        return self.purchase
+
+    def test_paying_a_renewal_keeps_the_agent_open(self):
+        self.stripe_answers(lambda sub_id: at_stripe(sub_id, period_end=self.next_month))
+        purchase = self.paid(self.renewal_invoice())
+        self.assertTrue(purchase.is_active())
+        self.assertEqual(purchase.current_period_end, self.next_month)
+
+    def test_it_takes_the_new_period_from_stripe_when_ours_is_stale(self):
+        self.purchase.current_period_end = self.renewed_at        # the rollover event never reached us
+        self.purchase.save()
+        self.stripe_answers(lambda sub_id: at_stripe(sub_id, period_end=self.next_month))
+        purchase = self.paid(self.renewal_invoice(lines=False))
+        self.assertEqual(purchase.current_period_end, self.next_month)
+        self.assertTrue(purchase.is_active())
+
+    def test_with_stripe_unreachable_it_uses_the_period_on_the_invoice_lines(self):
+        self.purchase.current_period_end = self.renewed_at
+        self.purchase.save()
+        self.stripe_answers(RuntimeError('Stripe is down'))
+        purchase = self.paid(self.renewal_invoice())
+        self.assertEqual(purchase.current_period_end, self.next_month)
+
+    def test_with_nothing_to_go_on_it_leaves_the_period_alone(self):
+        self.stripe_answers(RuntimeError('Stripe is down'))
+        purchase = self.paid(self.renewal_invoice(lines=False))
+        self.assertEqual(purchase.current_period_end, self.next_month)     # not pulled back to the invoice's date
+        self.assertTrue(purchase.is_active())
+
+    def test_an_old_invoice_settled_late_does_not_shorten_access(self):
+        last_month = self.renewed_at
+        self.stripe_answers(lambda sub_id: at_stripe(sub_id, period_end=last_month))
+        purchase = self.paid(self.renewal_invoice(lines=False))
+        self.assertEqual(purchase.current_period_end, self.next_month)
+
+    def test_a_payment_that_clears_after_failing_reopens_the_agent(self):
+        self.purchase.status = 'past_due'
+        self.purchase.save()
+        self.stripe_answers(lambda sub_id: at_stripe(sub_id, period_end=self.next_month))
+        purchase = self.paid(self.renewal_invoice())
+        self.assertEqual(purchase.status, 'active')
+        self.assertTrue(purchase.is_active())
