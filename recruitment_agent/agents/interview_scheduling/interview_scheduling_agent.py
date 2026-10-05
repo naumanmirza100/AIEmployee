@@ -812,6 +812,10 @@ class InterviewSchedulingAgent:
             # Send confirmation email
             confirmation_sent = self.send_confirmation_email(interview)
 
+            # The interviewers hear as well; nothing told them before.
+            from recruitment_agent import interviewer_alerts
+            interviewer_alerts.tell(interview, 'booked')
+
             # Tell the recruiter in the app too; this used to be email-only.
             if interview.company_user_id:
                 from core.notification_utils import notify_company_users
@@ -1060,6 +1064,8 @@ class InterviewSchedulingAgent:
                     "conflict": clash.payload()['data']}
 
         email_sent = self.send_reschedule_email(interview)
+        from recruitment_agent import interviewer_alerts
+        interviewer_alerts.tell(interview, 'moved')
         return {
             "success": True,
             "interview_id": interview.id,

@@ -1245,6 +1245,8 @@ def update_interview(request, interview_id):
         new_outcome = request.data.get('outcome')
         new_meeting_link = request.data.get('meeting_link')
         resend_confirmation = request.data.get('resend_confirmation', False)
+        from recruitment_agent import interviewer_alerts
+        was_booked = interview.status in ('SCHEDULED', 'RESCHEDULED', 'CONFIRMED')
 
         if new_status is not None:
             new_status = (new_status or '').strip().upper()
@@ -1254,6 +1256,26 @@ def update_interview(request, interview_id):
                     'message': f'Invalid status. Must be one of: {", ".join(VALID_INTERVIEW_STATUSES)}'
                 }, status=status.HTTP_400_BAD_REQUEST)
             interview.status = new_status or interview.status
+
+        # Setting a cancelled or completed interview back to Scheduled puts its
+        # old hour back on everyone's calendar. That was saved unchecked, on
+        # top of anything booked in the meantime. An interview already in the
+        # past is left alone: restoring an old record must not be refused.
+        from django.utils import timezone
+        rebooked = (not was_booked and interview.status in ('SCHEDULED', 'RESCHEDULED')
+                    and interview.scheduled_datetime is not None
+                    and interview.scheduled_datetime > timezone.now())
+        if rebooked:
+            from core.scheduling import ScheduleConflict, booking_guard, ensure_free
+            from recruitment_agent.interview_time import people as interview_people, stored_zone
+            occupied = interview_people(interview)
+            try:
+                with booking_guard(occupied):
+                    ensure_free(occupied, interview.scheduled_datetime, interview.duration_minutes,
+                                tz_name=stored_zone(interview), viewer_source='recruitment',
+                                reveal_private=True, exclude=[('recruitment', interview.id)])
+            except ScheduleConflict as clash:
+                return clash.response()
 
         outcome_updated = False
         if new_outcome is not None:
@@ -1285,7 +1307,8 @@ def update_interview(request, interview_id):
                 return Response({'status': 'error',
                                  'message': 'Interviewers must be colleagues in your company.'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            added = valid - set(interview.interviewers.values_list('id', flat=True))
+            before = set(interview.interviewers.values_list('id', flat=True))
+            added, removed = valid - before, before - valid
             booked = (interview.scheduled_datetime is not None
                       and interview.status in ('SCHEDULED', 'RESCHEDULED', 'CONFIRMED'))
             if added and booked:
@@ -1303,8 +1326,20 @@ def update_interview(request, interview_id):
                     return clash.response()
             else:
                 interview.interviewers.set(valid)
+            interviewer_alerts.tell(interview, 'added', users=added)
+            interviewer_alerts.tell(interview, 'removed', users=removed)
+        else:
+            added = set()
 
         interview.save()
+
+        # The people already on it hear when it is called off or put back on.
+        # Someone added in this same request has just been told the time.
+        staying = set(interview.interviewers.values_list('id', flat=True)) - added
+        if was_booked and interview.status == 'CANCELLED':
+            interviewer_alerts.tell(interview, 'cancelled', users=staying)
+        elif rebooked:
+            interviewer_alerts.tell(interview, 'booked', users=staying)
 
         # Resend confirmation email with the updated meeting link
         if resend_confirmation and interview.candidate_email:
@@ -2146,6 +2181,9 @@ def bulk_update_cv_records(request):
                             cancel_emails_sent += 1
                     except Exception as _ce:
                         logger.warning(f"Cancellation email failed for interview {iv.id}: {_ce}")
+                if iv.status in ('SCHEDULED', 'RESCHEDULED', 'CONFIRMED'):
+                    from recruitment_agent import interviewer_alerts
+                    interviewer_alerts.tell(iv, 'cancelled')
                 iv.delete()
                 removed_interviews += 1
             logger.info(
