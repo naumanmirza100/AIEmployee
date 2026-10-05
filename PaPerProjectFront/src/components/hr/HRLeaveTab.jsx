@@ -10,6 +10,7 @@
  * enforced server-side (assigned approver OR HR-roled CompanyUser).
  */
 import React, { useState, useEffect } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -283,7 +284,7 @@ export default function HRLeaveTab() {
                         {lr.employee_name || '—'}
                         <div className="text-[10px] text-white/45">{lr.employee_email}</div>
                       </TableCell>
-                      <TableCell><Badge variant="outline" className="text-[10px]">{lr.leave_type}</Badge></TableCell>
+                      <TableCell><Badge variant="outline" className="text-[10px]">{labelOf(lr.leave_type)}</Badge></TableCell>
                       <TableCell className="text-xs text-white/70">
                         {lr.start_date} → {lr.end_date}
                       </TableCell>
@@ -291,7 +292,7 @@ export default function HRLeaveTab() {
                       <TableCell className="text-xs text-white/70">{lr.approver_name || '—'}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`text-[10px] ${STATUS_BADGE[lr.status] || ''}`}>
-                          {lr.status}
+                          {labelOf(lr.status)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
@@ -505,7 +506,7 @@ export default function HRLeaveTab() {
             <DialogDescription>
               {decideDialog.lr ? (
                 <>
-                  {decideDialog.lr.employee_name} · {decideDialog.lr.leave_type} ·{' '}
+                  {decideDialog.lr.employee_name} · {labelOf(decideDialog.lr.leave_type)} ·{' '}
                   {decideDialog.lr.days_requested} day(s) ({decideDialog.lr.start_date} → {decideDialog.lr.end_date})
                 </>
               ) : null}

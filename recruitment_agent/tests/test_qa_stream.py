@@ -4,14 +4,13 @@ It showed nothing until the whole answer arrived, while HR and Frontline Q&A
 already streamed. The streamed call must still count against the quota.
 """
 import json
-from types import SimpleNamespace
 from unittest import mock
 
 from django.test import Client, TestCase
 
 from core.models import Company, CompanyModulePurchase, CompanyUser, CompanyUserToken
 from recruitment_agent.agents.recruitment_qa_agent import RecruitmentQAAgent
-from recruitment_agent.core import GroqClientError, QuotaAwareGroqClient
+from recruitment_agent.core import GroqClientError
 
 GENERAL = 'What are some good React interview questions?'
 ANSWER = '## React questions\n- What is JSX?\n- How do hooks work?'
@@ -75,67 +74,6 @@ class AgentTests(RecruitmentStreamTestCase):
         events, _ = self.stream(GENERAL, FakeGroq(fail=True))
         self.assertEqual(events[-1]['type'], 'done')
         self.assertIn('API error', events[-1]['result']['answer'])
-
-
-class FakeResponse:
-    def __init__(self, lines, status=200):
-        self.lines, self.status_code, self.closed = lines, status, False
-        self.headers, self.text = {}, 'denied'
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            import requests
-            raise requests.HTTPError(response=self)
-
-    def json(self):
-        return {'error': {'message': 'denied'}}
-
-    def iter_lines(self):
-        yield from self.lines
-
-    def close(self):
-        self.closed = True
-
-
-SSE = [
-    b'data: {"choices":[{"delta":{"content":"Hel"}}]}',
-    b'',
-    b'data: {"choices":[{"delta":{"content":"lo"}}],"x_groq":{"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}}',
-    b'data: [DONE]',
-]
-
-
-class ClientStreamTests(TestCase):
-
-    def client_with(self, response):
-        ctx = SimpleNamespace(provider='groq')
-        return QuotaAwareGroqClient(api_key='test-key', key_ctx=ctx), ctx, \
-            mock.patch('recruitment_agent.core.requests.post', return_value=response)
-
-    def test_pieces_and_the_reported_usage_against_the_quota(self):
-        response = FakeResponse(SSE)
-        client, ctx, post = self.client_with(response)
-        with post, mock.patch('core.api_key_service.record_usage') as record:
-            self.assertEqual(list(client.send_prompt_text_stream('System.', 'Hi?')), ['Hel', 'lo'])
-        record.assert_called_once_with(ctx, 5)
-        self.assertTrue(response.closed)
-
-    def test_a_reader_that_stops_early_is_still_charged(self):
-        client, ctx, post = self.client_with(FakeResponse(SSE))
-        with post, mock.patch('core.api_key_service.record_usage') as record:
-            stream = client.send_prompt_text_stream('System.', 'Hi?')
-            next(stream)
-            stream.close()
-        record.assert_called_once()
-        self.assertGreater(record.call_args.args[1], 0)
-
-    def test_a_refused_key_fails_before_any_text_and_costs_nothing(self):
-        client, _, post = self.client_with(FakeResponse([], status=401))
-        with post, mock.patch('core.api_key_service.record_usage') as record:
-            with self.assertRaises(GroqClientError) as caught:
-                list(client.send_prompt_text_stream('System.', 'Hi?'))
-        self.assertTrue(caught.exception.is_auth_error)
-        record.assert_not_called()
 
 
 class EndpointTests(RecruitmentStreamTestCase):

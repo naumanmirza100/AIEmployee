@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { QuickChatHistoryList, SlashCommandMenu, relativeTime } from '@/components/common/QuickChatParts';
+import { labelOf } from '@/utils/labels';
 import { createPortal } from 'react-dom';
 import {
   MessageCircle, X, Send, Loader2, Sparkles, GraduationCap,
@@ -8,20 +10,17 @@ import InfoHint, { useHints } from '../frontline/InfoHint';
 import FrontlineTutorial, { resetTutorial } from '../frontline/FrontlineTutorial';
 import { useTutorialNudge } from '../frontline/tourUtils';
 import { PM_FLOATING_CHAT_TOUR, PM_HINTS } from './pmTutorialSteps';
-import {
-  listPMChatHistory,
-  savePMChatConversation,
-  deletePMChatConversation,
-  listPMRecentlyViewed,
-} from './pmLocalStore';
+import { listPMRecentlyViewed } from './pmLocalStore';
+import useQuickChatHistory from '@/hooks/useQuickChatHistory';
 import pmAgentService from '@/services/pmAgentService';
-import { useToast } from '@/components/ui/use-toast';
+import PilotGapForm from './PilotGapForm';
+import ChatMarkdown from '@/components/shared/ChatMarkdown';
 import { useDraggableResizable, ContextIndicator, ResizeCorner, MobileSheetHandle } from '../frontline/chatShellUtils';
 
 const PM_LAST_MODE_KEY = 'pm_fc_last_mode_v1';
 
 // Two "modes" — the same UI drives both, backed by different service methods
-// and different localStorage histories.
+// and a history each (kept on the server, see useQuickChatHistory).
 const MODES = {
   pilot: {
     label: 'Project Pilot',
@@ -63,9 +62,19 @@ function newConversationId() {
   return `pmfc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// A document upload is read in the background; wait for its result.
+async function waitForPilotJob(jobId, { everyMs = 2000, tries = 150 } = {}) {
+  for (let i = 0; i < tries; i += 1) {
+    const res = await pmAgentService.getProjectPilotJobStatus(jobId);
+    const data = res?.data || {};
+    if (data.processing_status === 'ready' || data.processing_status === 'failed') return data;
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+  }
+  throw new Error('Reading the document is taking longer than expected. Please try again.');
+}
+
 const PMFloatingChat = () => {
   const { enabled: hintsEnabled } = useHints();
-  const { toast } = useToast();
 
   const [open, setOpen] = useState(false);
   // Preserve the last-used mode across sessions
@@ -98,8 +107,9 @@ const PMFloatingChat = () => {
   // Tour state
   const [tourOpen, setTourOpen] = useState(false);
 
-  // Stores — refresh whenever mode changes or chat is opened
-  const [history, setHistory] = useState(() => listPMChatHistory('pilot'));
+  // History (on the server, per mode) — refreshed whenever mode changes or chat is opened
+  const { history, refresh: refreshHistory, save: saveConversation, remove: removeConversation } =
+    useQuickChatHistory('pm', mode);
   const { containerStyle: geomStyle, dragHandleProps, resizeHandleProps } = useDraggableResizable('pm_fc', { defaultWidth: 440, defaultHeight: 600 });
   const [recents, setRecents] = useState(() => listPMRecentlyViewed());
 
@@ -107,7 +117,6 @@ const PMFloatingChat = () => {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const refreshHistory = () => setHistory(listPMChatHistory(mode));
   const refreshRecents = () => setRecents(listPMRecentlyViewed());
 
   // ---- Effects ---------------------------------------------------------
@@ -122,13 +131,7 @@ const PMFloatingChat = () => {
     if (!currentConv.messages.length) return;
     const firstUser = currentConv.messages.find((m) => m.role === 'user');
     const title = (firstUser?.content || 'Untitled').slice(0, 60);
-    savePMChatConversation(mode, {
-      id: currentConv.id,
-      title,
-      messages: currentConv.messages,
-      updated_at: Date.now(),
-    });
-    refreshHistory();
+    saveConversation({ id: currentConv.id, title, messages: currentConv.messages });
   }, [currentConv.messages, currentConv.id, mode]);
 
   // Global Ctrl/Cmd+K shortcut
@@ -165,6 +168,29 @@ const PMFloatingChat = () => {
     setCurrentConv((c) => ({ ...c, messages: [...c.messages, msg] }));
   };
 
+  // A Pilot proposal waiting for review lives on its message; this moves it
+  // along (open → busy → done / cancelled).
+  const setDraftState = (draftId, draftState) => {
+    setCurrentConv((c) => ({
+      ...c,
+      messages: c.messages.map((m) => (m.draftId === draftId ? { ...m, draftState } : m)),
+    }));
+  };
+
+  const confirmDraft = async (msg, answers, skip) => {
+    setDraftState(msg.draftId, 'busy');
+    try {
+      const res = await pmAgentService.projectPilotConfirm(msg.draft.actions || [], answers, skip);
+      if (res?.status !== 'success') throw new Error(res?.message || 'Could not make the changes.');
+      setDraftState(msg.draftId, 'done');
+      const failed = (res.data?.action_results || []).some((r) => !r.success);
+      pushMessage({ role: 'assistant', content: res.data?.answer || 'Done.', error: failed, mode: 'pilot' });
+    } catch (e) {
+      setDraftState(msg.draftId, 'open');
+      pushMessage({ role: 'assistant', content: `Error: ${e.message || 'Something went wrong.'}`, error: true });
+    }
+  };
+
   const startNewConversation = () => {
     setCurrentConv({ id: newConversationId(), messages: [] });
     setInput('');
@@ -173,10 +199,9 @@ const PMFloatingChat = () => {
   };
 
   const clearCurrentConversation = () => {
-    deletePMChatConversation(mode, currentConv.id);
+    removeConversation(currentConv.id);
     setCurrentConv({ id: newConversationId(), messages: [] });
     setInput('');
-    refreshHistory();
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
@@ -186,7 +211,7 @@ const PMFloatingChat = () => {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
-  const removeHistoryEntry = (id) => { deletePMChatConversation(mode, id); refreshHistory(); };
+  const removeHistoryEntry = (id) => { removeConversation(id); };
 
   const switchMode = (nextMode) => {
     if (nextMode === mode) return;
@@ -262,7 +287,17 @@ const PMFloatingChat = () => {
       // Multi-turn context — last 6 messages
       const history = currentConv.messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
       const res = await MODES[mode].call(q, history, { onText: setStreamText });
-      if (res && (res.status === 'success' || res.data)) {
+      if (res?.status === 'needs_input') {
+        // Pilot never changes anything without review: show the card.
+        pushMessage({
+          role: 'assistant',
+          content: res.data?.answer || 'Review this, then confirm.',
+          draft: res.data,
+          draftId: `d_${Date.now()}`,
+          draftState: 'open',
+          mode,
+        });
+      } else if (res && (res.status === 'success' || res.data)) {
         const data = res.data || res;
         pushMessage({
           role: 'assistant',
@@ -293,17 +328,34 @@ const PMFloatingChat = () => {
     try {
       // Force Pilot mode for uploads — that's the agent that reads files.
       if (mode !== 'pilot') switchMode('pilot');
-      const res = await pmAgentService.projectPilotFromFile(file, null, [], input.trim());
-      if (res && (res.status === 'success' || res.data)) {
-        const data = res.data || res;
+      const prompt = input.trim();
+      setInput('');
+      const res = await pmAgentService.projectPilotFromFile(file, null, [], prompt);
+      const jobId = res?.data?.id;
+      if (!jobId) throw new Error((res && res.message) || 'Upload failed');
+      // The document is read in the background. This used to say "Ingested"
+      // straight away and never show what happened to it.
+      const data = await waitForPilotJob(jobId);
+      if (data.processing_status === 'failed') throw new Error(data.error || 'The document could not be processed.');
+      if (data.draft) {
+        // Nothing is created until the card is confirmed.
         pushMessage({
           role: 'assistant',
-          content: data.answer || data.response || `Ingested "${file.name}".`,
-          system: true,
+          content: data.draft.answer || 'Review this, then confirm.',
+          draft: data.draft,
+          draftId: `d_${Date.now()}`,
+          draftState: 'open',
+          mode: 'pilot',
         });
-        toast({ title: 'File processed', description: file.name });
+      } else if (data.confirmation_required) {
+        const choices = (data.confirmation_required.options || []).map((o) => `- ${o.label}`).join('\n');
+        pushMessage({
+          role: 'assistant',
+          content: `${(data.answer || '').replace('Pick an option below to continue.', 'Reply with what you would like:')}\n${choices}`,
+          mode: 'pilot',
+        });
       } else {
-        throw new Error((res && res.message) || 'Upload failed');
+        pushMessage({ role: 'assistant', content: data.answer || data.cannot_do || `Read "${file.name}".`, mode: 'pilot' });
       }
     } catch (err) {
       pushMessage({ role: 'assistant', content: `Upload failed: ${err.message || 'Unknown error'}`, error: true });
@@ -329,15 +381,6 @@ const PMFloatingChat = () => {
   }, [slashOpen, filteredCommands, slashActive]);
 
   const replayTour = () => { dismissTourNudge(); resetTutorial(PM_FLOATING_CHAT_TOUR.key); setTourOpen(true); };
-
-  const relativeTime = (ts) => {
-    if (!ts) return '';
-    const diff = (Date.now() - ts) / 1000;
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return `${Math.floor(diff / 86400)}d ago`;
-  };
 
   const currentMode = MODES[mode];
   const ModeIcon = currentMode.icon;
@@ -472,35 +515,8 @@ const PMFloatingChat = () => {
 
           {/* Body */}
           {showHistory ? (
-            <div className="flex-1 overflow-y-auto p-3 space-y-1.5" style={{ background: 'var(--panel-3)' }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">
-                  {currentMode.label} · Recent conversations
-                </p>
-                <span className="text-[10px] text-white/40">{history.length} saved</span>
-              </div>
-              {history.length === 0 ? (
-                <p className="text-sm text-white/50 text-center py-8">No saved conversations yet.</p>
-              ) : history.map((h) => (
-                <div key={h.id}
-                  className={`group flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition
-                    ${h.id === currentConv.id ? 'bg-cyan-500/10 border border-cyan-400/30' : 'hover:bg-white/[0.04] border border-transparent'}`}
-                  onClick={() => openHistoryEntry(h)}
-                >
-                  <MessageCircle className="h-3.5 w-3.5 shrink-0 text-white/40" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-white/85 truncate">{h.title}</div>
-                    <div className="text-[10px] text-white/40">
-                      {relativeTime(h.updated_at)} · {(h.messages || []).length} messages
-                    </div>
-                  </div>
-                  <button type="button" onClick={(e) => { e.stopPropagation(); removeHistoryEntry(h.id); }}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-white/40 hover:text-rose-400 hover:bg-white/[0.06] transition">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
+            <QuickChatHistoryList history={history} currentId={currentConv.id} heading={`${currentMode.label} · Recent conversations`}
+              accent="cyan" onOpen={openHistoryEntry} onRemove={removeHistoryEntry} />
           ) : (
             <div data-tour-pmfc="messages" className="flex-1 overflow-y-auto p-3 space-y-2.5" style={{ background: 'var(--panel-3)' }}>
               {currentConv.messages.length === 0 ? (
@@ -528,7 +544,7 @@ const PMFloatingChat = () => {
                             className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded hover:bg-white/[0.05] transition group">
                             <Target className="h-3.5 w-3.5 text-white/50 shrink-0" />
                             <span className="text-xs text-white/70 truncate group-hover:text-white/90">
-                              {r.kind}: {r.title}
+                              {labelOf(r.kind)}: {r.title}
                             </span>
                             <span className="text-[10px] text-white/30 ml-auto shrink-0">{relativeTime(r.at)}</span>
                           </button>
@@ -569,7 +585,7 @@ const PMFloatingChat = () => {
               ) : currentConv.messages.map((m, i) => (
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
-                    className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                    className={`${m.draft ? 'w-full' : 'max-w-[85%]'} rounded-lg px-3 py-2 text-sm ${
                       m.role === 'user'
                         ? 'bg-cyan-500/25 text-white border border-cyan-400/30'
                         : m.error
@@ -579,7 +595,24 @@ const PMFloatingChat = () => {
                             : 'bg-white/[0.06] text-white/90 border border-white/10'
                     }`}
                   >
-                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    {m.role === 'user' || m.error || m.system ? (
+                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    ) : (
+                      // Answers come as markdown (bold, lists), as in HR's and Frontline's chats.
+                      // The streamed text below stays plain until it is complete.
+                      <ChatMarkdown>{m.content || ''}</ChatMarkdown>
+                    )}
+                    {m.draft && (
+                      <PilotGapForm
+                        data={m.draft}
+                        compact
+                        busy={m.draftState === 'busy'}
+                        done={m.draftState === 'done'}
+                        cancelled={m.draftState === 'cancelled'}
+                        onConfirm={(answers, skip) => confirmDraft(m, answers, skip)}
+                        onCancel={() => setDraftState(m.draftId, 'cancelled')}
+                      />
+                    )}
                     {m.role === 'assistant' && !m.error && !m.system && (m.citations?.length > 0 || m.source) && (
                       <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
                         <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Sources</p>
@@ -625,31 +658,8 @@ const PMFloatingChat = () => {
                 </div>
               )}
               {slashOpen && filteredCommands.length > 0 && (
-                <div className="absolute bottom-full left-2 right-2 mb-2 rounded-lg border border-[var(--sfc-1e3a5f)] bg-[var(--sfc-0a1929)] shadow-2xl overflow-hidden">
-                  <div className="px-3 py-1.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-white/40 font-semibold">
-                    Commands · ↑↓ Tab/Enter to insert
-                  </div>
-                  <div className="max-h-48 overflow-y-auto">
-                    {filteredCommands.map((c, i) => {
-                      const Icon = c.icon;
-                      return (
-                        <button key={c.key} type="button" onMouseDown={(e) => { e.preventDefault(); applyCommand(c); }}
-                          onMouseEnter={() => setSlashActive(i)}
-                          className={`w-full flex items-start gap-2 px-3 py-2 text-left transition
-                            ${i === slashActive ? 'bg-cyan-500/10' : 'hover:bg-white/[0.03]'}`}>
-                          <Icon className="h-4 w-4 shrink-0 text-cyan-300 mt-0.5" />
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-white">
-                              {c.label}
-                              <span className="text-white/40 font-normal ml-1">{c.hint}</span>
-                            </div>
-                            <div className="text-[11px] text-white/60 mt-0.5">{c.description}</div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <SlashCommandMenu commands={filteredCommands} active={slashActive} accent="cyan" panelClassName="border-[var(--sfc-1e3a5f)] bg-[var(--sfc-0a1929)]"
+                  onPick={applyCommand} onHover={setSlashActive} />
               )}
 
               <div className="p-2.5 flex gap-2 items-end">

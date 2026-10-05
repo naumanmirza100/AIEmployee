@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { labelOf } from '@/utils/labels';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import SearchableSelect from '@/components/ui/searchable-select';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   Table,
   TableBody,
@@ -74,6 +76,8 @@ const CVRecords = () => {
   const [pageSize, setPageSize] = useState(10);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  // A bulk decision emails candidates, so it is confirmed first.
+  const [pendingDecision, setPendingDecision] = useState(null);
 
   useEffect(() => {
     fetchJobs();
@@ -158,6 +162,7 @@ const CVRecords = () => {
   const handleBulkChangeDecision = async (decision) => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
+    setPendingDecision(null);
     try {
       setBulkUpdating(true);
       const response = await bulkUpdateCVRecords(ids, decision);
@@ -302,12 +307,12 @@ const CVRecords = () => {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <span className="text-xs sm:text-sm font-medium">{selectedIds.size} selected</span>
               <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
-                <Button id="REC-cvrecords-bulk-interview-btn" data-testid="REC-cvrecords-bulk-interview-btn" size="sm" variant="default" className="bg-green-600 hover:bg-green-700 text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('INTERVIEW')}>
+                <Button id="REC-cvrecords-bulk-interview-btn" data-testid="REC-cvrecords-bulk-interview-btn" size="sm" variant="default" className="bg-green-600 hover:bg-green-700 text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => setPendingDecision('INTERVIEW')}>
                   {bulkUpdating ? <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 animate-spin mr-1" /> : null}
                   Interview
                 </Button>
-                <Button id="REC-cvrecords-bulk-hold-btn" data-testid="REC-cvrecords-bulk-hold-btn" size="sm" variant="secondary" className="text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('HOLD')}>Hold</Button>
-                <Button id="REC-cvrecords-bulk-reject-btn" data-testid="REC-cvrecords-bulk-reject-btn" size="sm" variant="secondary" className="text-red-600 hover:text-red-700 text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => handleBulkChangeDecision('REJECT')}>Reject</Button>
+                <Button id="REC-cvrecords-bulk-hold-btn" data-testid="REC-cvrecords-bulk-hold-btn" size="sm" variant="secondary" className="text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => setPendingDecision('HOLD')}>Hold</Button>
+                <Button id="REC-cvrecords-bulk-reject-btn" data-testid="REC-cvrecords-bulk-reject-btn" size="sm" variant="secondary" className="text-red-600 hover:text-red-700 text-xs sm:text-sm" disabled={bulkUpdating} onClick={() => setPendingDecision('REJECT')}>Reject</Button>
                 <Button id="REC-cvrecords-bulk-clear-btn" data-testid="REC-cvrecords-bulk-clear-btn" size="sm" variant="ghost" className="text-xs sm:text-sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
               </div>
             </div>
@@ -459,9 +464,74 @@ const CVRecords = () => {
         </>
       )}
 
+      <BulkDecisionDialog
+        decision={pendingDecision}
+        count={selectedIds.size}
+        names={records.filter((r) => selectedIds.has(r.id))
+          .map((r) => r.application_name || r.parsed?.name || r.file_name || 'Unnamed')}
+        busy={bulkUpdating}
+        onCancel={() => setPendingDecision(null)}
+        onConfirm={() => handleBulkChangeDecision(pendingDecision)}
+      />
     </div>
   );
 };
+
+/** What each bulk decision does to the candidates — said before it happens,
+ *  because two of the three email them (api/views/recruitment_agent.py,
+ *  bulk_update_cv_records). */
+const BULK_EFFECTS = {
+  INTERVIEW: {
+    label: 'Interview',
+    effect: 'Each one who doesn\u2019t have an interview yet is emailed an invitation to pick a time.',
+    button: 'Confirm and send invitations',
+  },
+  HOLD: {
+    label: 'Hold',
+    effect: 'Interviews already arranged for them are removed, and anyone who had confirmed a time is emailed that it\u2019s cancelled.',
+    button: 'Confirm',
+  },
+  REJECT: {
+    label: 'Reject',
+    effect: 'Each is emailed an application update letting them know they weren\u2019t selected, and any interview arranged for them is removed.',
+    button: 'Confirm and email them',
+  },
+};
+
+function BulkDecisionDialog({ decision, count, names, busy, onCancel, onConfirm }) {
+  const info = BULK_EFFECTS[decision];
+  const shown = names.slice(0, 8);
+  const more = count - shown.length;
+  return (
+    <Dialog open={!!info} onOpenChange={(open) => { if (!open) onCancel(); }}>
+      {info && (
+        <DialogContent className="w-[95vw] max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move {count} candidate{count === 1 ? '' : 's'} to {info.label}?</DialogTitle>
+            <DialogDescription>{info.effect}</DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground">
+            {shown.join(', ')}{more > 0 ? `${shown.length ? ', and ' : ''}${more} more` : ''}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Candidates whose interview is already completed are left as they are.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>
+            <Button
+              size="sm"
+              variant={decision === 'REJECT' ? 'destructive' : 'default'}
+              onClick={onConfirm}
+              disabled={busy}
+            >
+              {busy ? 'Working\u2026' : info.button}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
 
 /* ───────────────────────────── Full Profile ───────────────────────────── */
 
@@ -651,7 +721,7 @@ function ApplicationTab({ application }) {
 
       <div className="flex items-center justify-between text-xs text-white/30 pt-1 border-t border-white/10">
         <span>Applied: {application.applied_at ? new Date(application.applied_at).toLocaleString() : '—'}</span>
-        <Badge variant="outline" className="text-xs capitalize">{application.status}</Badge>
+        <Badge variant="outline" className="text-xs">{labelOf(application.status)}</Badge>
       </div>
     </div>
   );
@@ -751,9 +821,9 @@ function InterviewsHistoryTab({ interviews }) {
         <div id={`REC-cvrecords-interview-row-${iv.id}`} data-testid={`REC-cvrecords-interview-row-${iv.id}`} key={iv.id} className="border border-white/10 rounded-lg p-3 space-y-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge className={`${statusColors[iv.status] || 'bg-gray-500'} text-xs`}>{iv.status}</Badge>
+              <Badge className={`${statusColors[iv.status] || 'bg-gray-500'} text-xs`}>{labelOf(iv.status)}</Badge>
               {iv.outcome && <Badge className={`${outcomeColors[iv.outcome] || 'bg-gray-500'} text-xs`}>{outcomeLabels[iv.outcome] || iv.outcome}</Badge>}
-              <Badge variant="outline" className="text-xs">{iv.interview_type}</Badge>
+              <Badge variant="outline" className="text-xs">{labelOf(iv.interview_type)}</Badge>
             </div>
             <span className="text-xs text-white/30">{iv.created_at ? new Date(iv.created_at).toLocaleDateString() : ''}</span>
           </div>

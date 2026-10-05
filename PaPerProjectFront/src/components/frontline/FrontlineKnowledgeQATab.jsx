@@ -17,7 +17,7 @@ import InfoHint from './InfoHint';
 import { HINTS } from './frontlineTutorialSteps';
 import { ElapsedTimer } from './chatShellUtils';
 import frontlineAgentService from '@/services/frontlineAgentService';
-import { renderChart } from '../recruitment/ChartRenderer';
+import { renderChart } from '@/components/common/ChartRenderer';
 
 /**
  * FrontlineKnowledgeQATab — extracted from the inline `qa` TabsContent in

@@ -142,9 +142,13 @@ class HiredToHRTests(TestCase):
         code, body = self.hire()
         self.assertEqual((code, body['code']), (403, 'no_hr'))
 
-    def test_another_recruiters_interview_is_not_found(self):
-        other = CompanyUser.objects.create(company=self.company, email='ola@test.local',
-                                           full_name='Ola', role='company_user',
-                                           password_hash='x', is_active=True)
-        code, _ = self.call(actor=other)
-        self.assertEqual(code, 404)
+    def test_a_colleague_can_add_them_but_another_company_cannot(self):
+        # Recruitment is the company's (recruitment_agent.sharing).
+        colleague = CompanyUser.objects.create(company=self.company, email='ola@test.local',
+                                               full_name='Ola', role='company_user',
+                                               password_hash='x', is_active=True)
+        self.assertEqual(self.call(actor=colleague)[0], 200)
+        rival = Company.objects.create(name='Rival', email='rival@test.local')
+        outsider = CompanyUser.objects.create(company=rival, email='rob@test.local', full_name='Rob',
+                                              role='admin', password_hash='x', is_active=True)
+        self.assertEqual(self.call(actor=outsider)[0], 404)

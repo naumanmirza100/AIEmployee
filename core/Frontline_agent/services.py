@@ -1068,10 +1068,15 @@ class TicketAutomationService:
         
         return True, resolution_text, solution
     
-    def process_ticket(self, title: str, description: str, user_id: int, llm_extraction: Optional[Dict] = None, company_id: Optional[int] = None) -> Dict:
+    def process_ticket(self, title: str, description: str, user_id: int, llm_extraction: Optional[Dict] = None, company_id: Optional[int] = None,
+                       auto_resolve: bool = True) -> Dict:
         """
         Process a ticket: classify, search for solution, and determine action.
         Optionally augments classification with LLM intent/entity extraction.
+
+        With `auto_resolve` False (a ticket staff are filing), a knowledge-base
+        answer is returned as `suggested_resolution` and the ticket stays open —
+        the AI doesn't close a ticket a person just raised.
         
         Args:
             title: Ticket title
@@ -1110,6 +1115,8 @@ class TicketAutomationService:
         can_auto_resolve, resolution_text, solution_data = self.auto_resolve_ticket(
             title, description, classification
         )
+        suggested = resolution_text if (can_auto_resolve and not auto_resolve) else None
+        can_auto_resolve = can_auto_resolve and auto_resolve
         
         # Create ticket in database
         try:
@@ -1151,6 +1158,9 @@ class TicketAutomationService:
                     'should_escalate': classification.get('should_escalate', False),
                     'message': 'Ticket processed successfully'
                 }
+                if suggested:
+                    out['suggested_resolution'] = suggested
+                    out['suggestion_confidence'] = classification.get('confidence', 0.0)
                 if classification.get('intent'):
                     out['intent'] = classification['intent']
                 if classification.get('entities'):

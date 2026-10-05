@@ -1,3 +1,13 @@
+"""Project Manager agent API for dashboard logins.
+
+Who may use it: any active dashboard login of a company that has the agent.
+CompanyUserTokenAuthentication and IsCompanyUserOnly refuse an inactive login,
+and api.middleware.module_access refuses a company without the agent, before
+any view here runs. No view checks a role. Views used to each carry a copy of
+an older check — the `project_manager` or `company_user` role, two of twelve
+and not the default `admin` — that could no longer refuse anyone but still
+said "Project manager or company user role required".
+"""
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -8,7 +18,7 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
-from project_manager_agent import drafts
+from project_manager_agent import drafts, pilot_review
 from project_manager_agent.models import (
     PMKnowledgeQAChat,
     PMKnowledgeQAChatMessage,
@@ -43,6 +53,7 @@ from core.api_key_service import KeyServiceError
 from project_manager_agent import services as pm_services
 from core.tenancy import (
     AssigneeNotAllowed, members_of, projects_for_company_user, resolve_member, scope_for_company_user,
+    tasks_for_company_user,
 )
 from core.scheduling import (
     ScheduleConflict, booking_guard, ensure_free, login_user_id_for_company_user, people_for,
@@ -530,22 +541,6 @@ def project_pilot(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error",
-             "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     try:
         question = request.data.get("question", "").strip()
         if not question:
@@ -556,7 +551,6 @@ def project_pilot(request):
 
         project_id = request.data.get("project_id")
         project = None
-        company = company_user.company
 
         # Filter projects created by this company user
         all_projects = Project.objects.filter(created_by_company_user=company_user)
@@ -834,551 +828,59 @@ def project_pilot(request):
             logger.warning(f"No actions found in result. Result keys: {result.keys() if isinstance(result, dict) else 'Not a dict'}")
             logger.warning(f"Result sample: {str(result)[:500]}")
 
-        created_project_id = None
-        action_results = []
-        
-        # Track created project ID across all actions in this batch
-        # This allows tasks created after a project to automatically use that project
-
         # Ensure answer exists for concatenations
         if "answer" not in result or result["answer"] is None:
             result["answer"] = ""
 
-        logger.info(f"Processing {len(actions)} actions from project pilot agent")
+        # The model picks assignee IDs. The prompt says to use only listed
+        # users, but that is an instruction, not enforcement — a prompt-injected
+        # message or document could name anyone. Someone outside the company
+        # becomes "unassigned", which the review card then asks about.
+        for action_data in actions:
+            if (isinstance(action_data, dict) and action_data.get("action") == "create_task"
+                    and action_data.get("assignee_id")):
+                try:
+                    _co, _cu = scope_for_company_user(company_user)
+                    resolve_member(action_data["assignee_id"], company=_co, company_user=_cu)
+                except AssigneeNotAllowed:
+                    action_data["assignee_id"] = None
 
-        # ---- Missing-detail check -------------------------------------------
-        # Before writing anything, check the agent actually filled in the
-        # details we insist on: who a task is for, and when things are due. It
-        # only knows what the user's sentence mentioned, so "make me a project
-        # for the rebuild" used to become a project with no deadline and a pile
-        # of unassigned tasks, with nothing said about it.
-        #
-        # When something is missing we return the proposal instead of applying
-        # it. The chat renders the gaps as a form; the user fills in what they
-        # want to and confirms, and the answers come back to
-        # `project_pilot_confirm` below. Leaving a gap blank stays allowed —
-        # they just have to say so rather than find out afterwards.
-        if not _is_true(request.data.get("confirm")):
-            # `project` is the existing one the user scoped the pilot to, if
-            # any; its dates bound the suggested task deadlines.
+        # ---- Review before anything changes ---------------------------------
+        # Pilot used to apply its actions the moment they arrived, unless a new
+        # task was missing an assignee or deadline — so updates, deletes and
+        # complete creates ran with nobody looking ("delete all projects except
+        # Website"). Now any proposal that would change something comes back as
+        # a review card: creates as an editable form (drafts), updates and
+        # deletes described against what is stored now (pilot_review). Nothing
+        # is written here; `project_pilot_confirm` makes exactly what the user
+        # confirmed, through the service layer.
+        if pilot_review.proposes_changes(actions):
             gaps = drafts.inspect(actions, available_users,
                                   today=timezone.localdate(), project=project)
-            if gaps["needs_input"]:
-                return Response(
-                    {
-                        "status": "needs_input",
-                        "data": {
-                            # Not the raw `answer`: that is usually the JSON the
-                            # actions came from, and it rendered as a wall of code.
-                            "answer": drafts.chat_text(actions, result.get("answer"), gaps),
-                            "actions": actions,
-                            "project_id": project.id if project else None,
-                            **gaps,
-                        },
+            changes = pilot_review.changes(actions, pm_services.DashboardActor(company_user, request))
+            return Response(
+                {
+                    "status": "needs_input",
+                    "data": {
+                        # Not the raw `answer`: that is usually the JSON the
+                        # actions came from, and it rendered as a wall of code.
+                        "answer": drafts.chat_text(actions, result.get("answer"), gaps),
+                        "actions": actions,
+                        "project_id": project.id if project else None,
+                        **gaps,
+                        "changes": changes,
+                        "review": True,
                     },
-                    status=status.HTTP_200_OK,
-                )
+                },
+                status=status.HTTP_200_OK,
+            )
 
-        
-        # ---- Write phase ----------------------------------------------------
-        # Same guarantee as project_manager_agent/project_pilot_pipeline.py: one
-        # transaction so a crash partway can't leave a half-applied batch (a
-        # project with half its tasks, or deletes applied without the updates
-        # they came with), plus a savepoint per action so the per-action
-        # try/except can keep going without leaving the transaction unusable.
-        with transaction.atomic():
-            # Process all actions in order
-            for action_data in actions:
-                action_type = action_data.get("action")
-                if action_type == "create_project":
-                    try:
-                        with transaction.atomic():  # savepoint per action
-                            # Parse explicit start_date / deadline. We collapsed the old
-                            # end_date + deadline pair into a single `deadline` field so
-                            # users don't have to maintain two near-identical dates. The
-                            # DB column `end_date` still exists for legacy readers and is
-                            # mirrored from deadline below; new code should only touch
-                            # `deadline`.
-                            def _parse_iso_date(raw):
-                                if not raw:
-                                    return None
-                                if hasattr(raw, 'year') and not isinstance(raw, str):
-                                    return raw  # already a date
-                                try:
-                                    return datetime.strptime(str(raw).split('T')[0], '%Y-%m-%d').date()
-                                except (ValueError, TypeError):
-                                    return None
-
-                            start_date = _parse_iso_date(action_data.get("start_date"))
-                            # Accept legacy `end_date` in the LLM output, but treat it as
-                            # a deadline alias rather than a separate field.
-                            deadline = (
-                                _parse_iso_date(action_data.get("deadline"))
-                                or _parse_iso_date(action_data.get("end_date"))
-                            )
-
-                            # Legacy fallback: derive deadline from deadline_days only when
-                            # the agent didn't produce a concrete date. Anchor from
-                            # start_date (not today) when one is available.
-                            if deadline is None:
-                                deadline_days = action_data.get("deadline_days")
-                                if deadline_days:
-                                    try:
-                                        days = int(
-                                            str(deadline_days)
-                                            .replace("working days", "")
-                                            .replace("days", "")
-                                            .strip()
-                                        )
-                                        anchor = start_date or datetime.now().date()
-                                        working_days = 0
-                                        check_date = anchor
-                                        while working_days < days:
-                                            if check_date.weekday() < 5:
-                                                working_days += 1
-                                            if working_days < days:
-                                                check_date += timedelta(days=1)
-                                        deadline = check_date
-                                    except (ValueError, TypeError):
-                                        deadline = None
-
-                            project_manager_id = action_data.get("project_manager_id")
-                            industry_id = action_data.get("industry_id")
-                            project_type = action_data.get("project_type")
-                            budget_min = action_data.get("budget_min")
-                            budget_max = action_data.get("budget_max")
-
-                            # Create project with company association
-                            # Note: owner field is required but CompanyUser is not a User model
-                            # We'll need to set owner to None or create a dummy owner
-                            # For now, we'll set it to None if the field allows it, otherwise we need to handle it
-                            from django.contrib.auth.models import User
-                            # Try to get the first user as owner (you might want to change this logic)
-                            default_owner = _get_project_owner(company_user)
-
-                            project_data = {
-                                "name": action_data.get("project_name", "New Project"),
-                                "description": action_data.get("project_description", ""),
-                                "company": company,
-                                "created_by_company_user": company_user,
-                                "status": action_data.get("project_status", "planning"),
-                                "priority": action_data.get("project_priority", "medium"),
-                                "project_type": project_type if project_type else "web_app",
-                            }
-
-                            # Set owner if we have a default owner
-                            if default_owner:
-                                project_data["owner"] = default_owner
-
-                            # Add optional fields
-                            if start_date:
-                                project_data["start_date"] = start_date
-                            if project_manager_id:
-                                project_data["project_manager_id"] = project_manager_id
-                            if industry_id:
-                                project_data["industry_id"] = industry_id
-                            if budget_min:
-                                project_data["budget_min"] = budget_min
-                            if budget_max:
-                                project_data["budget_max"] = budget_max
-                            if deadline:
-                                # Mirror deadline into the legacy end_date column so any
-                                # consumer that still reads end_date (Gantt, exports, etc.)
-                                # keeps working without a DB migration.
-                                project_data["deadline"] = deadline
-                                project_data["end_date"] = deadline
-
-                            project = Project.objects.create(**project_data)
-                            _audit_log(company_user, 'project_created', 'Project', project.id, project.name)
-
-                            # Store the created project ID for use in subsequent task creation
-                            created_project_id = project.id
-                            # Store it in the action_data for reference
-                            action_data["_created_project_id"] = project.id
-
-                            logger.info(f"Project created successfully: {project.id} - {project.name}")
-                            action_results.append(
-                                {
-                                    "action": "create_project",
-                                    "success": True,
-                                    "project_id": project.id,
-                                    "project_name": project.name,
-                                    "message": f'Project "{project.name}" created successfully!',
-                                    "start_date": project.start_date.isoformat() if project.start_date else None,
-                                    "deadline": (project.deadline or project.end_date).isoformat() if (project.deadline or project.end_date) else None,
-                                }
-                            )
-                    except Exception as e:
-                        logger.exception(f"Error creating project: {str(e)}")
-                        logger.error(f"Project data: {project_data}")
-                        action_results.append({
-                            "action": "create_project",
-                            "success": False,
-                            "error": str(e),
-                            "project_name": action_data.get("project_name", "Unknown")
-                        })
-
-            # Second pass: Create tasks and other actions, using created project IDs
-            for action_data in actions:
-                action_type = action_data.get("action")
-                if action_type == "create_project":
-                    # Already handled in first pass
-                    continue
-                elif action_type == "create_task":
-                    try:
-                        with transaction.atomic():  # savepoint per action
-                            task_project_id = action_data.get("project_id")
-                            # If no project_id specified, use the project created in this batch
-                            if not task_project_id and created_project_id:
-                                task_project_id = created_project_id
-
-                            if not task_project_id:
-                                action_results.append(
-                                    {
-                                        "action": "create_task",
-                                        "success": False,
-                                        "error": "project_id is required for task creation",
-                                    }
-                                )
-                                continue
-
-                            task_project = get_object_or_404(Project, id=task_project_id, created_by_company_user=company_user)
-
-                            # Parse due date
-                            due_date = None
-                            due_date_str = action_data.get("due_date")
-                            if due_date_str:
-                                try:
-                                    from django.utils import timezone
-                                    from datetime import datetime as dt_time
-                                    if isinstance(due_date_str, str):
-                                        # Try parsing different formats
-                                        for fmt in ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%SZ']:
-                                            try:
-                                                due_date = datetime.strptime(due_date_str, fmt)
-                                                if timezone.is_naive(due_date):
-                                                    due_date = timezone.make_aware(due_date)
-                                                break
-                                            except ValueError:
-                                                continue
-                                        # If still None, try date only
-                                        if due_date is None:
-                                            date_only = datetime.strptime(due_date_str.split('T')[0], '%Y-%m-%d').date()
-                                            if date_only:
-                                                due_date = datetime.combine(date_only, dt_time(23, 59, 59))
-                                                if timezone.is_naive(due_date):
-                                                    due_date = timezone.make_aware(due_date)
-                                except Exception:
-                                    due_date = None
-
-                            # Fallback to project's own dates when LLM didn't supply one.
-                            # Dropped the previous `timezone.now() + 14 days` fallback —
-                            # the agent is now expected to reason about due_date itself,
-                            # and forcing a today+14 anchor was the root cause of every
-                            # task appearing to start "today" regardless of context.
-                            if due_date is None and task_project:
-                                from django.utils import timezone
-                                from datetime import datetime as dt_time
-                                if getattr(task_project, "deadline", None):
-                                    d = task_project.deadline
-                                    if hasattr(d, "year"):
-                                        due_date = datetime.combine(d, dt_time(23, 59, 59))
-                                        if timezone.is_naive(due_date):
-                                            due_date = timezone.make_aware(due_date)
-                                if due_date is None and getattr(task_project, "end_date", None):
-                                    d = task_project.end_date
-                                    if hasattr(d, "year"):
-                                        due_date = datetime.combine(d, dt_time(23, 59, 59))
-                                        if timezone.is_naive(due_date):
-                                            due_date = timezone.make_aware(due_date)
-
-                            estimated_hours = action_data.get("estimated_hours")
-                            if estimated_hours:
-                                try:
-                                    estimated_hours = float(estimated_hours)
-                                except (ValueError, TypeError):
-                                    estimated_hours = None
-
-                            # Capacity check — warn if assignee has too many active tasks
-                            capacity_warning = None
-                            assignee_id_val = action_data.get("assignee_id")
-                            # The model picks this ID. The prompt tells it to use only
-                            # listed users, but that's an instruction, not enforcement —
-                            # and a prompt-injected message or document could steer it to
-                            # any user ID in the system. Verify membership; on a miss,
-                            # create the task unassigned rather than failing the batch.
-                            if assignee_id_val:
-                                try:
-                                    _co, _cu = scope_for_company_user(company_user)
-                                    assignee_id_val = resolve_member(
-                                        assignee_id_val, company=_co, company_user=_cu).pk
-                                except AssigneeNotAllowed:
-                                    capacity_warning = (
-                                        f"Assignee {action_data.get('assignee_id')} is not a member "
-                                        "of your company — task created unassigned.")
-                                    assignee_id_val = None
-                            if assignee_id_val:
-                                active_count = Task.objects.filter(
-                                    assignee_id=assignee_id_val,
-                                    status__in=['todo', 'in_progress', 'review']
-                                ).count()
-                                if active_count >= 10:
-                                    capacity_warning = f"Warning: assignee already has {active_count} active tasks."
-
-                            task = Task.objects.create(
-                                title=action_data.get("task_title", "New Task"),
-                                description=action_data.get("task_description", ""),
-                                project=task_project,
-                                status=action_data.get("status", "todo"),
-                                priority=action_data.get("priority", "medium"),
-                                assignee_id=assignee_id_val if assignee_id_val else None,
-                                estimated_hours=estimated_hours,
-                                due_date=due_date,
-                                ai_reasoning=action_data.get("reasoning", ""),
-                            )
-                            _audit_log(company_user, 'task_created', 'Task', task.id, task.title)
-
-                            action_results.append(
-                                {
-                                    "action": "create_task",
-                                    "success": True,
-                                    "task_id": task.id,
-                                    "task_title": task.title,
-                                    "project_name": task_project.name,
-                                    "message": f'Task "{task.title}" created successfully!',
-                                    "priority": getattr(task, "priority", None) or "medium",
-                                    "assignee_username": task.assignee.username if task.assignee else None,
-                                    "assignee_name": _assignee_display(task.assignee),
-                                    "due_date": task.due_date.isoformat() if task.due_date else None,
-                                    "deadline": task.due_date.isoformat() if task.due_date else None,
-                                    "created_at": task.created_at.isoformat() if getattr(task, "created_at", None) else None,
-                                }
-                            )
-                    except Exception as e:
-                        action_results.append(
-                            {"action": "create_task", "success": False, "error": f"Error creating task: {str(e)}"}
-                        )
-
-                elif action_type == "delete_project":
-                    try:
-                        with transaction.atomic():  # savepoint per action
-                            project_id_to_delete = action_data.get("project_id")
-                            if not project_id_to_delete:
-                                action_results.append(
-                                    {"action": "delete_project", "success": False, "error": "project_id is required"}
-                                )
-                                continue
-                            project_to_delete = get_object_or_404(Project, id=project_id_to_delete, created_by_company_user=company_user)
-                            project_name = project_to_delete.name
-                            project_to_delete.delete()
-                            action_results.append(
-                                {
-                                    "action": "delete_project",
-                                    "success": True,
-                                    "project_id": project_id_to_delete,
-                                    "project_name": project_name,
-                                    "message": f'Project "{project_name}" deleted successfully!',
-                                }
-                            )
-                    except Exception as e:
-                        action_results.append(
-                            {"action": "delete_project", "success": False, "error": f"Error deleting project: {str(e)}"}
-                        )
-
-                elif action_type == "delete_task":
-                    try:
-                        with transaction.atomic():  # savepoint per action
-                            task_id_to_delete = action_data.get("task_id")
-                            if not task_id_to_delete:
-                                action_results.append(
-                                    {"action": "delete_task", "success": False, "error": "task_id is required"}
-                                )
-                                continue
-                            task_to_delete = get_object_or_404(Task, id=task_id_to_delete, project__created_by_company_user=company_user)
-                            task_title = task_to_delete.title
-                            task_to_delete.delete()
-                            action_results.append(
-                                {
-                                    "action": "delete_task",
-                                    "success": True,
-                                    "task_id": task_id_to_delete,
-                                    "task_title": task_title,
-                                    "message": f'Task "{task_title}" deleted successfully!',
-                                }
-                            )
-                    except Exception as e:
-                        action_results.append(
-                            {"action": "delete_task", "success": False, "error": f"Error deleting task: {str(e)}"}
-                        )
-
-                elif action_type == "update_project":
-                    try:
-                        with transaction.atomic():  # savepoint per action
-                            project_id_to_update = action_data.get("project_id")
-                            if not project_id_to_update:
-                                action_results.append(
-                                    {"action": "update_project", "success": False, "error": "project_id is required"}
-                                )
-                                continue
-                            project_to_update = get_object_or_404(Project, id=project_id_to_update, created_by_company_user=company_user)
-                            updates = action_data.get("updates", {})
-
-                            # Update simple string/choice fields
-                            for field in ["name", "description", "status", "priority", "project_type"]:
-                                if field in updates and updates[field] is not None:
-                                    setattr(project_to_update, field, updates[field])
-
-                            # Handle date fields. `end_date` is no longer a user-facing
-                            # field — if the LLM emits it (legacy), treat it as a
-                            # deadline alias and mirror to both columns.
-                            deadline_in_updates = "deadline" in updates or "end_date" in updates
-                            if deadline_in_updates:
-                                date_val = updates.get("deadline") or updates.get("end_date")
-                                if date_val:
-                                    from datetime import datetime as _dt_proj
-                                    try:
-                                        parsed = _dt_proj.strptime(date_val, "%Y-%m-%d").date()
-                                        project_to_update.deadline = parsed
-                                        project_to_update.end_date = parsed
-                                    except (ValueError, TypeError):
-                                        pass
-                                else:
-                                    project_to_update.deadline = None
-                                    project_to_update.end_date = None
-
-                            if "start_date" in updates:
-                                date_val = updates.get("start_date")
-                                if date_val:
-                                    from datetime import datetime as _dt_proj
-                                    try:
-                                        project_to_update.start_date = _dt_proj.strptime(date_val, "%Y-%m-%d").date()
-                                    except (ValueError, TypeError):
-                                        pass
-                                else:
-                                    project_to_update.start_date = None
-
-                            # Handle budget fields
-                            for budget_field in ["budget_min", "budget_max"]:
-                                if budget_field in updates:
-                                    budget_val = updates.get(budget_field)
-                                    if budget_val is not None:
-                                        try:
-                                            setattr(project_to_update, budget_field, float(budget_val))
-                                        except (ValueError, TypeError):
-                                            pass
-                                    else:
-                                        setattr(project_to_update, budget_field, None)
-
-                            project_to_update.save()
-                            action_results.append(
-                                {
-                                    "action": "update_project",
-                                    "success": True,
-                                    "project_id": project_to_update.id,
-                                    "project_name": project_to_update.name,
-                                    "message": f'Project "{project_to_update.name}" updated successfully!',
-                                    "status": project_to_update.status,
-                                    "priority": project_to_update.priority,
-                                    "deadline": project_to_update.deadline.isoformat() if project_to_update.deadline else None,
-                                }
-                            )
-                    except Exception as e:
-                        action_results.append(
-                            {"action": "update_project", "success": False, "error": f"Error updating project: {str(e)}"}
-                        )
-
-                elif action_type == "update_task":
-                    try:
-                        with transaction.atomic():  # savepoint per action
-                            task_id_to_update = action_data.get("task_id")
-                            if not task_id_to_update:
-                                action_results.append(
-                                    {"action": "update_task", "success": False, "error": "task_id is required"}
-                                )
-                                continue
-                            task_to_update = get_object_or_404(Task, id=task_id_to_update, project__created_by_company_user=company_user)
-                            updates = action_data.get("updates", {})
-
-                            # Assignee
-                            if "assignee_id" in updates:
-                                assignee_id = updates.get("assignee_id")
-                                if assignee_id:
-                                    # LLM-chosen ID — verify membership (see create_task).
-                                    # An invalid one leaves the current assignee alone.
-                                    try:
-                                        _co, _cu = scope_for_company_user(company_user)
-                                        task_to_update.assignee = resolve_member(
-                                            assignee_id, company=_co, company_user=_cu)
-                                    except AssigneeNotAllowed:
-                                        logger.warning(
-                                            "project_pilot update_task: rejected non-member "
-                                            "assignee %s for task %s", assignee_id, task_to_update.id)
-                                else:
-                                    task_to_update.assignee = None
-
-                            # Update other fields
-                            for field in ["status", "priority", "title", "description"]:
-                                if field in updates:
-                                    setattr(task_to_update, field, updates[field])
-
-                            # Handle due_date separately (needs date parsing)
-                            if "due_date" in updates:
-                                due_date_val = updates.get("due_date")
-                                if due_date_val:
-                                    from datetime import datetime as _dt_update
-                                    try:
-                                        task_to_update.due_date = _dt_update.strptime(due_date_val, "%Y-%m-%d").date()
-                                    except (ValueError, TypeError):
-                                        pass  # Skip invalid date formats
-                                else:
-                                    task_to_update.due_date = None
-
-                            task_to_update.save()
-                            action_results.append(
-                                {
-                                    "action": "update_task",
-                                    "success": True,
-                                    "task_id": task_to_update.id,
-                                    "task_title": task_to_update.title,
-                                    "message": f'Task "{task_to_update.title}" updated successfully!',
-                                    "priority": getattr(task_to_update, "priority", None) or "medium",
-                                    "assignee_username": task_to_update.assignee.username if task_to_update.assignee else None,
-                                    "assignee_name": _assignee_display(task_to_update.assignee),
-                                    "due_date": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
-                                    "deadline": task_to_update.due_date.isoformat() if task_to_update.due_date else None,
-                                    "created_at": task_to_update.created_at.isoformat() if getattr(task_to_update, "created_at", None) else None,
-                                }
-                            )
-                    except Exception as e:
-                        action_results.append(
-                            {"action": "update_task", "success": False, "error": f"Error updating task: {str(e)}"}
-                        )
-
-        # Check if any critical actions failed
-        project_created = any(
-            r.get("action") == "create_project" and r.get("success") for r in action_results
-        )
-        if not project_created and any(a.get("action") == "create_project" for a in actions):
-            # Project creation was attempted but failed
-            logger.warning("Project creation was attempted but failed. Action results: %s", action_results)
-
-        # Ensure frontend always has a displayable answer (avoid raw JSON so UI does not hide it)
+        # Nothing to change: the agent answered a question or declined.
         answer_text = (result.get("answer") or "").strip()
-        if answer_text and (answer_text.startswith("[") or answer_text.startswith("{")):
-            # Build a short summary so the message bubble shows something
-            success_count = sum(1 for r in action_results if r.get("success"))
-            if action_results:
-                parts = []
-                for r in action_results:
-                    if r.get("success") and r.get("message"):
-                        parts.append(r["message"])
-                result["answer"] = "\n".join(parts) if parts else f"Completed {success_count} action(s)."
-            else:
-                result["answer"] = "Request processed; no actions were returned."
-        
-        data = {"status": "success", "data": result, "action_results": action_results}
-        logger.info(f"Returning project_pilot response with {len(action_results)} action results")
-        return Response(data, status=status.HTTP_200_OK)
+        if answer_text.startswith("[") or answer_text.startswith("{"):
+            result["answer"] = "I didn't find anything to change in that request."
+        return Response({"status": "success", "data": result, "action_results": []},
+                        status=status.HTTP_200_OK)
 
     except KeyServiceError:
         raise
@@ -1388,6 +890,53 @@ def project_pilot(request):
             {"status": "error", "message": "Project pilot failed", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+def _priority_changes(suggested, company_user):
+    """[{task_id, title, from, to, from_label, to_label}] for every task whose
+    suggested priority differs from the one it has, in the caller's scope."""
+    labels = dict(Task.PRIORITY_CHOICES)
+    wanted = {}
+    for item in suggested:
+        if not isinstance(item, dict):
+            continue
+        task_id = item.get("task_id") or item.get("id")
+        priority = str(item.get("ai_priority") or "").strip().lower()
+        if task_id and priority in labels:
+            wanted[str(task_id)] = priority
+    changes = []
+    for task in tasks_for_company_user(company_user).filter(pk__in=[k for k in wanted if k.isdigit()]):
+        new = wanted[str(task.pk)]
+        if new != task.priority:
+            changes.append({"task_id": task.pk, "title": task.title, "from": task.priority, "to": new,
+                            "from_label": labels.get(task.priority, task.priority), "to_label": labels[new]})
+    return sorted(changes, key=lambda c: c["title"].lower())
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def apply_task_priorities(request):
+    """Make the priority changes the user ticked on Task Prioritization's
+    results. Body: {changes: [{task_id, priority}]}. Each goes through the
+    task service — scope, validation, audit — and one refused change doesn't
+    stop the rest."""
+    changes = request.data.get("changes")
+    if not isinstance(changes, list) or not changes:
+        return Response({"status": "error", "message": "changes is required"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    actor = pm_services.DashboardActor(request.user, request)
+    updated, failed = [], []
+    for change in changes[:500]:
+        if not isinstance(change, dict):
+            continue
+        try:
+            task, _ = pm_services.update_task(actor, change.get("task_id"), {"priority": change.get("priority")})
+            updated.append(task.id)
+        except pm_services.ServiceError as exc:
+            failed.append({"task_id": change.get("task_id"), "error": exc.message})
+    return Response({"status": "success", "data": {"updated": updated, "failed": failed}},
+                    status=status.HTTP_200_OK)
 
 
 @api_view(["POST"])
@@ -1403,21 +952,6 @@ def task_prioritization(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     try:
         project_id = request.data.get("project_id")
         company = company_user.company
@@ -1588,27 +1122,12 @@ def task_prioritization(request):
                     result["bottlenecks"] = []
                     result["summary"] = {"message": "No bottlenecks found"}
 
-        # Apply prioritization suggestions
-        tasks_to_update = result.get("tasks") or result.get("prioritized_tasks", [])
-        if tasks_to_update:
-            for task_data in tasks_to_update:
-                # Handle both 'id' and 'task_id' field names
-                task_id = task_data.get("task_id") or task_data.get("id")
-                if task_id:
-                    try:
-                        t = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
-                        # Update priority if AI recommended a new one
-                        if "ai_priority" in task_data:
-                            t.priority = task_data["ai_priority"]
-                        elif "priority" in task_data:
-                            t.priority = task_data["priority"]
-                        # Update status if provided
-                        if "status" in task_data:
-                            t.status = task_data["status"]
-                        t.save()
-                    except (Task.DoesNotExist, ValueError, TypeError):
-                        continue
-
+        # Suggestions only. The AI's priority used to be written onto every
+        # task the moment the analysis came back (and its echo of each status
+        # with it); now the screen lists what would change and
+        # `apply_task_priorities` makes the ones the user ticks.
+        result["priority_changes"] = _priority_changes(
+            result.get("tasks") or result.get("prioritized_tasks") or [], company_user)
         return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
     except KeyServiceError:
@@ -1619,6 +1138,64 @@ def task_prioritization(request):
             {"status": "error", "message": "Task prioritization failed", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+def _clean_subtasks(raw):
+    """[{title, description, order}] from what the model or the browser sent:
+    dicts or bare strings, blanks dropped, lengths capped."""
+    items = []
+    for idx, item in enumerate(raw if isinstance(raw, list) else []):
+        if isinstance(item, dict):
+            title = str(item.get("title") or "").strip()
+            description = str(item.get("description") or "").strip()
+            order = item.get("order") if isinstance(item.get("order"), int) else idx + 1
+        else:
+            title, description, order = str(item or "").strip(), "", idx + 1
+        if title:
+            items.append({"title": title[:300], "description": description[:5000], "order": order})
+    return items[:50]
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def save_generated_subtasks(request):
+    """Create the generated subtasks the user kept. Body:
+    {proposals: [{task_id, subtasks: [{title, description, order}], reasoning}]}.
+    Only tasks in the caller's scope that still have no subtasks get them —
+    the same rule the generator follows — so a second save adds nothing twice."""
+    proposals = request.data.get("proposals")
+    if not isinstance(proposals, list) or not proposals:
+        return Response({"status": "error", "message": "proposals is required"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    company_user = request.user
+    saved, skipped = 0, []
+    for proposal in proposals[:200]:
+        if not isinstance(proposal, dict):
+            continue
+        task = tasks_for_company_user(company_user).filter(pk=proposal.get("task_id")).first() \
+            if str(proposal.get("task_id") or "").isdigit() else None
+        if task is None:
+            skipped.append({"task_id": proposal.get("task_id"), "reason": "not_found"})
+            continue
+        if Subtask.objects.filter(task=task).exists():
+            skipped.append({"task_id": task.id, "reason": "already_has_subtasks"})
+            continue
+        items = _clean_subtasks(proposal.get("subtasks"))
+        if not items:
+            continue
+        with transaction.atomic():
+            Subtask.objects.bulk_create([Subtask(task=task, title=i["title"], description=i["description"],
+                                                 order=i["order"], status="todo") for i in items])
+            reasoning = str(proposal.get("reasoning") or "").strip()
+            if reasoning:
+                note = "[Subtask Generation Strategy] " + reasoning[:4000]
+                task.ai_reasoning = f"{task.ai_reasoning}\n\n{note}" if task.ai_reasoning else note
+                task.save(update_fields=["ai_reasoning", "updated_at"])
+        _audit_log(company_user, "subtasks_generated", "Task", task.id, task.title, {"count": len(items)})
+        saved += len(items)
+    return Response({"status": "success", "data": {"saved_count": saved, "skipped": skipped}},
+                    status=status.HTTP_200_OK)
 
 
 @api_view(["POST"])
@@ -1634,21 +1211,6 @@ def generate_subtasks(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     try:
         project_id = request.data.get("project_id")
         if not project_id:
@@ -1735,71 +1297,26 @@ def generate_subtasks(request):
                 })
             result["subtasks"] = subtasks_list
 
-        # Save generated subtasks
-        saved_count = 0
-        reasoning_updated_count = 0
-        skipped_count = len(tasks_with_subtasks)
-        
+        # Proposals only. Generated subtasks used to be saved for every task in
+        # the project (and the AI's reasoning appended to each task) the moment
+        # they came back. Now they are shown per task; `save_generated_subtasks`
+        # creates the ones the user keeps.
+        titles = {t["id"]: t["title"] for t in tasks}
+        proposals = []
         for task_data in result.get("subtasks", []):
-            task_id = task_data.get("task_id")
-            subtasks_list = task_data.get("subtasks", [])
-            reasoning = task_data.get("reasoning", "")
-
-            if not task_id:
-                continue
-
             try:
-                task = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
-                
-                # Skip if task already has subtasks (shouldn't happen, but double-check)
-                if task.id in tasks_with_subtasks:
-                    continue
-                
-                # Update AI reasoning if provided
-                if reasoning:
-                    reasoning_prefix = "[Subtask Generation Strategy] "
-                    full_reasoning = reasoning_prefix + reasoning
-                    if task.ai_reasoning:
-                        task.ai_reasoning = task.ai_reasoning + "\n\n" + full_reasoning
-                    else:
-                        task.ai_reasoning = full_reasoning
-                    task.save()
-                    reasoning_updated_count += 1
-
-                # Create new subtasks (don't delete existing - we already filtered them out)
-                # Handle both string format (old) and dict format (new)
-                for idx, subtask_item in enumerate(subtasks_list):
-                    # Extract title and description from dict or use string directly
-                    if isinstance(subtask_item, dict):
-                        subtask_title = subtask_item.get('title', '')
-                        subtask_description = subtask_item.get('description', '')
-                        subtask_order = subtask_item.get('order', idx + 1)
-                    else:
-                        # Old format - string title
-                        subtask_title = str(subtask_item)
-                        subtask_description = ''
-                        subtask_order = idx + 1
-                    
-                    if subtask_title:
-                        Subtask.objects.create(
-                            task=task,
-                            title=subtask_title,
-                            description=subtask_description,
-                            order=subtask_order,
-                            status='todo'
-                        )
-                        saved_count += 1
-
+                task_id = int(task_data.get("task_id"))
+            except (TypeError, ValueError):
                 continue
-            except Task.DoesNotExist:
+            if task_id not in titles:
                 continue
-            except Exception as e:
-                logger.error(f"Error saving subtasks for task {task_id}: {str(e)}")
-                continue
-
-        result["saved_count"] = saved_count
-        result["reasoning_updated_count"] = reasoning_updated_count
-        result["skipped_count"] = skipped_count
+            items = _clean_subtasks(task_data.get("subtasks") or [])
+            if items:
+                proposals.append({"task_id": task_id, "task_title": titles[task_id], "subtasks": items,
+                                  "reasoning": task_data.get("reasoning") or ""})
+        result["proposals"] = proposals
+        result["proposed_count"] = sum(len(p["subtasks"]) for p in proposals)
+        result["skipped_count"] = len(tasks_with_subtasks)
         return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
     except KeyServiceError:
@@ -1828,21 +1345,6 @@ def timeline_gantt(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     try:
         action = request.data.get("action")
         project_id = request.data.get("project_id")
@@ -1956,21 +1458,6 @@ def _knowledge_qa_inputs(request):
     # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
     company_user = request.user
     
-    # Check if user can access project manager features (project_manager or company_user role)
-    # Use fallback if method doesn't exist (for server restart issues)
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        # Fallback: check role directly
-        can_access = company_user.role in ['project_manager', 'company_user']
-    
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        ), None
-
     question = request.data.get("question", "").strip()
     if not question:
         return Response(
@@ -3348,34 +2835,27 @@ def _extract_text_from_file(file):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def project_pilot_confirm(request):
-    """Create what `project_pilot` proposed, once the user has confirmed it.
+    """Make what `project_pilot` proposed, once the user has reviewed it.
 
-    `project_pilot` returns `status: needs_input` when the agent left out a
-    detail we insist on. The chat asks for those details and posts the whole
-    proposal back here with the answers merged in.
+    `project_pilot` returns `status: needs_input` for every proposal that
+    would change something; the chat shows it as a review card and posts the
+    whole proposal back here with the user's answers merged in and the
+    changes they unticked listed in `skip`.
 
     No model is called: the actions were already agreed, so re-asking would
-    risk getting a different plan than the one on screen. Only `create_project`
-    and `create_task` are accepted, because those are the only actions the gap
-    check can hold back — anything else never reaches this path and is ignored
-    rather than quietly executed.
-
-    Creation goes through the service layer, so this endpoint gets the same
-    validation, tenancy checks and audit entries as the dashboard's own create
-    buttons. A gap the user chose to leave blank stays blank; that is a
-    decision they have now made explicitly.
+    risk getting a different plan than the one on screen. Every action goes
+    through the service layer (project_manager_agent/pilot_review.py), so it
+    gets the same validation, tenancy checks and audit entries as the
+    dashboard's own buttons — the proposal comes back from the browser, and
+    this can do nothing those buttons couldn't. A gap the user chose to leave
+    blank stays blank; that is a decision they have now made explicitly.
 
     Body:
         actions  list    the proposal exactly as it was handed out
         answers  object  {action_index: {field: value}} from the form
+        skip     list    indexes of actions the user unticked
     """
     company_user = request.user
-    if not company_user.can_access_project_manager_features():
-        return Response(
-            {"status": "error",
-             "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
 
     proposed = request.data.get("actions")
     if not isinstance(proposed, list) or not proposed:
@@ -3383,86 +2863,19 @@ def project_pilot_confirm(request):
             {"status": "error", "message": "actions is required"},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    skip = request.data.get("skip") or []
+    if not isinstance(skip, list):
+        skip = []
 
     actions = drafts.apply_answers(proposed, request.data.get("answers"))
     actor = pm_services.DashboardActor(company_user, request)
-
-    action_results = []
-    created_project_id = None
-
-    # One transaction for the batch, a savepoint per action: a single bad row
-    # is reported and skipped without abandoning the rest or leaving the
-    # transaction unusable. Same shape as the write phase in `project_pilot`.
-    with transaction.atomic():
-        for action_data in actions:
-            if not isinstance(action_data, dict):
-                continue
-            kind = action_data.get("action")
-
-            if kind == "create_project":
-                try:
-                    with transaction.atomic():
-                        project = pm_services.create_project(actor, {
-                            "name": action_data.get("project_name") or action_data.get("name"),
-                            "description": action_data.get("description"),
-                            "priority": action_data.get("priority"),
-                            "status": action_data.get("status"),
-                            "deadline": action_data.get("deadline") or action_data.get("end_date"),
-                            "start_date": action_data.get("start_date"),
-                            # The chat already showed the name being created, so
-                            # a same-name project is not news worth a second dialog.
-                            "confirm_duplicate_name": True,
-                        })
-                    created_project_id = project.id
-                    action_results.append({
-                        "action": "create_project", "success": True,
-                        "project_id": project.id, "project_name": project.name,
-                    })
-                except pm_services.ServiceError as exc:
-                    action_results.append({
-                        "action": "create_project", "success": False, "error": str(exc),
-                    })
-
-            elif kind == "create_task":
-                try:
-                    with transaction.atomic():
-                        task = pm_services.create_task(actor, {
-                            # Tasks proposed alongside a new project have no
-                            # project_id yet; they belong to the one just made.
-                            "project_id": action_data.get("project_id") or created_project_id,
-                            "title": action_data.get("task_title") or action_data.get("title"),
-                            "description": action_data.get("task_description")
-                                           or action_data.get("description"),
-                            "priority": action_data.get("priority"),
-                            "status": action_data.get("status"),
-                            "assignee_id": action_data.get("assignee_id"),
-                            "due_date": action_data.get("due_date"),
-                            "estimated_hours": action_data.get("estimated_hours"),
-                        })
-                    action_results.append({
-                        "action": "create_task", "success": True,
-                        "task_id": task.id, "task_title": task.title,
-                        "project_id": task.project_id,
-                        "assignee_id": task.assignee_id,
-                    })
-                except pm_services.ServiceError as exc:
-                    action_results.append({
-                        "action": "create_task", "success": False, "error": str(exc),
-                    })
-
-    created = sum(1 for r in action_results if r.get("success"))
-    failed = len(action_results) - created
-    parts = []
-    if created:
-        parts.append(f"Created {created} item{'s' if created != 1 else ''}.")
-    if failed:
-        parts.append(f"{failed} could not be created.")
+    action_results, created_project_id = pilot_review.apply(actions, actor, skip=skip)
 
     return Response(
         {
             "status": "success",
             "data": {
-                "answer": " ".join(parts) or "Nothing to create.",
+                "answer": pilot_review.summary(action_results),
                 "action_results": action_results,
                 "created_project_id": created_project_id,
             },
@@ -3481,8 +2894,9 @@ def project_pilot_from_file(request):
 
     Saves the uploaded file to disk, creates a ProjectPilotJob row, enqueues
     the Celery task, and returns 202 immediately with the job id. The
-    browser polls /project-pilot/jobs/<id>/status to pick up the result
-    when the LLM extraction + action execution finishes.
+    browser polls /project-pilot/jobs/<id>/status to pick up the result —
+    a proposal to review (`draft`), a question, or an answer; nothing is
+    created until the user confirms.
 
     Body (multipart/form-data):
       * file          - required; .txt, .pdf, or .docx (max 10 MB).
@@ -3497,18 +2911,6 @@ def project_pilot_from_file(request):
     from django.conf import settings as _dj_settings
 
     company_user = request.user
-
-    # Access check (unchanged from the previous sync endpoint).
-    can_access = False
-    if hasattr(company_user, 'can_access_project_manager_features'):
-        can_access = company_user.can_access_project_manager_features()
-    else:
-        can_access = company_user.role in ['project_manager', 'company_user']
-    if not can_access:
-        return Response(
-            {"status": "error", "message": "Access denied. Project manager or company user role required."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
 
     try:
         if 'file' not in request.FILES:
@@ -3651,6 +3053,9 @@ def project_pilot_job_status(request, job_id):
     # timing display isn't polluted.
     timing = dict(job.timing_ms or {})
     confirmation_required = timing.pop('_confirmation_required', None)
+    # What the document proposes, as a review card — as `project_pilot`
+    # returns with status 'needs_input'. Confirmed via `project_pilot_confirm`.
+    draft = timing.pop('_draft', None)
     return Response({
         "status": "success",
         "data": {
@@ -3661,6 +3066,7 @@ def project_pilot_job_status(request, job_id):
             "action_results": job.action_results or [],
             "cannot_do": job.cannot_do or "",
             "confirmation_required": confirmation_required,
+            "draft": draft,
             "error": job.error_message or "",
             "timing_ms": timing,
             "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -3681,8 +3087,6 @@ def daily_standup(request):
     """Generate daily or weekly standup report for a project."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         action = request.data.get("action", "daily")  # "daily" or "weekly"
@@ -3777,8 +3181,6 @@ def project_health_score(request):
     """Calculate project health score and risk analysis."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         action = request.data.get("action", "health")  # "health", "risks", "report", "metrics"
@@ -3820,8 +3222,6 @@ def project_status_report(request):
     """Generate comprehensive project status report."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         if not project_id:
@@ -3861,8 +3261,6 @@ def meeting_notes(request):
     """Process meeting notes and extract action items."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         meeting_text = request.data.get("meeting_text", "")
         action = request.data.get("action", "summarize")  # "summarize" or "extract_actions"
@@ -3932,8 +3330,6 @@ def workflow_suggest(request):
     """Suggest workflows and checklists for a project."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         action = request.data.get("action", "suggest")  # "suggest", "checklist", "validate"
@@ -3998,8 +3394,6 @@ def calendar_schedule(request):
     """Generate optimized task schedules and detect conflicts."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         action = request.data.get("action", "schedule")  # "schedule" or "conflicts"
@@ -4061,8 +3455,6 @@ def scan_notifications(request):
     """Scan projects for issues and generate smart notifications."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
 
@@ -4226,8 +3618,6 @@ def team_performance(request):
     """Get team performance analytics for a project."""
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         if not project_id:
@@ -4280,8 +3670,6 @@ def time_estimation(request):
     """
     try:
         company_user = request.user
-        if not company_user.can_access_project_manager_features():
-            return Response({"status": "error", "message": "Access denied"}, status=status.HTTP_403_FORBIDDEN)
 
         project_id = request.data.get("project_id")
         if not project_id:
@@ -4571,7 +3959,13 @@ def meeting_schedule(request):
 
         pending_intent = request.data.get("pending_intent")
         picked_time = request.data.get("proposed_time")
-        if isinstance(pending_intent, dict) and picked_time:
+        confirm_move = request.data.get("confirm_reschedule")
+        if isinstance(confirm_move, dict) and confirm_move.get("meeting_id") and confirm_move.get("new_time"):
+            # The user reviewed a move and confirmed it: that meeting, that time.
+            result = {"action": "reschedule", "confirmed": True, "data": {
+                "meeting_id": confirm_move["meeting_id"], "new_time": str(confirm_move["new_time"]),
+                "invitee_ids": [], "invitee_names": []}}
+        elif isinstance(pending_intent, dict) and picked_time:
             # The user answered the "when?" question with the date picker.
             # Who and how long were already understood, so finish from those
             # values rather than asking the model to re-read a sentence built
@@ -4604,18 +3998,26 @@ def meeting_schedule(request):
             except Exception:
                 return Response({"status": "success", "data": {"action": "parse_error", "response": "Could not parse the new time.", "meeting": None}}, status=status.HTTP_200_OK)
 
-            # Find the most recent pending/accepted meeting with this invitee
+            # The meeting the user confirmed, or else the most recent active
+            # one with this invitee — which is a guess, so it is shown for
+            # review before anything moves.
             from django.db.models import Q
-            meeting = ScheduledMeeting.objects.filter(
+            active = ScheduledMeeting.objects.filter(
                 organizer=company_user,
                 status__in=['pending', 'accepted', 'counter_proposed', 'partially_accepted'],
-            ).filter(
-                Q(participants__user_id__in=invitee_ids) | Q(invitee_id__in=invitee_ids)
-            ).order_by('-created_at').first()
+            )
+            if data.get("meeting_id"):
+                meeting = active.filter(pk=data["meeting_id"]).first()
+            else:
+                meeting = active.filter(
+                    Q(participants__user_id__in=invitee_ids) | Q(invitee_id__in=invitee_ids)
+                ).order_by('-created_at').first()
 
             if not meeting:
                 names_str = ", ".join(f"**{n}**" for n in invitee_names)
-                return Response({"status": "success", "data": {"action": "not_found", "response": f"I couldn't find an active meeting with {names_str} to reschedule.", "meeting": None}}, status=status.HTTP_200_OK)
+                reply = ("That meeting is no longer active, so it wasn't moved." if data.get("meeting_id")
+                         else f"I couldn't find an active meeting with {names_str} to reschedule.")
+                return Response({"status": "success", "data": {"action": "not_found", "response": reply, "meeting": None}}, status=status.HTTP_200_OK)
 
             # M-F2 — reschedule guards. Two checks:
             #   1. Reject reschedule to the past (unless `?force=1` for HR
@@ -4637,6 +4039,32 @@ def meeting_schedule(request):
 
             old_time = meeting.proposed_time.strftime("%A, %B %d at %I:%M %p") if meeting.proposed_time else "unknown"
             people = people_for('pm', meeting)
+
+            if not result.get("confirmed"):
+                # Moving a meeting emails everyone invited, so show which
+                # meeting and when before doing it. A clash is said now.
+                try:
+                    ensure_free(people, new_time, meeting.duration_minutes, tz_name=tz_name,
+                                exclude=[('pm', meeting.id)], viewer_source='pm')
+                except ScheduleConflict as clash:
+                    return Response({"status": "success", "data": _meeting_conflict_reply(clash)},
+                                    status=status.HTTP_200_OK)
+                participant_names = [p.user.get_full_name() or p.user.username
+                                     for p in meeting.participants.select_related('user')]
+                return Response({"status": "success", "data": {
+                    "action": "reschedule_review",
+                    "response": (f"I'll move **{meeting.title}** to the time below. Everyone invited is "
+                                 "told by email — check it, then confirm."),
+                    "meeting": None,
+                    "reschedule": {
+                        "meeting_id": meeting.id, "title": meeting.title,
+                        "old_time": meeting.proposed_time.isoformat() if meeting.proposed_time else None,
+                        "new_time": new_time.isoformat(),
+                        "duration_minutes": meeting.duration_minutes,
+                        "participants": participant_names,
+                    },
+                }}, status=status.HTTP_200_OK)
+
             try:
                 with booking_guard(people):
                     ensure_free(people, new_time, meeting.duration_minutes, tz_name=tz_name,

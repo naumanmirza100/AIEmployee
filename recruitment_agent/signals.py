@@ -42,8 +42,9 @@ def _check_and_send_followup_async(interview_id):
             logger.info(f"Skipping email check for interview #{interview.id} - job schedule date range expired")
             return
 
-        # Check for PENDING interviews that need follow-up
-        if interview.status == 'PENDING' and interview.invitation_sent_at:
+        # Check for PENDING interviews that need follow-up — unless the
+        # recruiter turned automatic follow-ups off.
+        if interview.status == 'PENDING' and interview.invitation_sent_at and interview.sends_followups():
             time_since_invitation = now - interview.invitation_sent_at
             
             # Get recruiter settings for timing
@@ -77,8 +78,9 @@ def _check_and_send_followup_async(interview_id):
                         interview.save(update_fields=['followup_count', 'last_followup_sent_at'])
                         logger.info(f"✅ Follow-up email sent successfully for interview #{interview.id}")
         
-        # Check for SCHEDULED interviews that need reminder
-        elif interview.status == 'SCHEDULED' and interview.scheduled_datetime:
+        # Check for SCHEDULED interviews that need reminder — unless the
+        # recruiter turned automatic reminders off.
+        elif interview.status == 'SCHEDULED' and interview.scheduled_datetime and interview.sends_reminders():
             # Only for future interviews
             if interview.scheduled_datetime > now:
                 # Get recruiter settings for reminder timing

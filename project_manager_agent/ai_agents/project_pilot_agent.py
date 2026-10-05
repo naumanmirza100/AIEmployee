@@ -157,7 +157,12 @@ class ProjectPilotAgent(BaseAgent):
             'complete the project', 'complete project', 'finish project',
             'put project on hold', 'hold the project', 'cancel project', 'cancel the project',
             'activate project', 'activate the project', 'start the project',
-        ])
+        ]) or bool(
+            # Natural phrasings the list above misses: "mark the task X as
+            # done", "set its priority to high".
+            re.search(r"\bmark\b.+\bas\b", question_lower)
+            or re.search(r"\bset\b.*\b(status|priority|deadline|due date)\b", question_lower)
+        )
 
         # Detect bulk operations: "mark all tasks as done", "set all to high priority", etc.
         bulk_operation_patterns = [
@@ -1381,9 +1386,15 @@ Return a helpful text response (NOT JSON) explaining this."""
         try:
             # Determine if this is a text-only response (not JSON)
             # Deletion requests should return JSON (actions), so they're not text-only
+            # A clarifying-question prompt says "I need clarification" /
+            # "please specify". The bare word "clarification" also appears in
+            # the add-to-existing-project prompt ("DO NOT ask for
+            # clarification"), which sent every such request down this
+            # 200-token text path and cut its JSON off mid-way.
+            _p = prompt.lower()
             is_text_response = (
                 cannot_do or
-                ('clarification' in prompt.lower() or "didn't understand" in prompt.lower() or "please specify" in prompt.lower()) or
+                ('need clarification' in _p or "didn't understand" in _p or "please specify" in _p) or
                 (not is_action_request and not is_deletion_request)
             )
             

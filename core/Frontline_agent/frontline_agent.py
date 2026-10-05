@@ -657,7 +657,7 @@ class FrontlineAgent(BaseAgent):
             logger.warning(f"Ticket intent extraction failed: {e}")
             return None
 
-    def process_ticket(self, title: str, description: str, user_id: int) -> Dict:
+    def process_ticket(self, title: str, description: str, user_id: int, auto_resolve: bool = True) -> Dict:
         """
         Process a support ticket: classify, search for solution, auto-resolve if possible.
         Optionally uses LLM intent/entity extraction to augment triage.
@@ -676,7 +676,8 @@ class FrontlineAgent(BaseAgent):
             logger.info(f"LLM extraction: intent={llm_extraction.get('intent')}, category={llm_extraction.get('suggested_category')}, entities={llm_extraction.get('entities')}")
         
         # Use ticket service to process (with optional LLM augmentation)
-        result = self.ticket_service.process_ticket(title, description, user_id, llm_extraction=llm_extraction, company_id=self.company_id)
+        result = self.ticket_service.process_ticket(title, description, user_id, llm_extraction=llm_extraction,
+                                                    company_id=self.company_id, auto_resolve=auto_resolve)
         
         if not result.get('success', False):
             logger.error(f"Ticket processing failed: {result.get('error')}")

@@ -422,8 +422,14 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             invitee_str = ", ".join(f"**{n}**" for n in invitees) if invitees else meeting_data.get("invitee_name", "the invitee")
             time_str = meeting_data.get("proposed_time", "")
             try:
+                # On the organiser's clock, saying which zone. A time confirmed
+                # from the review form arrives in UTC, and used to be shown as
+                # its UTC digits under a card showing the local time.
+                from core.scheduling.conflicts import when_label
                 dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                time_display = dt.strftime("%A, %B %d, %Y at %I:%M %p")
+                if timezone.is_naive(dt):
+                    dt = dt.replace(tzinfo=self._organiser_zone())
+                time_display = when_label(dt, getattr(self, 'timezone_name', 'UTC') or 'UTC')
             except Exception:
                 time_display = time_str
             duration = meeting_data.get("duration_minutes", 30)
@@ -643,9 +649,13 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
         wanted = {"attendees": "who should attend", "time": "when it should be",
                   "duration": "how long it should last"}
         asks = [wanted[m] for m in missing]
-        asked = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + " and " + asks[-1]
-        response = (f"Before I book this, I need to know {asked}. "
-                    "Fill it in below, check the details, and confirm.")
+        if asks:
+            asked = asks[0] if len(asks) == 1 else ", ".join(asks[:-1]) + " and " + asks[-1]
+            response = (f"Before I book this, I need to know {asked}. "
+                        "Fill it in below, check the details, and confirm.")
+        else:
+            response = ("Here's the meeting as I understood it. Check the details and confirm — "
+                        "nobody is invited until you do.")
 
         return {
             "action": "needs_input",
@@ -938,10 +948,10 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
             missing.append("time")
         if not self._duration_mentioned(message) and not (template or {}).get("duration_minutes"):
             missing.append("duration")
-        if missing:
-            return self._needs_input(message, parsed, invitees, missing, template, company_users)
-
-        return self._schedule_result(invitees, parsed, message, company_users)
+        # Every booking is reviewed before anyone is invited, even a request
+        # that said everything: the form shows who, when and how long as
+        # understood, and nothing is booked or emailed until it's confirmed.
+        return self._needs_input(message, parsed, invitees, missing, template, company_users)
 
     def schedule_from_pending(self, pending_intent: Dict, proposed_time: str,
                               company_users: List[Dict] = None) -> Dict:

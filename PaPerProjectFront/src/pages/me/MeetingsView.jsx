@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { labelOf } from '@/utils/labels';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -242,7 +243,7 @@ export default function MeetingsView() {
                       {m.responses.map((r, ri) => (
                         <div key={ri} className="text-[11px] text-white/50 flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-white/70">{r.responder_name}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] ${STATUS_COLORS[r.action] || ''}`}>{r.action}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] ${STATUS_COLORS[r.action] || ''}`}>{labelOf(r.action)}</span>
                           {r.proposed_time && (
                             <span>→ {new Date(r.proposed_time).toLocaleString(undefined, {
                               month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
@@ -263,7 +264,7 @@ export default function MeetingsView() {
                             : p.status === 'counter_proposed' ? 'bg-blue-500/20 text-blue-400'
                             : 'bg-gray-500/20 text-gray-400'
                         }`}>
-                          {p.name}: {p.status}
+                          {p.name}: {labelOf(p.status)}
                         </span>
                       ))}
                     </div>

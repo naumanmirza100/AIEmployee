@@ -254,3 +254,23 @@ class HandoverOfWhatTheyLeadTests(HandoverTestCase):
             '1 interview for you to run': '/recruitment/interviews',
             '1 leave request for you to decide': '/hr/dashboard?tab=leave',
         })
+
+    def test_jobs_they_posted_get_a_new_owner_with_their_slots(self):
+        from recruitment_agent.models import JobDescription, RecruiterInterviewSettings
+        job = JobDescription.objects.create(title='Designer', description='x' * 30, company=self.company,
+                                            company_user=self.lee.company_user)
+        slots = RecruiterInterviewSettings.objects.create(company_user=self.lee.company_user, job=job)
+        # Tom's own defaults (no job) mustn't stop the job's slots moving.
+        RecruiterInterviewSettings.objects.create(company_user=self.tom.company_user, job=None)
+        groups = {g['key']: g for g in self.form()[1]['data']['groups']}
+        self.assertEqual([i['title'] for i in groups['jobs']['items']], ['Designer'])
+
+        code, body = self.hand_over({'jobs': self.tom.company_user_id})
+        self.assertEqual((code, body['data']['results']['jobs']['moved']), (200, 1), body)
+        job.refresh_from_db(); slots.refresh_from_db()
+        self.assertEqual((job.company_user, slots.company_user), (self.tom.company_user, self.tom.company_user))
+        alerts = dict(PMNotification.objects.filter(company_user=self.tom.company_user)
+                      .values_list('title', 'data__link'))
+        self.assertEqual(alerts, {'1 job handed over to you': '/recruitment/job-descriptions'})
+        # Jobs go to a dashboard login of the company only.
+        self.assertEqual(self.hand_over({'jobs': self.tom.user_id + 10_000})[0], 400)

@@ -28,6 +28,7 @@ import {
   Loader2, Plus, Bell, Trash2, Pencil, RefreshCw, Send,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
+import { NOTIFICATION_EVENTS, CHANNEL_LABELS, SEND_STATUS_LABELS, eventLabel, humanize } from './hrEventLabels';
 
 const NOTIFICATION_TYPES = [
   ['birthday', 'Birthday'],
@@ -41,6 +42,8 @@ const NOTIFICATION_TYPES = [
   ['compliance_training', 'Compliance Training'],
   ['system', 'System'],
 ];
+
+const TYPE_LABELS = Object.fromEntries(NOTIFICATION_TYPES);
 
 const SCHED_STATUS_BADGE = {
   pending: 'bg-white/[0.03] text-white/65 border-white/[0.08]',
@@ -225,7 +228,7 @@ export default function HRNotificationsTab() {
               <Bell className="h-5 w-5 text-violet-400" /> Notification Templates
             </CardTitle>
             <CardDescription>
-              Used by the daily walker (probation, birthdays, anniversaries, document expirations) and by workflow steps.
+              Sent automatically by HR's daily check (probation ending, birthdays, anniversaries, expiring documents) and by workflow steps.
               Use <code>{'{{employee_name}}'}</code>, <code>{'{{event_date}}'}</code>, <code>{'{{document_title}}'}</code> placeholders.
             </CardDescription>
           </div>
@@ -247,7 +250,7 @@ export default function HRNotificationsTab() {
               </div>
               <div className="font-medium text-white/90 mb-1">No notification templates yet</div>
               <div className="text-sm text-white/50 max-w-md">
-                Create a "Probation ending" or "Work anniversary" template — the daily walker auto-fans them out into scheduled rows.
+                Create a "Probation ending" or "Work anniversary" template — HR checks each day and queues it for everyone it applies to.
               </div>
             </div>
           ) : (
@@ -259,7 +262,7 @@ export default function HRNotificationsTab() {
                     <TableHead className="text-white/60 uppercase text-[10px] tracking-wider">Type</TableHead>
                     <TableHead className="text-white/60 uppercase text-[10px] tracking-wider">Channel</TableHead>
                     <TableHead className="text-white/60 uppercase text-[10px] tracking-wider">Trigger</TableHead>
-                    <TableHead className="text-white/60 uppercase text-[10px] tracking-wider">LLM</TableHead>
+                    <TableHead className="text-white/60 uppercase text-[10px] tracking-wider">AI-personalised</TableHead>
                     <TableHead className="text-right text-white/60 uppercase text-[10px] tracking-wider">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -267,13 +270,13 @@ export default function HRNotificationsTab() {
                   {templates.map((t) => {
                     const trig = t.trigger_config || {};
                     const trigText = trig.on
-                      ? `on ${trig.on}${trig.days_before ? ` · ${trig.days_before}d before` : ''}`
-                      : '—';
+                      ? `${eventLabel(trig.on)}${trig.days_before ? ` · ${trig.days_before} day${trig.days_before === 1 ? '' : 's'} before` : ''}`
+                      : 'Only from a workflow';
                     return (
                       <TableRow key={t.id} className="border-white/[0.06] hover:bg-white/[0.04]">
                         <TableCell className="font-medium text-white/95">{t.name}</TableCell>
-                        <TableCell className="text-xs text-white/70">{t.notification_type}</TableCell>
-                        <TableCell><Badge variant="outline" className="text-[10px]">{t.channel}</Badge></TableCell>
+                        <TableCell className="text-xs text-white/70">{TYPE_LABELS[t.notification_type] || humanize(t.notification_type)}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-[10px]">{CHANNEL_LABELS[t.channel] || humanize(t.channel)}</Badge></TableCell>
                         <TableCell className="text-xs text-white/60">{trigText}</TableCell>
                         <TableCell>{t.use_llm_personalization
                           ? <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-400/30">on</Badge>
@@ -308,7 +311,7 @@ export default function HRNotificationsTab() {
         <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <CardTitle>Scheduled queue</CardTitle>
-            <CardDescription>Most recent 200 rows. Sender runs every 60s with retry/DLQ.</CardDescription>
+            <CardDescription>The latest 200. Checked every minute; a failed send is retried a few times before it gives up.</CardDescription>
           </div>
           <Button variant="outline" onClick={loadScheduled} disabled={schedLoading}>
             {schedLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -339,7 +342,7 @@ export default function HRNotificationsTab() {
                       <TableCell className="text-xs text-white/85">{n.recipient_email || '—'}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`text-[10px] ${SCHED_STATUS_BADGE[n.status] || 'bg-white/[0.04]'}`}>
-                          {n.status}
+                          {SEND_STATUS_LABELS[n.status] || humanize(n.status)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs text-white/60">
@@ -367,7 +370,7 @@ export default function HRNotificationsTab() {
           <DialogHeader>
             <DialogTitle>{dialog.mode === 'create' ? 'New template' : 'Edit template'}</DialogTitle>
             <DialogDescription>
-              Pick a trigger event for the daily walker to auto-create scheduled rows. Or leave the trigger blank to use this template only via the workflow <code>send_email</code> step.
+              Pick when it is sent automatically: HR checks each day and queues it for the people it applies to. Or leave that blank to send it only from a workflow's "send email" step.
             </DialogDescription>
           </DialogHeader>
           {dialog.tpl && (
@@ -411,17 +414,13 @@ export default function HRNotificationsTab() {
                   )}
                 </div>
                 <div>
-                  <Label>Trigger event (for daily walker)</Label>
+                  <Label>Send automatically when</Label>
                   <Select value={dialog.tpl.trigger_event || '__none__'}
                     onValueChange={(v) => setDialog((s) => ({ ...s, tpl: { ...s.tpl, trigger_event: v === '__none__' ? '' : v } }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">(none — workflow-step use only)</SelectItem>
-                      <SelectItem value="probation_ending">probation_ending</SelectItem>
-                      <SelectItem value="birthday">birthday</SelectItem>
-                      <SelectItem value="work_anniversary">work_anniversary</SelectItem>
-                      <SelectItem value="document_expiring">document_expiring</SelectItem>
-                      <SelectItem value="review_due">review_due</SelectItem>
+                      <SelectItem value="__none__">Never — only from a workflow</SelectItem>
+                      {NOTIFICATION_EVENTS.map((e) => <SelectItem key={e.value} value={e.value}>{e.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -450,7 +449,7 @@ export default function HRNotificationsTab() {
                 <input type="checkbox" className="h-4 w-4"
                   checked={!!dialog.tpl.use_llm_personalization}
                   onChange={(e) => setDialog((s) => ({ ...s, tpl: { ...s.tpl, use_llm_personalization: e.target.checked } }))} />
-                <span>Use LLM personalization (slower, costs LLM tokens, falls back to template body on failure)</span>
+                <span>Personalise each message with AI (slower, uses AI tokens; sends the text above if the AI fails)</span>
               </label>
 
               {/* Quiet hours — per-template (N-F2). Off by default; when off,

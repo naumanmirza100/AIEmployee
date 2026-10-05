@@ -389,9 +389,9 @@ def cleanup_old_notifications():
 @shared_task(name='project_manager_agent.run_project_pilot_job',
              bind=True, max_retries=1, default_retry_delay=30)
 def run_project_pilot_job(self, job_id):
-    """Run a ProjectPilotJob end-to-end: extract text → LLM → create Project/
-    Task rows. Stamps results back onto the job row so the frontend polling
-    endpoint can pick them up.
+    """Run a ProjectPilotJob end-to-end: extract text → LLM → a proposal to
+    review (nothing is created until the user confirms it). Stamps results
+    back onto the job row so the frontend polling endpoint can pick them up.
 
     The pipeline itself is unchanged — this task is just an async wrapper
     around `run_project_pilot_pipeline`. The upload endpoint saves the file
@@ -466,6 +466,9 @@ def run_project_pilot_job(self, job_id):
         job.answer = result.get('answer', '') or ''
         job.action_results = result.get('action_results', []) or []
         job.cannot_do = result.get('cannot_do', '') or ''
+        # The proposal to review rides the same way (see the status endpoint).
+        if result.get('draft'):
+            timing_ms['_draft'] = result['draft']
         confirmation = result.get('confirmation_required')
         if confirmation:
             # Store on the job via `error_message`? No — reuse a JSON blob.

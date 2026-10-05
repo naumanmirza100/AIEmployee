@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { labelOf } from '@/utils/labels';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Loader2, ArrowLeft, Mail, Phone, Briefcase, MapPin,
@@ -212,7 +213,7 @@ const CandidateDetailPage = () => {
   ` : ''}
 
   ${ivs.length > 0 ? `<h2>Interviews (${ivs.length})</h2><table><thead><tr><th>Type</th><th>Status</th><th>Scheduled</th><th>Outcome</th></tr></thead><tbody>
-  ${ivs.map(iv => `<tr><td>${iv.interview_type || '—'}</td><td>${iv.status || '—'}</td><td>${iv.scheduled_datetime ? new Date(iv.scheduled_datetime).toLocaleString() : '—'}</td><td>${iv.outcome || '—'}</td></tr>`).join('')}
+  ${ivs.map(iv => `<tr><td>${labelOf(iv.interview_type) || '—'}</td><td>${labelOf(iv.status) || '—'}</td><td>${iv.scheduled_datetime ? new Date(iv.scheduled_datetime).toLocaleString() : '—'}</td><td>${labelOf(iv.outcome) || '—'}</td></tr>`).join('')}
   </tbody></table>` : ''}
 
   <div class="footer">
@@ -620,7 +621,7 @@ const CandidateDetailPage = () => {
                   <span>Applied: {application.applied_at ? new Date(application.applied_at).toLocaleString() : '—'}</span>
                   <span className="px-2.5 py-1 rounded-full capitalize"
                     style={{ background: 'hsl(var(--surface-invert) / 0.06)', border: '1px solid hsl(var(--surface-invert) / 0.1)' }}>
-                    {application.status}
+                    {labelOf(application.status)}
                   </span>
                 </div>
               </div>
@@ -647,17 +648,17 @@ const CandidateDetailPage = () => {
                   <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-3">
                     <span className="text-xs font-semibold px-2.5 py-1 rounded-full text-white"
                       style={{ background: statusColors[iv.status] || '#6b7280' }}>
-                      {iv.status}
+                      {labelOf(iv.status)}
                     </span>
                     {iv.outcome && (
                       <span className="text-xs px-2.5 py-1 rounded-full text-white/70"
                         style={{ background: 'hsl(var(--surface-invert) / 0.08)', border: '1px solid hsl(var(--surface-invert) / 0.12)' }}>
-                        {iv.outcome.replace(/_/g, ' ')}
+                        {labelOf(iv.outcome)}
                       </span>
                     )}
                     <span className="text-xs px-2.5 py-1 rounded-full text-violet-300"
                       style={{ background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.2)' }}>
-                      {iv.interview_type}
+                      {labelOf(iv.interview_type)}
                     </span>
                     <span className="text-xs text-white/25 ml-auto">
                       Created: {iv.created_at ? new Date(iv.created_at).toLocaleDateString() : '—'}

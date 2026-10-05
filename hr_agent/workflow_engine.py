@@ -341,7 +341,8 @@ def _run_single_step(step, step_index, step_path, workflow, context_data, simula
             'approver_role': step.get('approver_role') or 'hr_admin',
             'approver_user_id': step.get('approver_user_id'),
             'approver_employee_id': step.get('approver_employee_id'),
-            'message': _render(step.get('message') or 'Approval required to proceed', ctx),
+            # `ctx` here was undefined, so every approval step crashed.
+            'message': _render(step.get('message') or 'Approval required to proceed', context_data),
             'requested_at': timezone.now().isoformat(),
         }
         if simulate:
