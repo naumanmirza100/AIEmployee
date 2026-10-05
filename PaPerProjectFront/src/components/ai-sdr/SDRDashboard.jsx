@@ -95,7 +95,7 @@ const SDRDashboard = () => {
         <TabsContent value="crm-sync" className="mt-4">
           {/* CRM Sync is bought separately. Shown to everyone, connecting a CRM
               here just failed for a company without it. */}
-          {purchasedModules.includes('crm_sync_agent') || !modulesLoaded ? <SDRCRMSyncTab /> : (
+          {!modulesLoaded ? null : purchasedModules.includes('crm_sync_agent') ? <SDRCRMSyncTab /> : (
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6 text-center text-sm text-gray-400">
               CRM Sync is a separate agent and is not part of your plan.{' '}
               <button type="button" className="text-violet-400 underline" onClick={() => navigate('/company/dashboard/ai-agents')}>
