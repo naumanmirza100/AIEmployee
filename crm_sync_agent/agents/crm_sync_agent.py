@@ -470,7 +470,7 @@ class CRMSyncAgent:
         if integration.pk in self._connector_cache:
             return self._connector_cache[integration.pk]
 
-        creds = integration.credentials or {}
+        creds = integration.get_credentials()
         provider = integration.provider
 
         if provider == CRMIntegration.PROVIDER_HUBSPOT:

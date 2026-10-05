@@ -9,7 +9,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
-from api.permissions import IsCompanyUserOnly
+from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from crm_sync_agent.models import CRMIntegration, CRMSyncLog, CRMSyncQueue
 
 logger = logging.getLogger(__name__)
@@ -19,14 +19,41 @@ logger = logging.getLogger(__name__)
 # Serialization helpers
 # ------------------------------------------------------------------ #
 
-def _serialize_integration(integration: CRMIntegration) -> dict:
-    creds = dict(integration.credentials or {})
+def _admins_only(request):
+    """The refusal for a login that is not an owner or admin, else None.
+    Connecting, changing or disconnecting a CRM is for the people who run the
+    account; any login could do it, and could read the saved password."""
+    if getattr(request.user, 'role', None) in IsCompanyAdmin.ADMIN_ROLES:
+        return None
+    message = 'Only an owner or admin of your company can connect, change or disconnect a CRM.'
+    return Response({'error': message, 'message': message}, status=status.HTTP_403_FORBIDDEN)
 
+
+def _merged_credentials(integration: CRMIntegration, incoming) -> dict:
+    """The credentials to save when a form sends some back.
+
+    The screen is only ever shown masked values. A field that comes back
+    blank, or still masked, was not retyped: the saved value is kept, or the
+    mask would be written over the real key.
+    """
+    saved = integration.get_credentials()
+    shown = integration.credentials_preview()
+    merged = dict(saved)
+    for key, value in (incoming or {}).items():
+        text = str(value or '').strip()
+        if not text or text == shown.get(key) or '********' in text:
+            continue
+        merged[key] = value
+    return merged
+
+
+def _serialize_integration(integration: CRMIntegration) -> dict:
     return {
         'id': integration.pk,
         'provider': integration.provider,
         'provider_label': integration.get_provider_display(),
-        'credentials_preview': creds,
+        # Masked. The real values never leave the server.
+        'credentials_preview': integration.credentials_preview(),
         'field_mappings': integration.field_mappings,
         'sync_contacts': integration.sync_contacts,
         'sync_emails': integration.sync_emails,
@@ -73,6 +100,9 @@ def integrations_list(request):
         return Response([_serialize_integration(i) for i in qs])
 
     # POST — create
+    refused = _admins_only(request)
+    if refused:
+        return refused
     data = request.data
     provider = (data.get('provider') or '').strip()
     valid_providers = [p[0] for p in CRMIntegration.PROVIDERS]
@@ -93,10 +123,9 @@ def integrations_list(request):
             status=status.HTTP_409_CONFLICT,
         )
 
-    integration = CRMIntegration.objects.create(
+    integration = CRMIntegration(
         company=company,
         provider=provider,
-        credentials=data.get('credentials', {}),
         field_mappings=data.get('field_mappings', {}),
         sync_contacts=data.get('sync_contacts', True),
         sync_emails=data.get('sync_emails', True),
@@ -104,6 +133,8 @@ def integrations_list(request):
         sync_notes=data.get('sync_notes', True),
         is_active=data.get('is_active', True),
     )
+    integration.set_credentials(data.get('credentials') or {})
+    integration.save()
     logger.info('CRM integration created: company=%d provider=%s', company.pk, provider)
     return Response(_serialize_integration(integration), status=status.HTTP_201_CREATED)
 
@@ -127,6 +158,10 @@ def integration_detail(request, integration_id: int):
     if request.method == 'GET':
         return Response(_serialize_integration(integration))
 
+    refused = _admins_only(request)
+    if refused:
+        return refused
+
     if request.method == 'DELETE':
         integration.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -134,7 +169,7 @@ def integration_detail(request, integration_id: int):
     # PUT / PATCH
     data = request.data
     if 'credentials' in data:
-        integration.credentials = data['credentials']
+        integration.set_credentials(_merged_credentials(integration, data['credentials']))
     if 'field_mappings' in data:
         integration.field_mappings = data['field_mappings']
     for flag in ('sync_contacts', 'sync_emails', 'sync_meetings', 'sync_notes', 'is_active'):
@@ -202,40 +237,20 @@ def integration_sync_leads(request, integration_id: int):
     except CRMIntegration.DoesNotExist:
         return Response({'error': 'Integration not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+    from crm_sync_agent.tasks import queue_everything, sync_sdr_leads_to_crm
     try:
-        from crm_sync_agent.tasks import sync_sdr_leads_to_crm
         sync_sdr_leads_to_crm.delay(company_id=company.pk)
         return Response({'status': 'queued', 'message': 'Full lead sync has been queued.'})
     except Exception:
         # Redis/Celery not available — run synchronously
         from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
-        from ai_sdr_agent.models import SDRLead, SDROutreachLog, SDRMeeting
         agent = CRMSyncAgent(company)
-
-        # Sync leads (contacts)
-        leads = SDRLead.objects.filter(company_user__company=company)
-        for lead in leads:
-            agent.enqueue_sdr_lead(lead)
-
-        # Backfill past sent emails
-        emails = SDROutreachLog.objects.filter(
-            status='sent',
-            enrollment__lead__company_user__company=company,
-        ).select_related('enrollment__lead')
-        for email in emails:
-            agent.enqueue_email_sent(email)
-
-        # Backfill past meetings
-        meetings = SDRMeeting.objects.filter(
-            lead__company_user__company=company,
-        ).select_related('lead')
-        for meeting in meetings:
-            agent.enqueue_meeting(meeting)
-
+        counts = queue_everything(agent, company)
         result = agent.process_pending(limit=500)
         return Response({
             'status': 'done',
-            'message': f'Synced {leads.count()} leads, {emails.count()} emails, {meetings.count()} meetings.',
+            'message': (f"Synced {counts['leads']} leads, {counts['emails']} emails, "
+                        f"{counts['meetings']} meetings."),
             'result': result,
         })
 
