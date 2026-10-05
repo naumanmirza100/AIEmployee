@@ -53,13 +53,13 @@ const LoginPage = () => {
       // Redirect based on user type. Employees (company-created + regular)
       // land on the new /me/home shell; PMs go straight to the full PM
       // dashboard; admins keep the historic `from` behaviour.
-      const isPM =
-        userData?.role === 'project_manager' ||
-        userData?.userType === 'project_manager';
+      // Every employee lands on My Space. One with the Project Manager role
+      // used to be sent to the company's Project Manager dashboard, which talks
+      // to the server with a dashboard login's key they do not have: nearly
+      // every feature was refused. Their own project screen is linked from
+      // My Space home.
       if (userData?.userType === 'admin' || userData?.is_staff) {
         navigate(from, { replace: true });
-      } else if (isPM) {
-        navigate('/project-manager/dashboard', { replace: true });
       } else {
         navigate('/me/home', { replace: true });
       }

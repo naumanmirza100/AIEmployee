@@ -123,7 +123,7 @@ import { useTranslation } from 'react-i18next';
             />
 
             {/* /user/dashboard now sends users into the new employee shell.
-                PMs land on /project-manager/dashboard; everyone else on /me/home.
+                Every employee lands on /me/home, project managers included.
                 The legacy monolith stays reachable at /user/dashboard/classic
                 for rollback / debugging (see USER_DASHBOARD_REDESIGN.md, Chunk I). */}
             <Route

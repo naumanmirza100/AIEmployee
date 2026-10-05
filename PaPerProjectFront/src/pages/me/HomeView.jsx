@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import {
   CheckSquare,
+  FolderKanban,
   Calendar,
   Bell,
   User,
@@ -123,6 +124,11 @@ export default function HomeView() {
   ].slice(0, 6);
 
   const quickLinks = [
+    // Project managers run their projects from the screen built on the
+    // employee API; the company dashboard does not work with their login.
+    ...(user?.role === 'project_manager'
+      ? [{ to: '/user/dashboard/classic', icon: FolderKanban, label: 'My Projects' }]
+      : []),
     { to: '/me/tasks', icon: CheckSquare, label: 'My Tasks' },
     { to: '/me/meetings', icon: Calendar, label: 'My Meetings' },
     { to: '/me/notifications', icon: Bell, label: 'Notifications' },

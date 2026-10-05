@@ -66,8 +66,13 @@ const ProtectedRoute = ({ children, requireAdmin = false, requireProjectManager 
 
   if (requireProjectManager) {
     // Any company login gets through — the dashboard then checks that the
-    // company actually bought the module. This only turns people away on the
-    // employee login, where there is no company and no module to check.
+    // company actually bought the module. An employee login does not, whatever
+    // its role: the dashboard calls the server with a dashboard login's key,
+    // so for an employee everything on it failed. They go to My Space, which
+    // links to the project screen that does work for them.
+    if (!companyUserAuth && isAuthenticated) {
+      return <Navigate to="/me/home" replace />;
+    }
     const isPM = isProjectManager() || companyUserAuth;
     if (!isPM) {
       return (
