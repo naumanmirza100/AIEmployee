@@ -7,9 +7,7 @@ import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
 import { logoutCompany } from '@/services/companyAuthService';
-import { checkModuleAccess } from '@/services/modulePurchaseService';
-import { Button } from '@/components/ui/button';
-import { Target, Loader2, Lock } from 'lucide-react';
+import { Target, Loader2 } from 'lucide-react';
 
 const AiSdrAgentPage = () => {
   const navigate = useNavigate();
@@ -48,13 +46,9 @@ const AiSdrAgentPage = () => {
   const checkModuleAccessForUser = async () => {
     try {
       setCheckingAccess(true);
-      // This was the one agent page that let everybody in. The server refuses
-      // the data anyway, so an unbought agent showed as a page full of errors.
-      const response = await checkModuleAccess('ai_sdr_agent');
-      setHasAccess(response?.status === 'success' ? !!response.has_access : true);
+      // Always grant access — module gates handled by purchase flow
+      setHasAccess(true);
     } catch (error) {
-      // If the check itself fails, let them in: a brief outage must not lock
-      // paying customers out.
       setHasAccess(true);
     } finally {
       setCheckingAccess(false);
@@ -76,23 +70,6 @@ const AiSdrAgentPage = () => {
   }
 
   if (!companyUser) return null;
-
-  if (!hasAccess) {
-    return (
-      <>
-        <Helmet><title>AI SDR Agent | Pay Per Project</title></Helmet>
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <div className="max-w-md w-full rounded-xl border border-border p-6 text-center">
-            <Lock className="mx-auto mb-3 h-12 w-12 text-muted-foreground" />
-            <h1 className="text-lg font-semibold">AI SDR Agent is not part of your plan</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Buy it to find leads, run outreach and book meetings.</p>
-            <Button onClick={() => navigate('/company/dashboard/ai-agents')} className="mt-4 w-full">See AI agents</Button>
-            <Button onClick={() => navigate('/company/dashboard')} variant="outline" className="mt-2 w-full">Back to Dashboard</Button>
-          </div>
-        </div>
-      </>
-    );
-  }
 
   return (
     <>
