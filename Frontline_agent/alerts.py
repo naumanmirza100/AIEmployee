@@ -7,6 +7,8 @@ the company feed via `core.notification_utils`.
 """
 from __future__ import annotations
 
+from django.core.cache import cache
+
 from core.models import CompanyUser
 from core.notification_utils import notify_company_users
 
@@ -42,6 +44,26 @@ def handoff_requested(ticket):
         link='/frontline/dashboard?tab=handoffs',
         severity='warning',
         kind='frontline_handoff',
+    )
+
+
+def widget_cannot_answer(company, reason=''):
+    """The website chat could not use the AI: tokens used up, the key refused,
+    or the agent switched off. Visitors are told to try again later, so without
+    this nobody at the company would know. Once an hour per company at most:
+    every visitor message hits the same wall."""
+    if not cache.add(f'frontline-widget-cannot-answer:{company.id}', 1, 3600):
+        return 0
+    recipients = CompanyUser.objects.filter(company_id=company.id, is_active=True,
+                                            role__in=HANDOFF_ALERT_ROLES)
+    return notify_company_users(
+        recipients,
+        title='Your website chat cannot answer visitors',
+        message=(f"{reason} " if reason else '') + (
+            'Visitors are told to try again later. Anyone who asks for a person still reaches Hand-offs.'),
+        link='/company/settings/api-keys',
+        severity='critical',
+        kind='frontline_widget_cannot_answer',
     )
 
 

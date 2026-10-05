@@ -626,7 +626,15 @@ def process_scheduled_notifications():
             # Attach an unsubscribe URL for the recipient's own CompanyUser
             context.setdefault('unsubscribe_url', _build_unsubscribe_url(prefs.company_user_id))
         body = _render_template_body(template.body, context)
-        personalized_body = _generate_llm_notification_body(template, context, notif.company_id)
+        # AI wording is an extra. With the company's tokens used up or its key
+        # refused this raised, the row came back every five minutes and the
+        # email was never sent; the template's own text goes out instead.
+        try:
+            personalized_body = _generate_llm_notification_body(template, context, notif.company_id)
+        except Exception as exc:
+            logger.warning("Notification %s: AI wording unavailable (%s), sending the template text",
+                           notif.id, type(exc).__name__)
+            personalized_body = None
         if personalized_body:
             body = personalized_body
         subject = _render_template_body(template.subject, context)
