@@ -1154,6 +1154,16 @@ def auto_close_inactive_tickets():
     return {'closed': closed, 'cutoff': cutoff.isoformat(), 'inactivity_days': inactivity_days}
 
 
+# ---------- A customer still waiting for a person ----------
+
+@shared_task(name='Frontline_agent.tasks.remind_waiting_handoffs')
+def remind_waiting_handoffs():
+    """Say again, hourly, that a customer is waiting for a person
+    (Frontline_agent.alerts.handoffs_still_waiting)."""
+    from Frontline_agent.alerts import handoffs_still_waiting
+    return {'reminded': handoffs_still_waiting()}
+
+
 # ---------- Escalate near-breach tickets (S3) ----------
 
 @shared_task(name='Frontline_agent.tasks.escalate_near_breach_tickets')

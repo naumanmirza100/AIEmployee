@@ -1203,6 +1203,14 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 120}
     },
 
+    # A customer who asked for a person and has not been picked up: say so again.
+    # The job runs often; each hand-off is repeated at most once an hour.
+    'frontline-remind-waiting-handoffs': {
+        'task': 'Frontline_agent.tasks.remind_waiting_handoffs',
+        'schedule': 600.0,  # Every 10 minutes
+        'options': {'expires': 600}
+    },
+
     # Prune frontline documents that have exceeded their retention window. Daily.
     'frontline-prune-expired-documents': {
         'task': 'Frontline_agent.tasks.prune_expired_documents',
