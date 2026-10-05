@@ -477,7 +477,7 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
                 "I'm the Meeting Scheduler assistant. I can help you:\n\n"
                 "- **Schedule a meeting**: \"Schedule a meeting with [name] on [date] at [time]\"\n"
                 "- **View meetings**: \"Show my upcoming meetings\"\n"
-                "- **Withdraw a meeting**: \"Cancel meeting #[id]\"\n\n"
+                "- **Cancel a meeting**: press Withdraw (or Cancel meeting, once it is accepted) on it in your list\n\n"
                 "Try something like: *\"Schedule a meeting with John tomorrow at 2 PM\"*"
             )
 

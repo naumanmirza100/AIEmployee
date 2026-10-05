@@ -4355,9 +4355,16 @@ def meeting_respond(request):
         except ScheduledMeeting.DoesNotExist:
             return Response({"status": "error", "message": "Meeting not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Can't act on already finalized meetings
-        if meeting.status in ('accepted', 'withdrawn'):
+        # A withdrawn meeting is finished. An accepted one is settled, with one
+        # exception: its organiser can still cancel it until it takes place.
+        # They could not, so once everyone had accepted, that hour stayed busy
+        # for all of them in every agent with no way to free it.
+        cancelling_accepted = meeting.status == 'accepted' and action == 'withdrawn'
+        if meeting.status == 'withdrawn' or (meeting.status == 'accepted' and not cancelling_accepted):
             return Response({"status": "error", "message": f"Meeting is already {meeting.status}."}, status=status.HTTP_400_BAD_REQUEST)
+        if cancelling_accepted and meeting.proposed_time and meeting.proposed_time <= timezone.now():
+            return Response({"status": "error", "message": "This meeting has already taken place, so it can't be cancelled."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         # Parse counter time if provided
         counter_time = None
@@ -4461,18 +4468,31 @@ def meeting_respond(request):
                     <p><strong>New proposed time:</strong> {new_time_display}</p>{'<p><strong>Reason:</strong> ' + reason + '</p>' if reason else ''}""")
 
         elif action == 'withdrawn':
-            UserNotification.objects.create(
-                user=meeting.invitee, type='meeting_withdrawn', notification_type='meeting_request',
-                title=f"Meeting Withdrawn: {meeting.title}",
-                message=f'{company_user.full_name} has withdrawn the meeting request "{meeting.title}".',
-            )
-            if invitee_email:
-                _send_meeting_email(
-                    recipient_email=invitee_email,
-                    subject=f"Meeting Cancelled: {meeting.title}",
-                    body_html=f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting <strong>\"{meeting.title}\"</strong>.</p>",
-                    ics_content=confirm_ics,
+            # Everyone invited, not only the first: the others kept the meeting
+            # in their calendars and were never told it was off.
+            invited = {}
+            if meeting.invitee_id:
+                invited[meeting.invitee_id] = meeting.invitee
+            for seat in meeting.participants.select_related('user'):
+                invited.setdefault(seat.user_id, seat.user)
+            reason_text = f" Reason: {reason}" if reason else ""
+            for person in invited.values():
+                UserNotification.objects.create(
+                    user=person, type='meeting_withdrawn', notification_type='meeting_request',
+                    title=(f"Meeting Cancelled: {meeting.title}" if cancelling_accepted
+                           else f"Meeting Withdrawn: {meeting.title}"),
+                    message=(f'{company_user.full_name} has cancelled the meeting "{meeting.title}" on {time_display}.{reason_text}'
+                             if cancelling_accepted else
+                             f'{company_user.full_name} has withdrawn the meeting request "{meeting.title}".{reason_text}'),
                 )
+                if person.email:
+                    _send_meeting_email(
+                        recipient_email=person.email,
+                        subject=f"Meeting Cancelled: {meeting.title}",
+                        body_html=(f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting "
+                                   f"<strong>\"{meeting.title}\"</strong>.{' Reason: ' + reason if reason else ''}</p>"),
+                        ics_content=confirm_ics,
+                    )
 
         return Response({
             "status": "success",

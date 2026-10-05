@@ -66,6 +66,7 @@ export default function MeetingScheduler() {
   const [counterDate, setCounterDate] = useState('');
   const [counterTime, setCounterTime] = useState('');
   const [respondLoading, setRespondLoading] = useState(false);
+  const [cancellingId, setCancellingId] = useState(null);   // an accepted meeting being cancelled
 
   const normalizeChat = (chat) => {
     if (!chat) return chat;
@@ -797,6 +798,31 @@ export default function MeetingScheduler() {
                                 <ArrowRightLeft className="h-3 w-3 mr-1" /> Change Time
                               </Button>
                             </>
+                          )}
+                        </div>
+                      )}
+
+                      {/* An accepted meeting can still be cancelled until it takes place.
+                          Before, nobody could: the hour stayed busy for everyone invited. */}
+                      {m.status === 'accepted' && new Date(m.proposed_time) > new Date() && (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          {cancellingId === m.id ? (
+                            <>
+                              <span className="text-xs text-white/60">Cancel this meeting for everyone invited?</span>
+                              <Button size="sm" disabled={respondLoading} variant="outline"
+                                onClick={() => handleRespond(m.id, 'withdrawn').finally(() => setCancellingId(null))}
+                                className="text-xs h-7 border-red-500/30 text-red-400 hover:bg-red-500/10">
+                                {respondLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes, cancel it'}
+                              </Button>
+                              <Button size="sm" variant="ghost" disabled={respondLoading} onClick={() => setCancellingId(null)} className="text-xs h-7">
+                                Keep it
+                              </Button>
+                            </>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => setCancellingId(m.id)}
+                              className="text-xs h-7 border-red-500/30 text-red-400 hover:bg-red-500/10">
+                              <Trash2 className="h-3 w-3 mr-1" /> Cancel meeting
+                            </Button>
                           )}
                         </div>
                       )}
