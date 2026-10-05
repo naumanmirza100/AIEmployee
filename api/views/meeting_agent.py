@@ -598,15 +598,42 @@ def _serialize_meeting(meeting, include_participants=False):
     return data
 
 
+def _seat_for_employee(profile_id, company):
+    """The CompanyUser row that stands in for an employee in meetings and tasks,
+    or None when no active employee of this company has that profile id.
+
+    Participants and assignees are stored as CompanyUser, and an employee login
+    has none, so a row is made for them. It is a seat, NOT a login: it is created
+    inactive, which sign-in, password reset and token checks all refuse. It used
+    to be created active with a random password, so the employee could claim it
+    with "Forgot password" and open the whole company dashboard: every
+    candidate, every project, the AI keys.
+    """
+    import secrets
+    from django.contrib.auth.hashers import make_password
+    from core.models import CompanyUser, UserProfile
+    profile = (UserProfile.objects.select_related('user')
+               .filter(id=profile_id, company=company, user__is_active=True).first())
+    if profile is None:
+        return None
+    user = profile.user
+    seat, _ = CompanyUser.objects.get_or_create(
+        company=company, email=user.email,
+        defaults={'full_name': f"{user.first_name} {user.last_name}".strip() or user.username,
+                  'role': profile.role or 'company_user',
+                  'password_hash': make_password(secrets.token_urlsafe(16)),
+                  'is_active': False},
+    )
+    return seat
+
+
 def _resolve_assignees(assignee_list, company):
     """
     Accepts a list of {id, user_type} dicts from the frontend.
-    Returns a list of CompanyUser instances, creating mirror entries for
-    UserProfile-backed users when needed.
+    Returns a list of CompanyUser instances; an employee gets a seat
+    (see _seat_for_employee).
     """
-    from core.models import CompanyUser as _CU, UserProfile as _UP
-    import secrets as _sec
-    from django.contrib.auth.hashers import make_password as _mkpw
+    from core.models import CompanyUser as _CU
     result = []
     for item in (assignee_list or []):
         uid = item.get('id')
@@ -614,18 +641,9 @@ def _resolve_assignees(assignee_list, company):
         if not uid:
             continue
         if utype == 'profile':
-            try:
-                up = _UP.objects.select_related('user').get(id=uid, company=company)
-                u = up.user
-                full_name = f"{u.first_name} {u.last_name}".strip() or u.username
-                cu, _ = _CU.objects.get_or_create(
-                    company=company, email=u.email,
-                    defaults={'full_name': full_name, 'role': up.role or 'company_user',
-                              'password_hash': _mkpw(_sec.token_urlsafe(16)), 'is_active': True},
-                )
-                result.append(cu)
-            except _UP.DoesNotExist:
-                pass
+            seat = _seat_for_employee(uid, company)
+            if seat is not None:
+                result.append(seat)
         else:
             try:
                 result.append(_CU.objects.get(id=uid, company=company))
@@ -1010,7 +1028,7 @@ def search_company_users(request):
     # 2. UserProfile-backed users created via the admin panel
     existing_emails = {u['email'] for u in results}
     up_qs = UserProfile.objects.filter(
-        company=company_user.company,
+        company=company_user.company, user__is_active=True,
     )
     if not show_all:
         up_qs = up_qs.filter(
@@ -1055,7 +1073,7 @@ def _all_company_members(company_user):
         })
     seen_emails = {m['email'] for m in out}
     up_qs = UserProfile.objects.filter(
-        company=company_user.company,
+        company=company_user.company, user__is_active=True,
     ).select_related('user').exclude(user__email__in=seen_emails)[:500]
     for up in up_qs:
         u = up.user
@@ -1201,34 +1219,16 @@ def meeting_participants(request, meeting_id):
         ]})
 
     if request.method == 'POST':
-        from django.contrib.auth.hashers import make_password as _make_password
-        import secrets as _secrets
         user_id = request.data.get('user_id')
         user_type = request.data.get('user_type', 'company_user')
         if not user_id:
             return Response({'status': 'error', 'message': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         if user_type == 'profile':
-            # UserProfile-backed user: resolve via UserProfile and create/find a CompanyUser mirror
-            from core.models import UserProfile
-            try:
-                up = UserProfile.objects.select_related('user').get(id=user_id, company=company_user.company)
-            except UserProfile.DoesNotExist:
+            # An employee login: they take part through a seat, which is not a login.
+            target = _seat_for_employee(user_id, company_user.company)
+            if target is None:
                 return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-            u = up.user
-            full_name = f"{u.first_name} {u.last_name}".strip() or u.username
-            role = up.role or 'company_user'
-            # Get or create a CompanyUser mirror so we can use it in the participant FK
-            target, _ = CompanyUser.objects.get_or_create(
-                company=company_user.company,
-                email=u.email,
-                defaults={
-                    'full_name': full_name,
-                    'role': role,
-                    'password_hash': _make_password(_secrets.token_urlsafe(16)),
-                    'is_active': True,
-                },
-            )
         else:
             try:
                 target = CompanyUser.objects.get(id=user_id, company=company_user.company, is_active=True)
