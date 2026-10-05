@@ -120,3 +120,48 @@ class EmployeeSeatTests(TestCase):
         self.assertEqual(code, 201, body)
         colleague.refresh_from_db()
         self.assertTrue(colleague.is_active)
+
+
+class MeetingReplyTests(TestCase):
+    """Answering an invitation: your own company's meeting, and only if you were invited."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.company = Company.objects.create(name='Acme', email='acme@test.local')
+        self.rival = Company.objects.create(name='Rival', email='rival@test.local')
+        self.director = self.login(self.company, 'dana@test.local', 'Dana Director')
+        self.invited = self.login(self.company, 'ivan@test.local', 'Ivan Invited')
+        self.bystander = self.login(self.company, 'bea@test.local', 'Bea Bystander')
+        self.outsider = self.login(self.rival, 'omar@test.local', 'Omar Outsider')
+        self.meeting = ExecutiveMeeting.objects.create(
+            organizer=self.director, title='Board prep', scheduled_at=timezone.now() + timedelta(days=2))
+        ExecutiveMeetingParticipant.objects.create(meeting=self.meeting, company_user=self.invited)
+
+    @staticmethod
+    def login(company, email, name):
+        return CompanyUser.objects.create(company=company, email=email, full_name=name, role='admin',
+                                          password_hash='x', is_active=True)
+
+    def reply(self, who, response='accepted', reason=''):
+        request = self.factory.post('/', {'response': response, 'reason': reason}, format='json')
+        force_authenticate(request, user=who)
+        result = views.meeting_respond(request, meeting_id=self.meeting.id)
+        result.render()
+        return result.status_code
+
+    def test_someone_from_another_company_cannot_join_or_write_to_the_organiser(self):
+        from meeting_agent.models import ExecNotification
+        self.assertEqual(self.reply(self.outsider, reason='hello from outside'), 404)
+        self.assertFalse(ExecutiveMeetingParticipant.objects.filter(company_user=self.outsider).exists())
+        self.assertFalse(ExecNotification.objects.filter(company_user=self.director).exists())
+
+    def test_a_colleague_who_was_not_invited_cannot_add_themselves(self):
+        self.assertEqual(self.reply(self.bystander), 403)
+        self.assertFalse(ExecutiveMeetingParticipant.objects.filter(company_user=self.bystander).exists())
+
+    def test_an_invited_person_can_answer_and_the_organiser_is_told(self):
+        from meeting_agent.models import ExecNotification
+        self.assertEqual(self.reply(self.invited, 'rejected', 'On leave that day'), 200)
+        seat = ExecutiveMeetingParticipant.objects.get(meeting=self.meeting, company_user=self.invited)
+        self.assertEqual((seat.response, seat.reason), ('rejected', 'On leave that day'))
+        self.assertEqual(ExecNotification.objects.filter(company_user=self.director).count(), 1)

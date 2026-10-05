@@ -1278,9 +1278,15 @@ def meeting_participants(request, meeting_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([ExecCRUDThrottle])
 def meeting_respond(request, meeting_id):
-    """Accept, reject, or counter-propose a meeting invitation."""
+    """Accept, reject, or counter-propose a meeting invitation.
+
+    Only for a meeting of the caller's own company, and only for someone who
+    was invited. The meeting used to be found by its number alone and the
+    caller added as a participant on the spot, so a login from another company
+    could join anyone's meeting and write into the organiser's alerts.
+    """
     company_user = request.user
-    meeting = get_object_or_404(ExecutiveMeeting, id=meeting_id)
+    meeting = get_object_or_404(ExecutiveMeeting, id=meeting_id, organizer__company=company_user.company)
     response_val = request.data.get('response', '').strip()
     reason = request.data.get('reason', '')
     counter_time_str = request.data.get('counter_proposed_time', '')
@@ -1289,9 +1295,10 @@ def meeting_respond(request, meeting_id):
     if response_val not in valid_responses:
         return Response({'status': 'error', 'message': f'response must be one of {valid_responses}'}, status=status.HTTP_400_BAD_REQUEST)
 
-    participant, _ = ExecutiveMeetingParticipant.objects.get_or_create(
-        meeting=meeting, company_user=company_user,
-    )
+    participant = ExecutiveMeetingParticipant.objects.filter(meeting=meeting, company_user=company_user).first()
+    if participant is None:
+        return Response({'status': 'error', 'message': 'You are not invited to this meeting.'},
+                        status=status.HTTP_403_FORBIDDEN)
     participant.response = response_val
     participant.reason = reason
     participant.responded_at = timezone.now()
