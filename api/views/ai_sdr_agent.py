@@ -2694,6 +2694,14 @@ def sdr_meeting_lead_approve(request, approval_token):
         lead.status = 'meeting_scheduled'
         lead.save(update_fields=['status'])
 
+        # The time is settled now; that is when the CRM hears about it.
+        try:
+            from crm_sync_agent.signals import log_meeting
+            meeting.refresh_from_db()
+            log_meeting(meeting)
+        except Exception:
+            logger.exception("Could not send confirmed meeting %s to the CRM", meeting.id)
+
         if meeting.enrollment and meeting.enrollment.campaign:
             try:
                 from ai_sdr_agent.agents.meeting_scheduling_agent import MeetingSchedulingAgent

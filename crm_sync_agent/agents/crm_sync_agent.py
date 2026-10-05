@@ -120,17 +120,28 @@ class CRMSyncAgent:
             return
 
         sentiment = getattr(enrollment, 'reply_sentiment', 'unknown') or 'unknown'
+        replied_at = enrollment.replied_at.isoformat() if getattr(enrollment, 'replied_at', None) else ''
         body = (
             f"Lead replied to SDR outreach.\n"
             f"Sentiment: {sentiment}\n"
-            f"Reply snippet: {(getattr(enrollment, 'reply_snippet', '') or '')[:500]}"
+            f"Reply snippet: {(getattr(enrollment, 'reply_content', '') or '')[:500]}"
         )
         payload = {
             'email': lead.email,
             'note_body': body,
+            'replied_at': replied_at,
+        }
+        # One note per reply. The enrollment is saved many times after a reply
+        # (status, next step), and each save comes back here.
+        already = {
+            row.integration_id for row in CRMSyncQueue.objects.filter(
+                object_type=CRMSyncQueue.TYPE_NOTE, source_type=CRMSyncQueue.SOURCE_SDR_NOTE,
+                source_id=enrollment.pk,
+            ).only('integration_id', 'payload')
+            if (row.payload or {}).get('replied_at') == replied_at
         }
         for integration in self._integrations:
-            if not integration.sync_notes:
+            if not integration.sync_notes or integration.id in already:
                 continue
             self._enqueue(
                 integration=integration,
@@ -151,11 +162,15 @@ class CRMSyncAgent:
         except Exception:
             return
 
+        if not meeting.scheduled_at:
+            return      # no time chosen yet: the CRM would file it under "now"
+        from datetime import timedelta
+        ends = meeting.scheduled_at + timedelta(minutes=meeting.duration_minutes or 30)
         payload = {
             'email': lead.email,
             'title': meeting.title or f'Meeting with {lead.full_name or lead.email}',
-            'start_time': meeting.scheduled_at.isoformat() if meeting.scheduled_at else None,
-            'end_time': None,
+            'start_time': meeting.scheduled_at.isoformat(),
+            'end_time': ends.isoformat(),
             'notes': (
                 f"Booked via AI SDR Agent.\n"
                 f"Lead: {lead.full_name} <{lead.email}>\n"
@@ -163,8 +178,16 @@ class CRMSyncAgent:
                 f"Title: {lead.job_title or 'N/A'}"
             ),
         }
+        # Once per meeting. The CRM's own id for it is not kept, so sending it
+        # again after it has gone would add a second meeting there. One still
+        # waiting in the queue is brought up to date by `_enqueue` instead.
+        sent = set(CRMSyncQueue.objects.filter(
+            object_type=CRMSyncQueue.TYPE_MEETING, source_type=CRMSyncQueue.SOURCE_SDR_MEETING,
+            source_id=meeting.pk,
+        ).exclude(status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED])
+            .values_list('integration_id', flat=True))
         for integration in self._integrations:
-            if not integration.sync_meetings:
+            if not integration.sync_meetings or integration.id in sent:
                 continue
             self._enqueue(
                 integration=integration,

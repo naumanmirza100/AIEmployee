@@ -21,7 +21,14 @@ def _has_active_integrations(company) -> bool:
 
 
 def _process_async(company):
-    """Process pending queue in a background thread (no Celery needed)."""
+    """Process pending queue in a background thread (no Celery needed).
+
+    Not for a company whose CRM Sync subscription is not active: its queue
+    waits, as it does for the scheduled job (core/modules.py)."""
+    from core.modules import has_module
+    if not has_module(company, 'crm_sync_agent'):
+        return
+
     def _run():
         try:
             _get_agent(company).process_pending(limit=20)
@@ -92,24 +99,33 @@ def on_outreach_log_saved(sender, instance, created, **kwargs):
 
 
 # ------------------------------------------------------------------ #
-# SDR Meeting — log meeting on creation
+# SDR Meeting — log the meeting once it has a time
 # ------------------------------------------------------------------ #
+
+def log_meeting(meeting) -> None:
+    """Send a sales meeting to the CRM, once, when its time is settled.
+
+    It used to be sent the moment the AI created it, before any time was
+    chosen, and the CRM recorded it at that moment; when the lead later picked
+    a time the CRM was never told. `enqueue_meeting` sends each meeting once,
+    so calling this again for the same meeting does nothing.
+    """
+    if not meeting.scheduled_at or meeting.status not in ('scheduled', 'completed'):
+        return
+    lead = getattr(meeting, 'lead', None)
+    if not lead or not lead.email:
+        return
+    company = _company_from_lead(lead)
+    if not company or not _has_active_integrations(company):
+        return
+    _get_agent(company).enqueue_meeting(meeting)
+    _process_async(company)
+
 
 @receiver(post_save, sender='ai_sdr_agent.SDRMeeting')
 def on_sdr_meeting_saved(sender, instance, created, **kwargs):
-    if not created:
-        return
     try:
-        lead = getattr(instance, 'lead', None)
-        if not lead or not lead.email:
-            return
-        company = _company_from_lead(lead)
-        if not company:
-            return
-        if not _has_active_integrations(company):
-            return
-        _get_agent(company).enqueue_meeting(instance)
-        _process_async(company)
+        log_meeting(instance)
     except Exception:
         logger.exception(
             'CRM signal error on SDRMeeting save (meeting=%s)',
@@ -126,11 +142,13 @@ def on_enrollment_reply(sender, instance, created, **kwargs):
     if created:
         return
     try:
-        # Only fire when a reply was just recorded (reply_received_at freshly set)
-        if not getattr(instance, 'reply_received_at', None):
+        # A reply has been recorded. (This read `reply_received_at`, a field
+        # the enrollment does not have, so no reply ever reached the CRM.)
+        # `enqueue_reply_note` sends one note per reply, however many times the
+        # enrollment is saved afterwards.
+        if not getattr(instance, 'replied_at', None):
             return
-        # Check if reply_sentiment changed (indicates a new reply was processed)
-        if not getattr(instance, 'reply_sentiment', None):
+        if not (getattr(instance, 'reply_content', '') or getattr(instance, 'reply_sentiment', '')):
             return
         lead = getattr(instance, 'lead', None)
         if not lead or not lead.email:
