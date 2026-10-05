@@ -29,7 +29,9 @@ from ai_sdr_agent.models import (
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
     SDRAgentSettings,
 )
-from ai_sdr_agent.agents.lead_research_agent import LeadResearchAgent
+from ai_sdr_agent.agents.lead_research_agent import (
+    ApifyApprovalRequired, LeadResearchAgent, apify_actor_page_url,
+)
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
 from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
@@ -765,6 +767,15 @@ def research_leads(request):
 
     except KeyServiceError:
         raise
+    except ApifyApprovalRequired as exc:
+        # Not a server error: the user has to approve the actor once on Apify.
+        return Response({
+            'status': 'error',
+            'code': 'apify_approval_required',
+            'message': str(exc),
+            'approval_url': exc.approval_url,
+            'actor': exc.actor,
+        }, status=400)
     except Exception as exc:
         logger.error("Research leads error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -3125,6 +3136,7 @@ def sdr_agent_settings(request):
             'apify_api_token': _mask_key(sdr_settings.apify_api_token or ''),
             'apify_api_token_set': bool(sdr_settings.apify_api_token),
             'apify_actor_id': sdr_settings.apify_actor_id or '',
+            'apify_actor_url': apify_actor_page_url(sdr_settings.apify_actor_id) if sdr_settings.apify_actor_id else '',
             'updated_at': sdr_settings.updated_at.isoformat() if sdr_settings.updated_at else None,
         })
 
