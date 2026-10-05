@@ -63,6 +63,21 @@ def _render(body: str, ctx: dict) -> str:
     return out
 
 
+def _own_employee(ctx, employee_id):
+    """The employee with this id in the workflow's own company, or None.
+
+    A step may name any id, and steps are written by whoever saves the
+    workflow. Looked up by id alone, one company's workflow could change
+    another company's employee. `company_id` is set by `execute_workflow` from
+    the workflow itself, never from the caller.
+    """
+    from hr_agent.models import Employee
+    company_id = (ctx or {}).get('company_id')
+    if not (company_id and employee_id):
+        return None
+    return Employee.objects.filter(pk=employee_id, company_id=company_id).first()
+
+
 def _step_send_email(step, ctx, simulate):
     from django.core.mail import send_mail
     from hr_agent.models import HRNotificationTemplate
@@ -77,10 +92,11 @@ def _step_send_email(step, ctx, simulate):
         return False, {'done': False, 'error': 'Missing recipient email'}, None
 
     tpl = None
+    own_templates = HRNotificationTemplate.objects.filter(company_id=ctx.get('company_id') or 0)
     if template_id:
-        tpl = HRNotificationTemplate.objects.filter(pk=template_id).first()
+        tpl = own_templates.filter(pk=template_id).first()
     elif template_name:
-        tpl = HRNotificationTemplate.objects.filter(name=template_name).first()
+        tpl = own_templates.filter(name=template_name).first()
     if not tpl:
         return False, {'done': False, 'error': 'Template not found'}, None
 
@@ -102,18 +118,19 @@ def _step_send_email(step, ctx, simulate):
 
 
 def _step_update_employee(step, ctx, simulate):
-    from hr_agent.models import Employee
     employee_id = step.get('employee_id') or ctx.get('employee_id')
     if not employee_id:
         return False, {'done': False, 'error': 'Missing employee_id'}, None
     fields = step.get('fields') or {}
     if not isinstance(fields, dict) or not fields:
         return False, {'done': False, 'error': 'No `fields` to update'}, None
-    if simulate:
-        return True, {'done': True, 'simulated': True, 'employee_id': employee_id, 'fields': fields}, None
-    e = Employee.objects.filter(pk=employee_id).first()
+    e = _own_employee(ctx, employee_id)
     if not e:
         return False, {'done': False, 'error': 'Employee not found'}, None
+    if fields.get('manager_id') and not _own_employee(ctx, fields['manager_id']):
+        return False, {'done': False, 'error': 'Manager not found'}, None
+    if simulate:
+        return True, {'done': True, 'simulated': True, 'employee_id': employee_id, 'fields': fields}, None
     SAFE = {'job_title', 'department', 'employment_status', 'employment_type',
             'probation_end_date', 'manager_id', 'timezone_name'}
     update_fields = []
@@ -136,6 +153,8 @@ def _step_update_leave_balance(step, ctx, simulate):
     delta_accrued = step.get('delta_accrued_days')
     if not employee_id or (delta_used is None and delta_accrued is None):
         return False, {'done': False, 'error': 'employee_id and at least one delta required'}, None
+    if not _own_employee(ctx, employee_id):
+        return False, {'done': False, 'error': 'Employee not found'}, None
     if simulate:
         return True, {'done': True, 'simulated': True, 'employee_id': employee_id,
                       'leave_type': leave_type,
@@ -252,17 +271,18 @@ def _step_assign_training(step, ctx, simulate):
 
 
 def _step_assign_manager(step, ctx, simulate):
-    from hr_agent.models import Employee
     employee_id = step.get('employee_id') or ctx.get('employee_id')
     manager_id = step.get('manager_id')
     if not (employee_id and manager_id):
         return False, {'done': False, 'error': 'employee_id and manager_id required'}, None
+    e = _own_employee(ctx, employee_id)
+    if not e:
+        return False, {'done': False, 'error': 'Employee not found'}, None
+    if not _own_employee(ctx, manager_id):
+        return False, {'done': False, 'error': 'Manager not found'}, None
     if simulate:
         return True, {'done': True, 'simulated': True,
                       'employee_id': employee_id, 'manager_id': manager_id}, None
-    e = Employee.objects.filter(pk=employee_id).first()
-    if not e:
-        return False, {'done': False, 'error': 'Employee not found'}, None
     e.manager_id = manager_id
     e.save(update_fields=['manager_id', 'updated_at'])
     return True, {'done': True, 'employee_id': employee_id, 'manager_id': manager_id}, None
@@ -272,9 +292,7 @@ def _step_notify_template(step, ctx, simulate):
     """Schedule an `HRScheduledNotification` so the regular sender picks it up.
     Useful when you need a delayed reminder a few hours/days from now."""
     from datetime import timedelta as _td
-    from hr_agent.models import (
-        HRNotificationTemplate, HRScheduledNotification, Employee,
-    )
+    from hr_agent.models import HRNotificationTemplate, HRScheduledNotification
     template_id = step.get('template_id')
     template_name = step.get('template_name')
     delay_minutes = int(step.get('delay_minutes') or 0)
@@ -292,7 +310,7 @@ def _step_notify_template(step, ctx, simulate):
     if simulate:
         return True, {'done': True, 'simulated': True, 'template_id': tpl.id,
                       'delay_minutes': delay_minutes}, None
-    employee = Employee.objects.filter(pk=employee_id).first() if employee_id else None
+    employee = _own_employee(ctx, employee_id)
     n = HRScheduledNotification.objects.create(
         company_id=company_id, template=tpl,
         recipient_employee=employee,
@@ -440,6 +458,10 @@ def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False
     provided) and schedules a Celery resume task — mirroring Frontline's
     `_persist_and_schedule_resume`. Caller checks `result_data['paused']`.
     """
+    # The company is the workflow's, whatever the caller put in the context.
+    # Every step that touches a record looks it up inside this company.
+    context_data = dict(context_data or {})
+    context_data['company_id'] = workflow.company_id
     steps = _steps_override if _steps_override is not None else (workflow.steps or [])
     timeout = int(getattr(workflow, 'timeout_seconds', 0) or 0)
     effective_timeout = max(1, int(timeout - (_prior_elapsed or 0))) if timeout else 0

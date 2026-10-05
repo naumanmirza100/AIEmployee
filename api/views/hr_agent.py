@@ -1439,7 +1439,11 @@ def get_hr_workflow(request, workflow_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def update_hr_workflow(request, workflow_id):
-    """Update name/description/trigger/steps/is_active/timeout."""
+    """Update name/description/trigger/steps/is_active/timeout. HR admins only:
+    a workflow's steps email people and change employee records."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
     if not w:
@@ -1497,6 +1501,9 @@ def update_hr_workflow(request, workflow_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def delete_hr_workflow(request, workflow_id):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
     if not w:
@@ -1552,6 +1559,9 @@ def list_hr_workflows(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def create_hr_workflow(request):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = request.data or {}
     name = (d.get('name') or '').strip()
@@ -1588,7 +1598,10 @@ def execute_hr_workflow(request, workflow_id):
     `context.employee_id` runs it for that employee: their details are filled
     in as an event would (name, work email…). `simulate: true` is the preview
     the dashboard shows before running — each step says what it would do, and
-    nothing is sent, changed or recorded."""
+    nothing is sent, changed or recorded. HR admins only."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.company
         user = _hr_get_or_create_user_for_company_user(request.user)
@@ -1606,8 +1619,8 @@ def execute_hr_workflow(request, workflow_id):
                                 status=status.HTTP_400_BAD_REQUEST)
             from hr_agent.signals import _employee_context
             context_data = {**_employee_context(emp, event='manual_run'), **context_data}
-        # Always seed company_id so HR step handlers can scope inserts (e.g. schedule_meeting).
-        context_data.setdefault('company_id', company.id)
+        # The engine sets company_id from the workflow too; a caller's own value never counts.
+        context_data['company_id'] = company.id
 
         from hr_agent.workflow_engine import execute_workflow as _exec
         if simulate:
