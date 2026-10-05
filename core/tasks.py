@@ -125,6 +125,32 @@ def expire_module_purchases():
     return f'Expired {count} legacy purchase(s)'
 
 
+@shared_task(name='core.tasks.reconcile_stripe_subscriptions')
+def reconcile_stripe_subscriptions(full=False):
+    """Catch what a missed Stripe webhook would have told us.
+
+    Every 15 minutes: subscriptions whose stored period has ended, so a renewal
+    that never reached us cannot lock a paying customer out for long. Once a
+    night with `full=True`: every live subscription, for missed cancellations
+    and failed payments. See api.views.module_purchase.reconcile_stripe_subscriptions.
+
+    Having to correct anything means events are not arriving, so the people in
+    ERROR_ALERT_EMAILS are told (core/error_alerts.py).
+    """
+    from api.views.module_purchase import reconcile_stripe_subscriptions as reconcile
+
+    stats = reconcile(only_due=not full)
+    if stats['missed']:
+        logging.getLogger('alerts').error(
+            'Stripe sync had to correct %s subscription(s) that a webhook should have updated. '
+            'Stripe events are probably not reaching this server: check that the webhook '
+            'destination exists in the Stripe dashboard and that STRIPE_WEBHOOK_SECRET is set '
+            '(docs/STRIPE.md). The subscriptions themselves are right again.',
+            stats['missed'], extra={'alert_key': 'stripe-webhooks-missing'})
+    return 'Stripe reconcile ({}): checked {checked}, corrected {corrected}, failed {failed}'.format(
+        'all' if full else 'due', **stats)
+
+
 @shared_task(name='core.tasks.rebuild_calendar_blocks')
 def rebuild_calendar_blocks():
     """Nightly repair of the shared busy-time table (`CalendarBlock`).

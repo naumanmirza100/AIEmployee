@@ -980,6 +980,68 @@ def _handle_invoice_action_required(invoice):
     )
 
 
+def reconcile_stripe_subscriptions(only_due=True):
+    """Re-read subscriptions from Stripe and apply what the webhooks should have.
+
+    Webhooks are the normal path; this is the net under them. A renewal whose
+    event never arrives leaves `current_period_end` in the past, which locks a
+    paying customer out (`is_active()`), and a missed cancellation or failed
+    payment leaves the local row saying 'active'. Production ran with no
+    webhook secret at all, so every event was rejected and nothing noticed.
+
+    `only_due` looks only at subscriptions that cannot wait: the stored period
+    has ended (or was never stored), or the row is past_due. With webhooks
+    working that is normally none, so it is cheap to run every few minutes.
+    Otherwise every live subscription is checked.
+
+    Returns {'checked', 'corrected', 'missed', 'failed'}; `missed` counts the
+    corrections a webhook had clearly had time to make.
+    """
+    stats = {'checked': 0, 'corrected': 0, 'missed': 0, 'failed': 0}
+    if not stripe.api_key or stripe.api_key == 'sk_test_placeholder':
+        return stats
+
+    now = timezone.now()
+    purchases = (CompanyModulePurchase.objects
+                 .filter(is_complimentary=False, status__in=('active', 'past_due'))
+                 .exclude(stripe_subscription_id__isnull=True)
+                 .exclude(stripe_subscription_id=''))
+    if only_due:
+        purchases = purchases.filter(
+            Q(current_period_end__lt=now) | Q(current_period_end__isnull=True) | Q(status='past_due'))
+
+    for purchase in purchases:
+        before = (purchase.status, purchase.current_period_end, purchase.cancel_at_period_end)
+        stats['checked'] += 1
+        try:
+            subscription = stripe.Subscription.retrieve(purchase.stripe_subscription_id)
+            with transaction.atomic():
+                if subscription.get('status') == 'canceled':
+                    _handle_subscription_deleted(subscription)
+                else:
+                    _handle_subscription_updated(subscription)
+        except Exception as exc:  # one unreadable subscription must not stop the rest
+            stats['failed'] += 1
+            logger.warning('Stripe reconcile: could not check sub %s (purchase %s): %s',
+                           purchase.stripe_subscription_id, purchase.id, exc)
+            continue
+
+        purchase.refresh_from_db()
+        if (purchase.status, purchase.current_period_end, purchase.cancel_at_period_end) != before:
+            stats['corrected'] += 1
+            # A renewal's event lands within seconds of the period ending, so a
+            # period that ended minutes ago may just be us getting there first.
+            # Anything else we had to correct, a webhook should already have.
+            just_renewed = (only_due and purchase.status == before[0] and before[1] is not None
+                            and now - before[1] <= timedelta(minutes=10))
+            if not just_renewed:
+                stats['missed'] += 1
+            logger.warning('Stripe reconcile: purchase %s (sub %s) was out of date — now status=%s period_end=%s',
+                           purchase.id, purchase.stripe_subscription_id, purchase.status,
+                           purchase.current_period_end)
+    return stats
+
+
 def _handle_price_changed(price):
     """Handle price.created / price.updated — a catalogue edit made in Stripe.
 

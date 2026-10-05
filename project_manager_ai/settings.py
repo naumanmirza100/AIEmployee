@@ -1108,6 +1108,21 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 7200}
     },
 
+    # The net under the Stripe webhooks. Every 15 minutes: subscriptions whose
+    # stored period has ended, so a renewal event that never arrived cannot
+    # lock a paying customer out. Nightly at 03:45 UTC: every live subscription.
+    'reconcile-stripe-subscriptions-due': {
+        'task': 'core.tasks.reconcile_stripe_subscriptions',
+        'schedule': 900.0,
+        'options': {'expires': 840},
+    },
+    'reconcile-stripe-subscriptions-all': {
+        'task': 'core.tasks.reconcile_stripe_subscriptions',
+        'schedule': _crontab(hour=3, minute=45),
+        'kwargs': {'full': True},
+        'options': {'expires': 6 * 3600},
+    },
+
     # Shared busy-time table (meeting clash checks) - nightly repair, 03:15 UTC.
     # Signals keep it current; this fixes whatever they can't see.
     'rebuild-calendar-blocks': {
