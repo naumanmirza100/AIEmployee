@@ -25,7 +25,7 @@ const SIGN_IN_PAGES = ['/login', '/company/login'];
 const APP_AREAS = [
   '/company/dashboard', '/company/settings', '/company/profile', '/my-work', '/notifications',
   '/project-manager', '/hr', '/frontline', '/recruitment', '/marketing', '/operations', '/ai-sdr',
-  '/exec-meeting', '/reply-draft', '/me', '/user/dashboard', '/admin',
+  '/exec-meeting', '/reply-draft', '/crm-sync', '/me', '/user/dashboard', '/admin',
 ];
 
 const store = () => {

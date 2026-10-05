@@ -72,6 +72,7 @@ import MyWorkPage from '@/pages/MyWorkPage';
 import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
 import { ReturnToTracker } from '@/utils/returnTo';
 import DoNotEmailPage from '@/pages/DoNotEmailPage';
+import CrmSyncPage from '@/pages/CrmSyncPage';
 import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
 import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
 import OperationsDashboard from '@/components/operations/OperationsDashboard';
@@ -170,6 +171,8 @@ import { useTranslation } from 'react-i18next';
             <Route path="/company/settings/notifications" element={<NotificationSettingsPage />} />
             {/* Addresses the company must not send outreach to, for Marketing and AI SDR alike */}
             <Route path="/company/settings/do-not-email" element={<DoNotEmailPage />} />
+            {/* CRM Sync is its own agent; this is its page for a company that has it */}
+            <Route path="/crm-sync" element={<CrmSyncPage />} />
             {/* Full-detail notification list — the navbar dropdown links here */}
             <Route path="/notifications" element={<NotificationsPage />} />
             {/* Everything waiting for a dashboard login, across the agents */}

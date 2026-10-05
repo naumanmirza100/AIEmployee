@@ -20,6 +20,7 @@ import SDRMeetingsTab from './SDRMeetingsTab';
 import SDRAnalyticsTab from './SDRAnalyticsTab';
 import SDRCRMSyncTab from './SDRCRMSyncTab';
 import SDRSettingsTab from './SDRSettingsTab';
+import usePurchasedModules from '@/hooks/usePurchasedModules';
 
 const TAB_ITEMS = [
   { value: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -54,6 +55,7 @@ const TAB_TO_PATH = {
 const SDRDashboard = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { purchasedModules, modulesLoaded } = usePurchasedModules();
   const pathSegment = (location.pathname.match(/\/ai-sdr\/?([^/]*)/) || [])[1] || 'dashboard';
   const activeTab = PATH_TO_TAB[pathSegment] || 'dashboard';
   const currentTab = TAB_ITEMS.find(item => item.value === activeTab) || TAB_ITEMS[0];
@@ -91,7 +93,16 @@ const SDRDashboard = () => {
           <SDRAnalyticsTab />
         </TabsContent>
         <TabsContent value="crm-sync" className="mt-4">
-          <SDRCRMSyncTab />
+          {/* CRM Sync is bought separately. Shown to everyone, connecting a CRM
+              here just failed for a company without it. */}
+          {purchasedModules.includes('crm_sync_agent') || !modulesLoaded ? <SDRCRMSyncTab /> : (
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6 text-center text-sm text-gray-400">
+              CRM Sync is a separate agent and is not part of your plan.{' '}
+              <button type="button" className="text-violet-400 underline" onClick={() => navigate('/company/dashboard/ai-agents')}>
+                See AI agents
+              </button>
+            </div>
+          )}
         </TabsContent>
         <TabsContent value="settings" className="mt-4">
           <SDRSettingsTab />

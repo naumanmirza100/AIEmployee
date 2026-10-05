@@ -218,6 +218,12 @@ const ALL_AGENTS = [
     ],
   },
   {
+    // Priced and access-checked as its own agent; the screens did not know it
+    // existed. Its page is the one AI SDR shows as a tab.
+    key: 'crm_sync_agent', label: 'CRM Sync', icon: RefreshCw,
+    section: 'crm-sync', path: '/crm-sync', basePath: '/crm-sync',
+  },
+  {
     key: 'hr_agent', label: 'HR Support Agent', icon: Users,
     section: 'hr', path: '/hr/dashboard', basePath: '/hr',
     // Matches the restructured HR dashboard (?tab=-driven). Same shape as
@@ -268,6 +274,12 @@ const ALL_AGENTS = [
     ],
   },
 ];
+
+/** Where "Open Agent" goes for a bought agent, or null for one with no screens. */
+export const agentHomePath = (moduleKey) => ALL_AGENTS.find((a) => a.key === moduleKey)?.path || null;
+
+// A menu entry that belongs to another agent: shown only when that one is bought too.
+const NEEDS_MODULE = { '/ai-sdr/crm-sync': 'crm_sync_agent' };
 
 /**
  * Build the navItems array for DashboardNavbar / AgentSidebar.
@@ -321,7 +333,9 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
         icon: agent.icon,
         section: agent.section,
         basePath: agent.basePath,
-        children: agent.children || null,
+        children: agent.children
+          ? agent.children.filter((c) => !NEEDS_MODULE[c.path] || purchasedModules.includes(NEEDS_MODULE[c.path]))
+          : null,
         onClick: () => navigate(agent.path),
       });
     }
