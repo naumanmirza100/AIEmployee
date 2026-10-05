@@ -16,7 +16,7 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.response import Response
 
 from api.authentication import CompanyUserTokenAuthentication
-from api.permissions import IsCompanyUserOnly
+from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.models import (
     AGENT_CHOICES,
     AGENT_DEFAULT_PROVIDER,
@@ -47,6 +47,22 @@ _PROVIDER_VALIDATE = {
     'grok':    ('https://api.x.ai/v1/models',                               lambda k: {'Authorization': f'Bearer {k}'}),
     'gemini':  ('https://generativelanguage.googleapis.com/v1beta/models',   lambda k: {'x-goog-api-key': k}),
 }
+
+
+def _admins_only(request):
+    """The refusal for a dashboard login that is not an owner or admin, else None.
+
+    Every login of the company could add, replace or delete its AI keys,
+    switch an agent's AI off for everyone (the public support chat included),
+    change the spending cap and raise paid key requests. Looking stays open to
+    all; changing is for the people who run the account. Roles are given on
+    the Logins and roles page (api/views/company_logins.py).
+    """
+    if getattr(request.user, 'role', None) in IsCompanyAdmin.ADMIN_ROLES:
+        return None
+    return Response({'status': 'error', 'code': 'admins_only',
+                     'message': 'Only an owner or admin of your company can change AI keys.'},
+                    status=status.HTTP_403_FORBIDDEN)
 
 
 def _validate_byok_key(provider: str, api_key: str):
@@ -203,6 +219,8 @@ def list_agent_keys(request):
         'status': 'success',
         'providers': [{'value': v, 'label': l} for v, l in PROVIDER_CHOICES],
         'agents': rows,
+        # Whether this login may change anything here, so the page can say so.
+        'can_manage': getattr(request.user, 'role', None) in IsCompanyAdmin.ADMIN_ROLES,
     })
 
 
@@ -215,6 +233,9 @@ def upsert_byok_key(request):
     Body: { agent_name, provider, api_key }
     Requires the company to have an active purchase for the agent.
     """
+    refused = _admins_only(request)
+    if refused:
+        return refused
     company = request.user.company
     agent_name = (request.data.get('agent_name') or '').strip()
     provider = (request.data.get('provider') or 'openai').strip()
@@ -306,6 +327,9 @@ def revoke_byok_key(request, agent_name):
 
     Managed keys can NOT be revoked via this endpoint — only by a superadmin.
     """
+    refused = _admins_only(request)
+    if refused:
+        return refused
     company = request.user.company
     deleted, _ = CompanyAPIKey.objects.filter(
         company=company, agent_name=agent_name, mode='byok',
@@ -327,6 +351,9 @@ def set_token_pool(request):
     preferred_pool: 'free' | 'managed' | 'byok' | 'none'
     'none' disables all LLM calls for this agent until changed.
     """
+    refused = _admins_only(request)
+    if refused:
+        return refused
     company = request.user.company
     agent_name = (request.data.get('agent_name') or '').strip()
     preferred_pool = (request.data.get('preferred_pool') or '').strip()
@@ -358,6 +385,9 @@ def set_byok_limit(request):
     (`ByokCapReached` in resolve_for_call) until the cap is raised or removed.
     The page and the alerts used to call it a soft cap that never blocks.
     """
+    refused = _admins_only(request)
+    if refused:
+        return refused
     company = request.user.company
     agent_name = (request.data.get('agent_name') or '').strip()
     try:
@@ -453,6 +483,9 @@ def create_key_request(request):
     Only one pending request per (company, agent) — if one exists, we return it.
     is_renewal=true: request is for renewing an expired key (same flow, tagged differently).
     """
+    refused = _admins_only(request)
+    if refused:
+        return refused
     try:
         company = getattr(request.user, 'company', None)
         if company is None:
@@ -559,6 +592,9 @@ def create_key_request(request):
 @permission_classes([IsCompanyUserOnly])
 def create_key_checkout_session(request, request_id):
     """Create a Stripe Checkout Session for a payment_pending key request."""
+    refused = _admins_only(request)
+    if refused:
+        return refused
     import stripe
     from django.conf import settings
     company = request.user.company
@@ -679,44 +715,21 @@ def verify_key_session(request, session_id):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def pay_for_key_request(request, request_id):
-    """Company confirms payment for an approved key request.
+    """Refused. This address used to mark a key request as paid, and tell the
+    platform admins "payment received, please assign the key", on the
+    company's say-so: nothing checked that any money had arrived.
 
-    Marks the request as payment_received and notifies admins.
-    No real payment gateway yet — company confirms they've paid manually.
+    A request is marked paid in one place only, `verify_key_session`, after
+    Stripe confirms the checkout. A company that paid some other way tells the
+    platform team, who can assign the key to a request still awaiting payment.
     """
-    from django.utils import timezone
-    company = request.user.company
-    try:
-        req = KeyRequest.objects.select_related('company').get(pk=request_id, company=company)
-    except KeyRequest.DoesNotExist:
+    if not KeyRequest.objects.filter(pk=request_id, company=request.user.company).exists():
         return Response({'status': 'error', 'message': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    if req.status != 'payment_pending':
-        return Response({'status': 'error', 'message': f'Request is {req.status}, not awaiting payment'}, status=status.HTTP_400_BAD_REQUEST)
-
-    total = (req.key_cost_snapshot or 0) + (req.service_charge_snapshot or 0)
-    req.status = 'payment_received'
-    req.amount_paid = total
-    req.paid_at = timezone.now()
-    req.save()
-
-    # Notify admins so they can assign the key
-    from core.notification_utils import notify_admins
-    notify_admins(
-        title=f"Payment received — {req.company.name} / {req.get_agent_name_display()}",
-        message=(
-            f"{req.company.name} has confirmed payment of ${float(total):.2f} for a managed "
-            f"{req.provider.upper()} key for {req.get_agent_name_display()}. Please assign the key."
-        ),
-        action_url='/admin/api-keys',
-        notification_type='key_request_new',
-    )
-
     return Response({
-        'status': 'success',
-        'amount_paid': float(total),
-        'new_status': 'payment_received',
-    })
+        'status': 'error', 'code': 'use_checkout',
+        'message': ('Pay for this request with the Pay button. If you have paid another way, '
+                    'contact support and we will confirm it and assign the key.'),
+    }, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['GET'])
