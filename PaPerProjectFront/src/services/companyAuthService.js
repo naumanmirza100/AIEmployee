@@ -91,6 +91,11 @@ const companyApiRequest = async (endpoint, options = {}) => {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
 
     if (!response.ok) {
+      // "Not found" as a web page, not as our JSON, means the address itself
+      // doesn't exist on this server: these screens are newer than it is.
+      if (response.status === 404 && !(response.headers.get('content-type') || '').includes('json')) {
+        window.dispatchEvent(new CustomEvent('api:unknown-endpoint', { detail: endpoint }));
+      }
       let errorData;
       try {
         errorData = wantBlob ? { message: `HTTP error! status: ${response.status}` } : await response.json();

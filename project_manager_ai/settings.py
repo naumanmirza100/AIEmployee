@@ -398,6 +398,9 @@ MIDDLEWARE = [
     # before the agent middlewares below, so an unsubscribed company's request is
     # rejected instead of triggering their background work.
     'api.middleware.module_access.ModuleAccessMiddleware',
+    # Reports a logged-in screen calling an API address that doesn't exist here
+    # (a frontend newer than this backend). Only looks at 404 responses.
+    'api.middleware.unknown_endpoint.UnknownEndpointMiddleware',
     'recruitment_agent.middleware.AutoInterviewFollowupMiddleware',  # Auto follow-up email checking
     'ai_sdr_agent.middleware.AutoLeadResearchMiddleware',  # Apify auto lead research every 24h
 ]
@@ -742,6 +745,12 @@ LOGGING = {
             'formatter': 'standard',
             'filters': ['redact_pii'],
         },
+        # Emails the addresses in ERROR_ALERT_EMAILS, one email per problem per
+        # six hours. Does nothing while that setting is empty. core/error_alerts.py
+        'alert_email': {
+            'class': 'core.error_alerts.AlertEmailHandler',
+            'level': 'ERROR',
+        },
     },
     'root': {
         'handlers': ['console'],
@@ -751,6 +760,13 @@ LOGGING = {
     # doesn't silently drop SQL debug output in prod.
     'loggers': {
         'django.db.backends': {'level': 'WARNING'},
+
+        # ── Told to a person, not only to the log ─────────────
+        # Every HTTP 500, billing sync failures, and anything code sends to
+        # the 'alerts' logger on purpose. They still reach the console too.
+        'django.request': {'handlers': ['alert_email']},
+        'api.views.module_purchase': {'handlers': ['alert_email']},
+        'alerts': {'handlers': ['alert_email'], 'level': 'INFO'},
 
         # ── Third-party chatter ───────────────────────────────
         # httpx logs a line for EVERY outbound API call ("HTTP Request: POST
@@ -850,6 +866,9 @@ else:
     print("="*60 + "\n")
 
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER if EMAIL_HOST_USER else 'noreply@example.com').strip()
+# Who is emailed when the live site breaks (comma-separated). Empty = nobody.
+# See core/error_alerts.py for what counts and how often.
+ERROR_ALERT_EMAILS = [a.strip() for a in os.getenv('ERROR_ALERT_EMAILS', '').split(',') if a.strip()]
 RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
 
 

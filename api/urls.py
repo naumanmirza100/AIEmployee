@@ -46,7 +46,7 @@ from api.views import admin_api_keys
 from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
-from api.views.health import health_check, ping
+from api.views.health import health_check, ping, version
 from api.views import public_jobs
 from api.views import my_work
 from api.views import notification_settings
@@ -57,6 +57,7 @@ app_name = 'api'
 urlpatterns = [
     # Health check
     re_path(r'^health/?$', health_check, name='health_check'),  # DB + process
+    re_path(r'^version/?$', version, name='api_version'),  # GET: API level, for the screens (core/version.py)
     re_path(r'^ping/?$', ping, name='ping'),  # process only, no DB
 
     # Public Job Application (no auth required)

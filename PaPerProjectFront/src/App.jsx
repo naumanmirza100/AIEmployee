@@ -86,6 +86,7 @@ import ProtectedRoute from '@/components/common/ProtectedRoute';
 import PublicLayout from '@/components/layout/PublicLayout';
 import ScrollToTop from '@/components/layout/ScrollToTop';
 import { Toaster } from "@/components/ui/toaster";
+import ServerVersionNotice from '@/components/common/ServerVersionNotice';
 import { useTranslation } from 'react-i18next';
     
     const AppContent = () => {
@@ -308,6 +309,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/terms-of-service" element={<PublicLayout><TermsOfServicePage /></PublicLayout>} />
           </Routes>
           <Toaster />
+          <ServerVersionNotice />
         </>
       );
     }
