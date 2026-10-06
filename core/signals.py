@@ -87,8 +87,10 @@ def task_post_save_handler(sender, instance, created, **kwargs):
                 notification_type='task_assigned',
                 title=f"New Task Assigned: {instance.title}",
                 message=f"You have been assigned a new task: {instance.title}",
-                link=f"/tasks/{instance.id}/",
-                action_url=f"/tasks/{instance.id}/",
+                # My Space's task list. This pointed at /tasks/<id>/, a page
+                # that does not exist, so the alert could not be opened.
+                link='/me/tasks',
+                action_url='/me/tasks',
             )
         except Exception as e:
             import logging

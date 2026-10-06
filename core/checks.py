@@ -113,7 +113,10 @@ def check_encryption_keys(app_configs, **kwargs):
                 id='crypto.E001',
             ))
 
-    if os.getenv('DJANGO_SECRET_KEY', '').strip() and not primary:
+    # DJANGO_SECRET_KEY only decides when the older SECRET_KEY is not set
+    # (project_manager_ai/env_security.py).
+    if (os.getenv('DJANGO_SECRET_KEY', '').strip() and not os.getenv('SECRET_KEY', '').strip()
+            and not primary):
         issues.append(CheckWarning(
             'SECRET_KEY comes from DJANGO_SECRET_KEY, but FIELD_ENCRYPTION_KEY is not set.',
             hint=('Stored API keys are encrypted with a key derived from SECRET_KEY, so any '
@@ -121,6 +124,29 @@ def check_encryption_keys(app_configs, **kwargs):
                   'FIELD_ENCRYPTION_KEY (see core/crypto_utils.py) and run '
                   '`manage.py reencrypt_secrets`.'),
             id='crypto.W001',
+        ))
+    return issues
+
+
+@register('security', deploy=True)
+def check_not_running_on_the_defaults(app_configs, **kwargs):
+    """`manage.py check --deploy` only. A real server must not run in debug
+    mode or on the secret key that is published in git: with either, anyone
+    can read its settings or forge its sessions."""
+    from project_manager_ai.env_security import PUBLIC_SECRET_KEY
+    issues = []
+    if settings.SECRET_KEY == PUBLIC_SECRET_KEY:
+        issues.append(CheckError(
+            'SECRET_KEY is the public default from git.',
+            hint=('Set SECRET_KEY (or DJANGO_SECRET_KEY) in the environment. If this database already '
+                  'holds API keys, set FIELD_ENCRYPTION_KEY and run `manage.py reencrypt_secrets` first.'),
+            id='security.E101',
+        ))
+    if settings.DEBUG:
+        issues.append(CheckError(
+            'DEBUG is on.',
+            hint='Set DEBUG=False (or DJANGO_DEBUG=0) in the environment.',
+            id='security.E102',
         ))
     return issues
 

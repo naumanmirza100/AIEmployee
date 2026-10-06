@@ -119,7 +119,7 @@ def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float 
                 action_hint = "Contact your admin to increase the managed key token limit."
             elif pool == 'byok':
                 title = f"BYOK token cap reached — {agent_label}"
-                action_hint = "Your BYOK key will keep working, but you have reached the soft cap you set. Update the cap in API Keys settings if needed."
+                action_hint = "The agent has stopped: your own key has used the cap you set. Raise or remove the cap in API Keys settings to carry on."
             else:
                 title = f"Free token quota exhausted — {agent_label}"
                 action_hint = "Add your own API key (BYOK) or request a managed key to continue."
@@ -131,7 +131,7 @@ def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float 
                 action_hint = "Contact your admin soon to increase the managed key token limit."
             elif pool == 'byok':
                 title = f"BYOK token cap at {display_pct}% — {agent_label}"
-                action_hint = "You are approaching the soft cap you set. Update it in API Keys settings if needed."
+                action_hint = "The agent stops when the cap you set is reached. Raise or remove it in API Keys settings if you need more."
             else:
                 title = f"Token quota at {display_pct}% — {agent_label}"
                 action_hint = "Consider adding your own API key (BYOK) or requesting a managed key soon."

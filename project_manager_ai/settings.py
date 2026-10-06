@@ -275,31 +275,26 @@ def _url_host(url):
 FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY', '').strip()
 FIELD_ENCRYPTION_KEY_FALLBACKS = os.getenv('FIELD_ENCRYPTION_KEY_FALLBACKS', '').strip()
 
-# SECRET_KEY: set DJANGO_SECRET_KEY on any real server. Do that only AFTER
-# FIELD_ENCRYPTION_KEY is set and `manage.py reencrypt_secrets` has run —
-# otherwise every stored API key becomes unreadable (they were encrypted with
-# a key derived from this one). The default below is public (it's in git): fine
-# for local development only.
-SECRET_KEY = (os.getenv('DJANGO_SECRET_KEY', '').strip()
-              or 'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45')
+# SECRET_KEY, DEBUG and ALLOWED_HOSTS are decided once, in env_security.py,
+# which says how. In short:
+#   SECRET_KEY     SECRET_KEY or DJANGO_SECRET_KEY; else the public key in git
+#                  (local development only). Change it on a real server only
+#                  AFTER FIELD_ENCRYPTION_KEY is set and `manage.py
+#                  reencrypt_secrets` has run, or every stored API key becomes
+#                  unreadable.
+#   DEBUG          DEBUG or DJANGO_DEBUG; else on for `manage.py runserver` and
+#                  off everywhere else (a deployed server, Celery, commands).
+#                  With it on, anyone who triggers an error gets the full error
+#                  page and CORS accepts requests from every website.
+#   ALLOWED_HOSTS  ALLOWED_HOSTS or DJANGO_ALLOWED_HOSTS; else any host while
+#                  DEBUG, otherwise localhost plus the host of SITE_URL /
+#                  BACKEND_URL.
+# They used to be set a second time lower in this file, and that copy won.
+from project_manager_ai import env_security as _env_security
 
-# DEBUG: set DJANGO_DEBUG=1 or 0 to decide. When unset, it is on only for the
-# local dev server (`manage.py runserver`) and off everywhere else: a deployed
-# server (gunicorn, Passenger, …), Celery and management commands. With DEBUG on,
-# anyone who triggers an error gets the full error page (settings, SQL, local
-# variables) and CORS accepts requests from every website.
-_debug_flag = _env_flag('DJANGO_DEBUG')
-DEBUG = (_debug_flag if _debug_flag is not None
-         else any(arg.startswith('runserver') for arg in sys.argv[1:2]))
-
-# ALLOWED_HOSTS: comma-separated in DJANGO_ALLOWED_HOSTS. Without it: any host
-# while DEBUG (localhost, ngrok tunnels, …); otherwise localhost plus the host of
-# SITE_URL / BACKEND_URL, so a deployment that already sets those keeps working.
-_allowed_hosts = [h.strip() for h in os.getenv('DJANGO_ALLOWED_HOSTS', '').split(',') if h.strip()]
-if not _allowed_hosts:
-    _allowed_hosts = ['*'] if DEBUG else ['localhost', '127.0.0.1'] + [
-        h for h in (_url_host(os.getenv('SITE_URL')), _url_host(os.getenv('BACKEND_URL'))) if h]
-ALLOWED_HOSTS = list(dict.fromkeys(_allowed_hosts))
+SECRET_KEY = _env_security.secret_key(os.environ)
+DEBUG = _env_security.debug(os.environ, sys.argv)
+ALLOWED_HOSTS = _env_security.allowed_hosts(os.environ, DEBUG)
 
 
 # Local sentence-transformers embedding config. To enable, also set
@@ -318,24 +313,8 @@ def _startup_print(*args, **kwargs):
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# All three read from the environment so a deployed box can be locked down
-# without editing this file. The defaults keep local development working
-# exactly as before: DEBUG on, every host allowed.
-SECRET_KEY = os.getenv(
-    'SECRET_KEY',
-    'django-insecure-9hce6%w7!*)lb#$^6)gb8!h01#6t6y_85nn=exz82l4dj=6q45',
-)
-
-# Anything other than a literal "False" (case-insensitive) leaves DEBUG on, so
-# an unset or malformed value never silently disables error pages in dev.
-DEBUG = os.getenv('DEBUG', 'True').strip().lower() != 'false'
-
-# Comma-separated, e.g. ALLOWED_HOSTS=187.7.18.101,api.payperproject.com
-# Django rejects every request with 400 when DEBUG is off and the Host header
-# is not listed here, so set it on any box running DEBUG=False.
-ALLOWED_HOSTS = [
-    h.strip() for h in os.getenv('ALLOWED_HOSTS', '*').split(',') if h.strip()
-]
+# SECRET_KEY, DEBUG and ALLOWED_HOSTS are set once, near the top of this file
+# (env_security.py). A second copy used to sit here and overrode it.
 
 # Browsers require the scheme here for POSTs from an HTTPS origin; without it
 # the frontend gets "CSRF verification failed" on every write once it is
@@ -398,6 +377,9 @@ MIDDLEWARE = [
     # before the agent middlewares below, so an unsubscribed company's request is
     # rejected instead of triggering their background work.
     'api.middleware.module_access.ModuleAccessMiddleware',
+    # Reports a logged-in screen calling an API address that doesn't exist here
+    # (a frontend newer than this backend). Only looks at 404 responses.
+    'api.middleware.unknown_endpoint.UnknownEndpointMiddleware',
     'recruitment_agent.middleware.AutoInterviewFollowupMiddleware',  # Auto follow-up email checking
     'ai_sdr_agent.middleware.AutoLeadResearchMiddleware',  # Apify auto lead research every 24h
 ]
@@ -596,6 +578,16 @@ LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 LOGIN_URL = '/login/'
 
+# The old server-rendered site: sign-up, login, dashboards and the session
+# pages under /recruitment/, /frontline/ and /marketing/. It predates
+# companies. Its sign-up page gives anyone on the internet an account, and its
+# Recruitment pages show and change every company's candidates and jobs. The
+# React app uses none of it, so it is OFF unless LEGACY_SITE_ENABLED=1.
+# That switch is for local work only: never on a server that holds real data.
+# The links people get by email (pick an interview time, track an application,
+# email tracking, book a sales call) are separate and always on.
+LEGACY_SITE_ENABLED = bool(_env_flag('LEGACY_SITE_ENABLED'))
+
 
 # --------------------
 # AI / API Settings
@@ -742,6 +734,12 @@ LOGGING = {
             'formatter': 'standard',
             'filters': ['redact_pii'],
         },
+        # Emails the addresses in ERROR_ALERT_EMAILS, one email per problem per
+        # six hours. Does nothing while that setting is empty. core/error_alerts.py
+        'alert_email': {
+            'class': 'core.error_alerts.AlertEmailHandler',
+            'level': 'ERROR',
+        },
     },
     'root': {
         'handlers': ['console'],
@@ -751,6 +749,13 @@ LOGGING = {
     # doesn't silently drop SQL debug output in prod.
     'loggers': {
         'django.db.backends': {'level': 'WARNING'},
+
+        # ── Told to a person, not only to the log ─────────────
+        # Every HTTP 500, billing sync failures, and anything code sends to
+        # the 'alerts' logger on purpose. They still reach the console too.
+        'django.request': {'handlers': ['alert_email']},
+        'api.views.module_purchase': {'handlers': ['alert_email']},
+        'alerts': {'handlers': ['alert_email'], 'level': 'INFO'},
 
         # ── Third-party chatter ───────────────────────────────
         # httpx logs a line for EVERY outbound API call ("HTTP Request: POST
@@ -850,6 +855,9 @@ else:
     print("="*60 + "\n")
 
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER if EMAIL_HOST_USER else 'noreply@example.com').strip()
+# Who is emailed when the live site breaks (comma-separated). Empty = nobody.
+# See core/error_alerts.py for what counts and how often.
+ERROR_ALERT_EMAILS = [a.strip() for a in os.getenv('ERROR_ALERT_EMAILS', '').split(',') if a.strip()]
 RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
 
 
@@ -1089,6 +1097,21 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 7200}
     },
 
+    # The net under the Stripe webhooks. Every 15 minutes: subscriptions whose
+    # stored period has ended, so a renewal event that never arrived cannot
+    # lock a paying customer out. Nightly at 03:45 UTC: every live subscription.
+    'reconcile-stripe-subscriptions-due': {
+        'task': 'core.tasks.reconcile_stripe_subscriptions',
+        'schedule': 900.0,
+        'options': {'expires': 840},
+    },
+    'reconcile-stripe-subscriptions-all': {
+        'task': 'core.tasks.reconcile_stripe_subscriptions',
+        'schedule': _crontab(hour=3, minute=45),
+        'kwargs': {'full': True},
+        'options': {'expires': 6 * 3600},
+    },
+
     # Shared busy-time table (meeting clash checks) - nightly repair, 03:15 UTC.
     # Signals keep it current; this fixes whatever they can't see.
     'rebuild-calendar-blocks': {
@@ -1157,6 +1180,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'Frontline_agent.tasks.process_scheduled_notifications',
         'schedule': 60.0,  # Every minute
         'options': {'expires': 120}
+    },
+
+    # A customer who asked for a person and has not been picked up: say so again.
+    # The job runs often; each hand-off is repeated at most once an hour.
+    'frontline-remind-waiting-handoffs': {
+        'task': 'Frontline_agent.tasks.remind_waiting_handoffs',
+        'schedule': 600.0,  # Every 10 minutes
+        'options': {'expires': 600}
     },
 
     # Prune frontline documents that have exceeded their retention window. Daily.

@@ -110,6 +110,10 @@ def mark_bounced(enrollment, reason: str = '') -> None:
         lead=lead, status__in=['active', 'paused', 'replied']
     ).update(status='bounced')
     enrollment.status = 'bounced'
+    # Onto the company's do-not-email list, so a colleague's campaign and
+    # Marketing stop sending to a dead address too (core/do_not_email.py).
+    from core.do_not_email import BOUNCED, block
+    block(enrollment.campaign.company_user.company_id, lead.email, BOUNCED, source='ai_sdr')
 
 
 def claim_reply(enrollment, reply: dict) -> bool:
@@ -144,21 +148,15 @@ def claim_reply(enrollment, reply: dict) -> bool:
 
 
 def is_email_suppressed(company_user, email_addr: str) -> bool:
-    """True if this address hard-bounced or unsubscribed anywhere in the company."""
-    from ai_sdr_agent.models import SDRCampaignEnrollment, SDRLead
+    """True if the company must not email this address: it unsubscribed or
+    hard-bounced under any of its salespeople, or in Marketing.
 
-    email_addr = (email_addr or '').strip()
-    if not email_addr:
-        return False
-    if SDRLead.all_objects.filter(
-        company_user=company_user, email__iexact=email_addr, email_bounced=True
-    ).exists():
-        return True
-    return SDRCampaignEnrollment.objects.filter(
-        campaign__company_user=company_user,
-        lead__email__iexact=email_addr,
-        status='unsubscribed',
-    ).exists()
+    The answer comes from the company's do-not-email list (core/do_not_email.py).
+    It used to be worked out from this one login's own leads and campaigns, so
+    a colleague's campaign kept emailing someone who had opted out.
+    """
+    from core.do_not_email import is_blocked
+    return is_blocked(getattr(company_user, 'company_id', None), email_addr)
 
 
 def make_unsubscribe_token(enrollment_id: int) -> str:
@@ -184,17 +182,24 @@ def apply_unsubscribe(enrollment) -> None:
     """Opt the address out of every campaign for this company."""
     from ai_sdr_agent.models import SDRCampaignEnrollment, SDRLead
 
+    from django.db import transaction
+    from core.do_not_email import UNSUBSCRIBED, block
+
     lead = enrollment.lead
-    company_user = enrollment.campaign.company_user
+    company_id = enrollment.campaign.company_user.company_id
     now = timezone.now()
     email_addr = (lead.email or '').strip()
     if email_addr:
-        SDRCampaignEnrollment.objects.filter(
-            campaign__company_user=company_user, lead__email__iexact=email_addr,
-        ).exclude(status='bounced').update(status='unsubscribed', replied_at=now)
-        SDRLead.all_objects.filter(
-            company_user=company_user, email__iexact=email_addr,
-        ).update(status='disqualified')
+        # The person told the company to stop, so every salesperson's campaign
+        # stops, and the address goes on the list Marketing checks as well.
+        with transaction.atomic():
+            block(company_id, email_addr, UNSUBSCRIBED, source='ai_sdr')
+            SDRCampaignEnrollment.objects.filter(
+                campaign__company_user__company_id=company_id, lead__email__iexact=email_addr,
+            ).exclude(status='bounced').update(status='unsubscribed', replied_at=now)
+            SDRLead.all_objects.filter(
+                company_user__company_id=company_id, email__iexact=email_addr,
+            ).update(status='disqualified')
     else:
         enrollment.status = 'unsubscribed'
         enrollment.replied_at = now
@@ -822,7 +827,10 @@ Rules:
         # this company) or hard-bounced.
         if enrollment.status == 'active' and is_email_suppressed(campaign.company_user, lead.email):
             from ai_sdr_agent.models import SDRCampaignEnrollment as _E
-            new_status = 'bounced' if getattr(lead, 'email_bounced', False) else 'unsubscribed'
+            from core.do_not_email import BOUNCED, reason_for
+            bounced = (getattr(lead, 'email_bounced', False)
+                       or reason_for(campaign.company_user.company_id, lead.email) == BOUNCED)
+            new_status = 'bounced' if bounced else 'unsubscribed'
             _E.objects.filter(id=enrollment.id, status='active').update(status=new_status)
             enrollment.status = new_status
             logger.warning(

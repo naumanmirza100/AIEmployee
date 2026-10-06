@@ -1,6 +1,7 @@
 // Company Auth Service
 
 import { API_BASE_URL } from '@/config/apiConfig';
+import { rememberReturnTo, signedOutOnPurpose } from '@/utils/returnTo';
 /**
  * Get company authentication token from localStorage
  */
@@ -54,6 +55,8 @@ const handleExpiredSession = (errorData) => {
 
   clearCompanySession();
   const reason = /inactive/i.test(detail) ? 'inactive' : 'expired';
+  // After signing in again they go back to the page they were on.
+  rememberReturnTo(`${window.location.pathname}${window.location.search}`);
   window.location.replace(`/company/login?session=${reason}`);
   return true;
 };
@@ -91,6 +94,11 @@ const companyApiRequest = async (endpoint, options = {}) => {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
 
     if (!response.ok) {
+      // "Not found" as a web page, not as our JSON, means the address itself
+      // doesn't exist on this server: these screens are newer than it is.
+      if (response.status === 404 && !(response.headers.get('content-type') || '').includes('json')) {
+        window.dispatchEvent(new CustomEvent('api:unknown-endpoint', { detail: endpoint }));
+      }
       let errorData;
       try {
         errorData = wantBlob ? { message: `HTTP error! status: ${response.status}` } : await response.json();
@@ -337,6 +345,7 @@ export const companyApi = {
 };
 
 const logoutCompany = async () => {
+  signedOutOnPurpose();
   try {
     await companyApi.post('/company/logout/', {});
   } catch (_) {

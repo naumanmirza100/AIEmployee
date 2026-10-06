@@ -514,6 +514,7 @@ const CampaignDetail = () => {
         const reasonParts = [];
         if (reasons.missing_email) reasonParts.push(`${reasons.missing_email} missing email`);
         if (reasons.missing_name) reasonParts.push(`${reasons.missing_name} missing name`);
+        if (reasons.do_not_email) reasonParts.push(`${reasons.do_not_email} on the do-not-email list`);
         if (reasons.other) reasonParts.push(`${reasons.other} error(s)`);
         toast({
           title: d.rejected_count ? 'Leads uploaded with some rejected' : 'Leads uploaded',

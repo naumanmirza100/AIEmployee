@@ -55,6 +55,7 @@ from core.scheduling import (
 )
 from core.scheduling.identity import login_user_ids_for_employees, member_ids
 from core.api_key_service import KeyServiceError
+from api.streaming import error_event
 # Re-use Frontline's hardened helpers — file validation + broker probe.
 from Frontline_agent.document_processor import DocumentProcessor
 
@@ -760,10 +761,10 @@ def hr_knowledge_qa_stream(request):
             except KeyServiceError as exc:
                 # Surface quota/key errors as a stream event rather than a
                 # non-streaming HTTP error — client is already reading a body.
-                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+                yield _json.dumps(error_event(exc)) + '\n'
             except Exception as exc:
                 logger.exception("hr_knowledge_qa_stream: agent raised")
-                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+                yield _json.dumps(error_event(exc)) + '\n'
 
             # Compliance log — mirror what the sync endpoint does. Cited docs
             # are effectively "read" by the LLM into an answer, so we log
@@ -1439,7 +1440,11 @@ def get_hr_workflow(request, workflow_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def update_hr_workflow(request, workflow_id):
-    """Update name/description/trigger/steps/is_active/timeout."""
+    """Update name/description/trigger/steps/is_active/timeout. HR admins only:
+    a workflow's steps email people and change employee records."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
     if not w:
@@ -1497,6 +1502,9 @@ def update_hr_workflow(request, workflow_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def delete_hr_workflow(request, workflow_id):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     w = HRWorkflow.objects.filter(pk=workflow_id, company=company).first()
     if not w:
@@ -1552,6 +1560,9 @@ def list_hr_workflows(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def create_hr_workflow(request):
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = request.data or {}
     name = (d.get('name') or '').strip()
@@ -1588,7 +1599,10 @@ def execute_hr_workflow(request, workflow_id):
     `context.employee_id` runs it for that employee: their details are filled
     in as an event would (name, work email…). `simulate: true` is the preview
     the dashboard shows before running — each step says what it would do, and
-    nothing is sent, changed or recorded."""
+    nothing is sent, changed or recorded. HR admins only."""
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin role required'},
+                        status=status.HTTP_403_FORBIDDEN)
     try:
         company = request.user.company
         user = _hr_get_or_create_user_for_company_user(request.user)
@@ -1606,8 +1620,8 @@ def execute_hr_workflow(request, workflow_id):
                                 status=status.HTTP_400_BAD_REQUEST)
             from hr_agent.signals import _employee_context
             context_data = {**_employee_context(emp, event='manual_run'), **context_data}
-        # Always seed company_id so HR step handlers can scope inserts (e.g. schedule_meeting).
-        context_data.setdefault('company_id', company.id)
+        # The engine sets company_id from the workflow too; a caller's own value never counts.
+        context_data['company_id'] = company.id
 
         from hr_agent.workflow_engine import execute_workflow as _exec
         if simulate:
@@ -4549,7 +4563,33 @@ def list_holidays(request):
             qs = qs.filter(date__year=int(year))
         except ValueError:
             pass
-    return Response({'status': 'success', 'data': [_serialize_holiday(h) for h in qs[:1000]]})
+    return Response({'status': 'success', 'data': [_serialize_holiday(h) for h in qs[:1000]],
+                     # Whether this login may add or remove one, so the screen can say so.
+                     'can_manage': _is_hr_admin(request.user)})
+
+
+def _booked_on(company, day):
+    """Meetings and interviews already on the shared calendar for `day`.
+
+    A company holiday makes every agent refuse new bookings that day, but it
+    cancels nothing: whoever adds one is shown what is already there, so they
+    can tell the people involved. Leave is not a booking and is left out.
+    """
+    from core.models import CalendarBlock
+    seen, found = set(), []
+    blocks = (CalendarBlock.objects.filter(company=company, starts_at__date=day)
+              .exclude(source='leave').order_by('starts_at'))
+    for block in blocks:
+        key = (block.source, block.source_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append({'title': block.title or block.get_source_display(), 'source': block.source,
+                      'starts_at': block.starts_at.isoformat()})
+    return found
+
+
+_HOLIDAYS_ARE_FOR_HR_ADMINS = 'Only an HR admin can add or remove a company holiday.'
 
 
 @api_view(['POST'])
@@ -4558,6 +4598,11 @@ def list_holidays(request):
 @throttle_classes([HRCRUDThrottle])
 def create_holiday(request):
     from hr_agent.models import Holiday
+    # A holiday stops bookings in every agent and changes how leave days are
+    # counted. Any dashboard login could add or remove one.
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _HOLIDAYS_ARE_FOR_HR_ADMINS},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     d = request.data or {}
     name = (d.get('name') or '').strip()
@@ -4589,7 +4634,10 @@ def create_holiday(request):
                      'Holiday', h.id, before,
                      after={'name': h.name, 'date': h.date.isoformat(),
                             'region': h.region, 'is_working_day': h.is_working_day})
-    return Response({'status': 'success', 'data': _serialize_holiday(h)},
+    # Only a day off for the whole company blocks the shared calendar.
+    blocks_calendar = not h.is_working_day and not h.region
+    return Response({'status': 'success', 'data': _serialize_holiday(h),
+                     'already_booked': _booked_on(company, h.date) if blocks_calendar else []},
                     status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
@@ -4599,6 +4647,9 @@ def create_holiday(request):
 @throttle_classes([HRCRUDThrottle])
 def delete_holiday(request, holiday_id):
     from hr_agent.models import Holiday
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _HOLIDAYS_ARE_FOR_HR_ADMINS},
+                        status=status.HTTP_403_FORBIDDEN)
     company = request.user.company
     h = Holiday.objects.filter(pk=holiday_id, company=company).first()
     if not h:
@@ -4841,10 +4892,18 @@ def _is_hr_admin(company_user) -> bool:
 
 
 def _write_audit_log(actor_cu, company, action: str, target_type: str, target_id: int,
-                     *, before: dict | None = None, after: dict | None = None,
-                     created: dict | None = None, deleted: dict | None = None) -> None:
+                     before: dict | None = None, after: dict | None = None,
+                     *, created: dict | None = None, deleted: dict | None = None) -> None:
     """Fire-and-forget audit log writer. Never raises — a logging failure
-    must not roll back the main operation."""
+    must not roll back the main operation.
+
+    `before` and `after` may be given by position. They used to be
+    keyword-only, and seven callers passed `before` by position (updating a
+    department, a notification template, a leave request or an accrual policy,
+    adding a holiday, closing or reopening a review cycle): each saved its
+    change and then failed here with a TypeError, so the screen reported an
+    error for something that had worked, and nothing was logged.
+    """
     try:
         if created is not None:
             diff = {'created': created}
@@ -4936,6 +4995,16 @@ def update_employee(request, employee_id):
                 if not ok:
                     return Response({'status': 'error', 'message': err},
                                     status=status.HTTP_400_BAD_REQUEST)
+                if val == 'offboarded' and emp.employment_status != 'offboarded':
+                    # Offboarding switches the person's logins off (hr_agent.access).
+                    from hr_agent.handover import dashboard_login as _dashboard_login
+                    own_login = _dashboard_login(emp)
+                    if own_login is not None and own_login.pk == request.user.pk:
+                        return Response({
+                            'status': 'error',
+                            'message': "You can't offboard your own record: it would switch off the login "
+                                       "you are using. Ask another HR admin to do it.",
+                        }, status=status.HTTP_400_BAD_REQUEST)
                 emp.employment_status = val
                 fields.append('employment_status')
             if 'employment_type' in d:
@@ -5053,7 +5122,12 @@ def employee_handover(request, employee_id):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([HRCRUDThrottle])
 def deactivate_employee(request, employee_id):
-    """Mark an employee as offboarded. HR-admin only.
+    """Mark an employee as offboarded and switch their logins off. HR-admin only.
+
+    The logins are switched off by `hr_agent.access` when the status is saved
+    (it used to change the status only, while the dialog said access was
+    revoked). `access` in the answer says what was switched off, and whether a
+    dashboard login was left on because it is the company's last admin.
 
     Body:
       * ``reason`` (str, optional) — free text; goes into the audit log.
@@ -5073,20 +5147,31 @@ def deactivate_employee(request, employee_id):
             'id': emp.id, 'employment_status': emp.employment_status,
             'already_offboarded': True,
         }})
+    from hr_agent.handover import dashboard_login as _dashboard_login
+    own_login = _dashboard_login(emp)
+    if own_login is not None and own_login.pk == request.user.pk:
+        return Response({'status': 'error',
+                         'message': "You can't deactivate your own record: it would switch off the login you are "
+                                    "using. Ask another HR admin to do it."},
+                        status=status.HTTP_400_BAD_REQUEST)
+    from hr_agent import access as _access
     d = request.data or {}
     reason = (d.get('reason') or '').strip()[:500]
     previous_status = emp.employment_status
     emp.employment_status = 'offboarded'
     emp.save(update_fields=['employment_status', 'updated_at'])
+    emp.refresh_from_db(fields=['access_ended'])
+    access = _access.summary(emp)
     _write_audit_log(
         request.user, request.user.company,
         'employee.deactivate', 'employee', emp.id,
         before={'employment_status': previous_status},
-        after={'employment_status': 'offboarded', 'reason': reason},
+        after={'employment_status': 'offboarded', 'reason': reason, 'access': access},
     )
     return Response({'status': 'success', 'data': {
         'id': emp.id, 'employment_status': emp.employment_status,
         'previous_status': previous_status,
+        'access': access,
     }})
 
 
@@ -5122,17 +5207,21 @@ def reactivate_employee(request, employee_id):
                         status=status.HTTP_400_BAD_REQUEST)
     reason = (d.get('reason') or '').strip()[:500]
     previous_status = emp.employment_status
+    had_ended = dict(emp.access_ended or {})
     emp.employment_status = target
     emp.save(update_fields=['employment_status', 'updated_at'])
+    # The logins offboarding switched off are back on (hr_agent.access).
+    logins_restored = bool(had_ended.get('user_ids') or had_ended.get('company_user_id'))
     _write_audit_log(
         request.user, request.user.company,
         'employee.reactivate', 'employee', emp.id,
         before={'employment_status': previous_status},
-        after={'employment_status': target, 'reason': reason},
+        after={'employment_status': target, 'reason': reason, 'logins_restored': logins_restored},
     )
     return Response({'status': 'success', 'data': {
         'id': emp.id, 'employment_status': emp.employment_status,
         'previous_status': previous_status,
+        'logins_restored': logins_restored,
     }})
 
 
@@ -6408,6 +6497,12 @@ def anonymize_employee(request, employee_id):
         'full_name': emp.full_name, 'work_email': emp.work_email,
         'phone': emp.phone or '', 'date_of_birth': emp.date_of_birth.isoformat() if emp.date_of_birth else None,
     }
+
+    # Someone whose record is erased keeps no way in. Done before the scrub,
+    # while the record still carries the email that finds their dashboard login.
+    if not emp.access_ended:
+        from hr_agent.access import end_access
+        end_access(emp)
 
     # Scrub PII fields on the employee row.
     redact_tag = f'[redacted #{emp.id}]'

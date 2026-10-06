@@ -77,7 +77,13 @@ export const askHRKnowledge = async (question, chatHistory = []) => {
  *   after the stream ends. Rejects on network / auth errors.
  */
 export const askHRKnowledgeStream = async (question, chatHistory = [], callbacks = {}) => {
-  const { onMeta, onToken, onDone, onError, signal } = callbacks;
+  const { onMeta, onToken, onDone, signal } = callbacks;
+  // An error sent inside the stream (out of AI tokens, a key the provider
+  // refused) only reached callers that passed onError. The chats do not, so
+  // they showed an empty answer. It is now thrown once the stream has ended,
+  // where each chat's own catch shows it.
+  let streamError = null;
+  const onError = (err) => { streamError = err; callbacks.onError?.(err); };
   const { API_BASE_URL } = await import('@/config/apiConfig');
   const token = localStorage.getItem('company_auth_token');
 
@@ -112,6 +118,7 @@ export const askHRKnowledgeStream = async (question, chatHistory = [], callbacks
     for (const line of text.split('\n')) {
       if (line.trim()) _dispatchStreamEvent(JSON.parse(line), { onMeta, onToken, onDone, onError });
     }
+    if (streamError) throw streamError;
     return null;
   }
 
@@ -158,6 +165,7 @@ export const askHRKnowledgeStream = async (question, chatHistory = [], callbacks
     onError?.(err);
     throw err;
   }
+  if (streamError) throw streamError;
   return { answer, meta, doneEvent };
 };
 

@@ -26,10 +26,44 @@ class CRMIntegration(models.Model):
     # Salesforce: {"client_id": "...", "client_secret": "...", "username": "...",
     #              "password": "...", "security_token": "...", "domain": "login"}
     # Pipedrive:  {"api_token": "..."}
+    # Stored encrypted: {"enc": "<Fernet token of the JSON>"}. Read and written
+    # through get_credentials() / set_credentials(), never directly. Rows saved
+    # before encryption hold the plain values and are still read.
     credentials = models.JSONField(default=dict)
 
     # Optional per-integration field mappings: {"internal_field": "crm_field_name"}
     field_mappings = models.JSONField(default=dict)
+
+    #: Credential fields that say where to sign in, not how; shown as they are.
+    NOT_SECRET = ('domain', 'username')
+
+    def get_credentials(self) -> dict:
+        """The saved credentials, readable. They used to be kept in clear text
+        and sent whole to the browser of any login in the company."""
+        import json
+        from core.crypto_utils import decrypt_secret
+        stored = self.credentials or {}
+        if set(stored) != {'enc'}:
+            return dict(stored)             # saved before encryption
+        try:
+            return json.loads(decrypt_secret(stored['enc']) or '{}')
+        except Exception:
+            import logging
+            logging.getLogger(__name__).error(
+                'CRM integration %s: the saved credentials cannot be read with the keys this server has. '
+                'Check FIELD_ENCRYPTION_KEY, or connect the CRM again.', self.pk)
+            return {}
+
+    def set_credentials(self, credentials: dict) -> None:
+        import json
+        from core.crypto_utils import encrypt_secret
+        self.credentials = {'enc': encrypt_secret(json.dumps(credentials or {}))}
+
+    def credentials_preview(self) -> dict:
+        """What may be shown on screen: each secret as `pat-********abcd`."""
+        from core.crypto_utils import mask_secret
+        return {key: (value if key in self.NOT_SECRET else mask_secret(str(value or '')))
+                for key, value in self.get_credentials().items()}
 
     sync_contacts = models.BooleanField(default=True)
     sync_emails = models.BooleanField(default=True)

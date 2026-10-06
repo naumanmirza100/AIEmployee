@@ -108,7 +108,14 @@ class Command(BaseCommand):
         total_skipped = 0
         total_stopped = 0
 
+        # No sequence emails for a company whose Marketing subscription is not
+        # active (marketing_agent/services/subscription.py).
+        from marketing_agent.services.subscription import PayingCampaigns
+        paying = PayingCampaigns()
+
         for campaign in campaigns:
+            if not paying.allows(campaign):
+                continue
             # Get active main sequences (not sub-sequences)
             sequences = campaign.email_sequences.filter(is_active=True, is_sub_sequence=False)
 
@@ -252,15 +259,24 @@ class Command(BaseCommand):
             self.stdout.write(f'  [DRY RUN] Sub-seq run step {next_step_number} -> {lead.email} ({sub_sequence.name})')
             return 'sent'
 
+        # A follow-up the company set up for unsubscribe replies is a
+        # confirmation: its first email goes out, and only that one.
+        confirmation = run.interest_level == 'unsubscribe'
         email_account = sub_sequence.get_sending_account()
         result = email_service.send_email(
             template=next_step.template, lead=lead,
             campaign=campaign, email_account=email_account,
+            confirms_unsubscribe=confirmation and run.step == 0,
         )
+        if result.get('blocked'):
+            # On the do-not-email list: this follow-up is over, not waiting.
+            run.cancelled = True
+            run.save(update_fields=['cancelled', 'updated_at'])
+            return 'stopped'
         if result.get('success'):
             run.step = next_step_number
             run.last_sent_at = timezone.now()
-            if next_step_number >= step_count:
+            if next_step_number >= step_count or confirmation:
                 run.completed = True
             run.save(update_fields=['step', 'last_sent_at', 'completed', 'updated_at'])
             self.stdout.write(self.style.SUCCESS(
@@ -368,6 +384,9 @@ class Command(BaseCommand):
                     contact.mark_completed()
                     return 'stopped'
                 return 'sent'
+            elif result.get('blocked'):
+                # On the do-not-email list. Not a failure, and nothing to retry.
+                return 'skipped'
             else:
                 self.stdout.write(self.style.ERROR(
                     f'  [FAIL] Step {next_step_number} -> {lead.email}: {result.get("error", "Unknown")}'

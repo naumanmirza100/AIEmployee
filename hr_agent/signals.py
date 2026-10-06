@@ -211,6 +211,12 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
         logger.debug("HR signal: skipping (already inside a workflow run, event=%s)", event)
         return
 
+    # An automation is the HR agent working by itself. Without an active
+    # subscription it stops, like the screens do (core/modules.py).
+    from core.modules import has_module
+    if not has_module(company_id, 'hr_agent'):
+        return
+
     user = _system_user()
     workflows = HRWorkflow.objects.filter(company_id=company_id, is_active=True)
     for w in workflows:
@@ -290,6 +296,14 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
 def employee_post_save(sender, instance: Employee, created, **kwargs):
     if not instance.company_id:
         return
+    # Their logins follow the status, however it was changed: off when they
+    # are offboarded, back on if they return. Never breaks the save itself.
+    try:
+        from hr_agent.access import sync_access
+        with transaction.atomic():
+            sync_access(instance)
+    except Exception:
+        logger.exception("Could not bring logins in line with HR status for employee %s", instance.pk)
     if created:
         ctx = _employee_context(instance, event='employee_hired')
         _run_matching_workflows(company_id=instance.company_id,
@@ -350,7 +364,14 @@ def workflow_execution_post_save(sender, instance: HRWorkflowExecution, created,
                                  update_fields=None, **kwargs):
     """Tell HR admins when a run stops for approval. It stops either as it is
     created (a workflow that needs approval to start) or at an approval step
-    partway through, which saves `status` via update_fields."""
+    partway through, which saves `status` via update_fields. And tell them when
+    a run fails, or finishes having skipped a step."""
+    if instance.status in ('failed', 'completed'):
+        try:
+            alerts.workflow_needs_a_look(instance)
+        except Exception:
+            logger.exception("Could not alert HR admins about workflow run %s", instance.pk)
+        return
     if instance.status != 'awaiting_approval':
         return
     if created or (update_fields and 'status' in update_fields):

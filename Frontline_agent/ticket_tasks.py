@@ -8,6 +8,12 @@ audit log) — and the two stay linked: when the task is marked done the ticket
 gets an internal note, once, and its owner a bell alert, so the customer can
 be told.
 
+The link works both ways. When the ticket is closed, reopened or made urgent,
+the task gets a comment and its assignee an alert: they used to hear nothing,
+and could go on building something the customer no longer needed. And when the
+task (or its whole project) is deleted, the ticket says so in a note and its
+owner is told; the link used to vanish without a trace.
+
 API: `frontline/tickets/<id>/task` (GET the review form, POST create).
 """
 from __future__ import annotations
@@ -24,9 +30,8 @@ DUE_IN_WORKDAYS = {'urgent': 2, 'high': 5, 'medium': 10, 'low': 20}
 
 
 def pm_available(company) -> bool:
-    from core.models import CompanyModulePurchase
-    return bool(company) and CompanyModulePurchase.objects.filter(
-        company=company, module_name='project_manager_agent', status='active').exists()
+    from core.modules import has_module
+    return bool(company) and has_module(company, 'project_manager_agent')
 
 
 def _add_workdays(start, days):
@@ -124,22 +129,74 @@ def task_changed(task):
             body=f'The project task "{task.title}" is done. You can let the customer know.')
         ticket.pm_task_done_noted_at = timezone.now()
         ticket.save(update_fields=['pm_task_done_noted_at', 'updated_at'])
-        _tell_owner(ticket, task)
+        _tell_owner(ticket, title=f'Done: the task for ticket #{ticket.id}',
+                    message=f'"{task.title}" is finished. You can let the customer know.')
 
 
-def _tell_owner(ticket, task):
+def task_deleted(task):
+    """Called just before a task is deleted, alone or with its project. Each
+    ticket linked to it keeps a note saying so, and its owner is told."""
+    from Frontline_agent.models import Ticket, TicketNote
+    for ticket in Ticket.objects.filter(pm_task_id=task.pk):
+        TicketNote.objects.create(
+            ticket=ticket, author=None, is_internal=True,
+            body=(f'The project task "{task.title}" was deleted, so this ticket no longer has one. '
+                  'Make a new task if the work is still needed.'))
+        if ticket.status not in CLOSED:
+            _tell_owner(ticket, title=f'The task for ticket #{ticket.id} was deleted',
+                        message=f'"{task.title}" no longer exists. Make a new task if the work is still needed.')
+
+
+#: A ticket in one of these is finished with.
+CLOSED = ('resolved', 'closed')
+
+
+def ticket_changed(ticket, before):
+    """Called after a linked ticket is saved, with its status and priority as
+    they were. Closing, reopening or making it urgent is written on the task
+    and its assignee is told. Anything else says nothing."""
+    from core.models import Notification, TaskComment
+    task = ticket.pm_task
+    if task is None or not before:
+        return
+    was_closed, is_closed = before.get('status') in CLOSED, ticket.status in CLOSED
+    if is_closed and not was_closed:
+        said = (f'Frontline ticket #{ticket.id} was {ticket.get_status_display().lower()}. '
+                'Check whether this task is still needed.')
+    elif was_closed and not is_closed:
+        said = f'Frontline ticket #{ticket.id} was reopened: the customer still needs this.'
+    elif ticket.priority == 'urgent' and before.get('priority') != 'urgent' and not is_closed:
+        said = f'Frontline ticket #{ticket.id} is now urgent.'
+    else:
+        return
+    author = ticket.assigned_to or ticket.created_by
+    if author is not None:
+        TaskComment.objects.create(task=task, user=author, comment_text=said)
+    if task.assignee_id and task.status != 'done':
+        Notification.objects.create(
+            user_id=task.assignee_id, type='task_updated', notification_type='task_updated',
+            title=f'News on your task: {task.title}'[:255], message=said, action_url='/me/tasks')
+
+
+def _tell_owner(ticket, *, title, message):
+    """Alert the dashboard login that owns the ticket; if the owner has none
+    (the chat widget's system account), the login that created it."""
     from core.models import CompanyUser
     from core.notification_utils import notify_company_users
-    if not ticket.assigned_to_id or not ticket.company_id:
+    if not ticket.company_id:
         return
-    owner = CompanyUser.objects.filter(company_id=ticket.company_id, login_user_id=ticket.assigned_to_id,
-                                       is_active=True).first()
+    logins = CompanyUser.objects.filter(company_id=ticket.company_id, is_active=True)
+    owner = None
+    for user_id in (ticket.assigned_to_id, ticket.created_by_id):
+        owner = logins.filter(login_user_id=user_id).first() if user_id else None
+        if owner is not None:
+            break
     if owner is None:
         return
     notify_company_users(
         [owner],
-        title=f'Done: the task for ticket #{ticket.id}',
-        message=f'"{task.title}" is finished. You can let the customer know.',
+        title=title,
+        message=message,
         link='/frontline/dashboard?tab=tickets',
         kind='frontline_ticket_task_done',
     )

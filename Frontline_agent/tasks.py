@@ -266,7 +266,9 @@ def send_weekly_analytics_digest():
     for cu in CompanyUser.objects.filter(is_active=True).exclude(email=''):
         logins_by_company.setdefault(cu.company_id, []).append(cu)
 
-    for company in Company.objects.filter(is_active=True):
+    from core.modules import active_company_ids
+    # No weekly summary for a company whose Frontline subscription is not active.
+    for company in Company.objects.filter(is_active=True, id__in=active_company_ids('frontline_agent')):
         stats = ticket_stats.get(company.id)
         total = (stats or {}).get('total', 0)
         if total == 0:
@@ -383,9 +385,13 @@ def send_meeting_reminders():
     # been sent yet. The previous narrow ±window was correct only if cron was
     # punctual; if a worker slipped even 3 minutes, meetings in the missed band
     # lost their reminder. "Still upcoming + not yet sent" is the real condition.
+    from core.modules import active_company_ids
+    paying = active_company_ids('frontline_agent')     # no reminders for a lapsed agent
+
     r24_cutoff_upper = now + _td(hours=24)
     r24_cutoff_lower = now + _td(minutes=15)   # don't double with the 15m stage
     for m in FrontlineMeeting.objects.filter(
+        company_id__in=paying,
         status__in=['scheduled', 'rescheduled'],
         scheduled_at__gt=r24_cutoff_lower,
         scheduled_at__lte=r24_cutoff_upper,
@@ -404,6 +410,7 @@ def send_meeting_reminders():
     # window missed meetings when cron lagged; this does not.
     r15_upper = now + _td(minutes=15)
     for m in FrontlineMeeting.objects.filter(
+        company_id__in=paying,
         status__in=['scheduled', 'rescheduled'],
         scheduled_at__gte=now,
         scheduled_at__lte=r15_upper,
@@ -560,8 +567,12 @@ def process_scheduled_notifications():
     # select_related: the loop reads `notif.template` and `notif.recipient_user`
     # on every row, which was two extra queries each — 400 round trips on a
     # full 200-row tick (FL-PERF-5).
+    from core.modules import active_company_ids
+    # Customer emails go out only while the company's Frontline subscription is
+    # active (core/modules.py). A lapsed company's rows wait; they are not lost.
     due = ScheduledNotification.objects.filter(
         status='pending', scheduled_at__lte=now,
+        company_id__in=active_company_ids('frontline_agent'),
     ).filter(
         Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now)
     ).select_related('template', 'recipient_user')
@@ -626,7 +637,15 @@ def process_scheduled_notifications():
             # Attach an unsubscribe URL for the recipient's own CompanyUser
             context.setdefault('unsubscribe_url', _build_unsubscribe_url(prefs.company_user_id))
         body = _render_template_body(template.body, context)
-        personalized_body = _generate_llm_notification_body(template, context, notif.company_id)
+        # AI wording is an extra. With the company's tokens used up or its key
+        # refused this raised, the row came back every five minutes and the
+        # email was never sent; the template's own text goes out instead.
+        try:
+            personalized_body = _generate_llm_notification_body(template, context, notif.company_id)
+        except Exception as exc:
+            logger.warning("Notification %s: AI wording unavailable (%s), sending the template text",
+                           notif.id, type(exc).__name__)
+            personalized_body = None
         if personalized_body:
             body = personalized_body
         subject = _render_template_body(template.subject, context)
@@ -702,6 +721,11 @@ def process_inbound_email(self, payload: dict):
         company = Company.objects.filter(pk=company_id, is_active=True).first()
         if not company:
             return {'status': 'ignored', 'reason': 'company_inactive'}
+        # Mail to a company whose Frontline subscription lapsed opens no ticket
+        # and gets no AI reply; the screens it would land on are locked.
+        from core.modules import has_module
+        if not has_module(company, 'frontline_agent'):
+            return {'status': 'ignored', 'reason': 'not_subscribed'}
 
         from_addr = (payload.get('from_address') or '').strip().lower()
         subject = (payload.get('subject') or '').strip() or '(no subject)'
@@ -902,6 +926,15 @@ def resume_workflow_execution(self, execution_id: int):
         execution.save(update_fields=['status', 'error_message', 'completed_at'])
         return {'status': 'failed', 'execution_id': execution_id, 'reason': 'workflow_missing'}
 
+    # A run that paused while the agent was paid for does not carry on once it is not.
+    from core.modules import has_module
+    if not has_module(workflow.company_id, 'frontline_agent'):
+        execution.status = 'failed'
+        execution.error_message = 'Stopped: the Frontline agent subscription is not active'
+        execution.completed_at = timezone.now()
+        execution.save(update_fields=['status', 'error_message', 'completed_at'])
+        return {'status': 'failed', 'execution_id': execution_id, 'reason': 'not_subscribed'}
+
     snap = execution.pause_state or {}
     remaining_steps = list(snap.get('remaining_steps') or [])
     results_so_far = list(snap.get('results_so_far') or [])
@@ -1076,8 +1109,12 @@ def auto_close_inactive_tickets():
     if inactivity_days <= 0:
         logger.info("auto_close_inactive_tickets: disabled (FRONTLINE_AUTO_CLOSE_DAYS=%d)", inactivity_days)
         return {'closed': 0, 'disabled': True}
+    from django.db.models import Q
+    from core.modules import active_company_ids
+    paying = active_company_ids('frontline_agent')
     cutoff = timezone.now() - timedelta(days=inactivity_days)
     qs = Ticket.objects.filter(
+        Q(company_id__in=paying) | Q(company__isnull=True),      # a lapsed agent changes nothing by itself
         status='resolved',
         updated_at__lt=cutoff,
     ).exclude(snoozed_until__gt=timezone.now())
@@ -1117,6 +1154,16 @@ def auto_close_inactive_tickets():
     return {'closed': closed, 'cutoff': cutoff.isoformat(), 'inactivity_days': inactivity_days}
 
 
+# ---------- A customer still waiting for a person ----------
+
+@shared_task(name='Frontline_agent.tasks.remind_waiting_handoffs')
+def remind_waiting_handoffs():
+    """Say again, hourly, that a customer is waiting for a person
+    (Frontline_agent.alerts.handoffs_still_waiting)."""
+    from Frontline_agent.alerts import handoffs_still_waiting
+    return {'reminded': handoffs_still_waiting()}
+
+
 # ---------- Escalate near-breach tickets (S3) ----------
 
 @shared_task(name='Frontline_agent.tasks.escalate_near_breach_tickets')
@@ -1138,7 +1185,11 @@ def escalate_near_breach_tickets():
         return {'escalated': 0, 'disabled': True}
     now = timezone.now()
     deadline = now + timedelta(minutes=window_minutes)
+    from django.db.models import Q
+    from core.modules import active_company_ids
+    paying = active_company_ids('frontline_agent')
     qs = Ticket.objects.filter(
+        Q(company_id__in=paying) | Q(company__isnull=True),      # a lapsed agent changes nothing by itself
         sla_due_at__gt=now,
         sla_due_at__lte=deadline,
     ).exclude(

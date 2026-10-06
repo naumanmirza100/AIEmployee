@@ -46,9 +46,22 @@ def check_and_send_followup_emails():
 
         logger.info(f"Starting follow-up email check at {now}")
 
+        # Candidates are emailed only while the company's Recruitment
+        # subscription is active (core/modules.py). An interview whose company
+        # cannot be worked out is handled as before.
+        from django.db.models import Q
+        from core.modules import active_company_ids
+        paying = active_company_ids('recruitment_agent')
+        of_paying_company = (
+            Q(company_user__company_id__in=paying)
+            | Q(company_user__isnull=True, cv_record__job_description__company_id__in=paying)
+            | Q(company_user__isnull=True, cv_record__job_description__company__isnull=True)
+        )
+
         # 1. Check PENDING interviews for follow-up emails
         # Materialise with list() so the cursor is released before iteration begins
         pending_interviews = list(Interview.objects.filter(
+            of_paying_company,
             status='PENDING',
             invitation_sent_at__isnull=False
         ).exclude(
@@ -113,6 +126,7 @@ def check_and_send_followup_emails():
         
         # 2. Check SCHEDULED interviews for pre-interview reminders
         scheduled_interviews = list(Interview.objects.filter(
+            of_paying_company,
             status='SCHEDULED',
             scheduled_datetime__isnull=False,
             scheduled_datetime__gt=now,  # Only future interviews

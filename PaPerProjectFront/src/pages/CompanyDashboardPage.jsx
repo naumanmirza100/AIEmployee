@@ -20,7 +20,7 @@ import { companyJobsService } from '@/services';
 import { companyApi, logoutCompany } from '@/services/companyAuthService';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import BillingOverview from '@/components/company/BillingOverview';
-import { getAgentNavItems } from '@/utils/agentNavItems';
+import { agentHomePath, getAgentNavItems } from '@/utils/agentNavItems';
 import companyUserManagementService from '@/services/companyUserManagementService';
 import companyProjectsTasksService from '@/services/companyProjectsTasksService';
 import pmAgentService from '@/services/pmAgentService';
@@ -759,13 +759,16 @@ const CompanyDashboardPage = () => {
     }
   }, [activeTab, companyUser, taskStatusFilter, taskUserFilter, taskProjectFilter, usersPagination.page, usersPagination.limit, tasksPagination.page, tasksPagination.limit]);
 
-  // Normalize a bare /company/dashboard (no tab in URL) to a specific tab.
+  // Normalize a bare /company/dashboard (no tab in URL) to a specific page.
   // Wait for purchased modules to load so agent-less companies land on the
-  // AI Agents tab (to browse/buy), while companies with any agent go to Jobs.
+  // AI Agents tab (to browse/buy). Jobs is Recruitment's tab: a company that
+  // bought Recruitment lands there. Any other company used to land there too,
+  // on a page for an agent it does not have; it now lands on My work.
   useEffect(() => {
     if (!companyUser || tabParam || !modulesLoaded) return;
-    const target = purchasedModules.length === 0 ? 'ai-agents' : 'jobs';
-    navigate(`/company/dashboard/${target}`, { replace: true });
+    if (purchasedModules.length === 0) navigate('/company/dashboard/ai-agents', { replace: true });
+    else if (purchasedModules.includes('recruitment_agent')) navigate('/company/dashboard/jobs', { replace: true });
+    else navigate('/my-work', { replace: true });
   }, [companyUser, tabParam, modulesLoaded, purchasedModules, navigate]);
   
   const fetchAllUsersTasks = async () => {
@@ -2516,28 +2519,15 @@ const CompanyDashboardPage = () => {
                                       {agent.cancel_at_period_end ? 'Active (cancelling)' : 'Active'}
                                     </Button>
                                     {/* Open Agent Dashboard button */}
-                                    {({
-                                      recruitment_agent:     '/recruitment/job-descriptions',
-                                      marketing_agent:       '/marketing/dashboard',
-                                      project_manager_agent: '/project-manager/dashboard',
-                                      frontline_agent:       '/frontline/dashboard',
-                                      operations_agent:      '/operations/documents',
-                                      reply_draft_agent:     '/reply-draft/dashboard',
-                                      ai_sdr_agent:          '/ai-sdr/dashboard',
-                                    }[agent.module_name]) && (
+                                    {/* From the same list the menu is built from. A list kept
+                                        here by hand had no entry for HR, Executive Meeting or
+                                        CRM Sync, so those had no button. */}
+                                    {agentHomePath(agent.module_name) && (
                                       <Button
                                         size="sm"
                                         className="w-full"
                                         style={{ background: 'linear-gradient(90deg,hsl(var(--brand-600)),#4f46e5)', border: 'none' }}
-                                        onClick={() => navigate(({
-                                          recruitment_agent:     '/recruitment/job-descriptions',
-                                          marketing_agent:       '/marketing/dashboard',
-                                          project_manager_agent: '/project-manager/dashboard',
-                                          frontline_agent:       '/frontline/dashboard',
-                                          operations_agent:      '/operations/documents',
-                                          reply_draft_agent:     '/reply-draft/dashboard',
-                                          ai_sdr_agent:          '/ai-sdr/dashboard',
-                                        }[agent.module_name]))}
+                                        onClick={() => navigate(agentHomePath(agent.module_name))}
                                       >
                                         <PlayCircle className="h-4 w-4 mr-2" />
                                         Open Agent

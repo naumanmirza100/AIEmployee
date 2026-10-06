@@ -33,9 +33,6 @@ export const listKeyRequests = () => companyApi.get('/company/key-requests');
 export const createKeyRequest = ({ agent_name, provider, note, preferred_duration, is_renewal }) =>
   companyApi.post('/company/key-requests/create', { agent_name, provider, note, preferred_duration, is_renewal });
 
-export const payForRequest = (requestId) =>
-  companyApi.post(`/company/key-requests/${requestId}/pay`, {});
-
 export const createKeyPaymentSession = (requestId) =>
   companyApi.post(`/company/key-requests/${requestId}/checkout`, {});
 
@@ -52,7 +49,6 @@ export default {
   listKeyEvents,
   listKeyRequests,
   createKeyRequest,
-  payForRequest,
   createKeyPaymentSession,
   verifyKeyPaymentSession,
 };

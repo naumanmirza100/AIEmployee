@@ -63,13 +63,21 @@ VALID_AGENTS = _ValidAgents()
 #: five providers, but PM, HR, Frontline and Recruitment all call through the
 #: shared BaseAgent (Recruitment via recruitment_agent/core.py), which has Groq
 #: and OpenAI clients only. Any other key used to be accepted and then fail on
-#: every call. Agents not listed haven't been checked, so they stay
-#: unrestricted.
+#: every call. Marketing, Operations, Reply Draft and Executive Meeting have
+#: the same two clients. AI SDR builds a Groq client and nothing else: it sent
+#: whatever key it was given to Groq, and when that was refused it quietly
+#: scored leads by fixed rules and sent emails unpersonalised. Agents not
+#: listed haven't been checked, so they stay unrestricted.
 AGENT_SUPPORTED_PROVIDERS = {
     'project_manager_agent': ('openai', 'groq'),
     'hr_agent': ('openai', 'groq'),
     'frontline_agent': ('openai', 'groq'),
     'recruitment_agent': ('openai', 'groq'),
+    'marketing_agent': ('openai', 'groq'),
+    'operations_agent': ('openai', 'groq'),
+    'reply_draft_agent': ('openai', 'groq'),
+    'exec_meeting_agent': ('openai', 'groq'),
+    'ai_sdr_agent': ('groq',),
 }
 
 
@@ -461,7 +469,9 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
 
     Strict preference order — NO automatic switching between pools:
       0. preferred_pool == 'none' → AgentDisabled (hard-block immediately)
-      1. Active BYOK key (unless preferred_pool is 'free' or 'managed')
+      1. Active BYOK key (unless preferred_pool is 'free' or 'managed').
+         Saving a key sets preferred_pool to 'byok' (upsert_byok_key), so a
+         company's own key is used from the moment it is saved.
          → ByokCapReached if user-set token cap is exhausted
       2. Active managed key (unless preferred_pool is 'free')
          → ManagedQuotaExhausted if managed quota is exhausted (hard-block, no fallback)

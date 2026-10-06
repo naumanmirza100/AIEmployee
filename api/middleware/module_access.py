@@ -205,9 +205,6 @@ class ModuleAccessMiddleware:
 
     @staticmethod
     def _has_module(company, module_name):
-        from core.models import CompanyModulePurchase
-
-        purchase = CompanyModulePurchase.objects.filter(
-            company=company, module_name=module_name,
-        ).first()
-        return bool(purchase and purchase.is_active())
+        # The same rule the background jobs use (core/modules.py).
+        from core.modules import has_module
+        return has_module(company, module_name)

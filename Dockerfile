@@ -40,4 +40,10 @@ EXPOSE 8000
 # `migrate` runs here so a single-service deploy still applies migrations; if
 # you scale the web tier past one replica, move it to a release/pre-deploy step
 # so replicas don't race each other.
-CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn project_manager_ai.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 2 --timeout 120"]
+#
+# Eight threads, one worker. A request waiting on an AI answer holds its thread
+# for the whole answer; with two threads, two people asking at once made every
+# other page in the company wait. Threads share the worker's memory, so this
+# costs nothing. Stay at ONE worker: the AI SDR scheduler starts inside the web
+# process, and a second worker would start a second copy of it.
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn project_manager_ai.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 8 --timeout 120"]

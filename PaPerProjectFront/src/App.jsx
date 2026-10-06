@@ -70,6 +70,10 @@ import NotificationsView from '@/pages/me/NotificationsView';
 import WorkView from '@/pages/me/WorkView';
 import MyWorkPage from '@/pages/MyWorkPage';
 import NotificationSettingsPage from '@/pages/NotificationSettingsPage';
+import { ReturnToTracker } from '@/utils/returnTo';
+import DoNotEmailPage from '@/pages/DoNotEmailPage';
+import CrmSyncPage from '@/pages/CrmSyncPage';
+import TeamRolesPage from '@/pages/TeamRolesPage';
 import SDRDashboard from '@/components/ai-sdr/SDRDashboard';
 import RecruitmentDashboard from '@/components/recruitment/RecruitmentDashboard';
 import OperationsDashboard from '@/components/operations/OperationsDashboard';
@@ -86,6 +90,7 @@ import ProtectedRoute from '@/components/common/ProtectedRoute';
 import PublicLayout from '@/components/layout/PublicLayout';
 import ScrollToTop from '@/components/layout/ScrollToTop';
 import { Toaster } from "@/components/ui/toaster";
+import ServerVersionNotice from '@/components/common/ServerVersionNotice';
 import { useTranslation } from 'react-i18next';
     
     const AppContent = () => {
@@ -100,6 +105,7 @@ import { useTranslation } from 'react-i18next';
       return (
         <>
           <ScrollToTop />
+          <ReturnToTracker />
           <Routes location={location}>
             {/* Admin routes without header/footer */}
             <Route path="/login" element={<LoginPage />} />
@@ -121,7 +127,7 @@ import { useTranslation } from 'react-i18next';
             />
 
             {/* /user/dashboard now sends users into the new employee shell.
-                PMs land on /project-manager/dashboard; everyone else on /me/home.
+                Every employee lands on /me/home, project managers included.
                 The legacy monolith stays reachable at /user/dashboard/classic
                 for rollback / debugging (see USER_DASHBOARD_REDESIGN.md, Chunk I). */}
             <Route
@@ -164,6 +170,12 @@ import { useTranslation } from 'react-i18next';
             <Route path="/company/settings/api-keys" element={<AgentKeysSettingsPage />} />
             {/* What each login hears about from every agent, in the bell and by email */}
             <Route path="/company/settings/notifications" element={<NotificationSettingsPage />} />
+            {/* Addresses the company must not send outreach to, for Marketing and AI SDR alike */}
+            <Route path="/company/settings/do-not-email" element={<DoNotEmailPage />} />
+            {/* Dashboard logins and their roles */}
+            <Route path="/company/settings/team" element={<TeamRolesPage />} />
+            {/* CRM Sync is its own agent; this is its page for a company that has it */}
+            <Route path="/crm-sync" element={<CrmSyncPage />} />
             {/* Full-detail notification list — the navbar dropdown links here */}
             <Route path="/notifications" element={<NotificationsPage />} />
             {/* Everything waiting for a dashboard login, across the agents */}
@@ -308,6 +320,7 @@ import { useTranslation } from 'react-i18next';
             <Route path="/terms-of-service" element={<PublicLayout><TermsOfServicePage /></PublicLayout>} />
           </Routes>
           <Toaster />
+          <ServerVersionNotice />
         </>
       );
     }

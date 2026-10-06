@@ -37,6 +37,7 @@ from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.models import CompanyUser, Company
 from core.api_key_service import KeyServiceError
+from api.streaming import error_event
 from core.scheduling import (
     ScheduleConflict, booking_guard, ensure_free, find_conflicts, login_user_id_for_company_user,
     suggest_slots, zone_name,
@@ -1608,17 +1609,39 @@ def public_qa(request):
         else:
             public_history = []
         agent = FrontlineAgent(company_id=company.id)
-        result = agent.answer_question(
-            question,
-            company_id=company.id,
-            scope_document_type=scope_document_type,
-            scope_document_ids=scope_document_ids,
-            min_similarity=min_similarity,
-            max_age_days=max_age_days,
-            max_results=max_results,
-            enable_rewrite=enable_rewrite,
-            history=public_history,
-        )
+        ai_unavailable = False
+        try:
+            result = agent.answer_question(
+                question,
+                company_id=company.id,
+                scope_document_type=scope_document_type,
+                scope_document_ids=scope_document_ids,
+                min_similarity=min_similarity,
+                max_age_days=max_age_days,
+                max_results=max_results,
+                enable_rewrite=enable_rewrite,
+                history=public_history,
+            )
+        except KeyServiceError as exc:
+            # The company's AI is out of tokens, switched off, or its key was
+            # refused. That is between us and the company. A visitor on its
+            # website used to be shown the billing message word for word, and
+            # the request stopped there, so one asking for a person never
+            # reached the hand-off below. Tell the company; answer the visitor
+            # politely and carry on.
+            ai_unavailable = True
+            from Frontline_agent.alerts import widget_cannot_answer
+            widget_cannot_answer(company, getattr(exc, 'user_message', '') or '')
+            result = {
+                'answer': ("I can't answer that right now. Please try again a little later, "
+                           "or ask to speak to a person and someone will get back to you."),
+                'has_verified_info': False,
+                'confidence': 0.0,
+                'sources': [],
+                'citations': [],
+                'best_score': 0.0,
+                'fallback': True,
+            }
 
         # Hand-off: customer explicitly asked for a human → create a pending-handoff
         # ticket so an agent picks it up. Requires a customer identifier — fall back
@@ -1665,6 +1688,7 @@ def public_qa(request):
         # patterns ("we keep getting asked about X").
         try:
             if (not handoff_triggered
+                    and not ai_unavailable          # the AI being off is not a gap in the knowledge base
                     and result.get('has_verified_info') is False
                     and _widget_may_open_ticket(company)):
                 from Frontline_agent.contacts import upsert_contact_from_email
@@ -1713,8 +1737,6 @@ def public_qa(request):
             'status': 'success',
             'data': result
         }, status=status.HTTP_200_OK)
-    except KeyServiceError:
-        raise
     except Exception as e:
         # FRONTLINE-BUG-03: gibberish / weird input used to blow up inside
         # retrieval or embedding calls and surface as a raw 500 with the
@@ -2232,10 +2254,10 @@ def knowledge_qa_stream(request):
                                     continue
                     yield _json.dumps(event) + '\n'
             except KeyServiceError as exc:
-                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+                yield _json.dumps(error_event(exc)) + '\n'
             except Exception as exc:
                 logger.exception("knowledge_qa_stream: agent raised")
-                yield _json.dumps({'type': 'error', 'message': str(exc)}) + '\n'
+                yield _json.dumps(error_event(exc)) + '\n'
 
         response = StreamingHttpResponse(
             _event_stream(),

@@ -422,11 +422,17 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
         });
       } else {
         const res = await hrAgentService.deactivateHREmployee(emp.id, dangerDialog.reason || '');
+        // Say what really happened to their logins, not just the status.
+        const access = res?.data?.access || {};
+        let logins = 'They had no active login to switch off.';
+        if (access.kept === 'last_admin') {
+          logins = "Their dashboard login was left on: they are the company's only admin.";
+        } else if (access.employee_login_off || access.dashboard_login_off) {
+          logins = 'Their logins are switched off.';
+        }
         toast({
           title: 'Employee deactivated',
-          description: res?.data?.already_offboarded
-            ? 'Was already offboarded — no change.'
-            : `Previous status: ${res?.data?.previous_status || '—'}.`,
+          description: res?.data?.already_offboarded ? 'Was already offboarded — no change.' : logins,
         });
       }
       const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
@@ -460,7 +466,8 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
       const res = await hrAgentService.reactivateHREmployee(emp.id, { reason });
       toast({
         title: 'Employee reactivated',
-        description: `Status now: ${res?.data?.employment_status || 'active'}.`,
+        description: `Status now: ${labelOf(res?.data?.employment_status || 'active')}.`
+          + (res?.data?.logins_restored ? ' Their logins are back on.' : ''),
       });
       const refreshed = await hrAgentService.getHREmployeeDetail(emp.id);
       setData(refreshed?.data || null);
@@ -1378,9 +1385,10 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
               return (
                 <>
                   You are about to <strong>deactivate (offboard) {tag}</strong>.
-                  Their status flips to inactive and access is revoked.
-                  Their record and history stay intact — you can reactivate
-                  later if needed.
+                  Their logins are switched off: they can no longer sign in,
+                  and they stop appearing when work or meetings are assigned.
+                  Their record and history stay intact. Reactivating later
+                  turns their logins back on.
                 </>
               );
             })()}

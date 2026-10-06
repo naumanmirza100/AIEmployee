@@ -455,8 +455,20 @@ def resume_hr_workflow_execution(self, execution_id: int):
         execution.save(update_fields=['status', 'error_message', 'completed_at'])
         return {'status': 'failed', 'execution_id': execution_id, 'reason': 'workflow_missing'}
 
+    # A run that paused while the agent was paid for does not carry on once it is not.
+    from core.modules import has_module
+    if not has_module(workflow.company_id, 'hr_agent'):
+        execution.status = 'failed'
+        execution.error_message = 'Stopped: the HR agent subscription is not active'
+        execution.completed_at = timezone.now()
+        execution.save(update_fields=['status', 'error_message', 'completed_at'])
+        return {'status': 'failed', 'execution_id': execution_id, 'reason': 'not_subscribed'}
+
     snap = execution.pause_state or {}
-    remaining_steps = list(snap.get('remaining_steps') or [])
+    # A workflow that needs approval before it starts was never paused partway:
+    # it has no snapshot, and every step is still to do. (Approving one used to
+    # mark it completed without running any of them.)
+    remaining_steps = list(snap['remaining_steps'] or []) if 'remaining_steps' in snap else list(workflow.steps or [])
     results_so_far = list(snap.get('results_so_far') or [])
     elapsed_active = float(snap.get('elapsed_active_seconds') or 0.0)
     context_data = dict(snap.get('context_data') or execution.context_data or {})
@@ -538,9 +550,14 @@ def process_hr_scheduled_notifications():
     from django.db.models import Q
     from hr_agent.models import HRScheduledNotification
 
+    from core.modules import active_company_ids
+
     now = timezone.now()
+    # Only for companies whose HR subscription is active (core/modules.py).
+    # A lapsed company's rows wait; they are not lost.
     due = HRScheduledNotification.objects.filter(
         status='pending', scheduled_at__lte=now,
+        company_id__in=active_company_ids('hr_agent'),
     ).filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now))
 
     processed = sent = failed = dead = 0
@@ -678,7 +695,10 @@ def walk_hr_time_based_events():
     # emails for the same event. To intentionally run two flows for the same
     # event, encode them under different `on` values.
     seen_event_winner: dict[tuple, int] = {}
-    templates = list(HRNotificationTemplate.objects.all().order_by('-updated_at', '-id'))
+    from core.modules import active_company_ids
+    templates = list(HRNotificationTemplate.objects
+                     .filter(company_id__in=active_company_ids('hr_agent'))   # no reminders for a lapsed agent
+                     .order_by('-updated_at', '-id'))
 
     for tpl in templates:
         cfg = tpl.trigger_config or {}
@@ -929,9 +949,13 @@ def send_hr_meeting_reminders():
             logger.warning("HR meeting reminder send failed for meeting %s: %s", m.id, exc)
             return False
 
+    from core.modules import active_company_ids
+    paying = active_company_ids('hr_agent')
+
     r24_lo = now + _td(hours=24) - _td(minutes=3)
     r24_hi = now + _td(hours=24) + _td(minutes=2)
     for m in HRMeeting.objects.filter(
+        company_id__in=paying,
         status__in=['scheduled', 'rescheduled'],
         scheduled_at__gte=r24_lo, scheduled_at__lte=r24_hi,
         reminder_24h_sent_at__isnull=True,
@@ -946,6 +970,7 @@ def send_hr_meeting_reminders():
     r15_lo = now + _td(minutes=12)
     r15_hi = now + _td(minutes=17)
     for m in HRMeeting.objects.filter(
+        company_id__in=paying,
         status__in=['scheduled', 'rescheduled'],
         scheduled_at__gte=r15_lo, scheduled_at__lte=r15_hi,
         reminder_15m_sent_at__isnull=True,

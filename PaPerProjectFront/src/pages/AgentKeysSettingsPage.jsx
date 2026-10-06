@@ -45,6 +45,9 @@ const modeBadge = (a) => {
   if (p === 'none') active = 'disabled';
   else if (p === 'free') active = freeExhausted ? 'free_exhausted' : 'free';
   else if (p === 'managed' && hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
+  // 'managed' chosen with no managed key runs on free tokens, even when the
+  // company has its own key saved. The badge used to say "BYOK Active" here.
+  else if (p === 'managed') active = freeExhausted ? 'free_exhausted' : 'platform';
   else if (a.byok) active = byokCapHit ? 'byok_exhausted' : 'byok';
   else if (hasManagedKey) active = managedExhausted ? 'managed_exhausted' : 'managed';
   else active = freeExhausted ? 'free_exhausted' : 'platform';
@@ -990,6 +993,8 @@ const AgentKeysSettingsPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [agents, setAgents] = useState([]);
   const [providers, setProviders] = useState([]);
+  // Changing keys is for the company's owner and admins; everyone else can look.
+  const [canManage, setCanManage] = useState(true);
   const [requests, setRequests] = useState([]);
   const [keyEvents, setKeyEvents] = useState([]);
 
@@ -1023,6 +1028,7 @@ const AgentKeysSettingsPage = () => {
       ]);
       setAgents(keys.agents || []);
       setProviders(keys.providers || []);
+      setCanManage(keys.can_manage !== false);
       setRequests(reqs.requests || []);
       setKeyEvents(events.events || []);
     } catch (e) {
@@ -1064,6 +1070,14 @@ const AgentKeysSettingsPage = () => {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The server refuses a change from a login that is not an owner or admin;
+  // say so before a dialog opens rather than after it is filled in.
+  const adminsOnly = (action) => (...args) => {
+    if (canManage) return action(...args);
+    toast({ title: 'Admins only', description: 'Only an owner or admin of your company can change AI keys.' });
+    return undefined;
+  };
 
   // Only the providers this agent can actually call (null from the API = any).
   // Offering the rest let people save keys that then failed on every request.
@@ -1284,16 +1298,22 @@ const AgentKeysSettingsPage = () => {
             </Card>
           ) : (
             <div className="flex flex-col gap-3">
+              {!canManage && (
+                <p data-testid="keys-read-only" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  You can see how each agent is set up. Only an owner or admin of your company can change keys;
+                  roles are given under Dashboard → Logins &amp; roles.
+                </p>
+              )}
               {agents.map(a => (
                 <AgentCard
                   key={a.agent_name}
                   agent={a}
                   pendingReq={pendingByAgent[a.agent_name]}
-                  onByok={openByok}
-                  onRevoke={revokeByok}
-                  onRequest={openRequest}
-                  onSetPool={setPool}
-                  onSetByokLimit={openSetByokLimit}
+                  onByok={adminsOnly(openByok)}
+                  onRevoke={adminsOnly(revokeByok)}
+                  onRequest={adminsOnly(openRequest)}
+                  onSetPool={adminsOnly(setPool)}
+                  onSetByokLimit={adminsOnly(openSetByokLimit)}
                 />
               ))}
             </div>
@@ -1570,7 +1590,7 @@ const AgentKeysSettingsPage = () => {
               BYOK Spending Cap
             </DialogTitle>
             <DialogDescription className="text-white/60">
-              {byokLimitModal.agent?.agent_label} — set a soft limit on how many tokens your own API key can spend. Leave blank to remove the cap.
+              {byokLimitModal.agent?.agent_label} — set a limit on how many tokens your own API key can spend. Leave blank to remove the cap.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-3">
@@ -1592,7 +1612,7 @@ const AgentKeysSettingsPage = () => {
                 onChange={(e) => setByokLimitModal({ ...byokLimitModal, limitInput: e.target.value })}
               />
               <p className="text-xs text-white/40 flex items-center gap-1">
-                <Info className="w-3 h-3" /> This is a soft cap — it never blocks usage, just shows a progress bar.
+                <Info className="w-3 h-3" /> When the cap is reached this agent stops until you raise or remove it.
               </p>
             </div>
             {byokLimitModal.agent?.quota?.byok_tokens_info > 0 && (

@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import authService, { isAuthenticated as checkAuth } from '@/services/authService';
 import { getUser as getStoredUser } from '@/services/api';
 import { getCompanyUser, getCompanyToken } from '@/services/companyAuthService';
+import { signedOutOnPurpose } from '@/utils/returnTo';
 
 const AuthContext = createContext(null);
 
@@ -82,6 +83,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    signedOutOnPurpose();
     try {
       await authService.logout();
     } catch (error) {

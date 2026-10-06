@@ -15,13 +15,14 @@ import {
  *
  * `basePath` — URL prefix that identifies this agent (matched against the
  *   current pathname).
- * `moduleKey` — the purchased-module key to gate on; `null` means always granted
- *   (AI SDR historically grants access unconditionally).
+ * `moduleKey` — the purchased-module key to gate on; `null` means always granted.
+ *   AI SDR used to be `null`, the one agent open to a company that had not
+ *   bought it: the server refused its data, so the page was a wall of errors.
  *
  * Keyed by section (same section string used by getAgentNavItems / AgentSidebar).
  */
 export const AGENT_META = {
-  'ai-sdr':       { section: 'ai-sdr',       basePath: '/ai-sdr',       icon: Target,       title: 'AI SDR Agent',                    moduleKey: null },
+  'ai-sdr':       { section: 'ai-sdr',       basePath: '/ai-sdr',       icon: Target,       title: 'AI SDR Agent',                    moduleKey: 'ai_sdr_agent' },
   'recruitment':  { section: 'recruitment',  basePath: '/recruitment',  icon: UserCheck,    title: 'Recruitment Agent',               moduleKey: 'recruitment_agent' },
   'marketing':    { section: 'marketing',    basePath: '/marketing',    icon: Megaphone,    title: 'Marketing Agent',                 moduleKey: 'marketing_agent' },
   'operations':   { section: 'operations',   basePath: '/operations',   icon: FileSearch,   title: 'Operations Agent',                moduleKey: 'operations_agent' },

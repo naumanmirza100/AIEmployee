@@ -9,7 +9,9 @@ agent where it gets done.
 
 There are two kinds of login, and each sees only what it can open and act on:
 
-  * a dashboard login (`CompanyUser`): tickets assigned to it; leave requests
+  * a dashboard login (`CompanyUser`): tickets assigned to it; customers
+    waiting for a person and questions the assistant could not answer, for the
+    logins who are alerted about them; leave requests
     and HR workflows waiting for its decision; new times suggested for
     meetings it organises; interviews it ran that still need feedback; and PM
     tasks assigned to the employee login it maps to.
@@ -36,6 +38,9 @@ AGENT_LABELS = {'pm': 'Project Manager', 'hr': 'HR', 'frontline': 'Frontline', '
 #: Most items one source adds, so a large backlog can't make the list unbounded.
 LIMIT = 100
 OPEN_TICKET_STATUSES = ('new', 'open', 'in_progress')
+#: The system account the public chat widget files tickets under
+#: (api.views.frontline_agent._ensure_handoff_system_user).
+WIDGET_ACCOUNT = 'frontline_handoff_bot'
 #: Interviews older than this aren't chased for feedback any more.
 FEEDBACK_WINDOW = timedelta(days=60)
 
@@ -91,7 +96,7 @@ def for_company_user(company_user, now=None):
     modules = _active_modules(person.company)
     sources = []
     if 'frontline_agent' in modules:
-        sources.append(_tickets)
+        sources += [_tickets, _handoffs_waiting, _unanswered_questions]
     if 'hr_agent' in modules:
         sources += [_leave_to_decide, _workflows_to_approve, _hr_times_suggested]
     if 'recruitment_agent' in modules:
@@ -187,6 +192,71 @@ def _tickets(person, now):
         items.append(_item('frontline', 'ticket', t.id, f'Ticket #{t.id}: {t.title}', detail=' · '.join(parts),
                            due=due, action='Open ticket', link='/frontline/dashboard?tab=tickets'))
     return items
+
+
+def _hears_handoffs(person) -> bool:
+    from Frontline_agent.alerts import hears_handoffs
+    return hears_handoffs(person.company_user)
+
+
+def _handoffs_waiting(person, now):
+    """A customer who asked for a person, for every login that is alerted
+    about hand-offs, until one of them takes it.
+
+    The chat widget files these under a system account, so they were on
+    nobody's list: one bell alert, then nothing unless someone opened the
+    Hand-offs tab. One a signed-in agent raised on their own ticket is already
+    in their list as that ticket.
+    """
+    from Frontline_agent.alerts import HANDOFF_WHY
+    from Frontline_agent.models import Ticket
+    if not _hears_handoffs(person):
+        return []
+    tickets = (Ticket.objects
+               .filter(company=person.company, handoff_status='pending')
+               .exclude(status__in=('resolved', 'closed'))
+               .select_related('contact')
+               .order_by('handoff_requested_at')[:LIMIT])
+    login_id = person.company_user.login_user_id
+    items = []
+    for t in tickets:
+        if login_id and t.assigned_to_id == login_id and t.status in OPEN_TICKET_STATUSES:
+            continue
+        parts = [HANDOFF_WHY.get(t.handoff_reason, '').rstrip('.')]
+        if t.contact_id:
+            parts.append(t.contact.name or t.contact.email)
+        if t.handoff_requested_at:
+            parts.append(f'waiting since {_day(t.handoff_requested_at)}, '
+                         f'{timezone.localtime(t.handoff_requested_at):%H:%M}')
+        items.append(_item('frontline', 'handoff', t.id, f'Customer waiting for a person: {t.title}',
+                           detail=' · '.join(p for p in parts if p),
+                           # No response time set: they are waiting from the moment they asked.
+                           due=t.sla_due_at or t.handoff_requested_at,
+                           action='Take it', link='/frontline/dashboard?tab=handoffs'))
+    return items
+
+
+def _unanswered_questions(person, now):
+    """Questions the website assistant could not answer, as one line.
+
+    The widget files one ticket per question under the system account. Listed
+    singly, public traffic would swamp the page; unlisted, as before, nobody
+    was ever asked to fill the gaps.
+    """
+    from Frontline_agent.models import Ticket
+    if not _hears_handoffs(person):
+        return []
+    gaps = (Ticket.objects
+            .filter(company=person.company, category='knowledge_gap', status__in=OPEN_TICKET_STATUSES)
+            .filter(Q(assigned_to__isnull=True) | Q(assigned_to__username=WIDGET_ACCOUNT)))
+    count = gaps.count()
+    if not count:
+        return []
+    latest = gaps.order_by('-created_at', '-id').values_list('title', flat=True).first() or ''
+    return [_item('frontline', 'knowledge_gaps', person.company.id,
+                  f"{count} question{'' if count == 1 else 's'} the assistant couldn't answer",
+                  detail=f'Latest: {latest}'[:200],
+                  action='Review', link='/frontline/dashboard?tab=tickets')]
 
 
 # ---- HR -------------------------------------------------------------------------

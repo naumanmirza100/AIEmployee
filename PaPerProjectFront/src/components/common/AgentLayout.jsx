@@ -64,7 +64,7 @@ const AgentLayout = () => {
   useEffect(() => {
     let cancelled = false;
     const { moduleKey } = meta;
-    // null moduleKey → always granted (matches AI SDR's historic behaviour).
+    // null moduleKey → always granted. No agent uses that any more.
     if (!moduleKey) {
       setAccessBySection((prev) => (prev[section] === true ? prev : { ...prev, [section]: true }));
       return undefined;

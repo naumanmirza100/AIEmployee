@@ -10,8 +10,15 @@ import { labelOf } from '@/utils/labels';
 /** One preview step as a sentence: what it would do, and to whom. */
 function describe(step) {
   const kind = labelOf(step.type) || 'Step';
+  if (step.skipped) return `${kind}: will be skipped — ${step.error}`;
   if (step.error) return `${kind}: won't work — ${step.error}`;
   if (step.type === 'send_email') return `Email ${step.recipient}`;
+  if (step.type === 'schedule_meeting' && step.scheduled_at) {
+    const at = new Date(step.scheduled_at);
+    if (!Number.isNaN(at.getTime())) {
+      return `Book a meeting around ${at.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`;
+    }
+  }
   if (step.type === 'update_employee') {
     return `Change ${Object.entries(step.fields || {}).map(([k, v]) => `${labelOf(k).toLowerCase()} to "${v}"`).join(', ')}`;
   }

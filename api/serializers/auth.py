@@ -91,12 +91,29 @@ class UserSerializer(serializers.ModelSerializer):
     lastLogin = serializers.DateTimeField(source='last_login', read_only=True)
     createdAt = serializers.DateTimeField(source='date_joined', read_only=True)
     profile = serializers.SerializerMethodField()
-    
+    # `phone` was listed below without being declared here, and User has no
+    # such column, so this serializer raised on every use: GET auth/me answered
+    # 500 for everybody. The screens ask it on each page load and sign the
+    # person out when it fails, so an employee or platform admin was signed
+    # out by every reload and every link opened in a new tab.
+    phone = serializers.SerializerMethodField()
+    # The same two facts sign-in returns. The screens read `role` to decide
+    # what an employee sees; without them a reload would lose it.
+    role = serializers.SerializerMethodField()
+    createdByCompanyUser = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ['id', 'email', 'firstName', 'lastName', 'phone', 'userType', 
-                  'accountStatus', 'emailVerified', 'lastLogin', 'createdAt', 'profile']
+        fields = ['id', 'email', 'firstName', 'lastName', 'phone', 'userType',
+                  'accountStatus', 'emailVerified', 'lastLogin', 'createdAt', 'profile',
+                  'role', 'createdByCompanyUser']
         read_only_fields = ['id', 'email']
+
+    def get_role(self, obj):
+        return obj.profile.role if hasattr(obj, 'profile') else None
+
+    def get_createdByCompanyUser(self, obj):
+        return hasattr(obj, 'profile') and obj.profile.created_by_company_user_id is not None
     
     def get_userType(self, obj):
         """Get user type (client, freelancer, admin)"""

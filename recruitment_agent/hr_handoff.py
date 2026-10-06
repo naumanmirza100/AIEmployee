@@ -28,9 +28,8 @@ SUGGESTED_START_IN_DAYS = 14
 
 
 def hr_available(company) -> bool:
-    from core.models import CompanyModulePurchase
-    return bool(company) and CompanyModulePurchase.objects.filter(
-        company=company, module_name='hr_agent', status='active').exists()
+    from core.modules import has_module
+    return bool(company) and has_module(company, 'hr_agent')
 
 
 def job_for(interview):

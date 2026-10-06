@@ -5,7 +5,7 @@ Also mirrors Contact rows to HubSpot when the tenant has the integration enabled
 """
 import logging
 from django.db import transaction
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from .models import Ticket, Contact
@@ -42,6 +42,11 @@ def run_workflow_triggers_on_ticket_update(sender, instance, created, **kwargs):
         # dropping all signals. The next code path will still run.
         logger.exception("workflow_context guard import failed — proceeding without guard")
     try:
+        # Ticket automations are the agent working by itself: not for a company
+        # whose Frontline subscription is not active (core/modules.py).
+        from core.modules import has_module
+        if not has_module(instance.company_id, 'frontline_agent'):
+            return
         from api.views.frontline_agent import _run_workflow_triggers
         user = getattr(instance, 'created_by', None)
         if not user:
@@ -104,9 +109,49 @@ def _task_saved(sender, instance, created=False, raw=False, **kwargs):
         logger.exception("ticket_tasks: could not update tickets for task %s", instance.pk)
 
 
+# ... and when it is deleted, alone or with its project, the ticket keeps a
+# note. Runs for every task deleted anywhere, so: one indexed lookup, and it
+# never raises.
+def _task_deleting(sender, instance, **kwargs):
+    try:
+        from Frontline_agent.ticket_tasks import task_deleted
+        task_deleted(instance)
+    except Exception:
+        logger.exception("ticket_tasks: could not note the deletion of task %s", instance.pk)
+
+
+# The other direction: a ticket that has a task tells it when it is closed,
+# reopened or made urgent. The save hook fires on every save, so what the row
+# held before is read first (only for tickets that have a task) and compared.
+@receiver(pre_save, sender=Ticket)
+def _remember_ticket_before(sender, instance, raw=False, **kwargs):
+    instance._before_save = None
+    if raw or not instance.pk or not instance.pm_task_id:
+        return
+    try:
+        instance._before_save = (Ticket.objects.filter(pk=instance.pk)
+                                 .values('status', 'priority').first())
+    except Exception:
+        logger.exception("ticket_tasks: could not read ticket %s before its save", instance.pk)
+
+
+@receiver(post_save, sender=Ticket)
+def _tell_task_about_ticket(sender, instance, created=False, raw=False, **kwargs):
+    before = getattr(instance, '_before_save', None)
+    instance._before_save = None
+    if raw or created or not before or not instance.pm_task_id:
+        return
+    try:
+        from Frontline_agent.ticket_tasks import ticket_changed
+        ticket_changed(instance, before)
+    except Exception:
+        logger.exception("ticket_tasks: could not tell the task about ticket %s", instance.pk)
+
+
 def _connect_task_signal():
     from core.models import Task
     post_save.connect(_task_saved, sender=Task, weak=False, dispatch_uid='frontline-ticket-task-done')
+    pre_delete.connect(_task_deleting, sender=Task, weak=False, dispatch_uid='frontline-ticket-task-deleted')
 
 
 _connect_task_signal()

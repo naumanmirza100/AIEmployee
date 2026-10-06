@@ -6,10 +6,11 @@ offboarding / leave-approval workflow can declaratively orchestrate side
 effects across the HR domain.
 
 Step types implemented:
-  * **send_email**           — render an `HRNotificationTemplate` body and email a recipient
+  * **send_email**           — email a recipient: an `HRNotificationTemplate`, or `subject`/`body` in the step
   * **update_employee**      — set fields on the Employee row in `context_data['employee_id']`
   * **update_leave_balance** — adjust a `LeaveBalance` for {employee, leave_type}
-  * **schedule_meeting**     — create an `HRMeeting` row
+  * **schedule_meeting**     — create an `HRMeeting` row, at `scheduled_at` or a number of days from
+                               now / from the employee's start date
   * **provision_account**    — placeholder side-effect, logs intent (wire to your IT system)
   * **assign_training**      — placeholder side-effect (wire to your LMS)
   * **assign_manager**       — set Employee.manager
@@ -17,6 +18,9 @@ Step types implemented:
   * **wait** / **wait_for_duration** — non-blocking pause via `_WorkflowPauseSignal`
   * **notify_template**      — schedule an `HRScheduledNotification` row
   * Unknown types are no-ops (forward compat).
+
+Any step may carry `continue_on_error: true`: if it fails, the run records why,
+marks the step skipped and carries on with the rest.
 """
 from __future__ import annotations
 
@@ -59,61 +63,102 @@ def _render(body: str, ctx: dict) -> str:
         return ''
     out = body
     for k, v in (ctx or {}).items():
-        out = out.replace('{{' + str(k) + '}}', str(v) if v is not None else '')
+        value = str(v) if v is not None else ''
+        out = out.replace('{{' + str(k) + '}}', value).replace('{{ ' + str(k) + ' }}', value)
     return out
 
 
+def _own_employee(ctx, employee_id):
+    """The employee with this id in the workflow's own company, or None.
+
+    A step may name any id, and steps are written by whoever saves the
+    workflow. Looked up by id alone, one company's workflow could change
+    another company's employee. `company_id` is set by `execute_workflow` from
+    the workflow itself, never from the caller.
+    """
+    from hr_agent.models import Employee
+    company_id = (ctx or {}).get('company_id')
+    if not (company_id and employee_id):
+        return None
+    return Employee.objects.filter(pk=employee_id, company_id=company_id).first()
+
+
+def _employee_fields(ctx) -> dict:
+    """`{{employee.full_name}}` and friends, for the employee the run is about.
+    The ready-made workflows are written with these."""
+    e = _own_employee(ctx, (ctx or {}).get('employee_id'))
+    if not e:
+        return {}
+    return {
+        'employee.full_name': e.full_name,
+        'employee.first_name': (e.full_name or '').split(' ')[0],
+        'employee.work_email': e.work_email,
+        'employee.job_title': e.job_title,
+        'employee.department': e.department,
+        'employee.start_date': f'{e.start_date:%d %B %Y}' if e.start_date else 'to be confirmed',
+        'employee.manager_name': e.manager.full_name if e.manager_id else '',
+    }
+
+
 def _step_send_email(step, ctx, simulate):
+    """Email one person. The text is a saved notification template
+    (`template_id` / `template_name`) or written in the step itself
+    (`subject` + `body`), which is how the ready-made workflows carry theirs."""
     from django.core.mail import send_mail
     from hr_agent.models import HRNotificationTemplate
 
     template_id = step.get('template_id')
     template_name = step.get('template_name')
+    render_ctx = {**ctx, **_employee_fields(ctx), **(step.get('context') or {})}
     recipient = _render(
-        step.get('recipient_email') or ctx.get('recipient_email') or ctx.get('employee_email') or '{{employee_email}}',
-        ctx,
+        step.get('recipient_email') or step.get('to')
+        or ctx.get('recipient_email') or ctx.get('employee_email') or '{{employee_email}}',
+        render_ctx,
     ).strip()
     if not recipient or '@' not in recipient:
         return False, {'done': False, 'error': 'Missing recipient email'}, None
 
     tpl = None
-    if template_id:
-        tpl = HRNotificationTemplate.objects.filter(pk=template_id).first()
-    elif template_name:
-        tpl = HRNotificationTemplate.objects.filter(name=template_name).first()
-    if not tpl:
-        return False, {'done': False, 'error': 'Template not found'}, None
-
-    body = _render(tpl.body, {**ctx, **(step.get('context') or {})})
-    subject = _render(tpl.subject or tpl.name, {**ctx, **(step.get('context') or {})})
+    if template_id or template_name:
+        own_templates = HRNotificationTemplate.objects.filter(company_id=ctx.get('company_id') or 0)
+        tpl = (own_templates.filter(pk=template_id).first() if template_id
+               else own_templates.filter(name=template_name).first())
+        if not tpl:
+            return False, {'done': False, 'error': 'Template not found'}, None
+        body, subject = _render(tpl.body, render_ctx), _render(tpl.subject or tpl.name, render_ctx)
+    elif (step.get('body') or '').strip():
+        body, subject = _render(step['body'], render_ctx), _render(step.get('subject') or '', render_ctx)
+    else:
+        return False, {'done': False, 'error': 'This email step has no template and no text'}, None
+    sent = {'recipient': recipient, **({'template_id': tpl.id} if tpl else {'subject': subject})}
 
     if simulate:
-        return True, {'done': True, 'simulated': True,
-                      'recipient': recipient, 'template_id': tpl.id}, None
+        return True, {'done': True, 'simulated': True, **sent}, None
     try:
         send_mail(
             subject=subject or 'HR Notification', message=body,
             from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
             recipient_list=[recipient], fail_silently=False,
         )
-        return True, {'done': True, 'recipient': recipient, 'template_id': tpl.id}, None
+        return True, {'done': True, **sent}, None
     except Exception as exc:
         return False, {'done': False, 'error': f"{type(exc).__name__}: {exc}"}, None
 
 
 def _step_update_employee(step, ctx, simulate):
-    from hr_agent.models import Employee
     employee_id = step.get('employee_id') or ctx.get('employee_id')
     if not employee_id:
         return False, {'done': False, 'error': 'Missing employee_id'}, None
     fields = step.get('fields') or {}
     if not isinstance(fields, dict) or not fields:
         return False, {'done': False, 'error': 'No `fields` to update'}, None
-    if simulate:
-        return True, {'done': True, 'simulated': True, 'employee_id': employee_id, 'fields': fields}, None
-    e = Employee.objects.filter(pk=employee_id).first()
+    e = _own_employee(ctx, employee_id)
     if not e:
         return False, {'done': False, 'error': 'Employee not found'}, None
+    if fields.get('manager_id') and not _own_employee(ctx, fields['manager_id']):
+        return False, {'done': False, 'error': 'Manager not found'}, None
+    if simulate:
+        return True, {'done': True, 'simulated': True, 'employee_id': employee_id, 'fields': fields}, None
     SAFE = {'job_title', 'department', 'employment_status', 'employment_type',
             'probation_end_date', 'manager_id', 'timezone_name'}
     update_fields = []
@@ -136,6 +181,8 @@ def _step_update_leave_balance(step, ctx, simulate):
     delta_accrued = step.get('delta_accrued_days')
     if not employee_id or (delta_used is None and delta_accrued is None):
         return False, {'done': False, 'error': 'employee_id and at least one delta required'}, None
+    if not _own_employee(ctx, employee_id):
+        return False, {'done': False, 'error': 'Employee not found'}, None
     if simulate:
         return True, {'done': True, 'simulated': True, 'employee_id': employee_id,
                       'leave_type': leave_type,
@@ -151,12 +198,43 @@ def _step_update_leave_balance(step, ctx, simulate):
     return True, {'done': True, 'employee_id': employee_id, 'remaining': bal.remaining}, None
 
 
+def _day_from_offset(step, employee, tz_name):
+    """The start time for a step that names a day, not a moment:
+    `offset_days_from_now`, or `offset_days_from_start` counted from the
+    employee's start date. 10:00 in the meeting's time zone unless the step
+    says `at_hour`; never today or earlier, and never on a weekend."""
+    from datetime import datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+    from django.utils import timezone as dj_timezone
+
+    def number(key, default=0):
+        try:
+            return int(step.get(key))
+        except (TypeError, ValueError):
+            return default
+
+    zone = ZoneInfo(tz_name)
+    today = dj_timezone.now().astimezone(zone).date()
+    if step.get('offset_days_from_start') is not None:
+        start = employee.start_date if (employee is not None and employee.start_date) else today
+        day = start + timedelta(days=number('offset_days_from_start'))
+    else:
+        day = today + timedelta(days=number('offset_days_from_now'))
+    if day <= today:
+        day = today + timedelta(days=1)
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return datetime.combine(day, time(max(0, min(23, number('at_hour', 10)))), tzinfo=zone)
+
+
 def _step_schedule_meeting(step, ctx, simulate):
     """Book an HR meeting for the workflow's employee.
 
     Same rules as a booking made by hand: the employee needs an employee
     login, and the slot must be free across the PM, HR and Frontline
-    calendars. A clash fails the step with the reason in its result.
+    calendars. A clash fails the step with the reason in its result, unless
+    the step named a day and not a moment: then the first free time found
+    near it is booked instead.
     """
     from datetime import datetime, timezone as dt_timezone
     from django.utils import timezone as dj_timezone
@@ -176,22 +254,35 @@ def _step_schedule_meeting(step, ctx, simulate):
     company_id = ctx.get('company_id')
     if not company_id:
         return False, {'done': False, 'error': 'context_data.company_id required'}, None
-    if not when:
-        return False, {'done': False, 'error': 'scheduled_at required'}, None
-    try:
-        sched = datetime.fromisoformat(str(when).replace('Z', '+00:00'))
-    except ValueError:
-        return False, {'done': False, 'error': 'scheduled_at must be ISO-8601'}, None
-    if dj_timezone.is_naive(sched):
-        sched = dj_timezone.make_aware(sched, dt_timezone.utc)
+    emp = (Employee.objects.filter(pk=employee_id, company_id=company_id).first()
+           if employee_id else None)
+    tz_name = zone_name(step.get('timezone_name') or (emp.timezone_name if emp else None))
+    by_day = not when and (step.get('offset_days_from_start') is not None
+                           or step.get('offset_days_from_now') is not None)
+    if by_day:
+        sched = _day_from_offset(step, emp, tz_name)
+    elif not when:
+        return False, {'done': False,
+                       'error': 'This meeting step has no time: give scheduled_at or a day offset'}, None
+    else:
+        try:
+            sched = datetime.fromisoformat(str(when).replace('Z', '+00:00'))
+        except ValueError:
+            return False, {'done': False, 'error': 'scheduled_at must be ISO-8601'}, None
+        if dj_timezone.is_naive(sched):
+            sched = dj_timezone.make_aware(sched, dt_timezone.utc)
     if simulate:
         return True, {'done': True, 'simulated': True, 'meeting_type': meeting_type,
                       'scheduled_at': sched.isoformat()}, None
 
     organizer = (Employee.objects.filter(pk=organizer_id, company_id=company_id).first()
                  if organizer_id else None)
-    emp = (Employee.objects.filter(pk=employee_id, company_id=company_id).first()
-           if employee_id else None)
+    if organizer is None and step.get('with_manager') and emp is not None and emp.manager_id:
+        organizer = emp.manager
+    if organizer is None and step.get('with_hr'):
+        from hr_agent.alerts import hr_admins
+        organizer = (Employee.objects.filter(company_id=company_id, company_user__in=hr_admins(company_id))
+                     .exclude(pk=getattr(emp, 'pk', None)).order_by('id').first())
 
     seat_ids = [e.id for e in (emp, organizer) if e]
     links = login_user_ids_for_employees(seat_ids)
@@ -204,20 +295,32 @@ def _step_schedule_meeting(step, ctx, simulate):
 
     visibility = ('private' if meeting_type in ('exit_interview', 'grievance_hearing',
                                                 'performance_review') else 'company')
-    tz_name = zone_name(step.get('timezone_name'))
-    try:
+
+    def book(at):
         with booking_guard(people):
-            ensure_free(people, sched, duration_minutes, tz_name=tz_name,
+            ensure_free(people, at, duration_minutes, tz_name=tz_name,
                         viewer_source='hr', reveal_private=True)
-            m = HRMeeting.objects.create(
+            meeting = HRMeeting.objects.create(
                 company_id=company_id,
                 title=title[:200], description=step.get('description') or '',
                 meeting_type=meeting_type, visibility=visibility, organizer=organizer,
-                scheduled_at=sched, duration_minutes=duration_minutes,
+                scheduled_at=at, duration_minutes=duration_minutes,
                 timezone_name=tz_name,
             )
             if emp:
-                m.participants.add(emp)
+                meeting.participants.add(emp)
+        return meeting
+
+    try:
+        try:
+            m = book(sched)
+        except ScheduleConflict as clash:
+            # Someone is busy at 10:00 that day. The step asked for a day, so
+            # take the nearest time everyone is free.
+            if not (by_day and clash.suggestions):
+                raise
+            sched = clash.suggestions[0]
+            m = book(sched)
     except ScheduleConflict as clash:
         return False, {'done': False, 'error': clash.text(),
                        'conflicts': clash.payload()['data']['conflicts'],
@@ -252,17 +355,18 @@ def _step_assign_training(step, ctx, simulate):
 
 
 def _step_assign_manager(step, ctx, simulate):
-    from hr_agent.models import Employee
     employee_id = step.get('employee_id') or ctx.get('employee_id')
     manager_id = step.get('manager_id')
     if not (employee_id and manager_id):
         return False, {'done': False, 'error': 'employee_id and manager_id required'}, None
+    e = _own_employee(ctx, employee_id)
+    if not e:
+        return False, {'done': False, 'error': 'Employee not found'}, None
+    if not _own_employee(ctx, manager_id):
+        return False, {'done': False, 'error': 'Manager not found'}, None
     if simulate:
         return True, {'done': True, 'simulated': True,
                       'employee_id': employee_id, 'manager_id': manager_id}, None
-    e = Employee.objects.filter(pk=employee_id).first()
-    if not e:
-        return False, {'done': False, 'error': 'Employee not found'}, None
     e.manager_id = manager_id
     e.save(update_fields=['manager_id', 'updated_at'])
     return True, {'done': True, 'employee_id': employee_id, 'manager_id': manager_id}, None
@@ -272,9 +376,7 @@ def _step_notify_template(step, ctx, simulate):
     """Schedule an `HRScheduledNotification` so the regular sender picks it up.
     Useful when you need a delayed reminder a few hours/days from now."""
     from datetime import timedelta as _td
-    from hr_agent.models import (
-        HRNotificationTemplate, HRScheduledNotification, Employee,
-    )
+    from hr_agent.models import HRNotificationTemplate, HRScheduledNotification
     template_id = step.get('template_id')
     template_name = step.get('template_name')
     delay_minutes = int(step.get('delay_minutes') or 0)
@@ -292,7 +394,7 @@ def _step_notify_template(step, ctx, simulate):
     if simulate:
         return True, {'done': True, 'simulated': True, 'template_id': tpl.id,
                       'delay_minutes': delay_minutes}, None
-    employee = Employee.objects.filter(pk=employee_id).first() if employee_id else None
+    employee = _own_employee(ctx, employee_id)
     n = HRScheduledNotification.objects.create(
         company_id=company_id, template=tpl,
         recipient_employee=employee,
@@ -418,6 +520,10 @@ def _execute_step_list(steps, workflow, context_data, simulate, start_monotonic,
                 results.append(result_entry)
                 break
             if attempt > retries:
+                if step.get('continue_on_error'):
+                    # Not worth stopping the run for: say why and carry on.
+                    results.append({**result_entry, 'skipped': True})
+                    break
                 results.append(result_entry)
                 return False, results, result_entry.get('error', 'step_failed')
             if timeout and (_time.monotonic() - start_monotonic) > timeout:
@@ -440,6 +546,10 @@ def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False
     provided) and schedules a Celery resume task — mirroring Frontline's
     `_persist_and_schedule_resume`. Caller checks `result_data['paused']`.
     """
+    # The company is the workflow's, whatever the caller put in the context.
+    # Every step that touches a record looks it up inside this company.
+    context_data = dict(context_data or {})
+    context_data['company_id'] = workflow.company_id
     steps = _steps_override if _steps_override is not None else (workflow.steps or [])
     timeout = int(getattr(workflow, 'timeout_seconds', 0) or 0)
     effective_timeout = max(1, int(timeout - (_prior_elapsed or 0))) if timeout else 0
@@ -476,6 +586,7 @@ def execute_workflow(workflow, context_data, executed_by_user, *, simulate=False
     total_elapsed = round((_prior_elapsed or 0) + (_time.monotonic() - start), 3)
     return ok, {
         'steps_completed': sum(1 for r in combined if r.get('done')),
+        'steps_skipped': sum(1 for r in combined if r.get('skipped')),
         'results': combined, 'simulated': simulate,
         'elapsed_seconds': total_elapsed,
     }, err

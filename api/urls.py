@@ -46,10 +46,12 @@ from api.views import admin_api_keys
 from api.views import operations_agent
 from api.views import ai_sdr_agent as sdr_api
 from api.views import crm_sync_agent as crm_api
-from api.views.health import health_check, ping
+from api.views.health import health_check, ping, version
 from api.views import public_jobs
 from api.views import my_work
 from api.views import notification_settings
+from api.views import do_not_email
+from api.views import company_logins
 from api.views import quick_chats
 
 app_name = 'api'
@@ -57,6 +59,7 @@ app_name = 'api'
 urlpatterns = [
     # Health check
     re_path(r'^health/?$', health_check, name='health_check'),  # DB + process
+    re_path(r'^version/?$', version, name='api_version'),  # GET: API level, for the screens (core/version.py)
     re_path(r'^ping/?$', ping, name='ping'),  # process only, no DB
 
     # Public Job Application (no auth required)
@@ -294,6 +297,13 @@ urlpatterns = [
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
     re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
             name='company_notification_settings'),  # GET/PATCH
+    # The company's dashboard logins and their roles (api/views/company_logins.py).
+    re_path(r'^company/logins/?$', company_logins.company_logins, name='company_logins'),  # GET/POST
+    re_path(r'^company/logins/(?P<login_id>\d+)/?$', company_logins.company_login, name='company_login'),  # PATCH
+    # Addresses the company must not send outreach to, for every agent (core/do_not_email.py).
+    re_path(r'^company/do-not-email/?$', do_not_email.company_do_not_email, name='company_do_not_email'),  # GET/POST
+    re_path(r'^company/do-not-email/(?P<entry_id>\d+)/?$', do_not_email.company_do_not_email_entry,
+            name='company_do_not_email_entry'),  # DELETE
     # Floating Quick Chat history (PM, HR, Frontline), on the server (api/views/quick_chats.py).
     re_path(r'^quick-chats/?$', quick_chats.list_quick_chats, name='quick_chats_list'),  # GET
     re_path(r'^quick-chats/(?P<client_id>[A-Za-z0-9_-]{1,64})/?$', quick_chats.quick_chat,

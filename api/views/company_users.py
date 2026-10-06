@@ -15,9 +15,51 @@ from django.utils import timezone
 from django.db.models import Q
 
 from api.authentication import CompanyUserTokenAuthentication
-from api.permissions import IsCompanyUserOnly
+from api.permissions import IsCompanyAdmin, IsCompanyUserOnly
 from core.models import CompanyUser, UserProfile, Company
 from api.serializers.company_users import CompanyUserManagementSerializer, UserListSerializer
+
+
+def _company_employee_logins(company_user):
+    """Every employee login of the caller's company, switched off or not.
+
+    The Users tab used to list only the logins this dashboard login had created
+    itself, admins included, while every agent's people lists were
+    company-wide: a colleague's employees showed up in HR and Recruitment but
+    could not be seen, edited or switched off here by anyone else.
+    The dashboard logins' own user records are not employees and stay out.
+    """
+    company = company_user.company
+    if company is None:
+        return User.objects.filter(profile__created_by_company_user=company_user)
+    own_records = CompanyUser.objects.filter(company=company, login_user__isnull=False).values('login_user_id')
+    return (User.objects
+            .filter(Q(profile__company=company) | Q(profile__created_by_company_user__company=company))
+            .exclude(id__in=own_records)
+            .exclude(is_staff=True).exclude(is_superuser=True)
+            .distinct())
+
+
+def _refusal(user, company_user, *, changing):
+    """None when the caller may see (or, with `changing`, change) this login;
+    otherwise the response to send. Anyone in the company may see one. Its
+    creator may change it, and so may an owner or admin; without that second
+    rule widening the list would let any login reset any employee's password.
+    """
+    if not _company_employee_logins(company_user).filter(pk=user.pk).exists():
+        return Response({
+            'status': 'error',
+            'message': 'User not found or access denied'
+        }, status=status.HTTP_404_NOT_FOUND)
+    if not changing:
+        return None
+    created_it = user.profile.created_by_company_user_id == company_user.id
+    if created_it or company_user.role in IsCompanyAdmin.ADMIN_ROLES:
+        return None
+    return Response({
+        'status': 'error',
+        'message': 'Only an owner or admin of your company can change a login that someone else created.'
+    }, status=status.HTTP_403_FORBIDDEN)
 
 
 @api_view(['POST'])
@@ -260,19 +302,10 @@ def list_users(request):
         company_user = request.user
         company = company_user.company
         
-        # Get all users created by this company user
-        # Filter only users that have profiles and were created by this company user
-        users = User.objects.filter(
-            profile__created_by_company_user=company_user
-        ).select_related('profile').prefetch_related('profile__created_by_company_user').order_by('-date_joined')
-        
-        # Optional: Also include users from same company (not just created by this user)
-        include_company_users = request.GET.get('include_company_users', 'false').lower() == 'true'
-        if include_company_users:
-            users = User.objects.filter(
-                Q(profile__created_by_company_user=company_user) |
-                Q(profile__company=company)
-            ).select_related('profile').prefetch_related('profile__created_by_company_user').distinct().order_by('-date_joined')
+        # Everyone's employee logins, not only the ones this login created.
+        users = (_company_employee_logins(company_user)
+                 .select_related('profile').prefetch_related('profile__created_by_company_user')
+                 .order_by('-date_joined'))
         
         # Pagination
         page = int(request.GET.get('page', 1))
@@ -328,11 +361,9 @@ def get_user(request, userId):
         user = get_object_or_404(User, id=userId)
         
         # Check if user was created by this company user
-        if not hasattr(user, 'profile') or user.profile.created_by_company_user != company_user:
-            return Response({
-                'status': 'error',
-                'message': 'User not found or access denied'
-            }, status=status.HTTP_404_NOT_FOUND)
+        refused = _refusal(user, company_user, changing=False)
+        if refused:
+            return refused
         
         serializer = UserListSerializer(user)
         
@@ -364,11 +395,9 @@ def update_user(request, userId):
         # Get user and verify it was created by this company user
         user = get_object_or_404(User, id=userId)
         
-        if not hasattr(user, 'profile') or user.profile.created_by_company_user != company_user:
-            return Response({
-                'status': 'error',
-                'message': 'User not found or access denied'
-            }, status=status.HTTP_404_NOT_FOUND)
+        refused = _refusal(user, company_user, changing=True)
+        if refused:
+            return refused
         
         data = request.data
         
@@ -456,11 +485,9 @@ def delete_user(request, userId):
         # Get user and verify it was created by this company user
         user = get_object_or_404(User, id=userId)
         
-        if not hasattr(user, 'profile') or user.profile.created_by_company_user != company_user:
-            return Response({
-                'status': 'error',
-                'message': 'User not found or access denied'
-            }, status=status.HTTP_404_NOT_FOUND)
+        refused = _refusal(user, company_user, changing=True)
+        if refused:
+            return refused
         
         # Deactivate user instead of deleting
         user.is_active = False
@@ -492,11 +519,9 @@ def reactivate_user(request, userId):
 
         user = get_object_or_404(User, id=userId)
 
-        if not hasattr(user, 'profile') or user.profile.created_by_company_user != company_user:
-            return Response({
-                'status': 'error',
-                'message': 'User not found or access denied'
-            }, status=status.HTTP_404_NOT_FOUND)
+        refused = _refusal(user, company_user, changing=True)
+        if refused:
+            return refused
 
         if user.is_active:
             return Response({

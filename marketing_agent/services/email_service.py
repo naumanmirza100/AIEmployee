@@ -155,7 +155,8 @@ class EmailService:
         lead: Lead,
         campaign: Campaign,
         test_email: Optional[str] = None,
-        email_account: Optional['EmailAccount'] = None
+        email_account: Optional['EmailAccount'] = None,
+        confirms_unsubscribe: bool = False,
     ) -> Dict:
         """
         Send email to a lead using a template
@@ -172,6 +173,20 @@ class EmailService:
             except (Lead.DoesNotExist, Exception):
                 pass
         
+        # Never to an address on the company's do-not-email list
+        # (core/do_not_email.py). Two sends are let through: a test send, which
+        # goes to the person testing, and the one confirmation a company set up
+        # for unsubscribe replies.
+        if test_email is None and not confirms_unsubscribe:
+            from marketing_agent.services.do_not_email import is_blocked_for
+            if is_blocked_for(campaign, recipient_email):
+                logger.info("Email not sent: %s is on the company do-not-email list", recipient_email)
+                return {
+                    'success': False,
+                    'blocked': True,
+                    'error': 'This address is on the company do-not-email list.',
+                }
+
         context_vars = self._get_lead_context(lead, campaign)
         # Unconditionally ensure first_name/name are set when we have recipient (sequence sends often have blank lead)
         if recipient_email and '@' in recipient_email:

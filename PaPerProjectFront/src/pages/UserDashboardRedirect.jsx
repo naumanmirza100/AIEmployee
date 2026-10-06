@@ -6,16 +6,17 @@ import { useAuth } from '@/contexts/AuthContext';
 /**
  * UserDashboardRedirect — replaces the old /user/dashboard landing.
  *
- * Sends project managers to the full PM dashboard (which duplicated the
- * PM branch of the old UserDashboardPage anyway) and every other
- * employee to the new /me/home shell. The legacy page is still reachable
- * at /user/dashboard/classic for rollback / debugging.
+ * Sends every employee to the /me/home shell. Employees with the Project
+ * Manager role used to go to the company's Project Manager dashboard, which
+ * needs a dashboard login's key and refused nearly everything they tried;
+ * their own project screen (/user/dashboard/classic, which uses the employee
+ * API) is linked from My Space home.
  *
  * See USER_DASHBOARD_REDESIGN.md, Chunks G + I.
  */
 export default function UserDashboardRedirect() {
   const navigate = useNavigate();
-  const { user, isAuthenticated, loading, isProjectManager } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
 
   useEffect(() => {
     if (loading) return;
@@ -23,12 +24,8 @@ export default function UserDashboardRedirect() {
       navigate('/login', { replace: true });
       return;
     }
-    if (isProjectManager && isProjectManager()) {
-      navigate('/project-manager/dashboard', { replace: true });
-    } else {
-      navigate('/me/home', { replace: true });
-    }
-  }, [user, isAuthenticated, loading, isProjectManager, navigate]);
+    navigate('/me/home', { replace: true });
+  }, [user, isAuthenticated, loading, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--sfc-07030f)' }}>

@@ -24,6 +24,8 @@ import {
   PenTool,
   Bell,
   Mail,
+  MailX,
+  UserCog,
   RefreshCw,
   MessageSquare,
   Monitor,
@@ -128,6 +130,8 @@ const ALL_AGENTS = [
       { label: 'Documents',     icon: FileText,    path: '/marketing/dashboard', tab: 'documents' },
       { label: 'Notifications', icon: Bell,        path: '/marketing/dashboard', tab: 'notifications' },
       { label: 'Saved Graphs',  icon: Sparkles,    path: '/marketing/dashboard', tab: 'saved-graphs' },
+      // One list for the company, shared with AI SDR (core/do_not_email.py).
+      { label: 'Do-not-email list', icon: MailX,   path: '/company/settings/do-not-email' },
     ],
   },
   {
@@ -211,7 +215,14 @@ const ALL_AGENTS = [
       { label: 'Analytics', icon: BarChart3,       path: '/ai-sdr/analytics' },
       { label: 'CRM Sync',  icon: RefreshCw,       path: '/ai-sdr/crm-sync' },
       { label: 'Settings',  icon: Settings,        path: '/ai-sdr/settings' },
+      { label: 'Do-not-email list', icon: MailX,   path: '/company/settings/do-not-email' },
     ],
+  },
+  {
+    // Priced and access-checked as its own agent; the screens did not know it
+    // existed. Its page is the one AI SDR shows as a tab.
+    key: 'crm_sync_agent', label: 'CRM Sync', icon: RefreshCw,
+    section: 'crm-sync', path: '/crm-sync', basePath: '/crm-sync',
   },
   {
     key: 'hr_agent', label: 'HR Support Agent', icon: Users,
@@ -265,6 +276,12 @@ const ALL_AGENTS = [
   },
 ];
 
+/** Where "Open Agent" goes for a bought agent, or null for one with no screens. */
+export const agentHomePath = (moduleKey) => ALL_AGENTS.find((a) => a.key === moduleKey)?.path || null;
+
+// A menu entry that belongs to another agent: shown only when that one is bought too.
+const NEEDS_MODULE = { '/ai-sdr/crm-sync': 'crm_sync_agent' };
+
 /**
  * Build the navItems array for DashboardNavbar / AgentSidebar.
  *
@@ -284,6 +301,7 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
     { label: 'Projects',        icon: FolderKanban, path: '/company/dashboard/projects' },
     { label: 'Applications',    icon: Users,        path: '/company/dashboard/applications' },
     { label: 'Users',           icon: UserCheck,    path: '/company/dashboard/users' },
+    { label: 'Logins & roles',  icon: UserCog,      path: '/company/settings/team' },
     { label: 'All Users Tasks', icon: ListTodo,     path: '/company/dashboard/all-tasks' },
     ...(purchasedModules.includes('frontline_agent')
       ? [{ label: 'Ticket Tasks', icon: Ticket, path: '/company/dashboard/ticket-tasks' }]
@@ -317,7 +335,9 @@ export const getAgentNavItems = (purchasedModules, currentSection, navigate) => 
         icon: agent.icon,
         section: agent.section,
         basePath: agent.basePath,
-        children: agent.children || null,
+        children: agent.children
+          ? agent.children.filter((c) => !NEEDS_MODULE[c.path] || purchasedModules.includes(NEEDS_MODULE[c.path]))
+          : null,
         onClick: () => navigate(agent.path),
       });
     }
