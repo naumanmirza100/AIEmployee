@@ -26,6 +26,10 @@ class AgentProviderTests(TestCase):
                               ('marketing_agent', 'openai'), ('ai_sdr_agent', 'groq')):
             Agent.objects.update_or_create(slug=slug, defaults={'name': slug, 'default_provider': default})
         self.company = Company.objects.create(name='Acme', email='acme@test.local')
+        # A key is only ever picked for an agent the company has.
+        for slug in ('hr_agent', 'recruitment_agent', 'marketing_agent', 'ai_sdr_agent'):
+            CompanyModulePurchase.objects.create(company=self.company, module_name=slug,
+                                                 status='active', is_complimentary=True)
         self.login = CompanyUser.objects.create(
             company=self.company, email='dana@test.local', full_name='Dana',
             role='admin', password_hash='x', is_active=True)
@@ -37,6 +41,11 @@ class AgentProviderTests(TestCase):
         key.save()
         return key
 
+    def own_key_in_use(self, agent, provider):
+        """The company's own key, with the agent switched to it as saving one does."""
+        AgentTokenQuota.objects.filter(company=self.company, agent_name=agent).update(preferred_pool='byok')
+        return self.company_key(agent, provider)
+
     def platform_key(self, provider):
         key = PlatformAPIKey(provider=provider, status='active', encrypted_key='')
         key.set_plaintext_key('platform-key-0123456789')
@@ -46,7 +55,7 @@ class AgentProviderTests(TestCase):
     # ---- choosing a key for a call ------------------------------------------
 
     def test_a_saved_key_the_agent_cant_call_is_a_clear_error(self):
-        self.company_key('hr_agent', 'claude')
+        self.own_key_in_use('hr_agent', 'claude')
         with self.assertRaises(UnsupportedProvider) as caught:
             resolve_for_call(self.company, 'hr_agent')
         self.assertIn("can't use Claude / Anthropic keys", caught.exception.user_message)
@@ -59,7 +68,7 @@ class AgentProviderTests(TestCase):
         self.assertIn('ask your admin', caught.exception.user_message)
 
     def test_a_supported_key_is_used(self):
-        self.company_key('hr_agent', 'groq')
+        self.own_key_in_use('hr_agent', 'groq')
         self.assertEqual(resolve_for_call(self.company, 'hr_agent').provider, 'groq')
 
     def test_the_platform_fallback_never_hands_an_agent_a_key_it_cant_call(self):
@@ -81,7 +90,7 @@ class AgentProviderTests(TestCase):
         self.assertTrue(provider_supported('an_agent_nobody_checked', 'claude'))
 
     def test_an_openai_key_already_saved_for_ai_sdr_is_a_clear_error_not_a_silent_fallback(self):
-        self.company_key('ai_sdr_agent', 'openai')
+        self.own_key_in_use('ai_sdr_agent', 'openai')
         with self.assertRaises(UnsupportedProvider) as caught:
             resolve_for_call(self.company, 'ai_sdr_agent')
         self.assertIn('Use Groq (Llama) instead', caught.exception.user_message)
@@ -97,8 +106,6 @@ class AgentProviderTests(TestCase):
 
     def save_own_key(self, agent, provider):
         from api.views.company_api_keys import upsert_byok_key
-        CompanyModulePurchase.objects.get_or_create(
-            company=self.company, module_name=agent, defaults={'status': 'active', 'is_complimentary': True})
         request = APIRequestFactory().post('/', {'agent_name': agent, 'provider': provider,
                                                  'api_key': 'test-key-0123456789'}, format='json')
         force_authenticate(request, user=self.login)
@@ -120,8 +127,6 @@ class AgentProviderTests(TestCase):
 
     def test_the_key_form_is_told_which_providers_to_offer(self):
         from api.views.company_api_keys import list_agent_keys
-        CompanyModulePurchase.objects.create(company=self.company, module_name='recruitment_agent',
-                                             status='active', is_complimentary=True)
         request = APIRequestFactory().get('/')
         force_authenticate(request, user=self.login)
         response = list_agent_keys(request)
@@ -145,7 +150,7 @@ class OwnKeyIsUsedTests(TestCase):
     def setUp(self):
         AgentProviderTests.setUp(self)
         self.platform_key('openai')
-        self.quota = AgentTokenQuota.objects.create(company=self.company, agent_name='hr_agent')
+        self.quota = AgentTokenQuota.objects.get(company=self.company, agent_name='hr_agent')   # made by the purchase
 
     def pool(self):
         self.quota.refresh_from_db()
@@ -179,7 +184,7 @@ class OwnKeyIsUsedTests(TestCase):
             resolve_for_call(self.company, 'hr_agent')
 
     def test_only_that_agent_changes(self):
-        other = AgentTokenQuota.objects.create(company=self.company, agent_name='recruitment_agent')
+        other = AgentTokenQuota.objects.get(company=self.company, agent_name='recruitment_agent')
         self.save_own_key('hr_agent', 'groq')
         other.refresh_from_db()
         self.assertEqual(other.preferred_pool, 'managed')

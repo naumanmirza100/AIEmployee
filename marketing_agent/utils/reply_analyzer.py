@@ -377,8 +377,10 @@ REMINDER: "Thank you and see you soon!" = positive. "Thanks and same to you!" = 
             # Note WHY the AI path was skipped so it shows in the reply's analysis
             # (not a silent drop to keywords). Token/quota exhaustion is the common
             # case — surface it plainly.
-            from core.api_key_service import QuotaExhausted, NoKeyAvailable
-            if isinstance(e, QuotaExhausted):
+            from core.api_key_service import QuotaExhausted, NoKeyAvailable, NotSubscribed
+            if isinstance(e, NotSubscribed):
+                note = 'The Marketing agent is not active for this company, so the reply was analyzed with keyword rules instead.'
+            elif isinstance(e, QuotaExhausted):
                 note = 'AI tokens finished — analyzed with keyword rules instead. Top up the agent quota to re-enable AI analysis.'
             elif isinstance(e, NoKeyAvailable):
                 note = 'No AI key available — analyzed with keyword rules instead. Assign an API key to enable AI analysis.'

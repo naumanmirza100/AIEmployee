@@ -86,9 +86,11 @@ def create_company_job(request):
             # Save with company and company_user
             job = serializer.save(company=company, company_user=company_user)
             
-            # Parse keywords if requested (defaults to True, same as Django views.py)
+            # Parse keywords if requested (defaults to True, same as Django views.py).
+            # Keywords are Recruitment's AI: a company without that agent posts
+            # the job without them.
             keywords_json = None
-            if parse_keywords and job.description:
+            if parse_keywords and job.description and _company_has_recruitment_agent(company):
                 try:
                     agents = _make_agents(company)
                     job_desc_agent = agents['job_desc_agent']
@@ -185,7 +187,7 @@ def update_company_job(request, id):
         if serializer.is_valid():
             job = serializer.save()
             
-            if description_changed and job.description:
+            if description_changed and job.description and _company_has_recruitment_agent(company):
                 try:
                     agents = _make_agents(company)
                     job_desc_agent = agents['job_desc_agent']
