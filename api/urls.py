@@ -709,6 +709,7 @@ urlpatterns = [
     re_path(r'^modules/stripe-webhook/?$', module_purchase.stripe_webhook, name='stripe_webhook'),  # POST (raw, no auth)
     re_path(r'^modules/verify-session/?$', module_purchase.verify_session, name='verify_session'),  # POST (public)
     re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/leftovers/?$', module_purchase.lapsed_agent_leftovers, name='lapsed_agent_leftovers'),  # GET
     re_path(r'^modules/(?P<module_name>[a-z_]+)/plans/?$', module_purchase.get_module_plans, name='get_module_plans'),  # GET (public)
     # Subscription management
     re_path(r'^modules/(?P<module_name>[a-z_]+)/cancel/?$', module_purchase.cancel_subscription, name='cancel_subscription'),  # POST

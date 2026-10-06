@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { CreditCard, Lock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import LapsedLeftovers from '@/components/common/LapsedLeftovers';
 
 export const BILLING_PATH = '/company/dashboard/billing';
 
@@ -44,10 +45,11 @@ export const lockToast = (title, status) => {
 };
 
 /**
- * Shown in place of an agent the company cannot open. `children` go under the
- * buttons: what a company may still do with an agent it no longer has.
+ * Shown in place of an agent the company cannot open. Under the buttons, for an
+ * agent it once had: what that agent still holds on everyone's calendar, which
+ * can be removed from here and nowhere else.
  */
-const AgentLocked = ({ title, moduleKey, status, children }) => {
+const AgentLocked = ({ title, moduleKey, status }) => {
   const navigate = useNavigate();
   const reason = lockReason(status);
   const { heading, body, action } = WORDING[reason](title);
@@ -73,7 +75,7 @@ const AgentLocked = ({ title, moduleKey, status, children }) => {
         <Button onClick={() => navigate('/company/dashboard')} variant="outline" className="w-full">
           Back to Dashboard
         </Button>
-        {children}
+        {reason !== 'not_bought' && moduleKey && <LapsedLeftovers moduleKey={moduleKey} />}
       </CardContent>
     </Card>
   );

@@ -18,7 +18,7 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from core.models import CalendarBlock, Company, CompanyUser, UserProfile
+from core.models import CalendarBlock, Company, CompanyModulePurchase, CompanyUser, UserProfile
 from core.scheduling import ScheduleConflict, ensure_free
 from recruitment_agent import interview_time
 from recruitment_agent.agents.interview_scheduling import interview_scheduling_agent as scheduling
@@ -41,6 +41,9 @@ class InterviewSchedulingTests(TestCase):
 
     def setUp(self):
         self.company = Company.objects.create(name='Acme', email='acme@test.local')
+        # A candidate can only book with a company that has Recruitment.
+        CompanyModulePurchase.objects.create(company=self.company, module_name='recruitment_agent',
+                                             status='active', is_complimentary=True)
         self.recruiter = CompanyUser.objects.create(
             company=self.company, email='rae@test.local', full_name='Rae Recruiter',
             role='admin', password_hash='x', is_active=True)

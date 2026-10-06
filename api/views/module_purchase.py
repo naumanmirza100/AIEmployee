@@ -518,6 +518,17 @@ def check_module_access(request, module_name):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def lapsed_agent_leftovers(request, module_name):
+    """What an agent the company no longer has still holds on everyone's
+    calendar, with the call that removes each entry. See core/leftovers.py."""
+    from core import leftovers
+    return Response({'status': 'success', 'module_name': module_name,
+                     **leftovers.upcoming(request.user, module_name)}, status=status.HTTP_200_OK)
+
+
 # ---------------------------------------------------------------------------
 # Checkout — Stripe Subscription mode
 # ---------------------------------------------------------------------------

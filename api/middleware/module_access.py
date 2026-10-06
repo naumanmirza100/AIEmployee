@@ -77,7 +77,8 @@ class ModuleAccessMiddleware:
         module_name = self._module_for(request.path)
         if module_name:
             company = self._resolve_company(request)
-            if company is not None and not self._has_module(company, module_name):
+            if (company is not None and not self._has_module(company, module_name)
+                    and not self._is_clean_up(request, company, module_name)):
                 logger.info(
                     'Blocked %s for company %s — no active %s subscription.',
                     request.path, company.id, module_name,
@@ -92,6 +93,16 @@ class ModuleAccessMiddleware:
                     'message': message,
                 }, status=403)
         return self.get_response(request)
+
+    @staticmethod
+    def _is_clean_up(request, company, module_name):
+        """One of the few calls a company may still make to an agent it once had:
+        cancelling what that agent left on everyone's calendar. The list, and
+        why it is a list, is in core/leftovers.py."""
+        from core import leftovers
+        rest = re.sub(r'^v\d+/', '', request.path[len('/api/'):])
+        return (leftovers.is_clean_up(module_name, request.method, rest, lambda: request.body)
+                and leftovers.had_module(company, module_name))
 
     @staticmethod
     def _why_not(company, module_name):

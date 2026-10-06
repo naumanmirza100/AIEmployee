@@ -1291,6 +1291,9 @@ def get_available_slots_for_interview(request, token):
     if interview.status in ('COMPLETED', 'CANCELLED'):
         return JsonResponse({"error": f"Interview is {interview.status.lower()}"}, status=410)
 
+    if _booking_is_closed(interview):
+        return JsonResponse({"error": _BOOKING_CLOSED}, status=410)
+
     # Check if job's scheduling date range has expired
     if interview.is_job_schedule_expired():
         return JsonResponse({"error": "The scheduling period for this position has ended. Please contact the recruiter."}, status=410)
@@ -1404,6 +1407,19 @@ def get_available_slots_for_interview(request, token):
     })
 
 
+_BOOKING_CLOSED = ('Interview booking for this position is not available at the moment. '
+                   'Please contact the recruiter.')
+
+
+def _booking_is_closed(interview) -> bool:
+    """A candidate cannot book with a company that no longer has Recruitment.
+    When the company cannot be told, booking stays open, as it was."""
+    from core.modules import has_module
+    from recruitment_agent.interview_time import company_id_for
+    company_id = company_id_for(interview)
+    return bool(company_id) and not has_module(company_id, 'recruitment_agent')
+
+
 @require_http_methods(["GET", "POST"])
 def candidate_select_slot(request, token):
     """
@@ -1434,6 +1450,15 @@ def candidate_select_slot(request, token):
     if interview.status in ('COMPLETED', 'CANCELLED'):
         return render(request, 'recruitment_agent/candidate_slot_selection.html', {
             'error': f'This interview has been {interview.status.lower()}. Please contact the recruiter.',
+            'invalid_token': True,
+        })
+
+    # The recruiter's company no longer has Recruitment. Nobody there can see
+    # or move this booking, yet it would still land on the interviewers'
+    # calendars. (Someone who booked earlier still sees their details, above.)
+    if _booking_is_closed(interview):
+        return render(request, 'recruitment_agent/candidate_slot_selection.html', {
+            'error': _BOOKING_CLOSED,
             'invalid_token': True,
         })
 

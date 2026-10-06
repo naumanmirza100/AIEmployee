@@ -13,7 +13,7 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from api.views import company_jobs, recruitment_agent as views
-from core.models import Company, CompanyUser
+from core.models import Company, CompanyModulePurchase, CompanyUser
 from recruitment_agent import interview_time, sharing
 from recruitment_agent.agents.interview_scheduling import InterviewSchedulingAgent
 from recruitment_agent.agents.recruitment_qa_agent import RecruitmentQAAgent
@@ -31,6 +31,9 @@ class SharingTestCase(TestCase):
 
     def setUp(self):
         self.company = Company.objects.create(name='Acme', email='acme@test.local')
+        # A candidate can only book with a company that has Recruitment.
+        CompanyModulePurchase.objects.create(company=self.company, module_name='recruitment_agent',
+                                             status='active', is_complimentary=True)
         self.ann = self.login(self.company, 'ann@test.local', 'Ann Owner', 'admin')
         self.ben = self.login(self.company, 'ben@test.local', 'Ben Colleague', 'company_user')
         rival = Company.objects.create(name='Rival', email='rival@test.local')
