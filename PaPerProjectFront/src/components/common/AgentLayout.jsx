@@ -2,10 +2,9 @@ import { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Lock } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
+import AgentLocked, { lockToast } from '@/components/common/AgentLocked';
 import AgentBreadcrumb from '@/components/common/AgentBreadcrumb';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
@@ -37,6 +36,9 @@ const AgentLayout = () => {
   // Access is tracked per-section so switching agents re-evaluates the gate
   // without re-fetching modules. { [section]: true|false }
   const [accessBySection, setAccessBySection] = useState({});
+  // The purchase's status where there is one, so the lock screen can say why:
+  // a failed card is not "not purchased". { [section]: 'past_due' | ... }
+  const [statusBySection, setStatusBySection] = useState({});
 
   const meta = agentMetaForPath(location.pathname) || AGENT_META['ai-sdr'];
   const section = meta.section;
@@ -77,14 +79,9 @@ const AgentLayout = () => {
         const response = await checkModuleAccess(moduleKey);
         if (cancelled) return;
         const granted = response?.status === 'success' ? !!response.has_access : true;
+        setStatusBySection((prev) => ({ ...prev, [section]: response?.purchase_status }));
         setAccessBySection((prev) => ({ ...prev, [section]: granted }));
-        if (!granted) {
-          toast({
-            title: 'Module Not Purchased',
-            description: `Please purchase the ${meta.title} module to access this dashboard.`,
-            variant: 'default',
-          });
-        }
+        if (!granted) toast(lockToast(meta.title, response?.purchase_status));
       } catch {
         // Network/API error — fail open (matches previous per-page behaviour).
         if (!cancelled) setAccessBySection((prev) => ({ ...prev, [section]: true }));
@@ -129,31 +126,7 @@ const AgentLayout = () => {
   } else if (!hasAccess) {
     content = (
       <div className="flex items-center justify-center py-16 px-4">
-        <Card className="max-w-md w-full">
-          <CardHeader>
-            <div className="flex items-center justify-center mb-4">
-              <Lock className="h-12 w-12 text-muted-foreground" />
-            </div>
-            <CardTitle className="text-center">Module Not Purchased</CardTitle>
-            <CardDescription className="text-center">
-              You need to purchase the {meta.title} module to access this dashboard.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Deep link straight to this agent's card on the landing page rather
-                than dropping the visitor at the top of it — HomePage scrolls to
-                the section and ModuleCardsSection rings the matching card. */}
-            <Button
-              onClick={() => navigate(`/#ai-modules${meta.moduleKey ? `?agent=${encodeURIComponent(meta.moduleKey)}` : ''}`)}
-              className="w-full"
-            >
-              Go to Home Page to Purchase
-            </Button>
-            <Button onClick={() => navigate('/company/dashboard')} variant="outline" className="w-full">
-              Back to Dashboard
-            </Button>
-          </CardContent>
-        </Card>
+        <AgentLocked title={meta.title} moduleKey={meta.moduleKey} status={statusBySection[section]} />
       </div>
     );
   } else {

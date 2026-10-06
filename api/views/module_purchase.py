@@ -782,6 +782,7 @@ def _handle_subscription_updated(subscription):
         new_status = purchase.status
 
     # Only update status if it's a meaningful change
+    paused_now = purchase.status == 'active' and new_status == 'past_due'
     if purchase.status != new_status:
         purchase.status = new_status
         update_fields.append('status')
@@ -808,6 +809,11 @@ def _handle_subscription_updated(subscription):
         purchase.save(update_fields=update_fields)
         logger.info('Subscription %s updated: status=%s cancel_at_period_end=%s period_end=%s',
                      stripe_sub_id, purchase.status, purchase.cancel_at_period_end, purchase.current_period_end)
+
+    # This event, or the scheduled re-check, often gets here before the failed
+    # invoice's own event. Access stopped either way, and nobody was told.
+    if paused_now:
+        _tell_payment_failed(purchase, stripe_status)
 
 
 def _handle_subscription_deleted(subscription):
@@ -937,6 +943,40 @@ def _notify_company(purchase, title, message, severity='warning', data=None):
         )
 
 
+BILLING_PAGE = '/company/dashboard/billing'
+
+
+def _tell_payment_failed(purchase, stripe_status='past_due', hosted_invoice_url=None):
+    """Tell the company a payment failed and the agent is paused, because it is.
+
+    Access stops the moment the row leaves 'active' (CompanyModulePurchase.is_active),
+    for every login and for the public chat widget. The alert used to say the
+    payment would be retried and to update the card "to avoid losing access".
+
+    Call it on the change away from 'active' only. One failed charge raises two
+    Stripe events (the invoice's and the subscription's) and the scheduled
+    re-check sees it too; whichever gets there first sends the one alert.
+    """
+    display = purchase.get_module_name_display()
+    if stripe_status == 'past_due':
+        what = f'We could not take the payment for {display}'
+        retry = ' We will try the card again over the next few days.'
+    else:
+        what = f'The payment for {display} has not gone through'
+        retry = ''
+    _notify_company(
+        purchase,
+        title=f'Payment failed — {display} is paused',
+        message=(
+            f'{what}, so it is paused for everyone in your company until the payment '
+            f'succeeds.{retry} To get back in sooner, update your card on the Billing page.'
+        ),
+        severity='critical',
+        data={'module_name': purchase.module_name, 'reason': 'payment_failed',
+              'hosted_invoice_url': hosted_invoice_url, 'link': BILLING_PAGE},
+    )
+
+
 def _handle_invoice_payment_failed(invoice):
     """Handle invoice.payment_failed — Stripe retry/dunning in progress."""
     stripe_sub_id = _invoice_subscription_id(invoice)
@@ -953,20 +993,7 @@ def _handle_invoice_payment_failed(invoice):
         purchase.status = 'past_due'
         purchase.save(update_fields=['status', 'updated_at'])
         logger.warning('Payment failed for sub %s — marked past_due', stripe_sub_id)
-
-        display = purchase.get_module_name_display()
-        _notify_company(
-            purchase,
-            title=f'Payment failed — {display}',
-            message=(
-                f'Your recurring payment for {display} could not be processed. '
-                'We will retry automatically over the next few days. Update your '
-                'payment method to avoid losing access.'
-            ),
-            severity='critical',
-            data={'module_name': purchase.module_name,
-                  'hosted_invoice_url': invoice.get('hosted_invoice_url')},
-        )
+        _tell_payment_failed(purchase, hosted_invoice_url=invoice.get('hosted_invoice_url'))
 
 
 def _handle_invoice_action_required(invoice):

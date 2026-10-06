@@ -367,6 +367,16 @@ const BillingOverview = () => {
                       </td>
                       <td className="py-2">
                         <div className="flex items-center gap-1 justify-end">
+                          {/* An unpaid invoice is why an agent is paused. Paying it on
+                              Stripe's page brings the agent back without waiting for
+                              the next automatic retry. */}
+                          {inv.status === 'open' && inv.hosted_invoice_url && (
+                            <Button size="sm" asChild>
+                              <a href={inv.hosted_invoice_url} target="_blank" rel="noopener noreferrer" data-testid="pay-invoice">
+                                Pay now
+                              </a>
+                            </Button>
+                          )}
                           {inv.hosted_invoice_url && (
                             <Button size="sm" variant="ghost" asChild>
                               <a href={inv.hosted_invoice_url} target="_blank" rel="noopener noreferrer" title="View invoice">

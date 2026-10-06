@@ -82,17 +82,33 @@ class ModuleAccessMiddleware:
                     'Blocked %s for company %s — no active %s subscription.',
                     request.path, company.id, module_name,
                 )
+                reason, message = self._why_not(company, module_name)
                 return JsonResponse({
                     'success': False,
                     'status': 'error',
                     'error': 'subscription_required',
+                    'reason': reason,
                     'module_name': module_name,
-                    'message': (
-                        'Your subscription for this agent is not active. '
-                        'Please subscribe or renew to continue.'
-                    ),
+                    'message': message,
                 }, status=403)
         return self.get_response(request)
+
+    @staticmethod
+    def _why_not(company, module_name):
+        """('payment_failed' | 'lapsed' | 'not_bought', what to tell the caller).
+
+        After a failed card there is nothing to subscribe to: checkout refuses a
+        second subscription beside the one being retried. Send them to their card.
+        """
+        from core.models import CompanyModulePurchase
+        status = (CompanyModulePurchase.objects
+                  .filter(company=company, module_name=module_name)
+                  .values_list('status', flat=True).first())
+        if status == 'past_due':
+            return 'payment_failed', ('The payment for this agent failed, so it is paused. '
+                                      'Update your card on the Billing page to get back in.')
+        return ('lapsed' if status else 'not_bought'), ('Your subscription for this agent is not active. '
+                                                        'Please subscribe or renew to continue.')
 
     @staticmethod
     def _module_for(path):
