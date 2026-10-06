@@ -522,6 +522,70 @@ def check_module_access(request, module_name):
 # Checkout — Stripe Subscription mode
 # ---------------------------------------------------------------------------
 
+#: A subscription Stripe has finished with. In any other state it is still being
+#: billed, retried, or waiting for a payment the customer can complete.
+_ENDED_AT_STRIPE = ('canceled', 'incomplete_expired')
+
+
+def _refuse_checkout_if_still_subscribed(purchase):
+    """Ask Stripe about the subscription this row holds before starting another.
+
+    Returns a Response refusing the checkout, or None to go ahead.
+
+    Still live at Stripe: the row is brought up to date (the same repair the
+    scheduled re-check makes) and the checkout refused. A second subscription
+    would not replace the first; the company would be billed for both.
+
+    Stripe cannot be reached: refused too. Nothing is lost by waiting, since the
+    checkout itself needs Stripe, and guessing risks the double charge.
+    """
+    display = purchase.get_module_name_display()
+    try:
+        subscription = stripe.Subscription.retrieve(purchase.stripe_subscription_id)
+    except stripe.error.InvalidRequestError as exc:
+        if getattr(exc, 'code', None) == 'resource_missing' or getattr(exc, 'http_status', None) == 404:
+            return None             # Stripe has no such subscription: nothing to double
+        raise
+    except stripe.error.StripeError as exc:
+        logger.warning('Checkout: could not check sub %s (purchase %s) with Stripe: %s',
+                       purchase.stripe_subscription_id, purchase.id, exc)
+        return Response({
+            'status': 'error',
+            'error': 'stripe_unreachable',
+            'message': (
+                f'We could not check your current {display} subscription with Stripe, '
+                'so a new one was not started. Please try again in a few minutes.'
+            ),
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    stripe_status = subscription.get('status')
+    if stripe_status in _ENDED_AT_STRIPE:
+        return None
+
+    with transaction.atomic():
+        _handle_subscription_updated(subscription)
+    purchase.refresh_from_db()
+    logger.warning('Checkout refused: sub %s (purchase %s) is still %s at Stripe; local status now %s.',
+                   purchase.stripe_subscription_id, purchase.id, stripe_status, purchase.status)
+    if purchase.is_active():
+        return Response({
+            'status': 'error',
+            'error': 'already_active',
+            'message': (
+                f'{display} is already active: your subscription renewed and our record had '
+                'fallen behind. It is up to date now. Reload the page to open it.'
+            ),
+        }, status=status.HTTP_409_CONFLICT)
+    return Response({
+        'status': 'error',
+        'error': 'payment_required',
+        'message': (
+            f'{display} already has a subscription that has not ended, so a second one was '
+            'not started. Open the Billing page to pay or update your card, or contact support.'
+        ),
+    }, status=status.HTTP_409_CONFLICT)
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -575,6 +639,14 @@ def create_checkout_session(request):
                     'failed payment. Please update your payment method instead of subscribing again.'
                 ),
             }, status=status.HTTP_409_CONFLICT)
+
+        # Both checks above read our own copy, and that copy can be out of date:
+        # a renewal whose event never arrived leaves the row looking expired while
+        # Stripe goes on billing it. Ask Stripe before opening a second subscription.
+        if existing and existing.stripe_subscription_id:
+            refusal = _refuse_checkout_if_still_subscribed(existing)
+            if refusal is not None:
+                return refusal
 
         # A plan is REQUIRED
         plans = _active_plans_for(module_name)
