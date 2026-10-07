@@ -114,7 +114,7 @@ export default function HREmployeeLogins({ employee, logins, onChanged, onLoginC
         <div>
           <div className="text-xs text-white/50">Dashboard login</div>
           {logins.can_manage ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mt-1">
               <Select
                 value={linked ? String(linked.id) : NONE}
                 onValueChange={choose}
