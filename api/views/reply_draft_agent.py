@@ -13,14 +13,12 @@ from datetime import datetime, timedelta
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
-from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.db.models import Count, Max, Prefetch, Q
 from django.utils import timezone
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
-from core.models import CompanyUser
 from core.api_key_service import KeyServiceError
 from marketing_agent.models import Reply, Campaign, Lead, EmailSendHistory, EmailAccount
 from reply_draft_agent.agents.reply_draft_agent import ReplyDraftAgent
@@ -32,31 +30,12 @@ logger = logging.getLogger(__name__)
 
 
 def _get_or_create_user_for_company_user(company_user):
-    """Bridge CompanyUser → Django User. Copied from api/views/marketing_agent.py.
-
-    Uses get_or_create on `username` (the unique column) so concurrent first-visit
-    requests can't race each other into a UNIQUE-constraint violation on auth_user.
-    """
-    try:
-        return User.objects.get(email=company_user.email)
-    except User.DoesNotExist:
-        pass
-    username = f"company_user_{company_user.id}_{company_user.email}"
-    first_name = company_user.full_name.split()[0] if company_user.full_name else ''
-    last_name = (
-        ' '.join(company_user.full_name.split()[1:])
-        if company_user.full_name and len(company_user.full_name.split()) > 1
-        else ''
-    )
-    user, _ = User.objects.get_or_create(
-        username=username,
-        defaults={
-            'email': company_user.email,
-            'first_name': first_name,
-            'last_name': last_name,
-        },
-    )
-    return user
+    """The user record a dashboard login's inbox mail and drafts are stored
+    against. The same one every agent uses (core/logins.py). It used to be
+    looked up by email address, which failed with a server error as soon as two
+    user records shared the address."""
+    from core.logins import user_for
+    return user_for(company_user)
 
 
 def _enforce_module(company_user):
@@ -568,24 +547,14 @@ def _company_bridge_user_ids(company_user):
     in any company user's mailbox and the business rule is "show replies from
     leads across all of this company's campaigns".
     """
+    from core.logins import company_user_ids
+    caller_user = _get_or_create_user_for_company_user(company_user)      # made and linked on first use
     company = getattr(company_user, 'company', None)
     if company is None:
-        user = _get_or_create_user_for_company_user(company_user)
-        return [user.id]
-    emails = list(
-        CompanyUser.objects.filter(company=company, is_active=True)
-        .values_list('email', flat=True)
-    )
-    if not emails:
-        user = _get_or_create_user_for_company_user(company_user)
-        return [user.id]
-    ids = list(User.objects.filter(email__in=emails).values_list('id', flat=True))
-    # Always include the caller's own bridge user in case it hasn't been
-    # materialized for another CompanyUser yet.
-    caller_user = _get_or_create_user_for_company_user(company_user)
-    if caller_user.id not in ids:
-        ids.append(caller_user.id)
-    return ids
+        return [caller_user.id]
+    # The records linked to this company's own logins. Matching on their email
+    # addresses also picked up any other company's record with the same address.
+    return company_user_ids(company)
 
 
 def _visible_campaigns(user_ids):

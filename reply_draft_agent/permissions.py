@@ -9,7 +9,7 @@ from functools import wraps
 from django.http import JsonResponse
 from django.utils import timezone
 
-from core.models import CompanyModulePurchase, CompanyUser
+from core.models import CompanyModulePurchase
 
 
 MODULE_NAME = 'reply_draft_agent'
@@ -29,13 +29,12 @@ def _resolve_company(user):
     if company is not None:
         return company
 
-    email = getattr(user, 'email', None)
-    if email:
-        cu = CompanyUser.objects.filter(email=email, is_active=True).select_related('company').first()
-        if cu:
-            return cu.company
-
-    return None
+    # Through the dashboard login the user record is linked to, not the first
+    # company that happens to have a login at the same email address.
+    from core.logins import company_id_for
+    from core.models import Company
+    company_id = company_id_for(user)
+    return Company.objects.filter(pk=company_id).first() if company_id else None
 
 
 def company_has_module(company):

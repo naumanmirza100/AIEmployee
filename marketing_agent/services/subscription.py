@@ -7,8 +7,9 @@ cancelled, and nobody could open the screens to pause them.
 
 A campaign belongs to a user (`campaign.owner`), not to a company, so the
 company is worked out from the owner: the dashboard login that acts as that
-user, else the login with the same email. When no company can be found the
-campaign runs as before: a guess must not stop a paying customer's emails.
+user, else the login with the same email when only one company has it
+(core/logins.py). When no company can be found the campaign runs as before: a
+guess must not stop a paying customer's emails.
 """
 import logging
 
@@ -19,16 +20,8 @@ logger = logging.getLogger(__name__)
 
 def company_id_for_owner(owner):
     """The company a campaign owner belongs to, or None when it cannot be told."""
-    if owner is None:
-        return None
-    from core.models import CompanyUser
-    by_link = CompanyUser.objects.filter(login_user_id=owner.pk).values_list('company_id', flat=True).first()
-    if by_link:
-        return by_link
-    email = (getattr(owner, 'email', '') or '').strip()
-    if not email:
-        return None
-    return CompanyUser.objects.filter(email__iexact=email).values_list('company_id', flat=True).first()
+    from core.logins import company_id_for
+    return company_id_for(owner)
 
 
 class PayingCampaigns:

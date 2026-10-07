@@ -23,7 +23,6 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.conf import settings
-from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Count, Q
@@ -119,23 +118,8 @@ def _hr_get_or_create_user_for_company_user(company_user):
     audit). `CompanyUser.login_user` was added and backfilled by
     `core/migrations/0103`.
     """
-    if company_user is None:
-        return None
-    if company_user.login_user_id:
-        return company_user.login_user
-
-    username = f"company_user_{company_user.id}"
-    user = User.objects.filter(username=username).first()
-    if user is None:
-        names = (company_user.full_name or '').split()
-        user = User.objects.create_user(
-            username=username, email=company_user.email, password=None,
-            first_name=(names[0] if names else ''),
-            last_name=(' '.join(names[1:]) if len(names) > 1 else ''),
-        )
-    CompanyUser.objects.filter(pk=company_user.pk).update(login_user=user)
-    company_user.login_user = user
-    return user
+    from core.logins import user_for
+    return user_for(company_user)
 
 
 def _caller_login_user_id(company_user):

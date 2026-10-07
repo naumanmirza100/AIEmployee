@@ -15,16 +15,14 @@ logger = logging.getLogger(__name__)
 def _company_id_for_campaign(campaign):
     """Resolve the core.Company id for a campaign so the reply analyzer can get an
     LLM key. Marketing campaigns are owned by a Django User (campaign.owner), while
-    the key service is keyed by CompanyUser.company_id. A CompanyUser shares the
-    owner's email, so map owner-email → CompanyUser → company_id. Returns None if
-    no mapping exists (analyzer then falls back to keyword rules)."""
+    the key service is keyed by company. The owner's dashboard login says which
+    (core/logins.py); it used to be the first company, of any, with a login at
+    the owner's email address, so one company's replies could be analysed on
+    another's allowance. Returns None if the company cannot be told (the
+    analyzer then falls back to keyword rules)."""
     try:
-        owner = getattr(campaign, 'owner', None)
-        if not owner or not getattr(owner, 'email', None):
-            return None
-        from core.models import CompanyUser
-        cu = CompanyUser.objects.filter(email__iexact=owner.email).values_list('company_id', flat=True).first()
-        return cu
+        from core.logins import company_id_for
+        return company_id_for(getattr(campaign, 'owner', None))
     except Exception:
         return None
 

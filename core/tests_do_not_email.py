@@ -186,10 +186,10 @@ class MarketingBase(TestCase):
         self.company = Company.objects.create(name='Acme', email='acme@test.local')
         CompanyModulePurchase.objects.create(company=self.company, module_name='marketing_agent', status='active',
                                              is_complimentary=True)
-        self.mia = CompanyUser.objects.create(company=self.company, email='mia@acme.example', full_name='Mia M',
-                                              role='admin', password_hash='x', is_active=True)
-        # A campaign belongs to the user with the login's email.
+        # A campaign belongs to the login's own user record (core/logins.py).
         self.owner = get_user_model().objects.create_user(username='mia', password='x', email='mia@acme.example')
+        self.mia = CompanyUser.objects.create(company=self.company, email='mia@acme.example', full_name='Mia M',
+                                              role='admin', password_hash='x', is_active=True, login_user=self.owner)
         self.campaign = Campaign.objects.create(name='Spring', owner=self.owner, status='active')
         EmailAccount.objects.create(owner=self.owner, name='Main', email='mia@acme.example', smtp_host='smtp.test',
                                     smtp_port=587, smtp_username='u', smtp_password='p', is_active=True,
@@ -269,7 +269,8 @@ class MarketingSendTests(MarketingBase):
         self.assertEqual((result['success'], sent), (True, [VIC]))
 
     def test_a_campaign_with_no_known_company_sends_as_before(self):
-        CompanyUser.objects.filter(pk=self.mia.pk).update(email='moved@acme.example')
+        # No login is linked to the owner, and none has its address.
+        CompanyUser.objects.filter(pk=self.mia.pk).update(email='moved@acme.example', login_user=None)
         do_not_email.block(self.company, VIC)
         result, sent = self.send(self.lead())
         self.assertEqual((result['success'], sent), (True, [VIC]))

@@ -11,7 +11,6 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.core.paginator import Paginator
 from django.db.models import Q, Count, Sum, Avg
-from django.contrib.auth.models import User
 from django.http import HttpResponse
 from datetime import timedelta, datetime
 import imaplib
@@ -111,32 +110,11 @@ def _is_busy_error(e):
 
 
 def _get_or_create_user_for_company_user(company_user):
-    """
-    Get or create a Django User for a CompanyUser.
-    This is needed because marketing models use User, not CompanyUser.
-
-    Uses get_or_create on `username` (the unique column) so concurrent first-visit
-    requests can't race each other into a UNIQUE-constraint violation on auth_user.
-    """
-    existing = User.objects.filter(email=company_user.email).first()
-    if existing:
-        return existing
-    username = f"company_user_{company_user.id}_{company_user.email}"
-    first_name = company_user.full_name.split()[0] if company_user.full_name else ''
-    last_name = (
-        ' '.join(company_user.full_name.split()[1:])
-        if company_user.full_name and len(company_user.full_name.split()) > 1
-        else ''
-    )
-    user, _ = User.objects.get_or_create(
-        username=username,
-        defaults={
-            'email': company_user.email,
-            'first_name': first_name,
-            'last_name': last_name,
-        },
-    )
-    return user
+    """The user record a dashboard login's campaigns, leads and mail accounts
+    are stored against. The same one every agent uses: see core/logins.py for
+    why it is no longer looked up by email address."""
+    from core.logins import user_for
+    return user_for(company_user)
 
 
 @api_view(["GET"])
