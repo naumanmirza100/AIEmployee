@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import hrAgentService from '@/services/hrAgentService';
+import { getUserHandover, handOverUserWork } from '@/services/companyUserManagementService';
 
 /**
  * Hand over a leaver's open work in every agent.
@@ -24,7 +25,11 @@ const fmtWhen = (iso) => {
   });
 };
 
-export default function HandoverDialog({ employeeId, open, onOpenChange, onDone }) {
+/**
+ * `employeeId` opens it from an HR record. `userId` opens it for an employee
+ * login from Company, Users, at an address that does not need the HR agent.
+ */
+export default function HandoverDialog({ employeeId, userId, open, onOpenChange, onDone }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -37,7 +42,7 @@ export default function HandoverDialog({ employeeId, open, onOpenChange, onDone 
   const load = () => {
     setLoading(true);
     setError('');
-    hrAgentService.getEmployeeHandover(employeeId)
+    (userId ? getUserHandover(userId) : hrAgentService.getEmployeeHandover(employeeId))
       .then((res) => {
         setData(res?.data || null);
         setLabels(Object.fromEntries((res?.data?.groups || []).map((g) => [g.key, g.label])));
@@ -47,12 +52,12 @@ export default function HandoverDialog({ employeeId, open, onOpenChange, onDone 
   };
 
   useEffect(() => {
-    if (!open || !employeeId) return;
+    if (!open || !(employeeId || userId)) return;
     setChoice({});
     setResults(null);
     setData(null);
     load();
-  }, [open, employeeId]);           // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, employeeId, userId]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const chosen = Object.fromEntries(Object.entries(choice).filter(([, v]) => v));
 
@@ -60,7 +65,8 @@ export default function HandoverDialog({ employeeId, open, onOpenChange, onDone 
     setSaving(true);
     setError('');
     try {
-      const res = await hrAgentService.handOverEmployeeWork(employeeId, chosen);
+      const res = await (userId ? handOverUserWork(userId, chosen)
+        : hrAgentService.handOverEmployeeWork(employeeId, chosen));
       setResults(res?.data?.results || {});
       setData(res?.data?.remaining || null);
       setChoice({});

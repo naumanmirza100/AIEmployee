@@ -27,6 +27,7 @@ import pmAgentService from '@/services/pmAgentService';
 import frontlineAgentService from '@/services/frontlineAgentService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
+import HandoverDialog from '@/components/hr/HandoverDialog';
 import { API_BASE_URL } from '@/config/apiConfig';
 import {
   Building2, Plus, Briefcase, Users, Eye,
@@ -996,12 +997,18 @@ const CompanyDashboardPage = () => {
     }
   };
   
+  // The leaver whose work is being handed over, after Deactivate (owners and admins).
+  const [handoverUserId, setHandoverUserId] = useState(null);
+  const canHandOver = ['owner', 'admin'].includes(companyUser?.role);
+
   const handleDeleteUser = (userId) => {
     setConfirm({
       open: true,
       title: 'Deactivate this user?',
       description:
-        'They will no longer be able to log in or appear in task assignment dropdowns. You can reactivate them later.',
+        'They will no longer be able to log in or appear in task assignment dropdowns, and their HR record is '
+        + 'marked as offboarded. You can reactivate them later.'
+        + (canHandOver ? ' Next you can hand their open work to someone else.' : ''),
       confirmLabel: 'Deactivate user',
       variant: 'danger',
       loading: false,
@@ -1010,8 +1017,14 @@ const CompanyDashboardPage = () => {
         try {
           const response = await companyUserManagementService.deleteUser(userId);
           if (response.status === 'success') {
-            toast({ title: 'Success!', description: 'User deactivated successfully' });
+            toast({
+              title: 'User deactivated',
+              description: canHandOver
+                ? 'Their logins are switched off. Choose who takes their open work.'
+                : 'Their logins are switched off. Ask an owner or admin to hand over their open work.',
+            });
             fetchUsers();
+            if (canHandOver) setHandoverUserId(userId);
           }
           closeConfirm();
         } catch (error) {
@@ -3316,6 +3329,11 @@ const CompanyDashboardPage = () => {
           </DialogContent>
         </Dialog>
 
+        <HandoverDialog
+          userId={handoverUserId}
+          open={!!handoverUserId}
+          onOpenChange={(o) => { if (!o) setHandoverUserId(null); }}
+        />
         <ConfirmDialog
           open={confirm.open}
           onOpenChange={(o) => !o && closeConfirm()}

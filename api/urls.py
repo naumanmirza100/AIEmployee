@@ -193,6 +193,7 @@ urlpatterns = [
     re_path(r'^company/users/(?P<userId>\d+)/update/?$', company_users.update_user, name='company_update_user'),  # PUT/PATCH
     re_path(r'^company/users/(?P<userId>\d+)/delete/?$', company_users.delete_user, name='company_delete_user'),  # DELETE
     re_path(r'^company/users/(?P<userId>\d+)/reactivate/?$', company_users.reactivate_user, name='company_reactivate_user'),  # POST
+    re_path(r'^company/users/(?P<userId>\d+)/handover/?$', company_users.user_handover, name='company_user_handover'),  # GET, POST
     re_path(r'^company/users/tasks/?$', company_user_tasks.get_all_users_tasks, name='company_get_all_users_tasks'),  # GET
     
     # Company Auth endpoints

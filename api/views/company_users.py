@@ -62,6 +62,23 @@ def _refusal(user, company_user, *, changing):
     }, status=status.HTTP_403_FORBIDDEN)
 
 
+def _hr_record_of(user, company):
+    """The HR record of an employee login. Every login has one, whether or not
+    the company has bought HR; one from before that rule is made here."""
+    from hr_agent.models import Employee
+    record = Employee.objects.filter(user=user, company=company).first()
+    if record is None and company is not None:
+        from hr_agent.signals import _ensure_employee_for_user
+        record = _ensure_employee_for_user(user, company)
+    return record
+
+
+def _audit(company_user, action, record, **after):
+    from api.views.hr_agent import _write_audit_log
+    _write_audit_log(company_user, company_user.company, action, 'employee', record.id,
+                     after={**after, 'from': 'users_tab'})
+
+
 def _hr_record_for_new_login(company_user, data):
     """(the HR record this login is being made for, a refusal): at most one is set.
 
@@ -537,27 +554,55 @@ def update_user(request, userId):
 @permission_classes([IsCompanyUserOnly])
 def delete_user(request, userId):
     """
-    Delete user (deactivate instead of hard delete)
+    Deactivate a user: the person has left.
     DELETE /api/company/users/{userId}
+
+    This and HR's Deactivate used to be two switches that knew nothing of each
+    other. This one switched the login off, moved no work and left the HR
+    record active; HR's marked the record offboarded. Now this marks the
+    record offboarded, and saving that is what switches the person's logins
+    off (hr_agent.access), so either button does the same thing. The answer
+    says which record, so the screen can offer to hand their work over.
     """
     try:
         # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
         company_user = request.user
-        
-        # Get user and verify it was created by this company user
+
         user = get_object_or_404(User, id=userId)
-        
+
         refused = _refusal(user, company_user, changing=True)
         if refused:
             return refused
-        
-        # Deactivate user instead of deleting
-        user.is_active = False
-        user.save()
-        
+
+        from hr_agent import access as hr_access
+        from hr_agent.handover import dashboard_login
+        record = _hr_record_of(user, company_user.company)
+        own_login = dashboard_login(record) if record is not None else None
+        if own_login is not None and own_login.pk == company_user.pk:
+            return Response({
+                'status': 'error',
+                'message': "This is your own employee login: deactivating it would switch off the login you "
+                           "are using. Ask another admin to do it.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if record is not None and record.employment_status != 'offboarded':
+            previous = record.employment_status
+            record.employment_status = 'offboarded'
+            record.save(update_fields=['employment_status', 'updated_at'])
+            record.refresh_from_db(fields=['access_ended'])
+            _audit(company_user, 'employee.deactivate', record, employment_status='offboarded',
+                   previous_status=previous, access=hr_access.summary(record))
+        # With no record to speak for it, or one already offboarded, the login is switched off directly.
+        if User.objects.filter(pk=user.pk, is_active=True).update(is_active=False):
+            from rest_framework.authtoken.models import Token
+            Token.objects.filter(user_id=user.pk).delete()
+
         return Response({
             'status': 'success',
-            'message': 'User deactivated successfully'
+            'message': 'User deactivated successfully',
+            'data': {
+                'employee_id': record.id if record is not None else None,
+                'access': hr_access.summary(record) if record is not None else None,
+            },
         }, status=status.HTTP_200_OK)
     
     except Exception as e:
@@ -591,8 +636,20 @@ def reactivate_user(request, userId):
                 'message': 'User is already active'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        user.is_active = True
-        user.save()
+        # The other half of Deactivate: the HR record comes back from offboarded,
+        # and saving it switches back on what offboarding switched off.
+        record = _hr_record_of(user, company_user.company)
+        if record is not None and record.anonymized_at:
+            return Response({
+                'status': 'error',
+                'message': "This person's HR record was anonymised, so their login cannot be switched back on.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if record is not None and record.employment_status == 'offboarded':
+            record.employment_status = 'active'
+            record.save(update_fields=['employment_status', 'updated_at'])
+            _audit(company_user, 'employee.reactivate', record, employment_status='active')
+        User.objects.filter(pk=user.pk, is_active=False).update(is_active=True)
+        user.refresh_from_db()
 
         serializer = UserListSerializer(user)
 
@@ -609,3 +666,46 @@ def reactivate_user(request, userId):
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyAdmin])
+def user_handover(request, userId):
+    """
+    Hand over a leaver's open work in every agent (hr_agent.handover).
+    GET, POST /api/company/users/{userId}/handover
+
+    The same form HR has, at an address that does not need the HR agent: a
+    company without HR had no way at all to pass on a leaver's tasks, tickets,
+    meetings and interviews. Owners and admins only. Without HR, the two
+    groups that live on HR's screens (reports, leave to decide) are left out.
+    """
+    from core.modules import has_module
+    from hr_agent import handover
+
+    company_user = request.user
+    user = get_object_or_404(User, id=userId)
+    refused = _refusal(user, company_user, changing=False)
+    if refused:
+        return refused
+    record = _hr_record_of(user, company_user.company)
+    if record is None:
+        return Response({'status': 'error', 'message': 'User not found or access denied'},
+                        status=status.HTTP_404_NOT_FOUND)
+    with_hr = has_module(company_user.company, 'hr_agent')
+
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': handover.summary(record, with_hr=with_hr)})
+
+    assignments = (request.data or {}).get('assignments')
+    if not isinstance(assignments, dict) or not assignments:
+        return Response({'status': 'error', 'message': 'Choose who gets at least one group.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        results = handover.hand_over(record, assignments, company_user, with_hr=with_hr)
+    except ValueError as exc:
+        return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    _audit(company_user, 'employee.handover', record,
+           **{key: {'moved': r['moved'], 'to': r['to']} for key, r in results.items()})
+    return Response({'status': 'success', 'data': {'results': results,
+                                                   'remaining': handover.summary(record, with_hr=with_hr)}})
