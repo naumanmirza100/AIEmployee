@@ -647,6 +647,11 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                   employee={e}
                   logins={data.logins}
                   onChanged={(logins) => logins && setData((prev) => ({ ...prev, logins }))}
+                  onLoginCreated={async () => {
+                    // The record now has a login and may have a new work email.
+                    const refreshed = await hrAgentService.getHREmployeeDetail(e.id);
+                    setData(refreshed?.data || null);
+                  }}
                 />
               )}
               {chain.length > 0 && (

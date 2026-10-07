@@ -62,6 +62,36 @@ def _refusal(user, company_user, *, changing):
     }, status=status.HTTP_403_FORBIDDEN)
 
 
+def _hr_record_for_new_login(company_user, data):
+    """(the HR record this login is being made for, a refusal): at most one is set.
+
+    "Create login" on a person's HR record sends that record's id. Without it,
+    a login made at a different address from the record's became a second HR
+    record for the same person, and their onboarding started again.
+    """
+    raw = data.get('employee_id', data.get('employeeId'))
+    if raw in (None, ''):
+        return None, None
+    from api.views.hr_agent import _is_hr_admin
+    from hr_agent.models import Employee
+
+    def refuse(message, code):
+        return None, Response({'status': 'error', 'message': message}, status=code)
+
+    if not _is_hr_admin(company_user):
+        return refuse("Only an HR admin can create a login from a person's HR record.", status.HTTP_403_FORBIDDEN)
+    record = (Employee.objects.filter(pk=raw, company=company_user.company).first()
+              if str(raw).isdigit() else None)
+    if record is None:
+        return refuse('HR record not found.', status.HTTP_404_NOT_FOUND)
+    if record.user_id:
+        return refuse(f'{record.full_name} already has a login.', status.HTTP_400_BAD_REQUEST)
+    if record.anonymized_at or record.employment_status == 'offboarded':
+        return refuse(f'{record.full_name} has left. Reactivate their record before giving them a login.',
+                      status.HTTP_400_BAD_REQUEST)
+    return record, None
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -69,6 +99,9 @@ def create_user(request):
     """
     Create a new user (auth_user) by company user
     POST /api/company/users/create
+
+    With `employee_id`, the login is made for that HR record: the record is
+    given the login and takes its address, so there is still one record.
     """
     try:
         # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
@@ -83,6 +116,14 @@ def create_user(request):
         full_name = (data.get('fullName') or data.get('full_name', '')).strip()
         phone_number = (data.get('phoneNumber') or data.get('phone_number', '')).strip()
 
+        record, refusal = _hr_record_for_new_login(company_user, data)
+        if refusal is not None:
+            return refusal
+        if record is not None:
+            # HR already holds their name and number: neither is typed again, or checked again.
+            full_name = record.full_name
+            typed_phone, phone_number = phone_number, phone_number or (record.phone or '').strip()
+
         if not email or not password:
             return Response({
                 'status': 'error',
@@ -96,24 +137,24 @@ def create_user(request):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Full name: no digits allowed, only letters/spaces/dots/hyphens/apostrophes
-        if re.search(r'[0-9]', full_name):
+        if record is None and re.search(r'[0-9]', full_name):
             return Response({
                 'status': 'error',
                 'message': 'Full name must not contain numbers.'
             }, status=status.HTTP_400_BAD_REQUEST)
-        if not re.match(r"^[a-zA-Z\s.'\-]+$", full_name):
+        if record is None and not re.match(r"^[a-zA-Z\s.'\-]+$", full_name):
             return Response({
                 'status': 'error',
                 'message': "Full name can only contain letters, spaces, dots, hyphens, and apostrophes."
             }, status=status.HTTP_400_BAD_REQUEST)
         alpha_count = sum(1 for c in full_name if c.isalpha())
-        if alpha_count < 2:
+        if record is None and alpha_count < 2:
             return Response({
                 'status': 'error',
                 'message': 'Full name must contain at least 2 alphabetic characters.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        if not phone_number:
+        if not phone_number and record is None:
             return Response({
                 'status': 'error',
                 'message': 'Phone number is required'
@@ -121,7 +162,8 @@ def create_user(request):
 
         # Phone number validation - at least 7 digits, allows +, spaces, hyphens, parentheses
         phone_digits = sum(1 for c in phone_number if c.isdigit())
-        if not re.match(r'^[+]?[\d\s\-()]{7,20}$', phone_number) or phone_digits < 7:
+        to_check = phone_number if record is None else typed_phone
+        if to_check and (not re.match(r'^[+]?[\d\s\-()]{7,20}$', phone_number) or phone_digits < 7):
             return Response({
                 'status': 'error',
                 'message': 'Enter a valid phone number (at least 7 digits, e.g., +1234567890).'
@@ -212,6 +254,18 @@ def create_user(request):
                 'message': 'This email is already registered as a company user'
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        if record is not None:
+            # Work email is unique in a company, and this record is about to take the login's.
+            from hr_agent.models import Employee
+            clash = (Employee.objects.filter(company=record.company, work_email__iexact=email)
+                     .exclude(pk=record.pk).first())
+            if clash is not None:
+                return Response({
+                    'status': 'error',
+                    'message': f'Another HR record already uses {email}: {clash.full_name}. '
+                               'Give the login a different address, or use that record.',
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         # Check if username already exists
         if User.objects.filter(username=username).exists():
             # Append company user ID to make it unique
@@ -236,6 +290,13 @@ def create_user(request):
             is_staff=False,
             is_superuser=False
         )
+        if record is not None:
+            # Give the record its login before the profile below gets its company:
+            # saving that profile is what makes HR look for the person's record.
+            # It then finds this one instead of making a second, and brings the
+            # record's work email into step with the login's.
+            from hr_agent.models import Employee
+            Employee.objects.filter(pk=record.pk).update(user=user)
         
         # Create or update UserProfile
         profile, created = UserProfile.objects.get_or_create(
@@ -245,7 +306,7 @@ def create_user(request):
                 'company': company,
                 'created_by_company_user': company_user,
                 'company_name': company.name if company else None,
-                'phone_number': data.get('phoneNumber') or data.get('phone_number'),
+                'phone_number': phone_number or None,
                 'bio': data.get('bio'),
                 'location': data.get('location'),
             }
@@ -256,8 +317,8 @@ def create_user(request):
             profile.role = role
             profile.company = company
             profile.created_by_company_user = company_user
-            if data.get('phoneNumber') or data.get('phone_number'):
-                profile.phone_number = data.get('phoneNumber') or data.get('phone_number')
+            if phone_number:
+                profile.phone_number = phone_number
             if data.get('bio'):
                 profile.bio = data.get('bio')
             if data.get('location'):
@@ -275,7 +336,8 @@ def create_user(request):
             'message': 'User created successfully',
             'data': {
                 'user': serializer.data,
-                'token': token.key  # Return token for potential auto-login
+                'token': token.key,  # Return token for potential auto-login
+                'employee_id': record.id if record is not None else None,
             }
         }, status=status.HTTP_201_CREATED)
     

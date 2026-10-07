@@ -94,6 +94,23 @@ def new_starter_from_recruitment(employee, added_by='', onboarding=()):
     )
 
 
+def no_longer_hired(employee, outcome, changed_by=''):
+    """To HR admins, when Recruitment changes its mind about someone it handed
+    over. HR still has their record, and their onboarding may be running:
+    Recruitment used to say nothing."""
+    now = (outcome or '').replace('_', ' ').capitalize() or 'no decision'
+    by = f" Changed by {changed_by}." if changed_by else ''
+    return notify_company_users(
+        hr_admins(employee.company_id),
+        title=f"No longer hired: {employee.full_name}",
+        message=(f"Recruitment changed {employee.full_name} from Hired to {now}.{by} Their HR record is "
+                 "still there, and any onboarding that started is still running. Check whether they are joining."),
+        link='/hr/dashboard?tab=employees',
+        kind='hr_hire_withdrawn',
+        severity='warning',
+    )
+
+
 def workflow_needs_a_look(execution):
     """To HR admins, when a run fails or finishes without one of its steps.
     Nobody was told before, so a new hire could go without an orientation
