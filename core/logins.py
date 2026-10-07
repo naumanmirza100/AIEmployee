@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 def user_for(company_user):
     """The `auth.User` this dashboard login acts as, made on first use.
 
-    Never found by email: `CompanyUser` is unique per (company, email), so the
-    same address can be a login in two companies.
+    Never found by email across companies: `CompanyUser` is unique per
+    (company, email), so the same address can be a login in two of them.
     """
     if company_user is None:
         return None
@@ -36,7 +36,7 @@ def user_for(company_user):
     from core.models import CompanyUser
     User = get_user_model()
     username = f'company_user_{company_user.id}'
-    user = User.objects.filter(username=username).first()
+    user = User.objects.filter(username=username).first() or _own_employee_login(company_user)
     if user is None:
         names = (company_user.full_name or '').split()
         try:
@@ -52,6 +52,19 @@ def user_for(company_user):
     CompanyUser.objects.filter(pk=company_user.pk).update(login_user=user)
     company_user.login_user = user
     return user
+
+
+def _own_employee_login(company_user):
+    """This person's employee login, when they have one: an employee of the
+    same company with the same address, that no other dashboard login acts as.
+    Inside one company the same address is the same person; across companies it
+    proves nothing, which is why this never looks further than the company."""
+    from core.tenancy import members_of
+    email = (company_user.email or '').strip()
+    if not email or not company_user.company_id:
+        return None
+    matches = list(members_of(company_user.company).filter(email__iexact=email, company_logins__isnull=True)[:2])
+    return matches[0] if len(matches) == 1 else None
 
 
 def company_id_for(user):

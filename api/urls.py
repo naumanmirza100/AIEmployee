@@ -899,6 +899,8 @@ urlpatterns = [
     # Employee detail bundle + edit
     re_path(r'^hr/employees/(?P<employee_id>\d+)/?$', hr_agent.get_employee_detail, name='hr_get_employee_detail'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/update/?$', hr_agent.update_employee, name='hr_update_employee'),  # PATCH/POST
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/dashboard-login/?$', hr_agent.set_employee_dashboard_login, name='hr_set_employee_dashboard_login'),  # POST
+    re_path(r'^hr/dashboard-logins/?$', hr_agent.list_dashboard_logins, name='hr_list_dashboard_logins'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/?$', hr_agent.list_leave_balances, name='hr_list_leave_balances'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/adjust/?$', hr_agent.adjust_leave_balance, name='hr_adjust_leave_balance'),  # POST
     re_path(r'^hr/employees/(?P<employee_id>\d+)/deactivate/?$', hr_agent.deactivate_employee, name='hr_deactivate_employee'),  # POST
