@@ -6,10 +6,17 @@ Provides insights, analytics, and visualizations for project performance.
 from .base_agent import BaseAgent
 from .enhancements.chart_generation import ChartGenerator
 from core.models import Project, Task
+from core.tenancy import projects_for_company_user
 from typing import Dict, List, Optional
 from django.utils import timezone
 from datetime import datetime, timedelta
 import json
+
+
+def _projects_of(company_user):
+    """The projects a dashboard login may ask about: its company's. It used
+    to be only the ones that login had created itself."""
+    return projects_for_company_user(company_user) if company_user else Project.objects.all()
 
 
 class AnalyticsDashboardAgent(BaseAgent):
@@ -37,10 +44,7 @@ Always back up your analysis with data and provide specific recommendations."""
         self.log_action("Generating metrics", {"project_id": project_id})
 
         try:
-            filters = {"id": project_id}
-            if company_user:
-                filters["created_by_company_user"] = company_user
-            project = Project.objects.get(**filters)
+            project = _projects_of(company_user).get(id=project_id)
         except Project.DoesNotExist:
             return {"success": False, "error": f"Project with ID {project_id} not found"}
 
@@ -116,10 +120,7 @@ Always back up your analysis with data and provide specific recommendations."""
         self.log_action("Creating dashboard", {"project_id": project_id})
 
         try:
-            filters = {"id": project_id}
-            if company_user:
-                filters["created_by_company_user"] = company_user
-            project = Project.objects.get(**filters)
+            project = _projects_of(company_user).get(id=project_id)
         except Project.DoesNotExist:
             return {"success": False, "error": f"Project with ID {project_id} not found"}
 
@@ -170,10 +171,7 @@ Always back up your analysis with data and provide specific recommendations."""
         self.log_action("Tracking progress", {"project_id": project_id})
 
         try:
-            filters = {"id": project_id}
-            if company_user:
-                filters["created_by_company_user"] = company_user
-            project = Project.objects.get(**filters)
+            project = _projects_of(company_user).get(id=project_id)
         except Project.DoesNotExist:
             return {"success": False, "error": f"Project with ID {project_id} not found"}
 
@@ -225,10 +223,7 @@ Always back up your analysis with data and provide specific recommendations."""
         self.log_action("Analyzing productivity", {"project_id": project_id})
 
         try:
-            filters = {"id": project_id}
-            if company_user:
-                filters["created_by_company_user"] = company_user
-            project = Project.objects.get(**filters)
+            project = _projects_of(company_user).get(id=project_id)
         except Project.DoesNotExist:
             return {"success": False, "error": f"Project with ID {project_id} not found"}
 
@@ -372,10 +367,7 @@ Always back up your analysis with data and provide specific recommendations."""
         self.log_action("Identifying risks", {"project_id": project_id})
 
         try:
-            filters = {"id": project_id}
-            if company_user:
-                filters["created_by_company_user"] = company_user
-            project = Project.objects.get(**filters)
+            project = _projects_of(company_user).get(id=project_id)
         except Project.DoesNotExist:
             return {"success": False, "error": f"Project with ID {project_id} not found"}
 

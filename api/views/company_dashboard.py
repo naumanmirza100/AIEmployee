@@ -8,6 +8,7 @@ from django.db.models import Q, Count, Prefetch, prefetch_related_objects
 import logging
 
 from core.models import Project, Task, CompanyUser, Subtask
+from core.tenancy import projects_for_company_user
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
 from api.pagination import paginate
@@ -58,8 +59,8 @@ def project_manager_dashboard(request):
             )
         
         # Get projects created by this company user
-        projects = Project.objects.filter(created_by_company_user=company_user)
-        tasks = Task.objects.filter(project__created_by_company_user=company_user)
+        projects = projects_for_company_user(company_user)
+        tasks = Task.objects.filter(project__in=projects_for_company_user(company_user))
         
         # Calculate statistics.
         # Note: dashboard tiles read these counts directly (BUG-03 fix) —
@@ -174,7 +175,7 @@ def get_company_user_projects_list(request):
         company_user = request.user
         projects, pagination = paginate(
             request,
-            Project.objects.filter(created_by_company_user=company_user)
+            projects_for_company_user(company_user)
                    .order_by('-created_at').values('id', 'name', 'status'),
             default_limit=500, max_limit=1000,
         )
@@ -208,7 +209,7 @@ def get_company_user_projects(request):
         # carries its full task tree, so this is the heaviest list endpoint.
         page, pagination = paginate(
             request,
-            Project.objects.filter(created_by_company_user=company_user).order_by('-created_at'),
+            projects_for_company_user(company_user).order_by('-created_at'),
             default_limit=200, max_limit=500,
         )
         prefetch_related_objects(page, _task_tree_prefetch())  # onto the loaded page — no re-query
