@@ -262,6 +262,13 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
+    // With a file attached, Send means "send the file with this request". It
+    // used to send the text alone, so "create this project from the brief"
+    // was answered without the brief and the AI made a project up.
+    if (selectedFile) {
+      handleFileUpload();
+      return;
+    }
     if (!question.trim()) {
       toast({ title: 'Error', description: 'Please enter a request', variant: 'destructive' });
       return;
