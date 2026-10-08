@@ -36,6 +36,7 @@ from core.models import (
     DEFAULT_FREE_TOKENS,
     PlatformAPIKey,
 )
+from core.modules import has_module
 
 
 class _ValidAgents:
@@ -134,6 +135,16 @@ class AgentDisabled(KeyServiceError):
     user_message = (
         "This agent has been disabled by your account settings. "
         "Go to API Keys settings and select an active key pool to re-enable it."
+    )
+
+
+class NotSubscribed(KeyServiceError):
+    """The company does not have this agent: never bought, cancelled, expired,
+    or its payment failed."""
+    reason = "not_subscribed"
+    user_message = (
+        "Your company's subscription for this agent is not active, so its AI is off. "
+        "Subscribe or renew on the Billing page to use it."
     )
 
 
@@ -467,6 +478,12 @@ def _check_key_expiry(managed_key: 'CompanyAPIKey', company, agent_name: str) ->
 def resolve_for_call(company, agent_name: str) -> CallContext:
     """Pick the key to use for one LLM call. Raises on hard-block.
 
+    Before any key is looked at, the company must have the agent (NotSubscribed).
+    The screens' gate (api/middleware/module_access.py) only covers the agent's
+    own URLs. A job posted from the company dashboard used Recruitment's AI, and
+    background jobs used Marketing's, for companies that had never bought them:
+    step 3 below hands a company with no allowance a free one on the spot.
+
     Strict preference order — NO automatic switching between pools:
       0. preferred_pool == 'none' → AgentDisabled (hard-block immediately)
       1. Active BYOK key (unless preferred_pool is 'free' or 'managed').
@@ -486,6 +503,8 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     """
     if agent_name not in VALID_AGENTS:
         raise InvalidAgent()
+    if not has_module(company, agent_name):
+        raise NotSubscribed()
 
     # Step 0 — explicitly disabled by the company
     _pool_check = AgentTokenQuota.objects.filter(company=company, agent_name=agent_name).values_list('preferred_pool', flat=True).first()

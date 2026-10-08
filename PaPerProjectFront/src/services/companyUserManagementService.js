@@ -93,6 +93,31 @@ export const reactivateUser = async (userId) => {
   }
 };
 
+/**
+ * What a leaver still holds in every agent, and who each group can go to.
+ * Owners and admins only. Works for a company without the HR agent.
+ */
+export const getUserHandover = async (userId) => {
+  try {
+    const response = await companyApi.get(`/company/users/${userId}/handover`);
+    return response;
+  } catch (error) {
+    console.error('Error loading the hand-over:', error);
+    throw error;
+  }
+};
+
+/** Move each chosen group: `{ tasks: userId, tickets: companyUserId, ... }`. */
+export const handOverUserWork = async (userId, assignments) => {
+  try {
+    const response = await companyApi.post(`/company/users/${userId}/handover`, { assignments });
+    return response;
+  } catch (error) {
+    console.error('Error handing work over:', error);
+    throw error;
+  }
+};
+
 export default {
   createUser,
   listUsers,
@@ -100,5 +125,7 @@ export default {
   updateUser,
   deleteUser,
   reactivateUser,
+  getUserHandover,
+  handOverUserWork,
 };
 

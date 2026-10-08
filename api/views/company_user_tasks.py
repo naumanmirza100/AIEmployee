@@ -1,6 +1,6 @@
 """
 Company User Tasks API Views
-For company users to view all tasks of all users they created
+For company users to view all tasks of the company's employees
 """
 
 from rest_framework import status
@@ -11,7 +11,8 @@ from django.db.models import Q
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
-from core.models import Task, UserProfile
+from core.models import Task
+from core.tenancy import members_of
 from api.serializers.user_tasks import TaskSerializer
 
 
@@ -20,19 +21,18 @@ from api.serializers.user_tasks import TaskSerializer
 @permission_classes([IsCompanyUserOnly])
 def get_all_users_tasks(request):
     """
-    Get all tasks of all users created by the company user
+    Get all tasks of the company's employees
     GET /api/company/users/tasks
     """
     try:
         # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
         company_user = request.user
         
-        # Get all users created by this company user
-        created_user_profiles = UserProfile.objects.filter(
-            created_by_company_user=company_user
-        ).select_related('user')
-        
-        created_user_ids = list(created_user_profiles.values_list('user_id', flat=True))
+        # The company's employees. It used to be only the ones this login had
+        # created, so a second dashboard login saw an empty list.
+        created_user_ids = list(
+            members_of(getattr(company_user, 'company', None), company_user=company_user)
+            .values_list('id', flat=True))
         
         # If no users created, return empty list
         if not created_user_ids:

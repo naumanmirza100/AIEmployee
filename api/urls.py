@@ -193,6 +193,7 @@ urlpatterns = [
     re_path(r'^company/users/(?P<userId>\d+)/update/?$', company_users.update_user, name='company_update_user'),  # PUT/PATCH
     re_path(r'^company/users/(?P<userId>\d+)/delete/?$', company_users.delete_user, name='company_delete_user'),  # DELETE
     re_path(r'^company/users/(?P<userId>\d+)/reactivate/?$', company_users.reactivate_user, name='company_reactivate_user'),  # POST
+    re_path(r'^company/users/(?P<userId>\d+)/handover/?$', company_users.user_handover, name='company_user_handover'),  # GET, POST
     re_path(r'^company/users/tasks/?$', company_user_tasks.get_all_users_tasks, name='company_get_all_users_tasks'),  # GET
     
     # Company Auth endpoints
@@ -709,6 +710,7 @@ urlpatterns = [
     re_path(r'^modules/stripe-webhook/?$', module_purchase.stripe_webhook, name='stripe_webhook'),  # POST (raw, no auth)
     re_path(r'^modules/verify-session/?$', module_purchase.verify_session, name='verify_session'),  # POST (public)
     re_path(r'^modules/(?P<module_name>[a-z_]+)/access/?$', module_purchase.check_module_access, name='check_module_access'),  # GET
+    re_path(r'^modules/(?P<module_name>[a-z_]+)/leftovers/?$', module_purchase.lapsed_agent_leftovers, name='lapsed_agent_leftovers'),  # GET
     re_path(r'^modules/(?P<module_name>[a-z_]+)/plans/?$', module_purchase.get_module_plans, name='get_module_plans'),  # GET (public)
     # Subscription management
     re_path(r'^modules/(?P<module_name>[a-z_]+)/cancel/?$', module_purchase.cancel_subscription, name='cancel_subscription'),  # POST
@@ -898,6 +900,8 @@ urlpatterns = [
     # Employee detail bundle + edit
     re_path(r'^hr/employees/(?P<employee_id>\d+)/?$', hr_agent.get_employee_detail, name='hr_get_employee_detail'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/update/?$', hr_agent.update_employee, name='hr_update_employee'),  # PATCH/POST
+    re_path(r'^hr/employees/(?P<employee_id>\d+)/dashboard-login/?$', hr_agent.set_employee_dashboard_login, name='hr_set_employee_dashboard_login'),  # POST
+    re_path(r'^hr/dashboard-logins/?$', hr_agent.list_dashboard_logins, name='hr_list_dashboard_logins'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/?$', hr_agent.list_leave_balances, name='hr_list_leave_balances'),  # GET
     re_path(r'^hr/employees/(?P<employee_id>\d+)/leave-balances/adjust/?$', hr_agent.adjust_leave_balance, name='hr_adjust_leave_balance'),  # POST
     re_path(r'^hr/employees/(?P<employee_id>\d+)/deactivate/?$', hr_agent.deactivate_employee, name='hr_deactivate_employee'),  # POST

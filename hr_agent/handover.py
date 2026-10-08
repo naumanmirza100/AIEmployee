@@ -216,8 +216,13 @@ def hr_record(company_user):
 # The form, and doing it
 # ---------------------------------------------------------------------------
 
-def summary(employee) -> dict:
-    """What the hand-over form shows."""
+#: Groups that only mean something to a company that has HR.
+HR_GROUPS = ('reports', 'leave')
+
+
+def summary(employee, *, with_hr=True) -> dict:
+    """What the hand-over form shows. `with_hr=False` leaves out the groups
+    that belong to HR's own screens, for a company that does not have HR."""
     ids = login_ids(employee)
     cu = dashboard_login(employee)
     company_id = employee.company_id
@@ -282,16 +287,19 @@ def summary(employee) -> dict:
     return {
         'employee': {'id': employee.id, 'full_name': employee.full_name,
                      'employment_status': employee.employment_status},
-        'groups': [g for g in groups if g['count']],
+        'groups': [g for g in groups if g['count'] and (with_hr or g['key'] not in HR_GROUPS)],
     }
 
 
-def hand_over(employee, assignments: dict, actor) -> dict:
+def hand_over(employee, assignments: dict, actor, *, with_hr=True) -> dict:
     """Move each group in `assignments` ({group key: target id}) to its target.
 
     Returns {group: {'moved': n, 'to': name, 'skipped': [reasons]}}. Raises
     ValueError for a target that isn't allowed, before anything moves.
     """
+    if not with_hr and any(key in HR_GROUPS and target not in (None, '')
+                           for key, target in (assignments or {}).items()):
+        raise ValueError('Reports and leave are handed over in HR.')
     from core.models import CompanyUser
     from core.tenancy import members_of
 

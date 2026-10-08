@@ -32,6 +32,15 @@ def hr_available(company) -> bool:
     return bool(company) and has_module(company, 'hr_agent')
 
 
+def tell_hr_no_longer_hired(interview, changed_by=None) -> int:
+    """HR hears when someone Recruitment handed over stops being Hired."""
+    employee = interview.hr_employee if interview.hr_employee_id else None
+    if employee is None or not hr_available(employee.company):
+        return 0
+    from hr_agent import alerts
+    return alerts.no_longer_hired(employee, interview.outcome, changed_by=getattr(changed_by, 'full_name', '') or '')
+
+
 def job_for(interview):
     if interview.cv_record_id and interview.cv_record and interview.cv_record.job_description_id:
         return interview.cv_record.job_description

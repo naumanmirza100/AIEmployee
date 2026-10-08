@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Lock, RefreshCw } from 'lucide-react';
 
+import AgentLocked from '@/components/common/AgentLocked';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import SDRCRMSyncTab from '@/components/ai-sdr/SDRCRMSyncTab';
 import { Button } from '@/components/ui/button';
@@ -18,7 +19,7 @@ import { getAgentNavItems } from '@/utils/agentNavItems';
  */
 export default function CrmSyncPage() {
   const navigate = useNavigate();
-  const { purchasedModules, modulesLoaded } = usePurchasedModules();
+  const { purchasedModules, allPurchases, modulesLoaded } = usePurchasedModules();
   const companyUser = useMemo(() => getCompanyUser(), []);
   const [ready, setReady] = useState(false);
 
@@ -41,6 +42,8 @@ export default function CrmSyncPage() {
   }
 
   const bought = purchasedModules.includes('crm_sync_agent');
+  // Had it and lost it (a failed card, or it ended): say which, not "not part of your plan".
+  const lapsed = allPurchases.find((p) => p.module_name === 'crm_sync_agent')?.status;
 
   return (
     <>
@@ -58,7 +61,11 @@ export default function CrmSyncPage() {
           navItems={getAgentNavItems(purchasedModules, 'crm-sync', navigate)}
         />
         <div className="container mx-auto px-4 sm:px-10 py-6 max-w-full">
-          {bought ? <SDRCRMSyncTab /> : (
+          {bought ? <SDRCRMSyncTab /> : lapsed ? (
+            <div className="flex justify-center pt-10">
+              <AgentLocked title="CRM Sync" moduleKey="crm_sync_agent" status={lapsed} />
+            </div>
+          ) : (
             <div className="mx-auto mt-10 max-w-md rounded-xl border border-border bg-[var(--panel-2)] p-6 text-center">
               <Lock className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
               <h1 className="text-lg font-semibold text-foreground">CRM Sync is not part of your plan</h1>

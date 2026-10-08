@@ -23,7 +23,6 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.conf import settings
-from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Count, Q
@@ -119,23 +118,8 @@ def _hr_get_or_create_user_for_company_user(company_user):
     audit). `CompanyUser.login_user` was added and backfilled by
     `core/migrations/0103`.
     """
-    if company_user is None:
-        return None
-    if company_user.login_user_id:
-        return company_user.login_user
-
-    username = f"company_user_{company_user.id}"
-    user = User.objects.filter(username=username).first()
-    if user is None:
-        names = (company_user.full_name or '').split()
-        user = User.objects.create_user(
-            username=username, email=company_user.email, password=None,
-            first_name=(names[0] if names else ''),
-            last_name=(' '.join(names[1:]) if len(names) > 1 else ''),
-        )
-    CompanyUser.objects.filter(pk=company_user.pk).update(login_user=user)
-    company_user.login_user = user
-    return user
+    from core.logins import user_for
+    return user_for(company_user)
 
 
 def _caller_login_user_id(company_user):
@@ -4790,8 +4774,10 @@ def _build_employee_bundle(emp: Employee, company) -> dict:
         employee=emp, visible_to_employee=True,
     ).select_related('cycle', 'reviewer').order_by('-cycle__period_start')[:10]
 
+    from hr_agent import logins as hr_logins
     return {
         'employee': _serialize_employee(emp),
+        'logins': hr_logins.describe(emp),
         'manager_chain': chain,
         'leave_balances': balances,
         'personal_documents': [_serialize_hr_document(d) for d in personal_docs],
@@ -4838,8 +4824,9 @@ def get_employee_detail(request, employee_id):
         emp, err = _company_employee_or_404(request, employee_id)
         if err:
             return err
-        return Response({'status': 'success',
-                         'data': _build_employee_bundle(emp, request.user.company)})
+        data = _build_employee_bundle(emp, request.user.company)
+        data['logins']['can_manage'] = _is_hr_admin(request.user)
+        return Response({'status': 'success', 'data': data})
     except Exception:
         logger.exception("get_employee_detail failed")
         return Response({'status': 'error', 'message': 'Failed to load employee detail'},
@@ -4869,6 +4856,61 @@ def get_my_hr_profile(request):
         logger.exception("get_my_hr_profile failed")
         return Response({'status': 'error', 'message': 'Failed to load your profile'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# A person's logins (hr_agent/logins.py)
+# ============================================================================
+
+_LOGINS_ARE_FOR_HR_ADMINS = "Only an HR admin can change which logins belong to a person."
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def list_dashboard_logins(request):
+    """The company's dashboard logins, for choosing the one that belongs to an
+    employee. Each says which record it is linked to already."""
+    from hr_agent import logins as hr_logins
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _LOGINS_ARE_FOR_HR_ADMINS},
+                        status=status.HTTP_403_FORBIDDEN)
+    return Response({'status': 'success', 'data': hr_logins.dashboard_logins(request.user.company)})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def set_employee_dashboard_login(request, employee_id):
+    """Join a dashboard login to this employee's record, or take the link off
+    (`company_user_id: null`). The calendar, My work and HR self-service then
+    treat that login as this person."""
+    from hr_agent import logins as hr_logins
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': _LOGINS_ARE_FOR_HR_ADMINS},
+                        status=status.HTTP_403_FORBIDDEN)
+    emp, err = _company_employee_or_404(request, employee_id)
+    if err:
+        return err
+    raw = request.data.get('company_user_id')
+    login = None
+    if raw not in (None, ''):
+        # `link` refuses a login of another company, with the same answer as one that does not exist.
+        login = CompanyUser.objects.filter(pk=raw).first() if str(raw).isdigit() else None
+        if login is None:
+            return Response({'status': 'error', 'message': 'Login not found.'}, status=status.HTTP_404_NOT_FOUND)
+    before = emp.company_user_id
+    try:
+        warning = hr_logins.link(emp, login)
+    except hr_logins.LinkRefused as refused:
+        return Response({'status': 'error', 'message': refused.message}, status=refused.status)
+    _write_audit_log(request.user, request.user.company, 'employee.dashboard_login', 'employee', emp.id,
+                     before={'company_user_id': before}, after={'company_user_id': emp.company_user_id})
+    data = hr_logins.describe(emp)
+    data['can_manage'] = True
+    return Response({'status': 'success', 'data': data, 'warning': warning})
 
 
 # ============================================================================

@@ -1246,6 +1246,30 @@ export const submitLeaveRequest = async (payload) => {
   }
 };
 
+/** The company's dashboard logins, each with the HR record it is linked to. HR admins only. */
+export const listHRDashboardLogins = async () => {
+  try {
+    const response = await companyApi.get('/hr/dashboard-logins');
+    return response;
+  } catch (error) {
+    console.error('List dashboard logins error:', error);
+    throw error;
+  }
+};
+
+/** Join a dashboard login to an employee's record; `null` takes the link off. */
+export const setHREmployeeDashboardLogin = async (employeeId, companyUserId) => {
+  try {
+    const response = await companyApi.post(`/hr/employees/${employeeId}/dashboard-login`, {
+      company_user_id: companyUserId,
+    });
+    return response;
+  } catch (error) {
+    console.error('Set employee dashboard login error:', error);
+    throw error;
+  }
+};
+
 export const updateLeaveRequest = async (requestId, payload) => {
   try {
     const response = await companyApi.patch(`/hr/leave-requests/${requestId}/update`, payload);
@@ -1289,6 +1313,8 @@ export const withdrawLeaveRequest = async (requestId, reason = '') => {
 export default {
   getHRDashboard,
   listHREmployees,
+  listHRDashboardLogins,
+  setHREmployeeDashboardLogin,
   createHREmployee,
   askHRKnowledge,
   askHRKnowledgeStream,

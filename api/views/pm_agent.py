@@ -376,29 +376,26 @@ def _with_upcoming_leave(users):
 
 def _build_available_users(project_id=None, project=None, company_user=None):
     """
-    Return users created by this company_user (from UserProfile).
+    Return the company's employees: everyone work can be given to.
     Falls back to team members if no company_user provided.
     Never include superusers, and never include deactivated (is_active=False)
     users — they shouldn't appear in task Assign-To dropdowns.
+
+    It used to be only the employees this one dashboard login had created, so
+    a second login was offered nobody.
     """
     available_users = []
 
-    # Primary: use UserProfile to get users created by this company user
     if company_user:
-        from core.models import UserProfile
-        created_profiles = UserProfile.objects.filter(
-            created_by_company_user=company_user,
-            user__is_active=True,
-        ).select_related('user')
-        for profile in created_profiles:
-            user = profile.user
+        company, _ = scope_for_company_user(company_user)
+        for user in members_of(company, company_user=company_user).select_related('profile').order_by('id'):
             if getattr(user, "is_superuser", False):
                 continue
             available_users.append({
                 "id": user.id,
                 "username": user.username,
                 "name": user.get_full_name() or user.username,
-                "role": profile.role or "team_member",
+                "role": getattr(getattr(user, 'profile', None), 'role', None) or "team_member",
             })
         return _with_upcoming_leave(available_users)
 
@@ -553,11 +550,11 @@ def project_pilot(request):
         project = None
 
         # Filter projects created by this company user
-        all_projects = Project.objects.filter(created_by_company_user=company_user)
-        all_tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related("project")
+        all_projects = projects_for_company_user(company_user)
+        all_tasks = Task.objects.filter(project__in=projects_for_company_user(company_user)).select_related("project")
 
         if project_id:
-            project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
+            project = get_object_or_404(projects_for_company_user(company_user), id=project_id)
             tasks = Task.objects.filter(project=project).select_related("assignee").prefetch_related("subtasks")
             context = {
                 "project": {
@@ -961,10 +958,10 @@ def task_prioritization(request):
         agent.agent_key_name = 'project_manager_agent'
 
         if project_id:
-            project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
-            tasks_queryset = Task.objects.filter(project_id=project_id, project__created_by_company_user=company_user)
+            project = get_object_or_404(projects_for_company_user(company_user), id=project_id)
+            tasks_queryset = Task.objects.filter(project_id=project_id, project__in=projects_for_company_user(company_user))
         else:
-            tasks_queryset = Task.objects.filter(project__created_by_company_user=company_user)[:50]
+            tasks_queryset = Task.objects.filter(project__in=projects_for_company_user(company_user))[:50]
 
         tasks = [
             {
@@ -988,9 +985,9 @@ def task_prioritization(request):
         ]
 
         if project_id:
-            members = TeamMember.objects.filter(project_id=project_id, project__created_by_company_user=company_user).select_related("user")
+            members = TeamMember.objects.filter(project_id=project_id, project__in=projects_for_company_user(company_user)).select_related("user")
         else:
-            members = TeamMember.objects.filter(project__created_by_company_user=company_user)[:20].select_related("user")
+            members = TeamMember.objects.filter(project__in=projects_for_company_user(company_user))[:20].select_related("user")
 
         team = [
             {
@@ -1226,14 +1223,14 @@ def generate_subtasks(request):
         # Get company from company_user
         company = company_user.company
         
-        get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
+        get_object_or_404(projects_for_company_user(company_user), id=project_id)
 
-        tasks_queryset = Task.objects.filter(project_id=project_id, project__created_by_company_user=company_user)
+        tasks_queryset = Task.objects.filter(project_id=project_id, project__in=projects_for_company_user(company_user))
         
         # Filter out tasks that already have subtasks
         from core.models import Subtask
         tasks_with_subtasks = set(
-            Subtask.objects.filter(task__project_id=project_id, task__project__created_by_company_user=company_user)
+            Subtask.objects.filter(task__project_id=project_id, task__project__in=projects_for_company_user(company_user))
             .values_list('task_id', flat=True)
             .distinct()
         )
@@ -1355,8 +1352,8 @@ def timeline_gantt(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
-        tasks_queryset = Task.objects.filter(project=project, project__created_by_company_user=company_user).prefetch_related('depends_on', 'assignee')
+        project = get_object_or_404(projects_for_company_user(company_user), id=project_id)
+        tasks_queryset = Task.objects.filter(project=project, project__in=projects_for_company_user(company_user)).prefetch_related('depends_on', 'assignee')
         
         # Get team size (unique assignees or team members)
         from core.models import TeamMember
@@ -1422,7 +1419,7 @@ def timeline_gantt(request):
                 task_id = update.get("task_id")
                 if task_id:
                     try:
-                        t = Task.objects.get(id=task_id, project__created_by_company_user=company_user)
+                        t = Task.objects.get(id=task_id, project__in=projects_for_company_user(company_user))
                         if "due_date" in update:
                             from django.utils import timezone
                             from datetime import datetime
@@ -1467,25 +1464,21 @@ def _knowledge_qa_inputs(request):
 
     project_id = request.data.get("project_id")
     
-    all_projects = Project.objects.filter(created_by_company_user=company_user)
-    all_tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related("project", "assignee").prefetch_related("subtasks")
+    all_projects = projects_for_company_user(company_user)
+    all_tasks = Task.objects.filter(project__in=projects_for_company_user(company_user)).select_related("project", "assignee").prefetch_related("subtasks")
     
-    # Get all users created by this company user
-    from core.models import UserProfile
-    created_user_profiles = UserProfile.objects.filter(
-        created_by_company_user=company_user
-    ).select_related('user')
-    
-    # Build available users list with their roles
+    # Everyone in the company, not only the employees this login created.
+    company, _ = scope_for_company_user(company_user)
     available_users = []
-    for profile in created_user_profiles:
-        user = profile.user
+    for user in members_of(company, company_user=company_user).select_related('profile').order_by('id'):
+        if user.is_superuser:
+            continue
         available_users.append({
             'id': user.id,
             'username': user.username,
             'name': user.get_full_name() or user.username,
             'email': user.email,
-            'role': profile.role or 'team_member',
+            'role': getattr(getattr(user, 'profile', None), 'role', None) or 'team_member',
             'is_active': user.is_active,
         })
     
@@ -1498,7 +1491,7 @@ def _knowledge_qa_inputs(request):
             user_tasks = Task.objects.filter(
                 project_id=project_id, 
                 assignee_id=user_id,
-                project__created_by_company_user=company_user
+                project__in=projects_for_company_user(company_user)
             )
         else:
             user_tasks = all_tasks.filter(assignee_id=user_id)
@@ -1531,7 +1524,7 @@ def _knowledge_qa_inputs(request):
         })
 
     if project_id:
-        project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
+        project = get_object_or_404(projects_for_company_user(company_user), id=project_id)
         tasks = Task.objects.filter(project=project).select_related("assignee").prefetch_related("subtasks")
         context = {
             "project": {
@@ -1629,11 +1622,11 @@ def _knowledge_qa_inputs(request):
         if project_id:
             activity_logs = TaskActivityLog.objects.filter(
                 task__project_id=project_id,
-                task__project__created_by_company_user=company_user
+                task__project__in=projects_for_company_user(company_user)
             ).select_related('task', 'user').order_by('-created_at')[:30]
         else:
             activity_logs = TaskActivityLog.objects.filter(
-                task__project__created_by_company_user=company_user
+                task__project__in=projects_for_company_user(company_user)
             ).select_related('task', 'user').order_by('-created_at')[:20]
         context["activity_logs"] = [
             {
@@ -1655,11 +1648,11 @@ def _knowledge_qa_inputs(request):
         if project_id:
             comments = TaskComment.objects.filter(
                 task__project_id=project_id,
-                task__project__created_by_company_user=company_user
+                task__project__in=projects_for_company_user(company_user)
             ).select_related('task', 'user').order_by('-created_at')[:20]
         else:
             comments = TaskComment.objects.filter(
-                task__project__created_by_company_user=company_user
+                task__project__in=projects_for_company_user(company_user)
             ).select_related('task', 'user').order_by('-created_at')[:15]
         context["comments"] = [
             {
@@ -1677,11 +1670,11 @@ def _knowledge_qa_inputs(request):
         if project_id:
             members = TeamMember.objects.filter(
                 project_id=project_id,
-                project__created_by_company_user=company_user
+                project__in=projects_for_company_user(company_user)
             ).select_related('user')
         else:
             members = TeamMember.objects.filter(
-                project__created_by_company_user=company_user
+                project__in=projects_for_company_user(company_user)
             ).select_related('user', 'project')
         context["team_members"] = [
             {
@@ -1699,11 +1692,11 @@ def _knowledge_qa_inputs(request):
         if project_id:
             entries = TimeEntry.objects.filter(
                 task__project_id=project_id,
-                task__project__created_by_company_user=company_user
+                task__project__in=projects_for_company_user(company_user)
             ).select_related('task', 'user').order_by('-date')[:20]
         else:
             entries = TimeEntry.objects.filter(
-                task__project__created_by_company_user=company_user
+                task__project__in=projects_for_company_user(company_user)
             ).select_related('task', 'user').order_by('-date')[:15]
         context["time_entries"] = [
             {
@@ -1723,11 +1716,11 @@ def _knowledge_qa_inputs(request):
         if project_id:
             milestones = ProjectMilestone.objects.filter(
                 project_id=project_id,
-                project__created_by_company_user=company_user
+                project__in=projects_for_company_user(company_user)
             ).order_by('due_date')
         else:
             milestones = ProjectMilestone.objects.filter(
-                project__created_by_company_user=company_user
+                project__in=projects_for_company_user(company_user)
             ).select_related('project').order_by('due_date')[:15]
         context["milestones"] = [
             {
@@ -1744,11 +1737,11 @@ def _knowledge_qa_inputs(request):
     risk_keywords = ['risk', 'issue', 'problem', 'blocker', 'blocked', 'impediment', 'concern', 'severity']
     if any(kw in q_lower for kw in risk_keywords):
         if project_id:
-            risks = ProjectRisk.objects.filter(project_id=project_id, project__created_by_company_user=company_user)[:10]
-            issues = ProjectIssue.objects.filter(project_id=project_id, project__created_by_company_user=company_user)[:10]
+            risks = ProjectRisk.objects.filter(project_id=project_id, project__in=projects_for_company_user(company_user))[:10]
+            issues = ProjectIssue.objects.filter(project_id=project_id, project__in=projects_for_company_user(company_user))[:10]
         else:
-            risks = ProjectRisk.objects.filter(project__created_by_company_user=company_user).select_related('project')[:10]
-            issues = ProjectIssue.objects.filter(project__created_by_company_user=company_user).select_related('project')[:10]
+            risks = ProjectRisk.objects.filter(project__in=projects_for_company_user(company_user)).select_related('project')[:10]
+            issues = ProjectIssue.objects.filter(project__in=projects_for_company_user(company_user)).select_related('project')[:10]
         context["risks"] = [
             {
                 "title": r.title,
@@ -1938,8 +1931,8 @@ def _pm_build_analytics_data(company_user, project_id=None):
     else:
         # Defensive — never expose another tenant's data if the user
         # somehow has no company link.
-        projects_qs = Project.objects.filter(created_by_company_user=company_user)
-        tasks_qs = Task.objects.filter(project__created_by_company_user=company_user)
+        projects_qs = projects_for_company_user(company_user)
+        tasks_qs = Task.objects.filter(project__in=projects_for_company_user(company_user))
     if project_id:
         projects_qs = projects_qs.filter(id=project_id)
         tasks_qs = tasks_qs.filter(project_id=project_id)
@@ -3096,13 +3089,13 @@ def daily_standup(request):
         tasks_data = []
         if project_id:
             try:
-                project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+                project = projects_for_company_user(company_user).get(id=project_id)
                 project_info = {"id": project.id, "name": project.name, "status": project.status}
                 tasks = Task.objects.filter(project=project).select_related('assignee')
             except Project.DoesNotExist:
                 return Response({"status": "error", "message": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
         else:
-            tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related('assignee', 'project')
+            tasks = Task.objects.filter(project__in=projects_for_company_user(company_user)).select_related('assignee', 'project')
 
         for t in tasks:
             tasks_data.append({
@@ -3127,11 +3120,11 @@ def daily_standup(request):
             if project_id:
                 logs = TaskActivityLog.objects.filter(
                     task__project_id=project_id,
-                    task__project__created_by_company_user=company_user
+                    task__project__in=projects_for_company_user(company_user)
                 ).select_related('task', 'user').order_by('-created_at')[:30]
             else:
                 logs = TaskActivityLog.objects.filter(
-                    task__project__created_by_company_user=company_user
+                    task__project__in=projects_for_company_user(company_user)
                 ).select_related('task', 'user').order_by('-created_at')[:20]
 
             for log in logs:
@@ -3278,7 +3271,7 @@ def meeting_notes(request):
         project_context = None
         if project_id:
             try:
-                project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+                project = projects_for_company_user(company_user).get(id=project_id)
                 tasks = Task.objects.filter(project=project).select_related('assignee')
                 # Collect unique team members assigned to tasks in this project
                 team_members = set()
@@ -3338,7 +3331,7 @@ def workflow_suggest(request):
             return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+            project = projects_for_company_user(company_user).get(id=project_id)
         except Project.DoesNotExist:
             return Response({"status": "error", "message": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -3402,7 +3395,7 @@ def calendar_schedule(request):
             return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+            project = projects_for_company_user(company_user).get(id=project_id)
         except Project.DoesNotExist:
             return Response({"status": "error", "message": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -3676,7 +3669,7 @@ def time_estimation(request):
             return Response({"status": "error", "message": "project_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            project = Project.objects.get(id=project_id, created_by_company_user=company_user)
+            project = projects_for_company_user(company_user).get(id=project_id)
         except Project.DoesNotExist:
             return Response({"status": "error", "message": "Project not found"}, status=status.HTTP_404_NOT_FOUND)
 

@@ -15,6 +15,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from core.models import Project, Task
+from core.tenancy import projects_for_company_user
 from project_manager_agent.ai_agents import AgentRegistry
 
 logger = logging.getLogger(__name__)
@@ -245,13 +246,13 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
     company = company_user.company
 
     # Filter projects created by this company user
-    all_projects = Project.objects.filter(created_by_company_user=company_user)
-    all_tasks = Task.objects.filter(project__created_by_company_user=company_user).select_related("project")
+    all_projects = projects_for_company_user(company_user)
+    all_tasks = Task.objects.filter(project__in=projects_for_company_user(company_user)).select_related("project")
 
     if project_id:
         try:
             project_id = int(project_id)
-            project = get_object_or_404(Project, id=project_id, created_by_company_user=company_user)
+            project = get_object_or_404(projects_for_company_user(company_user), id=project_id)
         except (ValueError, Project.DoesNotExist):
             project = None
 

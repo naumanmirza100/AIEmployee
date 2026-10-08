@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 import HandoverDialog from './HandoverDialog';
+import HREmployeeLogins from './HREmployeeLogins';
 
 const STAT_BG = 'rgba(167,139,250,0.2)';
 const STAT_FG = '#a78bfa';
@@ -641,6 +642,18 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                   {e.timezone_name && <KV icon={CalendarClock} label="Timezone" value={e.timezone_name} />}
                 </div>
               </div>
+              {!e.anonymized_at && (
+                <HREmployeeLogins
+                  employee={e}
+                  logins={data.logins}
+                  onChanged={(logins) => logins && setData((prev) => ({ ...prev, logins }))}
+                  onLoginCreated={async () => {
+                    // The record now has a login and may have a new work email.
+                    const refreshed = await hrAgentService.getHREmployeeDetail(e.id);
+                    setData(refreshed?.data || null);
+                  }}
+                />
+              )}
               {chain.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-white/[0.06]">
                   <div className="text-[10px] uppercase tracking-wider text-white/50 mb-1.5">Reports up to</div>

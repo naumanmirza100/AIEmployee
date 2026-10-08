@@ -26,7 +26,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from core.models import CompanyUser, UserProfile
-from hr_agent import alerts
+from hr_agent import alerts, logins
 from hr_agent.models import Employee, HRWorkflowExecution, LeaveRequest
 
 
@@ -60,7 +60,17 @@ def company_for_profile(profile):
 
 
 def _ensure_employee_for_user(user: User, company) -> Employee:
-    """Get-or-create the Employee row backing a (user, company). Idempotent."""
+    """Get-or-create the Employee row backing a (user, company). Idempotent.
+
+    The record is also joined to the dashboard login with the same address, if
+    the company has one: the same person, with two logins (hr_agent/logins.py)."""
+    emp = _employee_for_user(user, company)
+    if emp is not None:
+        logins.link_by_email(emp)
+    return emp
+
+
+def _employee_for_user(user: User, company) -> Employee:
     if not user or not company:
         return None
     emp = Employee.objects.filter(user=user).first()
@@ -122,6 +132,19 @@ def userprofile_post_save(sender, instance: UserProfile, created, **kwargs):
             _ensure_employee_for_user(instance.user, company)
     except Exception:
         logger.exception("Failed to sync Employee for UserProfile %s", instance.id)
+
+
+@receiver(post_save, sender=CompanyUser)
+def companyuser_post_save(sender, instance: CompanyUser, created, **kwargs):
+    """A new dashboard login for someone HR already has a record of is joined
+    to that record. Best-effort: never breaks the triggering save."""
+    if not created or not instance.company_id:
+        return
+    try:
+        with transaction.atomic():
+            logins.link_login_by_email(instance)
+    except Exception:
+        logger.exception("Failed to link dashboard login %s to its HR record", instance.id)
 
 
 def backfill_employees_for_company(company_id: int) -> int:

@@ -443,27 +443,9 @@ def _get_or_create_user_for_company_user(company_user):
 
     Existing links were backfilled by core migration 0103.
     """
-    if company_user is None:
-        return None
+    from core.logins import user_for
     try:
-        if company_user.login_user_id:
-            return company_user.login_user
-
-        username = f"company_user_{company_user.id}"
-        user = User.objects.filter(username=username).first()
-        if user is None:
-            names = (company_user.full_name or '').split()
-            user = User.objects.create_user(
-                username=username,
-                email=company_user.email,
-                password=None,
-                first_name=names[0] if names else '',
-                last_name=' '.join(names[1:]) if len(names) > 1 else '',
-            )
-        # Persist the link so the next request is a FK read, not a lookup.
-        CompanyUser.objects.filter(pk=company_user.pk).update(login_user=user)
-        company_user.login_user = user
-        return user
+        return user_for(company_user)
     except Exception:
         logger.exception("Could not resolve a login for company_user=%s",
                          getattr(company_user, 'id', None))

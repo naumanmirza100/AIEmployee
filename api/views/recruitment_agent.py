@@ -1247,6 +1247,7 @@ def update_interview(request, interview_id):
         resend_confirmation = request.data.get('resend_confirmation', False)
         from recruitment_agent import interviewer_alerts
         was_booked = interview.status in ('SCHEDULED', 'RESCHEDULED', 'CONFIRMED')
+        was_hired = interview.outcome == 'HIRED'
 
         if new_status is not None:
             new_status = (new_status or '').strip().upper()
@@ -1332,6 +1333,11 @@ def update_interview(request, interview_id):
             added = set()
 
         interview.save()
+
+        # HR was handed this person as a new hire. It hears if that changes.
+        if was_hired and interview.outcome != 'HIRED':
+            from recruitment_agent import hr_handoff
+            hr_handoff.tell_hr_no_longer_hired(interview, changed_by=company_user)
 
         # The people already on it hear when it is called off or put back on.
         # Someone added in this same request has just been told the time.

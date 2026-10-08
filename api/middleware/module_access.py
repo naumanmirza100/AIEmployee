@@ -77,22 +77,49 @@ class ModuleAccessMiddleware:
         module_name = self._module_for(request.path)
         if module_name:
             company = self._resolve_company(request)
-            if company is not None and not self._has_module(company, module_name):
+            if (company is not None and not self._has_module(company, module_name)
+                    and not self._is_clean_up(request, company, module_name)):
                 logger.info(
                     'Blocked %s for company %s — no active %s subscription.',
                     request.path, company.id, module_name,
                 )
+                reason, message = self._why_not(company, module_name)
                 return JsonResponse({
                     'success': False,
                     'status': 'error',
                     'error': 'subscription_required',
+                    'reason': reason,
                     'module_name': module_name,
-                    'message': (
-                        'Your subscription for this agent is not active. '
-                        'Please subscribe or renew to continue.'
-                    ),
+                    'message': message,
                 }, status=403)
         return self.get_response(request)
+
+    @staticmethod
+    def _is_clean_up(request, company, module_name):
+        """One of the few calls a company may still make to an agent it once had:
+        cancelling what that agent left on everyone's calendar. The list, and
+        why it is a list, is in core/leftovers.py."""
+        from core import leftovers
+        rest = re.sub(r'^v\d+/', '', request.path[len('/api/'):])
+        return (leftovers.is_clean_up(module_name, request.method, rest, lambda: request.body)
+                and leftovers.had_module(company, module_name))
+
+    @staticmethod
+    def _why_not(company, module_name):
+        """('payment_failed' | 'lapsed' | 'not_bought', what to tell the caller).
+
+        After a failed card there is nothing to subscribe to: checkout refuses a
+        second subscription beside the one being retried. Send them to their card.
+        """
+        from core.models import CompanyModulePurchase
+        status = (CompanyModulePurchase.objects
+                  .filter(company=company, module_name=module_name)
+                  .values_list('status', flat=True).first())
+        if status == 'past_due':
+            return 'payment_failed', ('The payment for this agent failed, so it is paused. '
+                                      'Update your card on the Billing page to get back in.')
+        return ('lapsed' if status else 'not_bought'), ('Your subscription for this agent is not active. '
+                                                        'Please subscribe or renew to continue.')
 
     @staticmethod
     def _module_for(path):

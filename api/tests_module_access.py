@@ -95,7 +95,8 @@ class EnforcementTests(unittest.TestCase):
         with mock.patch.object(ModuleAccessMiddleware, '_resolve_company',
                                staticmethod(lambda req: company)), \
              mock.patch.object(ModuleAccessMiddleware, '_has_module',
-                               staticmethod(lambda c, m: has_module)):
+                               staticmethod(lambda c, m: has_module)),              mock.patch.object(ModuleAccessMiddleware, '_why_not',
+                               staticmethod(lambda c, m: ('not_bought', 'Not active.'))):
             return self.mw(_request(path))
 
     def test_blocks_when_no_active_subscription(self):

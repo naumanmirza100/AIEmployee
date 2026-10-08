@@ -3,7 +3,6 @@ import { logoutCompany } from '@/services/companyAuthService';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import {
@@ -18,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { projectService } from '@/services';
 import pmAgentService from '@/services/pmAgentService';
 import { checkModuleAccess } from '@/services/modulePurchaseService';
+import AgentLocked, { lockToast } from '@/components/common/AgentLocked';
 import usePurchasedModules from '@/hooks/usePurchasedModules';
 import { getAgentNavItems } from '@/utils/agentNavItems';
 import {
@@ -34,7 +34,6 @@ import {
   Building2,
   ArrowLeft,
   Plus,
-  Lock,
   Menu,
   Check,
   Workflow,
@@ -263,6 +262,7 @@ const ProjectManagerDashboardPage = () => {
   // Get company user from localStorage
   const [companyUser, setCompanyUser] = useState(null);
   const [hasAccess, setHasAccess] = useState(false);
+  const [purchaseStatus, setPurchaseStatus] = useState(undefined);
   const [checkingAccess, setCheckingAccess] = useState(true);
   const { purchasedModules, modulesLoaded } = usePurchasedModules();
 
@@ -284,13 +284,8 @@ const ProjectManagerDashboardPage = () => {
       const response = await checkModuleAccess('project_manager_agent');
       if (response.status === 'success') {
         setHasAccess(response.has_access);
-        if (!response.has_access) {
-          toast({
-            title: 'Module Not Purchased',
-            description: 'Please purchase the Project Manager Agent module to access this dashboard',
-            variant: 'default',
-          });
-        }
+        setPurchaseStatus(response.purchase_status);
+        if (!response.has_access) toast(lockToast('Project Manager Agent', response.purchase_status));
       }
     } catch (error) {
       console.error('Error checking module access:', error);
@@ -402,32 +397,7 @@ const ProjectManagerDashboardPage = () => {
           <title>Access Denied | Pay Per Project</title>
         </Helmet>
         <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <Card className="max-w-md w-full">
-            <CardHeader>
-              <div className="flex items-center justify-center mb-4">
-                <Lock className="h-12 w-12 text-muted-foreground" />
-              </div>
-              <CardTitle className="text-center">Module Not Purchased</CardTitle>
-              <CardDescription className="text-center">
-                You need to purchase the Project Manager Agent module to access this dashboard.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button 
-                onClick={() => navigate('/#ai-modules?agent=project_manager_agent')} 
-                className="w-full"
-              >
-                Go to Home Page to Purchase
-              </Button>
-              <Button 
-                onClick={() => navigate('/company/dashboard')} 
-                variant="outline"
-                className="w-full"
-              >
-                Back to Dashboard
-              </Button>
-            </CardContent>
-          </Card>
+          <AgentLocked title="Project Manager Agent" moduleKey="project_manager_agent" status={purchaseStatus} />
         </div>
       </>
     );
