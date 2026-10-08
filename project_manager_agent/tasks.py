@@ -536,8 +536,14 @@ class _DiskFileWrapper:
         self.name = name
         self.size = size
 
-    def seek(self, pos):
-        return self._fh.seek(pos)
+    # The PDF reader seeks from the end of the file (`seek(offset, 2)`) and asks
+    # where it is. Without `whence` and `tell` every uploaded PDF failed with
+    # "Failed to extract text from file".
+    def seek(self, pos, whence=0):
+        return self._fh.seek(pos, whence)
+
+    def tell(self):
+        return self._fh.tell()
 
     def read(self, n=-1):
         return self._fh.read(n) if n != -1 else self._fh.read()
