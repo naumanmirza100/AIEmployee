@@ -86,6 +86,21 @@ class TimelineTests(SimpleTestCase):
         self.assertEqual((plan['start'], plan['deadline']), ('2026-10-12', '2026-11-13'))
         self.assertEqual(set(plan['tasks']), {0, 1})
 
+    def test_tasks_that_name_their_project_are_held_to_that_project(self):
+        # "Create a task in ShopKart for Ahmed": the project is on the task, not chosen in the picker.
+        named = [_task('A', project_id=7), _task('B', project_id='7')]
+        self.assertEqual(drafts.only_project_id(named), 7)
+        # Without it the card made up a deadline a week away and called it the project's.
+        made_up = drafts.timeline(named, today=MONDAY)
+        self.assertEqual((made_up['tasks'], made_up['deadline_suggested']), ({}, True))
+
+    def test_only_when_they_all_name_the_same_existing_project(self):
+        self.assertIsNone(drafts.only_project_id([_task('A', project_id=7), _task('B', project_id=8)]))
+        self.assertIsNone(drafts.only_project_id([_task('A', project_id=7), _task('B')]))       # one has none
+        self.assertIsNone(drafts.only_project_id([_task('A', project_id='new-1')]))             # not a stored project
+        self.assertIsNone(drafts.only_project_id([{'action': 'create_project', 'name': 'P'}, _task('A', project_id=7)]))
+        self.assertIsNone(drafts.only_project_id([{'action': 'update_task', 'task_id': 3}]))
+
     def test_a_task_for_some_other_project_is_left_alone(self):
         class Existing:
             id = 7

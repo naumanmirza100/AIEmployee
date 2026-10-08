@@ -852,8 +852,12 @@ def project_pilot(request):
         # is written here; `project_pilot_confirm` makes exactly what the user
         # confirmed, through the service layer.
         if pilot_review.proposes_changes(actions):
+            # The project the tasks belong to: the one chosen in the picker, or the one they all name.
+            review_project = project
+            if review_project is None and drafts.only_project_id(actions):
+                review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
             gaps = drafts.inspect(actions, available_users,
-                                  today=timezone.localdate(), project=project)
+                                  today=timezone.localdate(), project=review_project)
             changes = pilot_review.changes(actions, pm_services.DashboardActor(company_user, request))
             return Response(
                 {

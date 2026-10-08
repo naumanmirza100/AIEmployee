@@ -543,7 +543,10 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
     from project_manager_agent import drafts, pilot_review
     from project_manager_agent.services.actor import DashboardActor
     if pilot_review.proposes_changes(actions):
-        gaps = drafts.inspect(actions, available_users, today=timezone.localdate(), project=project)
+        review_project = project
+        if review_project is None and drafts.only_project_id(actions):
+            review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
+        gaps = drafts.inspect(actions, available_users, today=timezone.localdate(), project=review_project)
         answer = drafts.chat_text(actions, result.get("answer"), gaps)
         draft = {
             "answer": answer,
