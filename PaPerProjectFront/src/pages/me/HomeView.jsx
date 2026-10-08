@@ -45,14 +45,18 @@ export default function HomeView() {
   // land here in a session. Matches the pattern PM/HR/Frontline use.
   const { glow: tourGlow, tooltip: tourTooltip, dismiss: dismissNudge } = useTutorialNudge(USER_MAIN_TOUR_KEY);
 
-  const firstName = (user?.fullName || user?.username || user?.email || 'there')
+  // Sign-in sends firstName and lastName. It sends no phone or timezone, so
+  // those are only asked for when the details carry the field and it is empty;
+  // otherwise everyone was told, for good, that their profile was incomplete.
+  const firstName = (user?.firstName || user?.fullName || user?.username || user?.email || 'there')
     .split(' ')[0].split('@')[0];
 
   // Look for missing profile fields to decide whether to nudge.
+  const has = (key) => user && Object.prototype.hasOwnProperty.call(user, key);
   const profileGaps = [];
-  if (!user?.fullName && !user?.username) profileGaps.push('name');
-  if (!user?.phone && !user?.phone_number) profileGaps.push('phone');
-  if (!user?.timezone) profileGaps.push('timezone');
+  if (!user?.firstName && !user?.fullName && !user?.username) profileGaps.push('name');
+  if ((has('phone') || has('phone_number')) && !user?.phone && !user?.phone_number) profileGaps.push('phone');
+  if (has('timezone') && !user?.timezone) profileGaps.push('timezone');
   const profileIncomplete = profileGaps.length > 0;
 
   useEffect(() => {

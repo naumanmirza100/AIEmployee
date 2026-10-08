@@ -43,6 +43,15 @@ class SessionCheckTests(TestCase):
             self.assertEqual(checked[field], value, field)
         self.assertEqual((checked['role'], checked['createdByCompanyUser']), ('project_manager', True))
 
+    def test_the_phone_on_their_profile_reaches_their_own_screens(self):
+        # It always answered "none", so the home page told every employee their profile had no phone.
+        UserProfile.objects.filter(user=self.pat).update(phone_number='+92 300 0000000')
+        signed_in = Client().post('/api/auth/login', {'email': 'pat@test.local', 'password': 'a-synthetic-password'},
+                                  content_type='application/json').json()['data']['user']
+        self.assertEqual((signed_in['phone'], self.me(self.pat).json()['data']['user']['phone']),
+                         ('+92 300 0000000', '+92 300 0000000'))
+        self.assertIsNone(self.me(self.admin).json()['data']['user']['phone'])        # no profile, no phone, no error
+
     def test_a_platform_admin_is_still_an_admin_after_a_reload(self):
         user = self.me(self.admin).json()['data']['user']
         self.assertEqual((user['userType'], user['createdByCompanyUser']), ('admin', False))

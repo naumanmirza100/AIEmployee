@@ -94,6 +94,8 @@ def login(request):
                     'email': user.email,
                     'firstName': user.first_name,
                     'lastName': user.last_name,
+                    # The same value auth/me sends, so the screens see one profile before and after a reload.
+                    'phone': getattr(getattr(user, 'profile', None), 'phone_number', None) or None,
                     'userType': user_type,
                     'accountStatus': account_status,
                     'emailVerified': True,
