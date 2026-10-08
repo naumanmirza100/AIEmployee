@@ -47,8 +47,8 @@ const ProtectedRoute = ({ children, requireAdmin = false, requireProjectManager 
 
   if (!userIsAuthenticated) {
     // A company page sends people to the company sign-in. It used to send
-    // them to /login, headed "Admin Login", which a dashboard login cannot
-    // use. Where they were going is remembered either way (utils/returnTo).
+    // them to /login (employees and platform admins), which a dashboard login
+    // cannot use. Where they were going is remembered either way (utils/returnTo).
     if (requireProjectManager) {
       return <Navigate to="/company/login" replace />;
     }
