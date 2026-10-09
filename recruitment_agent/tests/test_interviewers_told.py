@@ -51,6 +51,18 @@ class InterviewersAreToldTests(base.InterviewSchedulingTests):
         self.patch(interviewer_ids=[self.sam.id])
         self.assertIn('10:00', Notification.objects.get(user=self.sam).message)
 
+    def test_they_are_emailed_as_well_as_alerted(self, *_):
+        # In the bell only, an interviewer who was not signed in that day heard nothing.
+        from django.core import mail
+        self.book()
+        mail.outbox.clear()
+        with self.captureOnCommitCallbacks(execute=True):
+            self.patch(interviewer_ids=[self.sam.id])
+        [sent] = mail.outbox
+        self.assertEqual((sent.to, sent.subject), ([self.sam.email], "You're interviewing Cara Candidate"))
+        self.assertIn('10:00', sent.body)
+        self.assertIn('/me/meetings', sent.body)
+
     def test_only_the_people_who_changed_are_told(self, *_):
         self.patch(interviewer_ids=[self.sam.id])
         self.forget()

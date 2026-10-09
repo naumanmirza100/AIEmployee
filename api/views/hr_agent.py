@@ -235,6 +235,7 @@ def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
 #: `company_user` is deliberately NOT here — see `_is_hr_admin`. Defined in
 #: hr_agent.alerts, which also uses it to pick who gets HR's bell alerts.
 from hr_agent import alerts as hr_alerts  # noqa: E402
+from core import meeting_notices  # noqa: E402
 from hr_agent.alerts import HR_ADMIN_ROLES  # noqa: E402
 
 #: Roles `set_company_user_role` may grant. A subset of CompanyUser.ROLE_CHOICES:
@@ -2379,6 +2380,8 @@ def create_hr_meeting(request):
             _seed_meeting_proposal(m, request.user)
     except ScheduleConflict as clash:
         return clash.response()
+    # The people booked are told. HR used to block their calendar and say nothing.
+    meeting_notices.tell('hr', m, None, actor_user_id=_caller_login_user_id(request.user))
     _write_audit_log(request.user, company, 'hr_meeting.create', 'HRMeeting', m.id,
                      before=None,
                      after={'title': m.title, 'meeting_type': m.meeting_type,
@@ -3906,6 +3909,7 @@ def hr_meeting_schedule(request):
                     'action': 'conflict',
                     'conflict': clash.payload()['data'],
                 }})
+            meeting_notices.tell('hr', m, None, actor_user_id=_caller_login_user_id(company_user))
             meeting_payload = _serialize_hr_meeting(m)
 
             # Build a strong success reply so the frontend never has to guess.
@@ -3996,6 +4000,9 @@ def update_hr_meeting(request, meeting_id):
     company = request.user.company
     d = request.data or {}
     dirty = []
+    # Who is in it and when, before anything changes: the people a change
+    # touches are told afterwards. The Edit dialog used to tell nobody.
+    seats_before = meeting_notices.snapshot('hr', m)
     before = {'title': m.title, 'status': m.status,
               'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
               'duration_minutes': m.duration_minutes,
@@ -4097,6 +4104,7 @@ def update_hr_meeting(request, meeting_id):
 
     participants_changed = new_participant_ids is not None
     m.refresh_from_db()
+    meeting_notices.tell('hr', m, seats_before, actor_user_id=_caller_login_user_id(request.user))
     if dirty or participants_changed:
         _write_audit_log(request.user, company, 'hr_meeting.update',
                          'HRMeeting', m.id, before=before,
@@ -4125,6 +4133,7 @@ def cancel_hr_meeting(request, meeting_id):
         return err
     reason = (request.data or {}).get('reason') or ''
     prev_status = m.status
+    seats_before = meeting_notices.snapshot('hr', m)
     m.status = 'cancelled'
     # A cancelled meeting is off the table — carry that through to the
     # negotiation state so the card stops showing "pending" on a dead meeting.
@@ -4133,6 +4142,8 @@ def cancel_hr_meeting(request, meeting_id):
         prefix = '\n\n[Cancelled] ' if m.notes else '[Cancelled] '
         m.notes = (m.notes or '') + prefix + reason
     m.save(update_fields=['status', 'response_status', 'notes', 'updated_at'])
+    # Everyone who was in it is told it is off. The Cancel button used to tell nobody.
+    meeting_notices.tell('hr', m, seats_before, actor_user_id=_caller_login_user_id(request.user))
     # Audit — cancellation was the only meeting mutation not logged. Compliance
     # queries like "who cancelled this exit interview?" now have an answer.
     _write_audit_log(

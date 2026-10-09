@@ -325,6 +325,9 @@ def _step_schedule_meeting(step, ctx, simulate):
         return False, {'done': False, 'error': clash.text(),
                        'conflicts': clash.payload()['data']['conflicts'],
                        'suggested_slots': clash.payload()['data']['suggested_slots']}, None
+    # A meeting a workflow books is announced like one booked by hand.
+    from core import meeting_notices
+    meeting_notices.tell('hr', m, None)
     return True, {'done': True, 'meeting_id': m.id, 'scheduled_at': sched.isoformat()}, None
 
 

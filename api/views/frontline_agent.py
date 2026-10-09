@@ -43,6 +43,7 @@ from core.scheduling import (
     suggest_slots, zone_name,
 )
 from core.tenancy import members_of
+from core import meeting_notices
 from Frontline_agent.models import (
     Document, Ticket, TicketNote, TicketMessage, TicketAttachment,
     KnowledgeBase, FrontlineQAChat, FrontlineQAChatMessage,
@@ -4182,6 +4183,8 @@ def create_meeting(request):
                     m.participants.set(attendees)
         except ScheduleConflict as clash:
             return clash.response()
+        # The people booked are told. Frontline used to block their calendar and say nothing.
+        meeting_notices.tell('frontline', m, None, actor_user_id=organizer.id if organizer_is_employee else None)
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)},
                         status=status.HTTP_201_CREATED)
@@ -4229,6 +4232,7 @@ def update_meeting(request, meeting_id):
         active_states = ('scheduled', 'rescheduled')
         was_active = m.status in active_states
         old_start, old_duration = m.scheduled_at, m.duration_minutes
+        seats_before = meeting_notices.snapshot('frontline', m)
 
         if 'title' in data:
             m.title = str(data['title'])[:200]
@@ -4298,6 +4302,8 @@ def update_meeting(request, meeting_id):
                     m.participants.set(new_attendees)
         except ScheduleConflict as clash:
             return clash.response()
+        meeting_notices.tell('frontline', m, seats_before,
+                             actor_user_id=login_user_id_for_company_user(request.user))
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)})
     except KeyServiceError:
@@ -4316,7 +4322,11 @@ def delete_meeting(request, meeting_id):
         m, err = _get_company_meeting_or_404(request, meeting_id)
         if err:
             return err
+        seats_before = meeting_notices.snapshot('frontline', m)
         m.delete()
+        # A deleted meeting is a cancelled one to the people who were in it.
+        meeting_notices.tell('frontline', m, seats_before, after=None,
+                             actor_user_id=login_user_id_for_company_user(request.user))
         return Response({'status': 'success'})
     except KeyServiceError:
         raise
