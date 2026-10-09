@@ -35,7 +35,10 @@ from ai_sdr_agent.agents.lead_research_agent import (
 from ai_sdr_agent.agents.lead_qualification_agent import LeadQualificationAgent
 from ai_sdr_agent.agents.outreach_agent import OutreachAgent
 
+from contextlib import contextmanager
+
 from core.api_key_service import KeyServiceError
+from core.scheduling import ScheduleConflict
 
 logger = logging.getLogger(__name__)
 
@@ -2220,6 +2223,38 @@ def sdr_check_replies(request, campaign_id):
 # Meetings — scheduling agent output
 # ==========================================================================
 
+@contextmanager
+def _host_booking(company_user, scheduled_at, duration_minutes, *, exclude_id=None, public=False):
+    """The salesperson must be free then, on the calendar every agent shares:
+    no interview, no other agent's meeting, no leave, no company holiday.
+
+    Use as ``with _host_booking(...): save the call``. It holds the booking
+    lock while the call is saved, and raises ``ScheduleConflict`` before
+    anything is saved if they are busy. Sales calls used to be checked only
+    against the same person's other sales calls, or against nothing at all.
+
+    ``public`` is for the page a lead books on: the reason is kept back, so a
+    stranger learns only that the time is not available. A salesperson whose
+    dashboard login is nobody's employee login has no calendar to check.
+    """
+    from core.scheduling import booking_guard, ensure_free, login_user_id_for_company_user, zone_name
+    host = login_user_id_for_company_user(company_user)
+    people = [host] if host else []
+    with booking_guard(people):
+        if people and scheduled_at is not None:
+            ensure_free(people, scheduled_at, duration_minutes or 30,
+                        tz_name=zone_name(company_user.company.timezone_name),
+                        exclude=[('sdr', exclude_id)] if exclude_id else (),
+                        viewer_source='sdr', hide_titles=public, suggest=not public)
+        yield
+
+
+def _takes_time(status, scheduled_at) -> bool:
+    """Does a call in this state occupy the salesperson's calendar?"""
+    from core.scheduling.sources import SOURCES
+    return scheduled_at is not None and status in SOURCES['sdr'].BOOKED
+
+
 def _clean_meeting_fields(d):
     """Validate the editable meeting fields in ``d``.
 
@@ -2363,7 +2398,7 @@ def sdr_meetings_list(request):
         fields, err = _clean_meeting_fields(d)
         if err:
             return Response({'status': 'error', 'message': err}, status=400)
-        meeting = SDRMeeting.objects.create(
+        new = dict(
             company_user=company_user,
             lead=lead,
             title=fields.get('title', f'Discovery Call with {lead.display_name}'),
@@ -2374,7 +2409,14 @@ def sdr_meetings_list(request):
             status=fields.get('status', 'pending'),
             is_manual=True,
         )
+        if _takes_time(new['status'], new['scheduled_at']):
+            with _host_booking(company_user, new['scheduled_at'], new['duration_minutes']):
+                meeting = SDRMeeting.objects.create(**new)
+        else:
+            meeting = SDRMeeting.objects.create(**new)
         return Response({'status': 'success', 'data': _serialize_meeting(meeting)}, status=201)
+    except ScheduleConflict as clash:
+        return clash.response()
     except SDRLead.DoesNotExist:
         return Response({'status': 'error', 'message': 'Lead not found.'}, status=404)
     except KeyServiceError:
@@ -2405,9 +2447,20 @@ def sdr_meeting_detail(request, meeting_id):
             fields, err = _clean_meeting_fields(d)
             if err:
                 return Response({'status': 'error', 'message': err}, status=400)
+            was = (_takes_time(meeting.status, meeting.scheduled_at), meeting.scheduled_at, meeting.duration_minutes)
             for field, value in fields.items():
                 setattr(meeting, field, value)
-            meeting.save()
+            now = (_takes_time(meeting.status, meeting.scheduled_at), meeting.scheduled_at, meeting.duration_minutes)
+            if now[0] and now != was:
+                # A new time or length, or a call brought back: the salesperson must be free then.
+                try:
+                    with _host_booking(company_user, meeting.scheduled_at, meeting.duration_minutes,
+                                       exclude_id=meeting.id):
+                        meeting.save()
+                except ScheduleConflict as clash:
+                    return clash.response()
+            else:
+                meeting.save()
 
             new_status = meeting.status
             # Send completion thank-you email when status changes to completed
@@ -2509,7 +2562,8 @@ def sdr_confirm_meeting(request, meeting_id):
             meeting.approval_token = _uuid.uuid4()
             meeting.status = 'awaiting_approval'
             meeting.approval_proposed_at = timezone.now()
-            meeting.save()
+            with _host_booking(company_user, meeting.scheduled_at, meeting.duration_minutes, exclude_id=meeting.id):
+                meeting.save()
 
             if meeting.enrollment and meeting.enrollment.campaign:
                 campaign = meeting.enrollment.campaign
@@ -2537,7 +2591,8 @@ def sdr_confirm_meeting(request, meeting_id):
             # Direct confirm flow (original behaviour)
             meeting.status = 'scheduled'
             meeting.confirmed_at = timezone.now()
-            meeting.save()
+            with _host_booking(company_user, meeting.scheduled_at, meeting.duration_minutes, exclude_id=meeting.id):
+                meeting.save()
 
             lead = meeting.lead
             lead.status = 'meeting_scheduled'
@@ -2557,6 +2612,9 @@ def sdr_confirm_meeting(request, meeting_id):
 
     except KeyServiceError:
         raise
+    except ScheduleConflict as clash:
+        # The salesperson is busy then. Nothing was saved, and no email went to the lead.
+        return clash.response()
     except Exception as exc:
         logger.error("Confirm meeting error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
@@ -3295,12 +3353,27 @@ def sdr_booking_confirm(request, token):
     # fallback link until/unless a Meet link can be created.
     room_slug = str(meeting.booking_token).replace('-', '')[:16]
     meet_link = f"https://meet.jit.si/SDR-{room_slug}"
-    rows = SDRMeeting.objects.filter(id=meeting.id, status__in=['pending', 'awaiting_approval']).update(
-        status='scheduled',
-        scheduled_at=scheduled_at,
-        confirmed_at=timezone.now(),
-        calendar_link=meet_link,
-    )
+    try:
+        # The salesperson must be free then on the shared calendar too: not on leave, not in an
+        # interview or another agent's meeting, not on a company holiday. The lead is told only that
+        # the time is not available, never who is busy or why.
+        with _host_booking(meeting.company_user, scheduled_at, duration_minutes, exclude_id=meeting.id, public=True):
+            rows = SDRMeeting.objects.filter(id=meeting.id, status__in=['pending', 'awaiting_approval']).update(
+                status='scheduled',
+                scheduled_at=scheduled_at,
+                confirmed_at=timezone.now(),
+                calendar_link=meet_link,
+            )
+            if rows:
+                # .update() sends no signal, so the calendar is told here. Left to the nightly
+                # rebuild, the hour would stay bookable by every other agent until then.
+                from core.scheduling.sync import safe_sync_id
+                safe_sync_id('sdr', meeting.id)
+    except ScheduleConflict:
+        return Response({
+            'error': 'slot_unavailable',
+            'message': 'That time is no longer available. Please pick another slot.',
+        }, status=409)
     if rows == 0:
         return Response({
             'error': 'already_booked',

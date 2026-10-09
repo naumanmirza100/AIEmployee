@@ -509,23 +509,124 @@ def _recruitment_meeting_items(user):
     return items
 
 
+def _dashboard_logins_of(user):
+    """Ids of the dashboard logins (and executive seats) that are this
+    employee: linked by HR, or the same address in the same company. The rule
+    the shared calendar uses (core.scheduling.identity)."""
+    from core.models import CompanyUser
+    ids = set()
+    try:
+        from hr_agent.models import Employee
+        ids |= set(Employee.objects.filter(user=user, company_user__isnull=False)
+                   .values_list('company_user_id', flat=True))
+    except Exception:
+        pass
+    company_id = getattr(getattr(user, 'profile', None), 'company_id', None)
+    if user.email and company_id:
+        ids |= set(CompanyUser.objects.filter(company_id=company_id, email__iexact=user.email)
+                   .values_list('id', flat=True))
+    return ids
+
+
+def _sales_call_items(user):
+    """Sales calls this employee runs. Informational: the time is agreed with
+    the lead, in the sales agent."""
+    from ai_sdr_agent.models import SDRMeeting
+
+    logins = _dashboard_logins_of(user)
+    if not logins:
+        return []
+    calls = (SDRMeeting.objects.filter(company_user_id__in=logins, scheduled_at__isnull=False,
+                                       status__in=('scheduled', 'awaiting_approval'))
+             .select_related('company_user', 'lead').order_by('-created_at')[:50])
+    return [{
+        'id': m.id,
+        'source': 'sdr',
+        'source_label': 'Sales call',
+        'organizer_name': m.company_user.full_name or 'Sales',
+        'organizer_email': _visible_email(m.company_user.email),
+        'title': m.title or 'Sales call',
+        'description': '',
+        'agenda': [],
+        'proposed_time': m.scheduled_at.isoformat(),
+        'duration_minutes': m.duration_minutes,
+        'status': m.status,
+        'my_status': 'organizer',
+        'participants': [],
+        'created_at': m.created_at.isoformat() if m.created_at else None,
+        'responses': [],
+        'meeting_link': m.calendar_link or None,
+        'location': '',
+        'can_respond': False,
+        'can_suggest_time': False,
+        'respond_url': None,
+    } for m in calls]
+
+
+def _executive_meeting_items(user):
+    """Executive meetings this employee organises or is invited to.
+    Informational here: an invitation is answered in the Executive Meeting agent.
+    The time is when it really is: that agent keeps it as typed (meeting_agent.clock)."""
+    from django.db.models import Q
+    from meeting_agent.clock import real_start
+    from meeting_agent.models import ExecutiveMeeting
+
+    logins = _dashboard_logins_of(user)
+    if not logins:
+        return []
+    meetings = (ExecutiveMeeting.objects
+                .filter(Q(organizer_id__in=logins) | Q(participants__company_user_id__in=logins))
+                .exclude(status='cancelled').distinct()
+                .select_related('organizer__company').prefetch_related('participants__company_user')
+                .order_by('-created_at')[:50])
+    items = []
+    for m in meetings:
+        seats = list(m.participants.all())
+        mine = next((s.response for s in seats if s.company_user_id in logins), None)
+        items.append({
+            'id': m.id,
+            'source': 'exec',
+            'source_label': 'Executive meeting',
+            'organizer_name': m.organizer.full_name or 'Organiser',
+            'organizer_email': _visible_email(m.organizer.email),
+            'title': m.title,
+            'description': m.description or '',
+            'agenda': m.agenda or [],
+            'proposed_time': real_start(m).isoformat(),
+            'duration_minutes': m.duration_minutes,
+            'status': m.status,
+            'my_status': 'organizer' if m.organizer_id in logins else (mine or 'pending'),
+            'participants': [{'user_id': s.company_user_id, 'name': s.company_user.full_name or s.company_user.email,
+                              'status': s.response} for s in seats],
+            'created_at': m.created_at.isoformat() if m.created_at else None,
+            'responses': [],
+            'meeting_link': m.meeting_link or None,
+            'location': '',
+            'can_respond': False,
+            'can_suggest_time': False,
+            'respond_url': None,
+        })
+    return items
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def meeting_list_for_user(request):
     """Every meeting the current employee is part of, from the Project
-    Manager, HR and Frontline agents, and interviews they run or sit in on.
+    Manager, HR and Frontline agents, interviews they run or sit in on, sales
+    calls they run and executive meetings they are in.
 
-    Each item carries `source` ('pm' | 'hr' | 'frontline' | 'recruitment');
-    ids are only unique within a source. `respond_url` (relative to /api) is
-    where to send an accept / reject / counter-proposal, and `can_respond`
-    says whether the employee may answer now. Frontline meetings and
-    interviews are informational.
+    Each item carries `source` ('pm' | 'hr' | 'frontline' | 'recruitment' |
+    'sdr' | 'exec'); ids are only unique within a source. `respond_url`
+    (relative to /api) is where to send an accept / reject / counter-proposal,
+    and `can_respond` says whether the employee may answer now. Frontline
+    meetings, interviews, sales calls and executive meetings are informational.
     """
     try:
         user = request.user
         items = []
         for collect in (_pm_meeting_items, _hr_meeting_items, _frontline_meeting_items,
-                        _recruitment_meeting_items):
+                        _recruitment_meeting_items, _sales_call_items, _executive_meeting_items):
             try:
                 items += collect(user)
             except Exception:

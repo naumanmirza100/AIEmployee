@@ -378,6 +378,8 @@ class CalendarBlock(models.Model):
         ('frontline', 'Frontline'),
         ('recruitment', 'Recruitment interview'),
         ('leave', 'Approved leave'),
+        ('sdr', 'Sales call'),
+        ('exec', 'Executive meeting'),
     ]
     ROLE_CHOICES = [
         ('organizer', 'Organizer'),

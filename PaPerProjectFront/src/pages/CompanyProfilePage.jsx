@@ -267,8 +267,8 @@ const CompanyProfilePage = () => {
                   )}
                   <p className="text-xs text-white/40">
                     {c.timezoneName
-                      ? 'Leave and holidays are read on this clock for everyone who has no time zone of their own.'
-                      : 'Until this is set, leave is read in UTC: a half day off can block the wrong hours.'}
+                      ? 'Leave and holidays are read on this clock for everyone who has no time zone of their own, and so are executive meeting times.'
+                      : 'Until this is set, leave and executive meeting times are read in UTC: they can block the wrong hours.'}
                   </p>
                 </div>
                 <div className="sm:col-span-2">

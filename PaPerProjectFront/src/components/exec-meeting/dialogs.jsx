@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select';
 import { Loader2, Sparkles, Users, ChevronRight, Wand2 } from 'lucide-react';
 import execMeetingService from '@/services/execMeetingService';
-import { DateTimePicker, DateOnlyPicker, validateMeetingLink, todayStr } from './shared';
+import { DateTimePicker, DateOnlyPicker, validateMeetingLink, todayStr, fmtUtc } from './shared';
 import HoverTip from '@/components/common/HoverTip';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
 import { AllMembersPanel } from './AllMembersPanel';
@@ -123,25 +123,26 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
     }
   };
 
+  // The people picked, as the server takes them.
+  const picked = () => participants.map(p => ({ user_id: p.id, user_type: p.user_type || 'company_user' }));
+
   // Actually creates the meeting (called directly, or after the user confirms
-  // past a scheduling conflict).
+  // past a warning). The people picked go with it, so the server books it for
+  // all of them or refuses it: adding them one request each afterwards left a
+  // meeting made without whoever turned out to be busy.
   const doCreate = async () => {
     setConflicts(null);
     setLoading(true);
     try {
-      const res = await execMeetingService.createMeeting({
+      await execMeetingService.createMeeting({
         title: form.title,
         description: form.description,
         agenda,
         scheduled_at: form.scheduled_at,
         duration_minutes: parseInt(form.duration_minutes) || 60,
         meeting_link: form.meeting_link.trim() || '',
+        participants: picked(),
       });
-      // Add participants if any
-      const meetingId = res.meeting?.id;
-      if (meetingId && participants.length > 0) {
-        await Promise.all(participants.map(p => execMeetingService.addParticipant(meetingId, p.id, p.user_type)));
-      }
       toast({ title: 'Meeting scheduled!' });
       onCreated();
       onClose();
@@ -171,6 +172,7 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
       const res = await execMeetingService.checkMeetingConflicts({
         scheduled_at: form.scheduled_at,
         duration_minutes: parseInt(form.duration_minutes) || 60,
+        participants: picked(),
       });
       const found = res.conflicts || [];
       if (found.length > 0) {
@@ -391,42 +393,57 @@ export const ScheduleMeetingDialog = ({ open, onClose, onCreated, prefill = null
   );
 };
 
-// Shown when a meeting already occupies the chosen time slot — lets the user
-// double-book on purpose or go back and pick another time.
-const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading }) => (
-  <Dialog open={!!conflicts && conflicts.length > 0} onOpenChange={v => { if (!v) onCancel(); }}>
-    <DialogContent className="max-w-md bg-[var(--sfc-0d0b1f)] border-white/10 text-white">
-      <DialogHeader>
-        <DialogTitle className="text-amber-300">Time slot already booked</DialogTitle>
-        <DialogDescription className="text-white/50">
-          You already have {conflicts?.length === 1 ? 'a meeting' : `${conflicts?.length} meetings`} at this time.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="space-y-2 py-2">
-        {(conflicts || []).map(c => (
-          <div key={c.id} className="rounded-lg border-b border-amber-500/20 px-3 py-2">
-            <p className="text-sm font-medium text-white">{c.title}</p>
-            <p className="text-xs text-white/50">
-              {c.status === 'in_progress' ? 'In progress' : 'Scheduled'}
-              {c.scheduled_at ? ` · ${new Date(c.scheduled_at).toLocaleString()}` : ''}
-              {c.duration_minutes ? ` · ${c.duration_minutes} min` : ''}
-            </p>
-          </div>
-        ))}
-        <p className="text-xs text-white/40 pt-1">Do you still want to add another meeting in this slot?</p>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel} className="border-white/10 text-white/70">Pick another time</Button>
-        <HoverTip tip="Book this slot despite the conflict">
-          <Button onClick={onConfirm} disabled={loading} className="bg-amber-600 hover:bg-amber-700 text-pure-white border-0">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Add anyway
-          </Button>
-        </HoverTip>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-);
+// Shown when something already occupies the chosen time.
+//
+// Two kinds of clash come back. One the calendar every agent shares knows of
+// (another meeting, an interview, a sales call, leave, a company holiday, for
+// the organiser or anyone invited) is `blocking`: the server will refuse the
+// meeting, so the only way on is another time. One that only the agent's own
+// check finds is a warning, and the user may still book over it.
+const MeetingConflictDialog = ({ conflicts, onCancel, onConfirm, loading }) => {
+  const blocked = (conflicts || []).some(c => c.blocking);
+  return (
+    <Dialog open={!!conflicts && conflicts.length > 0} onOpenChange={v => { if (!v) onCancel(); }}>
+      <DialogContent className="max-w-md bg-[var(--sfc-0d0b1f)] border-white/10 text-white" data-testid="exec-meeting-clash">
+        <DialogHeader>
+          <DialogTitle className="text-amber-300">{blocked ? 'That time is taken' : 'Time slot already booked'}</DialogTitle>
+          <DialogDescription className="text-white/50">
+            {blocked
+              ? 'Someone in this meeting is busy then, so it cannot be booked at this time.'
+              : `You already have ${conflicts?.length === 1 ? 'a meeting' : `${conflicts?.length} meetings`} at this time.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          {(conflicts || []).map((c, i) => (
+            <div key={`${c.source || 'exec'}-${c.id ?? i}-${i}`} className="rounded-lg border-b border-amber-500/20 px-3 py-2">
+              <p className="text-sm font-medium text-white">{c.title}</p>
+              {/* A clash from the shared calendar says who and when in its own line. */}
+              {!c.source && (
+                <p className="text-xs text-white/50">
+                  {c.status === 'in_progress' ? 'In progress' : 'Scheduled'}
+                  {c.scheduled_at ? ` · ${fmtUtc(c.scheduled_at)}` : ''}
+                  {c.duration_minutes ? ` · ${c.duration_minutes} min` : ''}
+                </p>
+              )}
+            </div>
+          ))}
+          {!blocked && <p className="text-xs text-white/40 pt-1">Do you still want to add another meeting in this slot?</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} className="border-white/10 text-white/70">Pick another time</Button>
+          {!blocked && (
+            <HoverTip tip="Book this slot despite the conflict">
+              <Button onClick={onConfirm} disabled={loading} className="bg-amber-600 hover:bg-amber-700 text-pure-white border-0">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Add anyway
+              </Button>
+            </HoverTip>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 // ── Edit meeting dialog ─────────────────────────────────────────────────────
 export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
@@ -517,6 +534,15 @@ export const MeetingEditDialog = ({ meeting, open, onClose, onUpdated }) => {
     // meeting completed or cancelled frees its slot, so there's nothing to
     // conflict with — save straight through.
     if (form.status === 'completed' || form.status === 'cancelled') {
+      await doSave();
+      return;
+    }
+    // Nor when the time, the length and the state are as they were: a new title
+    // or agenda moves nobody, and the server does not check it either.
+    const unmoved = form.scheduled_at === (meeting.scheduled_at ? meeting.scheduled_at.slice(0, 16) : '')
+      && (parseInt(form.duration_minutes) || 60) === (meeting.duration_minutes || 60)
+      && form.status === (meeting.status || 'scheduled');
+    if (unmoved) {
       await doSave();
       return;
     }

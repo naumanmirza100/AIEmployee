@@ -292,8 +292,86 @@ class LeaveSource(Source):
         return qs.select_related('employee__company')
 
 
+class SalesCallSource(Source):
+    """A sales call occupies the salesperson whose call it is. The lead is
+    outside the company and has no calendar here.
+
+    Sales calls were left off the shared calendar when it was built (17
+    September 2026), so a lead could book a salesperson who was on leave, in
+    an interview or in another meeting. A time proposed to the lead and not
+    yet answered counts as busy, like any other pending invitation.
+    """
+    key = 'sdr'
+    label = 'Sales call'
+    model_label = 'ai_sdr_agent.SDRMeeting'
+    attendees_field = ''
+    relevant_fields = frozenset({'scheduled_at', 'duration_minutes', 'status', 'title',
+                                 'company_user', 'company_user_id'})
+    BOOKED = ('scheduled', 'awaiting_approval')
+
+    def booking(self, m, *, assume_active=False, include_declined=False):
+        if m.scheduled_at is None or not m.company_user_id:
+            return None
+        if not assume_active and m.status not in self.BOOKED:
+            return None
+        starts, ends = _window(m.scheduled_at, m.duration_minutes)
+        b = Booking(company_id=m.company_user.company_id, starts_at=starts, ends_at=ends,
+                    title=m.title or 'Sales call')
+        b.add(login_user_id_for_company_user(m.company_user), ORGANIZER, ORGANIZER)
+        return b
+
+    def upcoming(self, since, company_id=None):
+        qs = self.model.objects.filter(scheduled_at__gte=since - timedelta(days=1))
+        if company_id:
+            qs = qs.filter(company_user__company_id=company_id)
+        return qs.select_related('company_user')
+
+
+class ExecutiveSource(Source):
+    """An executive meeting occupies its organiser and everyone invited who
+    has not declined. They are dashboard logins, or the seat that stands in
+    for an employee; each counts when it maps to an employee login.
+
+    Its title is private: someone booking in another agent learns that the
+    person is busy in an executive meeting, not what the meeting is about.
+
+    That agent keeps a meeting's time as it was typed, filed as UTC. The busy
+    time is the real instant, read on the company's clock (meeting_agent.clock)."""
+    key = 'exec'
+    label = 'Executive meeting'
+    model_label = 'meeting_agent.ExecutiveMeeting'
+    participant_model_label = 'meeting_agent.ExecutiveMeetingParticipant'
+    attendees_field = ''
+    relevant_fields = frozenset({'scheduled_at', 'duration_minutes', 'status', 'title',
+                                 'organizer', 'organizer_id'})
+    ACTIVE = ('scheduled', 'in_progress', 'pending_confirmation')
+    BUSY = BUSY_RESPONSES + ('tentative',)
+
+    def booking(self, m, *, assume_active=False, include_declined=False):
+        if m.scheduled_at is None:
+            return None
+        if not assume_active and m.status not in self.ACTIVE:
+            return None
+        from meeting_agent.clock import real_start
+        starts, ends = _window(real_start(m), m.duration_minutes)
+        b = Booking(company_id=m.organizer.company_id, starts_at=starts, ends_at=ends, title=m.title or '',
+                    is_private=True)
+        for seat in self.participant_model.objects.filter(meeting_id=m.pk).select_related('company_user'):
+            if include_declined or seat.response in self.BUSY:
+                b.add(login_user_id_for_company_user(seat.company_user), PARTICIPANT, seat.response)
+        b.add(login_user_id_for_company_user(m.organizer), ORGANIZER, ORGANIZER)
+        return b
+
+    def upcoming(self, since, company_id=None):
+        qs = self.model.objects.filter(scheduled_at__gte=since - timedelta(days=1))
+        if company_id:
+            qs = qs.filter(organizer__company_id=company_id)
+        return qs.select_related('organizer__company')
+
+
 SOURCES: dict[str, Source] = {s.key: s for s in (ProjectManagerSource(), HRSource(), FrontlineSource(),
-                                                  RecruitmentSource(), LeaveSource())}
+                                                  RecruitmentSource(), LeaveSource(),
+                                                  SalesCallSource(), ExecutiveSource())}
 
 
 def people_for(source_key: str, meeting, *, include_declined=False) -> list[int]:

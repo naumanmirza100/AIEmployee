@@ -50,6 +50,8 @@ const SOURCE_COLORS = {
   hr: 'text-pink-300 border-pink-500/30',
   frontline: 'text-amber-300 border-amber-500/30',
   recruitment: 'text-emerald-300 border-emerald-500/30',
+  sdr: 'text-orange-300 border-orange-500/30',
+  exec: 'text-violet-300 border-violet-500/30',
 };
 
 const meetingKey = (m) => `${m.source || 'pm'}-${m.id}`;

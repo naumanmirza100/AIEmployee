@@ -74,10 +74,16 @@ def follow_company(company) -> int:
 
 def set_company_zone(company, name) -> None:
     """Set the company's time zone to `name`: a valid IANA name, or '' for
-    "not set". Everyone who follows it has their approved leave moved."""
+    "not set". Everyone who follows it has their approved leave moved, and so
+    have the company's executive meetings, whose typed times are read on it."""
     company.timezone_name = name
     company.save(update_fields=['timezone_name'])
     resync_leave(following(company).values_list('id', flat=True))
+    try:
+        from meeting_agent.clock import resync_company
+        resync_company(company)
+    except Exception:
+        logger.exception("could not move the executive meetings of company %s to its new time zone", company.pk)
 
 
 def summary(company) -> dict:
