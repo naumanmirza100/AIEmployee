@@ -34,6 +34,10 @@ def employee_login(company, email, first_name):
     return user
 
 
+# The function itself, for the tests of it: the class below replaces it for every other test.
+_real_google_link = scheduling._create_google_meet_link
+
+
 @mock.patch.object(scheduling, '_create_google_meet_link', return_value=None)
 @mock.patch.object(scheduling.InterviewSchedulingAgent, 'send_confirmation_email', return_value=True)
 @mock.patch.object(scheduling.InterviewSchedulingAgent, 'send_reschedule_email', return_value=True)
@@ -75,6 +79,33 @@ class InterviewSchedulingTests(TestCase):
     def book(self, interview=None, slot=None):
         return scheduling.InterviewSchedulingAgent().confirm_slot(
             (interview or self.interview).id, slot or self.slot10)
+
+    def test_booking_keeps_the_google_event_so_it_can_follow_the_interview(self, *_):
+        # The event's id was thrown away: an interview that moved stayed in Google at its old time.
+        from core.google_calendar import event_state
+        self.interview.scheduled_datetime = self.at(10)
+        made = {'event_id': 'ev-7', 'meet_url': 'https://meet.google.com/xyz'}
+        with mock.patch('core.google_calendar.create_google_event', return_value=made) as create:
+            link = _real_google_link(self.interview, 45)
+        self.assertEqual(link, 'https://meet.google.com/xyz')
+        self.assertEqual(create.call_args.kwargs['duration_minutes'], 45)
+        self.assertEqual((self.interview.google_event_id, self.interview.google_event_state),
+                         ('ev-7', event_state(self.at(10), 45)))
+
+    def test_without_google_there_is_no_event_to_keep(self, *_):
+        with mock.patch('core.google_calendar.create_google_event', return_value=None):
+            self.assertIsNone(_real_google_link(self.interview, 45))
+        self.assertEqual((self.interview.google_event_id, self.interview.google_event_state), ('', ''))
+
+    def test_the_event_made_at_booking_is_saved_with_the_interview(self, *_):
+        def google(interview, minutes):
+            interview.google_event_id, interview.google_event_state = 'ev-7', 'as-booked'
+            return 'https://meet.google.com/xyz'
+        with mock.patch.object(scheduling, '_create_google_meet_link', side_effect=google):
+            self.assertTrue(self.book()['success'])
+        saved = Interview.objects.get(pk=self.interview.pk)
+        self.assertEqual((saved.google_event_id, saved.google_event_state, saved.meeting_link),
+                         ('ev-7', 'as-booked', 'https://meet.google.com/xyz'))
 
     def busy(self, user, hour, source='pm'):
         return CalendarBlock.objects.create(

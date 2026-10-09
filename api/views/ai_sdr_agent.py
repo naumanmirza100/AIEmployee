@@ -3107,10 +3107,14 @@ def _create_google_meet_link(meeting, scheduled_at, duration_minutes=30):
     connection recruitment uses — so a company that connected Google once gets
     Meet links for SDR meetings too. Returns None when not connected, and the
     caller falls back to Jitsi.
+
+    The event's id, and the time it stands at, are set on `meeting` for the
+    caller to save: they are what lets the event follow the call when it moves
+    or is called off (core/google_events.py).
     """
-    from core.google_calendar import create_google_meet_link
+    from core.google_calendar import create_google_event, event_state
     company = _company_for_meeting(meeting)
-    return create_google_meet_link(
+    created = create_google_event(
         company,
         start_dt=scheduled_at,
         duration_minutes=duration_minutes,
@@ -3118,6 +3122,12 @@ def _create_google_meet_link(meeting, scheduled_at, duration_minutes=30):
         description=(f"Meeting with {meeting.lead.display_name}" if getattr(meeting, 'lead', None) else ''),
         attendee_email=(meeting.lead.email if getattr(meeting, 'lead', None) and meeting.lead.email else ''),
     )
+    if not created:
+        return None
+    if created['event_id']:
+        meeting.google_event_id = created['event_id']
+        meeting.google_event_state = event_state(scheduled_at, duration_minutes)
+    return created['meet_url'] or None
 
 
 # ==========================================================================
@@ -3297,20 +3307,30 @@ def sdr_booking_confirm(request, token):
             'message': 'This meeting was just booked by another request.',
         }, status=400)
 
-    try:
-        google_link = _create_google_meet_link(meeting, scheduled_at, duration_minutes)
-    except KeyServiceError:
-        raise
-    except Exception as exc:
-        logger.warning("Google Meet creation failed for meeting %s: %s", meeting.id, exc)
-        google_link = None
-    if google_link:
-        meet_link = google_link
-        SDRMeeting.objects.filter(id=meeting.id).update(calendar_link=meet_link)
-
     meeting.status = 'scheduled'
     meeting.scheduled_at = scheduled_at
     meeting.confirmed_at = timezone.now()
+    if meeting.google_event_id:
+        # Booked before, then reopened: it has an event already. Move that one;
+        # a second event would leave the first in the calendar for good. The
+        # row was changed with .update(), which no signal sees.
+        from core.google_events import follow_meeting
+        follow_meeting(meeting)
+        meet_link = meeting.calendar_link or meet_link
+        SDRMeeting.objects.filter(id=meeting.id).update(calendar_link=meet_link)
+    else:
+        try:
+            google_link = _create_google_meet_link(meeting, scheduled_at, duration_minutes)
+        except KeyServiceError:
+            raise
+        except Exception as exc:
+            logger.warning("Google Meet creation failed for meeting %s: %s", meeting.id, exc)
+            google_link = None
+        if google_link:
+            meet_link = google_link
+        SDRMeeting.objects.filter(id=meeting.id).update(
+            calendar_link=meet_link, google_event_id=meeting.google_event_id,
+            google_event_state=meeting.google_event_state)
     meeting.calendar_link = meet_link
 
     lead = meeting.lead

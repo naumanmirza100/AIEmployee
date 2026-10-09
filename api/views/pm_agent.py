@@ -4074,6 +4074,15 @@ def meeting_schedule(request):
 
             new_time_display = new_time.strftime("%A, %B %d, %Y at %I:%M %p")
 
+            # The meeting as it now stands, as a calendar file. The move email
+            # used to carry none, so each invitee's own calendar kept the old time.
+            try:
+                from project_manager_agent.ics_generator import generate_meeting_ics
+                moved_ics = generate_meeting_ics(meeting, action='REQUEST')
+            except Exception as ics_err:
+                logger.warning(f"[MEETING] Failed to generate .ics for the move: {ics_err}")
+                moved_ics = None
+
             # Notify participants
             from core.models import Notification as UserNotification
             for p in meeting.participants.all().select_related('user'):
@@ -4088,6 +4097,7 @@ def meeting_schedule(request):
                         recipient_email=p.user.email,
                         subject=f"Meeting Rescheduled: {meeting.title}",
                         body_html=f"<p><strong>{company_user.full_name}</strong> rescheduled <strong>\"{meeting.title}\"</strong> from {old_time} to <strong>{new_time_display}</strong>.</p>",
+                        ics_content=moved_ics,
                     )
 
             response_text = (

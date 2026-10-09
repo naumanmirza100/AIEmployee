@@ -240,6 +240,33 @@ class RescheduleReviewTests(PMTestCase):
         self.assertEqual(self.meeting.proposed_time, self.new)
         email.assert_called_once()
 
+    def test_the_move_email_carries_the_meeting_as_it_now_stands(self):
+        # It carried no calendar file, so the invitee's own calendar kept the old time.
+        from datetime import timezone as dt_timezone
+        _, email = self.send({'message': 'Move it.', 'confirm_reschedule': {
+            'meeting_id': self.meeting.id, 'new_time': self.new.isoformat()}})
+        ics = email.call_args.kwargs['ics_content']
+        self.assertIn(f"DTSTART:{self.new.astimezone(dt_timezone.utc):%Y%m%dT%H%M%SZ}", ics)
+        self.assertIn(f'UID:meeting-{self.meeting.id}@', ics)
+
+    def test_a_calendar_file_sent_after_a_change_outranks_the_one_before(self):
+        # Every file said SEQUENCE:0, and a calendar program ignores a file that is not newer than its own.
+        import re
+        from project_manager_agent.ics_generator import generate_meeting_ics
+        from project_manager_agent.models import ScheduledMeeting
+
+        def sequence():
+            self.meeting.refresh_from_db()
+            return int(re.search(r'SEQUENCE:(\d+)', generate_meeting_ics(self.meeting)).group(1))
+
+        hours_ago = timezone.now() - timedelta(hours=2)
+        ScheduledMeeting.objects.filter(pk=self.meeting.pk).update(created_at=hours_ago, updated_at=hours_ago)
+        first = sequence()
+        self.assertEqual(first, 0)
+        self.send({'message': 'Move it.', 'confirm_reschedule': {
+            'meeting_id': self.meeting.id, 'new_time': self.new.isoformat()}})
+        self.assertGreater(sequence(), first)
+
     def test_only_a_meeting_you_organise_can_be_moved(self):
         data, _ = self.send({'message': 'Move it.', 'confirm_reschedule': {
             'meeting_id': self.meeting.id, 'new_time': self.new.isoformat()}}, actor=self.dash_colleague)

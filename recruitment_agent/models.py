@@ -419,6 +419,12 @@ class Interview(models.Model):
 
     # Google Meet link auto-generated at slot confirmation
     meeting_link = models.URLField(max_length=500, null=True, blank=True, help_text="Google Meet link generated when candidate confirms their slot")
+
+    # The Google Calendar event made for this interview, and the time that event
+    # stands at. core.google_calendar.follow moves or removes the event when
+    # the interview moves or is called off. Empty: no event (Google not connected).
+    google_event_id = models.CharField(max_length=255, blank=True, default='')
+    google_event_state = models.CharField(max_length=64, blank=True, default='')
     
     # Related CV record (optional)
     cv_record = models.ForeignKey(CVRecord, on_delete=models.SET_NULL, null=True, blank=True, related_name='interviews')

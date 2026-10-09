@@ -32,6 +32,11 @@ class CoreConfig(AppConfig):
         from core.scheduling.sync import connect_signals
         connect_signals()
 
+        # Keep the Google Calendar events of interviews and sales calls in
+        # step with them when they move or are called off.
+        from core.google_events import connect_signals as connect_google_events
+        connect_google_events()
+
         # NOTE: Stripe Product/Price sync deliberately does NOT run here.
         # ready() fires in every gunicorn worker, every celery worker and every
         # `manage.py` invocation — so syncing here meant concurrent workers racing
