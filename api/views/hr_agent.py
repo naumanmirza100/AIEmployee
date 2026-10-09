@@ -234,6 +234,7 @@ def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
 #: the GDPR export, anonymisation, leave-balance adjustment, the audit log.
 #: `company_user` is deliberately NOT here — see `_is_hr_admin`. Defined in
 #: hr_agent.alerts, which also uses it to pick who gets HR's bell alerts.
+from hr_agent import alerts as hr_alerts  # noqa: E402
 from hr_agent.alerts import HR_ADMIN_ROLES  # noqa: E402
 
 #: Roles `set_company_user_role` may grant. A subset of CompanyUser.ROLE_CHOICES:
@@ -2670,6 +2671,7 @@ def cancel_leave_request(request, request_id):
             after={'status': lr.status, 'employee_id': lr.employee_id,
                    'days_requested': float(lr.days_requested or 0)},
         )
+        hr_alerts.leave_decided(lr, decided_by=request.user, note=lr.approval_note)
         return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status}})
     except Exception:
         logger.exception("cancel_leave_request failed")
@@ -2787,6 +2789,7 @@ def withdraw_leave_request(request, request_id):
                    'after_end_date': bool(already_taken),
                    'reason': reason[:500]},
         )
+        hr_alerts.leave_decided(lr, decided_by=request.user, note=reason)
         return Response({'status': 'success',
                          'data': {'id': lr.id, 'status': lr.status,
                                   'days_restored': restored}})
@@ -2898,6 +2901,8 @@ def decide_leave_request(request, request_id):
                 'days_requested': float(lr.days_requested or 0),
             },
         )
+        # The person who asked is told the answer. Nobody was, before.
+        hr_alerts.leave_decided(lr, decided_by=cu, note=lr.approval_note)
 
         return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status}})
     except Exception:

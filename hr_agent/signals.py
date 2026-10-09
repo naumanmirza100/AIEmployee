@@ -260,8 +260,11 @@ def _run_matching_workflows(*, company_id: int, event: str, context: dict):
             # second execution; the partial unique constraint on
             # (workflow, idempotency_key) turns the second into a no-op via
             # the IntegrityError handler below.
+            # A leave event is counted by the request, not the person. Counted
+            # by the person, a "when leave is approved" workflow ran for an
+            # employee's first leave and was skipped as a repeat ever after.
             import hashlib as _hashlib
-            target_pk = context.get('employee_id') or context.get('leave_request_id') or 'na'
+            target_pk = context.get('leave_request_id') or context.get('employee_id') or 'na'
             idem_key = _hashlib.sha256(
                 f"wf={w.id}|evt={event}|tgt={target_pk}".encode()
             ).hexdigest()

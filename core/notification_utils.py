@@ -78,6 +78,69 @@ def notify_company_users(company_users, *, title, message, link=None,
         return 0
 
 
+def notify_employees(users, *, title, message, link=None, kind='custom',
+                     email_subject=None, email_body=None, attachments=()):
+    """Tell employee logins: a row in the bell My Space reads
+    (`core.Notification`) and, when `email_subject` is given, an email.
+
+    `notify_company_users` reaches dashboard logins only, so an agent that
+    booked or decided something for a member of staff had no way to say so:
+    HR, Frontline and Recruitment told the people they booked nothing at all.
+    `link` is an in-app path the bell opens (a My Space page), `kind` says what
+    raised it. `email_body` defaults to the message; `attachments` are
+    (filename, content, mimetype) triples, e.g. a calendar file.
+
+    The bell rows are written now, so they roll back with a booking that
+    fails. The email is sent only once the surrounding transaction commits:
+    nobody is emailed about something that did not happen. Employee logins
+    have no notification settings yet, so there is nothing to ask first.
+    Switched-off logins, repeats and `.invalid` addresses are skipped.
+
+    Returns how many bell rows were created. Never raises: an alert must not
+    break the action that raised it.
+    """
+    from django.db import transaction
+    try:
+        seen, people = set(), []
+        for user in users:
+            if user is None or not user.is_active or user.pk in seen:
+                continue
+            seen.add(user.pk)
+            people.append(user)
+        Notification.objects.bulk_create([
+            Notification(user=user, type=str(kind)[:50], title=str(title)[:255], message=message,
+                         link=link, action_url=link)
+            for user in people
+        ])
+        addresses = [u.email for u in people
+                     if email_subject and u.email and not u.email.lower().endswith('.invalid')]
+        if addresses:
+            body = email_body or message
+            if link:
+                from core.notification_settings import frontend_url
+                body = f"{body}\n\nOpen it: {frontend_url(link)}"
+            transaction.on_commit(lambda: _email_each(addresses, email_subject, body, attachments))
+        return len(people)
+    except Exception as exc:
+        logger.warning("Failed to tell employees (%s): %s", kind, exc)
+        return 0
+
+
+def _email_each(addresses, subject, body, attachments=()):
+    """One email per person, so nobody sees who else was told. Never raises."""
+    from django.conf import settings
+    from django.core.mail import EmailMessage
+    sender = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
+    for address in dict.fromkeys(addresses):
+        try:
+            email = EmailMessage(subject=str(subject)[:200], body=body, from_email=sender, to=[address])
+            for name, content, mimetype in attachments or ():
+                email.attach(name, content, mimetype)
+            email.send(fail_silently=True)
+        except Exception as exc:
+            logger.warning("Could not email %s: %s", address, exc)
+
+
 def notify_company_user(company_user, *, title, message, action_url=None,
                         notification_type='key_update'):
     """One login's bell; see `notify_company_users`.
