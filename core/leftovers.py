@@ -1,7 +1,7 @@
 """What a lapsed agent leaves behind, and the few calls that may still remove it.
 
-Approved leave, company holidays, meetings and booked interviews go on blocking
-bookings in the other agents after the agent that made them lapses. The only
+Approved leave, company holidays, meetings, booked interviews and sales calls go
+on blocking bookings in the other agents after the agent that made them lapses. The only
 screens that could cancel them are that agent's own, which are locked, so a
 wrong entry stayed until the company subscribed again or support edited the
 database.
@@ -71,6 +71,13 @@ CLEAN_UPS = (
             ('PATCH', 'PUT'), 'recruitment/interviews/{id}/update', says={'status': 'CANCELLED'}),
     CleanUp('campaign', 'marketing_agent', 'Campaign', 'Stop campaign',
             ('POST',), 'marketing/campaigns/{id}/stop'),
+    # Sales calls and executive meetings joined the shared calendar on 9 October 2026 and were left out
+    # of this list, so a lapsed agent's bookings blocked people with no way to clear them. Each is
+    # cancelled the way its own screen does it: a status edit, which is all the address may then do.
+    CleanUp('exec_meeting', 'exec_meeting_agent', 'Executive meeting', 'Cancel meeting',
+            ('PATCH',), 'exec-meeting/meetings/{id}', says={'status': 'cancelled'}),
+    CleanUp('sales_call', 'ai_sdr_agent', 'Sales call', 'Cancel call',
+            ('PUT',), 'sdr/meetings/{id}', says={'status': 'cancelled'}),
 )
 BY_KIND = {c.kind: c for c in CLEAN_UPS}
 
@@ -86,6 +93,10 @@ NOTES = {
                          'Cancel any that will not take place.',
     'marketing_agent': 'Nothing is being sent, but an active campaign starts again by itself the day '
                        'you subscribe again. Stop any you do not want to resume.',
+    'exec_meeting_agent': 'These meetings still block bookings in your other agents. '
+                          'Cancel any that will not take place; the people invited are emailed.',
+    'ai_sdr_agent': "Booked sales calls are still on the salesperson's calendar and block bookings in your "
+                    'other agents. Cancel any that will not take place. The lead is not emailed: tell them yourself.',
 }
 
 
@@ -199,7 +210,21 @@ def _marketing(login, company, now):
         yield True, _entry('campaign', campaign.id, campaign.name)
 
 
+def _executive(login, company, now):
+    for meeting, booking in _booked('exec', company, now):
+        yield meeting.organizer_id == login.id, _entry(           # only its organiser may cancel it
+            'exec_meeting', meeting.id, meeting.title, starts_at=booking.starts_at, ends_at=booking.ends_at)
+
+
+def _sales(login, company, now):
+    for call, booking in _booked('sdr', company, now):
+        yield call.company_user_id == login.id, _entry(           # a call belongs to the login whose lead it is
+            'sales_call', call.id, call.title or 'Sales call', starts_at=booking.starts_at, ends_at=booking.ends_at)
+
+
 _FINDERS = {
+    'exec_meeting_agent': _executive,
+    'ai_sdr_agent': _sales,
     'hr_agent': _hr,
     'project_manager_agent': _project_manager,
     'frontline_agent': _frontline,
