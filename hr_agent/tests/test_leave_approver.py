@@ -85,6 +85,35 @@ class ApproverTests(HRTestCase):
         self.assertEqual((item['title'], item['link']),
                          ('Leave request from Sam Staff', '/hr/dashboard?tab=leave&view=all'))
 
+    def waiting_on(self, actor):
+        """The names in the leave screen's "Pending for me" view, which is the one it opens on."""
+        code, body = self.call(views.list_leave_requests, actor, {'pending_for_me': '1'}, method='get')
+        self.assertEqual(code, 200, body)
+        return sorted(row['employee_name'] for row in body['data'])
+
+    def test_a_request_with_nobody_named_waits_on_whoever_runs_hr(self):
+        nobody_named = self.ask(self.sam)
+        self.ask(self.member_emp)                                   # Meg is named
+        # It was only under "All": the screen told the one person who could decide it that nothing was waiting.
+        self.assertEqual(self.waiting_on(self.admin), ['Sam Staff'])
+        # A manager is shown the ones sent to them, and not the ones that are HR's to decide.
+        self.assertEqual(self.waiting_on(self.meg_login), ['Mo Member'])
+        self.assertEqual(self.waiting_on(self.member), [])
+        nobody_named.status = 'approved'
+        nobody_named.save()
+        self.assertEqual(self.waiting_on(self.admin), [])           # decided: no longer waiting
+
+    def test_someones_own_request_with_nobody_named_waits_on_hr_not_on_them(self):
+        self.ask(self.meg)                                          # Meg has no manager
+        self.assertEqual(self.waiting_on(self.meg_login), [])
+        self.assertEqual(self.waiting_on(self.admin), ['Meg Manager'])
+
+    def test_an_hr_admin_with_no_hr_record_is_shown_them_too(self):
+        owner = self.login(self.company, 'owen@test.local', 'Owen Owner', 'owner')
+        self.assertFalse(Employee.objects.filter(company_user=owner).exists())
+        self.ask(self.sam)
+        self.assertEqual(self.waiting_on(owner), ['Sam Staff'])
+
     def test_the_alert_opens_the_view_the_request_is_on(self):
         self.ask(self.member_emp)                                   # Meg is named
         self.assertEqual(bell_links(self.meg_login), ['/hr/dashboard?tab=leave'])

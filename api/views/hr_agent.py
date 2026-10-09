@@ -4574,7 +4574,8 @@ def list_leave_requests(request):
     Filters (query params):
       ``?status=pending|approved|rejected|cancelled``
       ``?mine=1`` — only requests submitted BY the caller
-      ``?pending_for_me=1`` — only pending requests where the caller is the approver
+      ``?pending_for_me=1`` — only pending requests the caller is to decide: the ones
+        they are the approver of and, for whoever runs HR, the ones with nobody named
     """
     try:
         company = request.user.company
@@ -4603,10 +4604,14 @@ def list_leave_requests(request):
                 qs = qs.none()
 
         if request.GET.get('pending_for_me') == '1':
-            if asker_emp:
-                qs = qs.filter(status='pending', approver=asker_emp)
-            else:
-                qs = qs.none()
+            waiting = Q(approver=asker_emp) if asker_emp else Q(pk__in=[])
+            if _is_hr_admin(request.user):
+                # A request with nobody named waits on whoever runs HR: a manager who cannot
+                # decide leave is passed over, and so is someone with no manager. It was only
+                # under "All", and this view told the one person who could decide it that
+                # nothing was waiting on them.
+                waiting |= Q(approver__isnull=True)
+            qs = qs.filter(waiting, status='pending')
 
         # Paginated rather than silently cut at 200 (HR-PERF-4).
         from api.pagination import paginate
