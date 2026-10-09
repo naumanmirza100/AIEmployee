@@ -152,7 +152,18 @@ export default function HRLeaveTab() {
     }
   };
 
-  const openDecide = (lr, action) => setDecideDialog({ open: true, lr, action, note: '' });
+  // What the person is already booked into during the leave. Approving moves
+  // none of it, so the approver is shown the list first.
+  const [booked, setBooked] = useState({ loading: false, data: null });
+
+  const openDecide = (lr, action) => {
+    setDecideDialog({ open: true, lr, action, note: '' });
+    setBooked({ loading: action === 'approve', data: null });
+    if (action !== 'approve') return;
+    hrAgentService.getLeaveRequestClashes(lr.id)
+      .then((res) => setBooked({ loading: false, data: res?.data || null }))
+      .catch(() => setBooked({ loading: false, data: null }));
+  };
 
   const openEdit = (lr) => setEditDialog({
     open: true, saving: false, lr,
@@ -211,8 +222,16 @@ export default function HRLeaveTab() {
     const { lr, action, note } = decideDialog;
     if (!lr) return;
     try {
-      await hrAgentService.decideLeaveRequest(lr.id, action, note);
-      toast({ title: action === 'approve' ? 'Approved' : 'Rejected' });
+      const res = await hrAgentService.decideLeaveRequest(lr.id, action, note);
+      const still = res?.data?.booked_during || 0;
+      const told = res?.data?.organisers_told || 0;
+      toast({
+        title: action === 'approve' ? 'Approved' : 'Rejected',
+        description: still
+          ? `${lr.employee_name} is still booked into ${still} meeting${still === 1 ? '' : 's'} in that time. `
+            + (told ? `${told === 1 ? 'Its organiser has' : 'Their organisers have'} been told.` : '')
+          : undefined,
+      });
       setDecideDialog({ open: false, lr: null, action: 'approve', note: '' });
       load();
     } catch (e) {
@@ -513,6 +532,41 @@ export default function HRLeaveTab() {
               ) : null}
             </DialogDescription>
           </DialogHeader>
+          {decideDialog.action === 'approve' && (
+            <div className="text-xs" data-testid="leave-booked-during">
+              {booked.loading && <p className="text-white/50">Checking what is already booked…</p>}
+              {!booked.loading && booked.data && !booked.data.checked && (
+                <p className="text-white/50">
+                  {booked.data.why === 'hours'
+                    ? 'Leave of a few hours does not say which hours, so their calendar was not checked.'
+                    : `${decideDialog.lr?.employee_name} has no employee login, so their calendar could not be checked.`}
+                </p>
+              )}
+              {!booked.loading && booked.data?.checked && booked.data.count === 0 && (
+                <p className="text-white/50">Nothing is booked for {decideDialog.lr?.employee_name} in that time.</p>
+              )}
+              {!booked.loading && booked.data?.checked && booked.data.count > 0 && (
+                <div className="rounded-md border border-amber-400/30 bg-amber-500/10 p-3 space-y-2">
+                  <p className="font-medium text-amber-200">
+                    Already booked in that time: {booked.data.count} meeting{booked.data.count === 1 ? '' : 's'}
+                  </p>
+                  <ul className="space-y-1 text-white/80 max-h-40 overflow-y-auto">
+                    {booked.data.clashes.map((c) => (
+                      <li key={`${c.source}-${c.meeting_id}`}>
+                        <span className="text-white/60">{c.when}</span> · {c.kind}{c.title ? `: ${c.title}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                  {booked.data.count > booked.data.clashes.length && (
+                    <p className="text-white/50">…and {booked.data.count - booked.data.clashes.length} more.</p>
+                  )}
+                  <p className="text-white/60">
+                    Approving does not move or cancel these. Whoever runs each one will be told.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <Textarea rows={2} placeholder="Optional note for the employee..."
             value={decideDialog.note}
             onChange={(e) => setDecideDialog((s) => ({ ...s, note: e.target.value }))} />

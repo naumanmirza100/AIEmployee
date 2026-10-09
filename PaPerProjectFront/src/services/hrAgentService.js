@@ -1290,6 +1290,17 @@ export const decideLeaveRequest = async (requestId, action, note = '') => {
   }
 };
 
+/** What the person is already booked into during this leave, with times on this browser's clock. */
+export const getLeaveRequestClashes = async (requestId) => {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    return await companyApi.get(`/hr/leave-requests/${requestId}/clashes?timezone=${encodeURIComponent(zone)}`);
+  } catch (error) {
+    console.error('Leave request clashes error:', error);
+    throw error;
+  }
+};
+
 export const cancelLeaveRequest = async (requestId, note = '') => {
   try {
     const response = await companyApi.post(`/hr/leave-requests/${requestId}/cancel`, { note });
@@ -1378,6 +1389,7 @@ export default {
   submitLeaveRequest,
   updateLeaveRequest,
   decideLeaveRequest,
+  getLeaveRequestClashes,
   cancelLeaveRequest,
   withdrawLeaveRequest,
   listLeaveRequests,

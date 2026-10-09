@@ -886,6 +886,7 @@ urlpatterns = [
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/cancel/?$', hr_agent.cancel_leave_request, name='hr_cancel_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/withdraw/?$', hr_agent.withdraw_leave_request, name='hr_withdraw_leave_request'),  # POST
     re_path(r'^hr/leave-requests/(?P<request_id>\d+)/decide/?$', hr_agent.decide_leave_request, name='hr_decide_leave_request'),  # POST
+    re_path(r'^hr/leave-requests/(?P<request_id>\d+)/clashes/?$', hr_agent.leave_request_clashes, name='hr_leave_request_clashes'),  # GET
 
     # Holiday calendar
     re_path(r'^hr/holidays/?$', hr_agent.list_holidays, name='hr_list_holidays'),  # GET

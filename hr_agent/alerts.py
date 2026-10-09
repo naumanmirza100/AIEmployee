@@ -51,7 +51,7 @@ _DECISIONS = {
 }
 
 
-def leave_decided(leave_request, decided_by=None, note=''):
+def leave_decided(leave_request, decided_by=None, note='', booked=0):
     """To the person whose leave it is, when someone else settles it: approved
     or declined, a waiting request cancelled for them, approved leave withdrawn.
 
@@ -59,7 +59,9 @@ def leave_decided(leave_request, decided_by=None, note=''):
     (and by email, as they have chosen). Someone with only My Space has no
     leave screen, so this is how they learn the answer: their bell, and an
     email. `decided_by` is the dashboard login that did it; what a person does
-    to their own request they are not told about.
+    to their own request they are not told about. `booked` is how many
+    meetings they are still booked into during approved leave
+    (`hr_agent.leave_clashes`), so that they know too.
     """
     emp = leave_request.employee
     words = _DECISIONS.get(leave_request.status)
@@ -74,6 +76,9 @@ def leave_decided(leave_request, decided_by=None, note=''):
     title = f"{words[0]}: {leave_dates(leave_request)}"
     message = (f"Your leave ({leave_summary(leave_request)}) {words[1]}{by}."
                + (f' They wrote: "{note[:500]}"' if note else ''))
+    if booked:
+        message += (f" You are still booked into {booked} meeting{'' if booked == 1 else 's'} in that time; "
+                    f"whoever runs {'it' if booked == 1 else 'them'} has been told.")
     if own_login is not None and own_login.is_active:
         return notify_company_users([own_login], title=title, message=message, link=LEAVE_MINE,
                                     kind='hr_leave_decided')

@@ -2844,11 +2844,7 @@ def decide_leave_request(request, request_id):
             # role list: the inlined copy here included 'company_user', so any
             # colleague — including the requester — could decide the request
             # (HR-SEC-1).
-            is_hr_admin = _is_hr_admin(cu)
-            approver_emp = (Employee.objects.filter(company=company, company_user=cu).first()
-                            or Employee.objects.filter(company=company, work_email__iexact=cu.email).first())
-            is_assigned_approver = bool(lr.approver_id and approver_emp and lr.approver_id == approver_emp.id)
-            if not (is_hr_admin or is_assigned_approver):
+            if not _may_decide_leave(cu, lr):
                 return Response({'status': 'error',
                                  'message': "You aren't authorized to decide this request — "
                                             "must be the assigned approver or HR admin."},
@@ -2901,14 +2897,66 @@ def decide_leave_request(request, request_id):
                 'days_requested': float(lr.days_requested or 0),
             },
         )
+        # Approved leave does not move the meetings the person is already
+        # booked into. Whoever runs each one is told, now that it is certain.
+        booked = told = 0
+        if lr.status == 'approved':
+            from hr_agent import leave_clashes
+            clashes = leave_clashes.booked_during(lr)
+            booked = len(clashes)
+            told = leave_clashes.tell_organisers(lr, clashes)
         # The person who asked is told the answer. Nobody was, before.
-        hr_alerts.leave_decided(lr, decided_by=cu, note=lr.approval_note)
+        hr_alerts.leave_decided(lr, decided_by=cu, note=lr.approval_note, booked=booked)
 
-        return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status}})
+        return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status,
+                                                       'booked_during': booked, 'organisers_told': told}})
     except Exception:
         logger.exception("decide_leave_request failed")
         return Response({'status': 'error', 'message': 'Failed to decide leave request'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _may_decide_leave(company_user, leave_request) -> bool:
+    """May this login decide the request? Its named approver (their HR record
+    found by its link or its work address), or anyone who runs HR."""
+    if _is_hr_admin(company_user):
+        return True
+    company = company_user.company
+    record = (Employee.objects.filter(company=company, company_user=company_user).first()
+              or Employee.objects.filter(company=company, work_email__iexact=company_user.email).first())
+    return bool(leave_request.approver_id and record and leave_request.approver_id == record.id)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def leave_request_clashes(request, request_id):
+    """What the person is already booked into during this leave: the list the
+    approval dialog shows before a decision. For whoever may decide it.
+
+    ``?timezone=`` is the clock the times are written on (the viewer's).
+    Returns ``{checked, why, count, clashes: [{kind, title, when, ...}]}``.
+    ``checked`` is false, with ``why``, when the calendar cannot say: the
+    person has no employee login, or the leave is for a few unnamed hours.
+    """
+    from hr_agent import leave_clashes
+    lr = (LeaveRequest.objects.select_related('employee')
+          .filter(pk=request_id, employee__company=request.user.company).first())
+    if not lr:
+        return Response({'status': 'error', 'message': 'Leave request not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if not _may_decide_leave(request.user, lr):
+        return Response({'status': 'error', 'message': 'Only the approver or an HR admin can see this.'},
+                        status=status.HTTP_403_FORBIDDEN)
+    why = leave_clashes.why_not_checked(lr)
+    clashes = leave_clashes.booked_during(lr, reveal_private=_is_hr_admin(request.user))
+    return Response({'status': 'success', 'data': {
+        'checked': not why,
+        'why': why,
+        'count': len(clashes),
+        'clashes': leave_clashes.rows(clashes, zone_name(request.GET.get('timezone'))),
+    }})
 
 
 # ============================================================================

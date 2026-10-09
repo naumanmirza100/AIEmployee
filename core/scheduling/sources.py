@@ -251,16 +251,16 @@ class LeaveSource(Source):
     #: Where a half day splits, on the employee's clock.
     MIDDAY = time(13, 0)
 
-    def booking(self, lr, *, assume_active=False, include_declined=False):
-        if lr.status != 'approved' or not lr.employee_id:
-            return None
+    def window(self, lr):
+        """The hours a request covers, on the employee's clock, whatever its
+        status: (starts, ends), or None when it does not say which hours.
+        Also what HR looks through before approving one."""
         # "Some hours" leave doesn't say which hours, so it can't block any.
-        if lr.partial_day_period == 'hours':
+        if not lr.employee_id or lr.partial_day_period == 'hours':
             return None
-        employee = lr.employee
         from zoneinfo import ZoneInfo
         try:
-            zone = ZoneInfo(employee.timezone_name or 'UTC')
+            zone = ZoneInfo(lr.employee.timezone_name or 'UTC')
         except Exception:
             zone = ZoneInfo('UTC')
         starts = datetime.combine(lr.start_date, time(0), tzinfo=zone)
@@ -269,9 +269,18 @@ class LeaveSource(Source):
             ends = datetime.combine(lr.start_date, self.MIDDAY, tzinfo=zone)
         elif lr.partial_day_period == 'afternoon':
             starts = datetime.combine(lr.start_date, self.MIDDAY, tzinfo=zone)
+        return starts, ends
+
+    def booking(self, lr, *, assume_active=False, include_declined=False):
+        if lr.status != 'approved':
+            return None
+        window = self.window(lr)
+        if window is None:
+            return None
+        employee = lr.employee
         # Private and plainly titled: colleagues see "on leave", not the
         # leave type or the reason.
-        b = Booking(company_id=employee.company_id, starts_at=starts, ends_at=ends,
+        b = Booking(company_id=employee.company_id, starts_at=window[0], ends_at=window[1],
                     title='On leave', is_private=True)
         b.add(employee.user_id, PARTICIPANT, 'on_leave')
         return b
