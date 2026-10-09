@@ -32,13 +32,14 @@ class HRAlertTests(HRTestCase):
         [alert] = bell(self.admin)
         self.assertIn('Mo Member', alert.title)
         self.assertIn('3 days', alert.message)
-        self.assertEqual(alert.data['link'], '/hr/dashboard?tab=leave')
+        # Nobody was named to decide it, so it is under "All" (test_leave_approver.py).
+        self.assertEqual(alert.data['link'], '/hr/dashboard?tab=leave&view=all')
 
-    def test_it_reaches_the_employees_manager_too(self):
+    def test_it_reaches_the_person_named_to_decide_it_too(self):
         manager = self.login(self.company, 'meg@test.local', 'Meg Manager', 'manager')
-        self.member_emp.manager = self.employee(manager, 'Meg Manager')
-        self.member_emp.save()
-        self.ask_for_leave(self.member_emp)
+        start = timezone.now().date() + timedelta(days=10)
+        LeaveRequest.objects.create(employee=self.member_emp, approver=self.employee(manager, 'Meg Manager'),
+                                    leave_type='vacation', start_date=start, end_date=start, days_requested=1)
         self.assertEqual(len(bell(manager)), 1)
 
     def test_not_to_ordinary_colleagues_or_the_person_asking(self):

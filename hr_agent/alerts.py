@@ -31,28 +31,34 @@ def leave_summary(leave_request):
     return f"{leave_request.get_leave_type_display()}, {when} ({days_text})"
 
 
+#: The leave screen opens on "Pending for me". A request is only there for its
+#: named approver; everyone else finds it under "All".
+LEAVE_FOR_ME = '/hr/dashboard?tab=leave'
+LEAVE_ALL = '/hr/dashboard?tab=leave&view=all'
+
+
 def leave_request_submitted(leave_request):
-    """To HR admins and the employee's manager; not to whoever asked."""
+    """To the person named to decide it and to the HR admins; not to whoever
+    asked. Each is sent to the view of the leave screen the request is on for
+    them: an HR admin who is not the approver used to land on an empty list."""
     emp = leave_request.employee
     if not emp or not emp.company_id:
         return 0
-    recipients = hr_admins(emp.company_id)
-    # The manager's dashboard login, by the link on their HR record or, as
-    # nothing ever sets that link, by their work address.
     from hr_agent.handover import dashboard_login
-    manager_login = dashboard_login(emp.manager) if emp.manager_id else None
-    if manager_login is not None:
-        recipients.append(manager_login)
     own_login = dashboard_login(emp)
-    recipients = [cu for cu in recipients if own_login is None or cu.id != own_login.id]
-
-    return notify_company_users(
-        recipients,
-        title=f"Leave request from {emp.full_name}",
-        message=f"{leave_summary(leave_request)}. Waiting for a decision.",
-        link='/hr/dashboard?tab=leave',
-        kind='hr_leave_request',
-    )
+    own_id = own_login.id if own_login is not None else None
+    # The approver's dashboard login, by the link on their HR record or by
+    # their work address.
+    approver_login = dashboard_login(leave_request.approver) if leave_request.approver_id else None
+    approver_id = approver_login.id if approver_login is not None else None
+    words = {'title': f"Leave request from {emp.full_name}",
+             'message': f"{leave_summary(leave_request)}. Waiting for a decision.",
+             'kind': 'hr_leave_request'}
+    told = 0
+    if approver_login is not None and approver_id != own_id:
+        told += notify_company_users([approver_login], link=LEAVE_FOR_ME, **words)
+    others = [cu for cu in hr_admins(emp.company_id) if cu.id not in (own_id, approver_id)]
+    return told + notify_company_users(others, link=LEAVE_ALL, **words)
 
 
 def run_outcome(execution) -> str:

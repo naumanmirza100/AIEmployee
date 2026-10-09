@@ -2,9 +2,9 @@
 
 * ``working_days_between(start, end, company)`` — counts weekdays in
   ``[start, end]`` minus any matching ``Holiday`` rows for the company.
-* ``resolve_approver_for_leave(employee, company)`` — picks the right
-  ``Employee`` to approve a request: the asker's ``manager`` if set,
-  otherwise the first HR-roled CompanyUser's Employee, otherwise None.
+* ``resolve_approver_for_leave(employee, company)`` — picks the ``Employee``
+  to approve a request: the asker's ``manager`` if they have a dashboard login
+  to decide it with, otherwise None (the HR admins decide).
 """
 from __future__ import annotations
 
@@ -50,44 +50,36 @@ def working_days_between(start: _date, end: _date, company) -> float:
     return float(days)
 
 
-def resolve_approver_for_leave(employee, company):
-    """Pick the right Employee to approve a leave request.
-
-    Order of preference:
-      1. The asker's direct manager (``Employee.manager``).
-      2. Any active company user with the ``hr_agent`` role,
-         mapped to their backing Employee row.
-      3. The first active CompanyUser of the company (last-resort fallback).
-
-    Returns an ``Employee`` instance (the approver) or ``None``.
-    """
+def can_decide_leave(employee) -> bool:
+    """Can this person decide a leave request? Deciding one, and seeing the
+    leave screens at all, takes a dashboard login that is switched on: theirs
+    by the link on their HR record, or by their work address."""
     from core.models import CompanyUser
-    from hr_agent.models import Employee
 
-    if not employee or not company:
+    if employee is None or not employee.company_id:
+        return False
+    if employee.company_user_id:
+        return bool(employee.company_user.is_active)
+    email = (employee.work_email or '').strip()
+    return bool(email) and CompanyUser.objects.filter(
+        company_id=employee.company_id, email__iexact=email, is_active=True).exists()
+
+
+def resolve_approver_for_leave(employee, company):
+    """Who a leave request is sent to: the asker's manager, if they can decide
+    it. Otherwise nobody (``None``).
+
+    A request with no approver is put before the HR admins: it is on their My
+    work list and under "All" on the leave screen. A request sent to a manager
+    with only a My Space login used to wait on nobody's list. The older
+    fall-backs (an HR login, then any login at all) are gone: they looked a
+    login up through its HR record, so they could name a colleague who is
+    neither the manager nor in HR.
+    """
+    if not employee or not company or not employee.manager_id:
         return None
-    if employee.manager_id:
-        return employee.manager
-
-    # HR-roled approver
-    hr_user = CompanyUser.objects.filter(
-        company=company, is_active=True, role='hr_agent',
-    ).first()
-    if hr_user:
-        emp = Employee.objects.filter(company=company, company_user=hr_user).first()
-        if emp:
-            return emp
-
-    # Last-resort — any active company user, prefer non-self.
-    fallback = (CompanyUser.objects
-                .filter(company=company, is_active=True)
-                .exclude(pk=getattr(employee.company_user, 'pk', None))
-                .first())
-    if fallback:
-        emp = Employee.objects.filter(company=company, company_user=fallback).first()
-        if emp:
-            return emp
-    return None
+    manager = employee.manager
+    return manager if can_decide_leave(manager) else None
 
 
 _PART_LABELS = {'morning': 'morning', 'afternoon': 'afternoon', 'hours': 'part of the day'}
