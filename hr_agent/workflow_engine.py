@@ -256,7 +256,7 @@ def _step_schedule_meeting(step, ctx, simulate):
         return False, {'done': False, 'error': 'context_data.company_id required'}, None
     emp = (Employee.objects.filter(pk=employee_id, company_id=company_id).first()
            if employee_id else None)
-    tz_name = zone_name(step.get('timezone_name') or (emp.timezone_name if emp else None))
+    tz_name = zone_name(step.get('timezone_name') or (emp.zone if emp else None))
     by_day = not when and (step.get('offset_days_from_start') is not None
                            or step.get('offset_days_from_now') is not None)
     if by_day:

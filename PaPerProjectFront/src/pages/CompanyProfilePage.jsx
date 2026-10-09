@@ -6,10 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { companyAuthService } from '@/services';
+import TimeZoneSelect from '@/components/common/TimeZoneSelect';
+import { browserTimeZone } from '@/utils/timeZones';
 import {
   Loader2, ArrowLeft, Pencil, X, Check, Lock,
   Building2, Phone, Globe, Factory, Users2, MapPin, FileText, Mail, ShieldCheck, CalendarDays,
-  User as UserIcon, Plug, CalendarCheck, CheckCircle2, ExternalLink,
+  User as UserIcon, Plug, CalendarCheck, CheckCircle2, ExternalLink, Clock,
 } from 'lucide-react';
 
 const ACCENT = 'hsl(var(--brand-accent))';
@@ -86,7 +88,14 @@ const CompanyProfilePage = () => {
   };
 
   const setField = (name, val) => setForm((f) => ({ ...f, [name]: val }));
-  const startEdit = () => { setForm(profile.company); setEditing(true); };
+  // Only an owner or admin may change the company's time zone: it moves everyone's leave on the calendar.
+  const mayChangeZone = ['owner', 'admin'].includes(profile?.user?.role);
+  const startEdit = () => {
+    // Never set before: offer the zone this browser is in. Nothing is saved until Save is pressed.
+    const zone = profile.company.timezoneName || (mayChangeZone ? browserTimeZone() : '');
+    setForm({ ...profile.company, timezoneName: zone });
+    setEditing(true);
+  };
   const cancelEdit = () => { setForm(profile.company); setEditing(false); };
 
   const save = async () => {
@@ -99,6 +108,7 @@ const CompanyProfilePage = () => {
       const res = await companyAuthService.updateCompanyProfile({
         name: form.name, phone: form.phone, address: form.address, website: form.website,
         industry: form.industry, companySize: form.companySize, description: form.description,
+        ...(mayChangeZone ? { timezoneName: form.timezoneName || '' } : {}),
       });
       if (res.status === 'success') {
         setProfile(res.data);
@@ -242,6 +252,25 @@ const CompanyProfilePage = () => {
                 <Field icon={Globe} label="Website" name="website" value={form.website} editing={editing} onChange={setField} placeholder="https://acme.com" href />
                 <Field icon={Factory} label="Industry" name="industry" value={form.industry} editing={editing} onChange={setField} placeholder="Software" />
                 <Field icon={Users2} label="Company size" name="companySize" value={form.companySize} editing={editing} onChange={setField} placeholder="50-100" />
+                <div className="space-y-1.5" data-testid="company-time-zone">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35">
+                    <Clock className="h-3.5 w-3.5" />
+                    Time zone
+                    {!mayChangeZone && <Lock className="h-3 w-3 text-white/25" title="Only an owner or admin can change this" />}
+                  </div>
+                  {editing && mayChangeZone ? (
+                    <TimeZoneSelect value={form.timezoneName} onChange={(v) => setField('timezoneName', v)} emptyLabel="Not set" />
+                  ) : (
+                    <p className={`text-[15px] ${c.timezoneName ? 'text-white' : 'text-white/25'} break-words`}>
+                      {c.timezoneName || 'Not set'}
+                    </p>
+                  )}
+                  <p className="text-xs text-white/40">
+                    {c.timezoneName
+                      ? 'Leave and holidays are read on this clock for everyone who has no time zone of their own.'
+                      : 'Until this is set, leave is read in UTC: a half day off can block the wrong hours.'}
+                  </p>
+                </div>
                 <div className="sm:col-span-2">
                   <Field icon={MapPin} label="Address" name="address" value={form.address} editing={editing} onChange={setField} placeholder="123 Main St, City" />
                 </div>

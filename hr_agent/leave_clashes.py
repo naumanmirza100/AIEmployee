@@ -120,7 +120,7 @@ def tell_organisers(leave_request, clashes) -> int:
             if meeting is None:
                 continue
             login, user, name = _runs_it(clash.source, meeting, emp.company_id)
-            zone = getattr(meeting, 'timezone_name', '') or emp.timezone_name or 'UTC'
+            zone = getattr(meeting, 'timezone_name', '') or emp.zone
             title = f"{emp.full_name} will be on leave during a meeting you run"
             message = (f"{emp.full_name} is on leave {leave_dates(leave_request)} and is booked into {name}, "
                        f"{when_label(clash.starts_at, zone)}. The meeting has not been changed: "

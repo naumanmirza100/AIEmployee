@@ -778,6 +778,13 @@ class Company(models.Model):
     google_calendar_config = models.JSONField(default=dict, blank=True,
                                               help_text='Per-company Google Calendar OAuth config: {connected, refresh_token, google_email, calendar_id, last_error}.')
 
+    # The clock the company keeps. Leave is recorded in days, and the shared
+    # calendar needs to know when a day starts: it reads the employee's own
+    # zone, and this one for everyone who has none. Blank until an admin sets
+    # it; days are then read in UTC, as they were before this existed.
+    timezone_name = models.CharField(max_length=64, blank=True, default='',
+                                     help_text="IANA time zone the company works in, e.g. Asia/Karachi. Blank = not set (UTC).")
+
     stripe_customer_id = models.CharField(max_length=255, null=True, blank=True, db_index=True,
                                           help_text="Stripe Customer ID for this company")
 

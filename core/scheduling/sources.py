@@ -260,7 +260,7 @@ class LeaveSource(Source):
             return None
         from zoneinfo import ZoneInfo
         try:
-            zone = ZoneInfo(lr.employee.timezone_name or 'UTC')
+            zone = ZoneInfo(lr.employee.zone)          # their own, else the company's
         except Exception:
             zone = ZoneInfo('UTC')
         starts = datetime.combine(lr.start_date, time(0), tzinfo=zone)
@@ -289,7 +289,7 @@ class LeaveSource(Source):
         qs = self.model.objects.filter(end_date__gte=(since - timedelta(days=1)).date())
         if company_id:
             qs = qs.filter(employee__company_id=company_id)
-        return qs.select_related('employee')
+        return qs.select_related('employee__company')
 
 
 SOURCES: dict[str, Source] = {s.key: s for s in (ProjectManagerSource(), HRSource(), FrontlineSource(),

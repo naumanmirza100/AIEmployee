@@ -2916,6 +2916,41 @@ def decide_leave_request(request, request_id):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def hr_time_zones(request):
+    """Whose clock leave is read on (hr_agent/zones.py).
+
+    GET, for any login: the company's time zone, how many HR records follow
+    it, and how many still say the 'UTC' every record used to be given.
+
+    POST ``{action: 'follow_company'}``, HR admins only: move those records
+    onto the company's zone, and their approved leave with them. It is offered,
+    never done unasked: a UTC someone chose looks the same as the default.
+    """
+    from hr_agent import zones
+    company = request.user.company
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': zones.summary(company)})
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    if (request.data or {}).get('action') != 'follow_company':
+        return Response({'status': 'error', 'message': "action must be 'follow_company'"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if not zone_name(company.timezone_name, default=''):
+        return Response({'status': 'error',
+                         'message': 'Set the company time zone first, in the company profile.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    moved = zones.follow_company(company)
+    _write_audit_log(request.user, company, 'employee.follow_company_zone', 'company', company.id,
+                     before={'timezone_name': zones.OLD_DEFAULT},
+                     after={'timezone_name': '', 'company_zone': company.timezone_name, 'records': moved})
+    return Response({'status': 'success', 'data': {**zones.summary(company), 'moved': moved}})
+
+
 def _may_decide_leave(company_user, leave_request) -> bool:
     """May this login decide the request? Its named approver (their HR record
     found by its link or its work address), or anyone who runs HR."""
@@ -5059,8 +5094,19 @@ def update_employee(request, employee_id):
         if 'phone' in d:
             emp.phone = (d['phone'] or '')[:40]
             fields.append('phone')
+        zone_changed = False
         if 'timezone_name' in d:
-            emp.timezone_name = (d['timezone_name'] or 'UTC')[:64]
+            # Blank means "the company's". A name that is not a time zone is
+            # refused: it used to be saved and then read, silently, as UTC.
+            wanted = str(d['timezone_name'] or '').strip()
+            if wanted and not zone_name(wanted, default=''):
+                return Response({
+                    'status': 'error',
+                    'message': f"{wanted[:64]!r} is not a time zone. Use a name such as Asia/Karachi, "
+                               "or leave it empty to follow the company's.",
+                }, status=status.HTTP_400_BAD_REQUEST)
+            zone_changed = wanted != emp.timezone_name
+            emp.timezone_name = wanted
             fields.append('timezone_name')
 
         # HR-admin-only fields.
@@ -5147,6 +5193,10 @@ def update_employee(request, employee_id):
 
         fields_to_save = list(set(fields)) + ['updated_at']
         emp.save(update_fields=fields_to_save)
+        if zone_changed:
+            # Their approved leave is on the calendar at the old zone's hours.
+            from hr_agent import zones
+            zones.resync_leave([emp.id])
 
         after = _serialize_employee(emp)
         _write_audit_log(request.user, company, 'employee.update', 'employee', emp.id,

@@ -1290,6 +1290,26 @@ export const decideLeaveRequest = async (requestId, action, note = '') => {
   }
 };
 
+/** Whose clock leave is read on: the company's time zone, and how many HR records still say the old 'UTC'. */
+export const getHRTimeZones = async () => {
+  try {
+    return await companyApi.get('/hr/time-zones');
+  } catch (error) {
+    console.error('HR time zones error:', error);
+    throw error;
+  }
+};
+
+/** Move the HR records still on the old 'UTC' onto the company's time zone (HR admins). */
+export const followCompanyTimeZone = async () => {
+  try {
+    return await companyApi.post('/hr/time-zones', { action: 'follow_company' });
+  } catch (error) {
+    console.error('Follow company time zone error:', error);
+    throw error;
+  }
+};
+
 /** What the person is already booked into during this leave, with times on this browser's clock. */
 export const getLeaveRequestClashes = async (requestId) => {
   try {
@@ -1390,6 +1410,8 @@ export default {
   updateLeaveRequest,
   decideLeaveRequest,
   getLeaveRequestClashes,
+  getHRTimeZones,
+  followCompanyTimeZone,
   cancelLeaveRequest,
   withdrawLeaveRequest,
   listLeaveRequests,
