@@ -108,7 +108,7 @@ def generate_meeting_ics(meeting, action='REQUEST') -> str:
         f"DESCRIPTION:{_escape(description)}",
         f"ORGANIZER;CN={_escape(organizer_name)}:mailto:{organizer_email}",
         f"STATUS:{status}",
-        "SEQUENCE:0",
+        f"SEQUENCE:{_sequence(meeting)}",
     ]
 
     if rrule:
@@ -129,6 +129,22 @@ def generate_meeting_ics(meeting, action='REQUEST') -> str:
     ])
 
     return "\r\n".join(lines)
+
+
+def _sequence(meeting) -> int:
+    """The file's revision number: how many seconds after the meeting was
+    created it last changed.
+
+    A calendar program keeps the copy of an event with the highest SEQUENCE and
+    ignores one that is not higher than what it has. Every file used to say 0,
+    so a file sent after a meeting moved changed nothing in the invitee's own
+    calendar. This number rises with every save of the meeting and costs no
+    column to keep.
+    """
+    created, updated = getattr(meeting, 'created_at', None), getattr(meeting, 'updated_at', None)
+    if not created or not updated:
+        return 0
+    return max(0, int((updated - created).total_seconds()))
 
 
 def _format_dt(dt) -> str:

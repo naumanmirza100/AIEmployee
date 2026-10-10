@@ -115,7 +115,11 @@ class Employee(models.Model):
     work_anniversary_month_day = models.CharField(max_length=5, blank=True, default='',
                                                   help_text='MM-DD shortcut for the anniversary reminder agent.')
 
-    timezone_name = models.CharField(max_length=64, default='UTC')
+    # Blank means "the company's" (see `zone`). New records start blank. It
+    # used to start as 'UTC', which nobody had chosen and which put half-day
+    # leave on the wrong hours for anyone not working in UTC.
+    timezone_name = models.CharField(max_length=64, blank=True, default='',
+                                     help_text="This person's own IANA time zone. Blank = the company's.")
     custom_fields = models.JSONField(default=dict, blank=True,
                                      help_text='Tenant-specific attributes (location, cost center, etc.).')
 
@@ -144,6 +148,16 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.full_name} <{self.work_email}>"
+
+    @property
+    def zone(self) -> str:
+        """The time zone this person's days are read in: their own if they
+        have one, else the company's, else UTC. Always a valid IANA name."""
+        from core.scheduling import zone_name
+        own = zone_name(self.timezone_name, default='')
+        if own:
+            return own
+        return zone_name(self.company.timezone_name if self.company_id else '')
 
 
 # ============================================================================

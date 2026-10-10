@@ -423,6 +423,12 @@ class SDRMeeting(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     calendar_link = models.CharField(max_length=500, blank=True)
 
+    # The Google Calendar event made for this call, and the time that event
+    # stands at. core.google_calendar.follow moves or removes the event when
+    # the call moves or is called off. Empty: no event (Google not connected).
+    google_event_id = models.CharField(max_length=255, blank=True, default='')
+    google_event_state = models.CharField(max_length=64, blank=True, default='')
+
     # Scheduling agent fields
     prep_notes = models.JSONField(default=dict, blank=True)          # AI-generated prep notes
     scheduling_email_sent_at = models.DateTimeField(null=True, blank=True)

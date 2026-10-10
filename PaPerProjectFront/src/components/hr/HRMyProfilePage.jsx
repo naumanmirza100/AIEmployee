@@ -29,6 +29,7 @@ import {
   Target, Star,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
+import TimeZoneSelect from '@/components/common/TimeZoneSelect';
 
 
 const STATUS_BADGE = {
@@ -69,7 +70,7 @@ export default function HRMyProfilePage() {
 
   const openEdit = () => {
     const e = data?.employee || {};
-    setEditPayload({ phone: e.phone || '', timezone_name: e.timezone_name || 'UTC' });
+    setEditPayload({ phone: e.phone || '', timezone_name: e.timezone_name || '' });
     setEditOpen(true);
   };
 
@@ -178,7 +179,7 @@ export default function HRMyProfilePage() {
             <Field icon={CalendarClock} label="Start date" value={e.start_date} />
             <Field icon={User} label="Manager" value={e.manager_name || '—'} />
             <Field icon={User} label="Phone" value={e.phone || '—'} />
-            <Field icon={User} label="Timezone" value={e.timezone_name || 'UTC'} />
+            <Field icon={User} label="Time zone" value={e.timezone_name || "The company's"} />
             <Field icon={User} label="Status" value={labelOf(e.employment_status)} />
           </CardContent>
         </Card>
@@ -415,9 +416,9 @@ export default function HRMyProfilePage() {
                 onChange={(ev) => setEditPayload((s) => ({ ...s, phone: ev.target.value }))} />
             </div>
             <div>
-              <Label>Timezone</Label>
-              <Input placeholder="UTC" value={editPayload.timezone_name}
-                onChange={(ev) => setEditPayload((s) => ({ ...s, timezone_name: ev.target.value }))} />
+              <Label>Time zone</Label>
+              <TimeZoneSelect value={editPayload.timezone_name} emptyLabel="The company's"
+                onChange={(v) => setEditPayload((s) => ({ ...s, timezone_name: v }))} />
             </div>
           </div>
           <DialogFooter>

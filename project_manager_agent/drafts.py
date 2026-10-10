@@ -246,6 +246,25 @@ def timeline(actions, today=None, project=None):
     }
 
 
+def only_project_id(actions):
+    """The id of the one existing project every new task is going into, or None.
+
+    "Create a task in ShopKart for Ahmed" arrives with ShopKart's id on the task
+    and no project chosen in the picker. The review card then had no project to
+    hold the dates against: it made up a deadline five working days away, showed
+    it as the project's, and warned that the task "will be refused, dated outside
+    the project" when the real deadline was weeks later.
+    """
+    tasks = [a for a in actions if isinstance(a, dict) and a.get('action') == 'create_task']
+    if not tasks or any(isinstance(a, dict) and a.get('action') == 'create_project' for a in actions):
+        return None
+    targets = {str(a.get('project_id')).strip() for a in tasks if not _is_blank(a.get('project_id'))}
+    if len(targets) != 1 or any(_is_blank(a.get('project_id')) for a in tasks):
+        return None
+    target = targets.pop()
+    return int(target) if target.isdigit() else None
+
+
 def leave_before(user, start, due):
     """The label of `user`'s first approved leave that overlaps [start, due]
     ("On leave 6–10 Oct"), or None. `user['on_leave']` is attached by the view

@@ -122,13 +122,15 @@ export const MeetingsPanel = ({
     // Fire the work in the background.
     (async () => {
       let added = 0, removed = 0, failed = 0;
+      // Why someone could not be added: they are busy then, and with what.
+      const reasons = [];
       for (const orig of removes) {
         try { await removeParticipant(meetingId, orig.id, orig.user_id, orig.full_name, { silent: true }); removed++; }
         catch { failed++; }
       }
       for (const u of adds) {
         try { await addParticipant(meetingId, u, { silent: true }); added++; }
-        catch { failed++; }
+        catch (e) { failed++; if (e?.message) reasons.push(e.message); }
       }
       const bits = [];
       if (added) bits.push(`${added} added`);
@@ -137,7 +139,7 @@ export const MeetingsPanel = ({
       const result = {
         title: bits.length ? `Participants updated — ${bits.join(', ')}` : 'No changes applied',
         description: failed
-          ? `${failed} change${failed === 1 ? '' : 's'} failed. Notification emails sent for the rest.`
+          ? `${failed} change${failed === 1 ? '' : 's'} failed. ${reasons.length ? `${reasons[0]} ` : ''}Notification emails sent for the rest.`
           : 'Notification emails have been sent.',
         variant: failed ? 'destructive' : undefined,
       };

@@ -108,6 +108,14 @@ class LapsedCleanUpTests(HRTestCase):
         call = entry['call']
         return self.send(self.http(login or self.admin), call['method'].lower(), '/api' + call['path'], call['body'])
 
+    def with_calendars(self):
+        """Dana and Mo also sign in as employees of the company, so each has a calendar that a sales
+        call or an executive meeting of theirs occupies."""
+        from core.models import UserProfile
+        for record in (self.admin_emp, self.member_emp):
+            UserProfile.objects.update_or_create(user=record.user, defaults={
+                'company': self.company, 'role': 'team_member'})
+
     def hr_meeting(self, title='Review', **fields):
         meeting = HRMeeting.objects.create(company=self.company, title=title, organizer=self.admin_emp,
                                            scheduled_at=self.soon, **fields)
@@ -318,6 +326,61 @@ class LapsedCleanUpTests(HRTestCase):
         campaign.refresh_from_db()
         self.assertEqual((interview.status, campaign.status, FrontlineMeeting.objects.count()),
                          ('CANCELLED', 'paused', 0))
+
+    def test_an_executive_meeting_is_for_its_organiser_and_only_the_cancel_gets_through(self):
+        # Executive meetings joined the shared calendar on 9 October and were not on this list: a lapsed
+        # agent's meetings went on blocking the people in them with no way to clear one.
+        from unittest import mock
+        from meeting_agent.models import ExecutiveMeeting
+        self.with_calendars()
+        mine = ExecutiveMeeting.objects.create(organizer=self.admin, title='Board prep', scheduled_at=self.soon)
+        ExecutiveMeeting.objects.create(organizer=self.member, title="Mo's review",
+                                        scheduled_at=self.soon + timedelta(hours=3))
+        ExecutiveMeeting.objects.create(organizer=self.admin, title='Called off', scheduled_at=self.soon,
+                                        status='cancelled')
+        module = 'exec_meeting_agent'
+        self.lapse(module)
+        self.assertEqual(self.kinds(self.admin, module), [('exec_meeting', mine.id, 'Board prep')])
+        self.assertEqual(self.found(self.admin, module)['others'], 1)
+        client = self.http(self.admin)
+        address = f'/api/exec-meeting/meetings/{mine.id}'
+        self.assertEqual(self.send(client, 'get', '/api/exec-meeting/meetings')[0], 403)
+        self.assertEqual(self.send(client, 'patch', address, {'title': 'Renamed'})[0], 403)
+        self.assertEqual(self.send(client, 'patch', address, {'status': 'cancelled', 'title': 'Renamed'})[0], 403)
+        self.assertEqual(self.send(client, 'patch', address, {'status': 'scheduled'})[0], 403)
+        with mock.patch('threading.Thread'):                # the people invited are emailed from a thread
+            code, body = self.remove(self.found(self.admin, module)['items'][0])
+        self.assertEqual(code, 200, body)
+        mine.refresh_from_db()
+        self.assertEqual((mine.status, mine.title), ('cancelled', 'Board prep'))
+        self.assertEqual(self.kinds(self.admin, module), [])
+
+    def test_a_sales_call_is_for_the_login_whose_call_it_is(self):
+        from ai_sdr_agent.models import SDRLead, SDRMeeting
+        self.with_calendars()
+        lead = SDRLead.objects.create(company_user=self.admin, email='bob@lead.example', first_name='Bob')
+        call = SDRMeeting.objects.create(company_user=self.admin, lead=lead, title='Discovery call',
+                                         status='scheduled', scheduled_at=self.soon)
+        SDRMeeting.objects.create(company_user=self.admin, lead=lead, title='No time yet', status='pending')
+        theirs = SDRLead.objects.create(company_user=self.member, email='amy@lead.example', first_name='Amy')
+        SDRMeeting.objects.create(company_user=self.member, lead=theirs, title="Mo's call", status='scheduled',
+                                  scheduled_at=self.soon + timedelta(hours=3))
+        module = 'ai_sdr_agent'
+        self.lapse(module)
+        self.assertEqual(self.kinds(self.admin, module), [('sales_call', call.id, 'Discovery call')])
+        self.assertEqual(self.found(self.admin, module)['others'], 1)
+        client = self.http(self.admin)
+        address = f'/api/sdr/meetings/{call.id}'
+        self.assertEqual(self.send(client, 'get', '/api/sdr/meetings')[0], 403)
+        self.assertEqual(self.send(client, 'put', address, {'notes': 'x'})[0], 403)
+        self.assertEqual(self.send(client, 'put', address, {'status': 'completed'})[0], 403)
+        self.assertEqual(self.send(client, 'delete', address)[0], 403)
+        self.assertEqual(self.send(client, 'delete', address, {'status': 'cancelled'})[0], 403)   # cancel, not delete
+        code, body = self.remove(self.found(self.admin, module)['items'][0])
+        self.assertEqual(code, 200, body)
+        call.refresh_from_db()
+        self.assertEqual(call.status, 'cancelled')
+        self.assertEqual(self.kinds(self.admin, module), [])
 
     # ---- the candidate's emailed link --------------------------------------------------
 

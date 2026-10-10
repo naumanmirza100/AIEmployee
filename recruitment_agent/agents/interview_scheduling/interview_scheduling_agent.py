@@ -71,11 +71,15 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
 
     Delegates to the shared per-company helper so recruitment and SDR share one
     implementation of the Calendar/Meet call.
+
+    The event's id, and the time it stands at, are set on `interview` for the
+    caller to save: they are what lets the event follow the interview when it
+    moves or is called off (core/google_events.py).
     """
-    from core.google_calendar import create_google_meet_link
+    from core.google_calendar import create_google_event, event_state
     company = _company_for_interview(interview)
     job_title = getattr(interview, 'job_role', '') or getattr(interview, 'job_title', '') or 'Interview'
-    return create_google_meet_link(
+    created = create_google_event(
         company,
         start_dt=interview.scheduled_datetime,
         duration_minutes=duration_minutes,
@@ -87,6 +91,12 @@ def _create_google_meet_link(interview: 'Interview', duration_minutes: int = 60)
         ),
         attendee_email=interview.candidate_email or '',
     )
+    if not created:
+        return None
+    if created['event_id']:
+        interview.google_event_id = created['event_id']
+        interview.google_event_state = event_state(interview.scheduled_datetime, duration_minutes)
+    return created['meet_url'] or None
 
 
 class InterviewSchedulingAgent:
@@ -807,7 +817,7 @@ class InterviewSchedulingAgent:
                     logger.info(f"Using Jitsi fallback meeting link for interview {interview.id}.")
                 if meet_link:
                     interview.meeting_link = meet_link
-                    interview.save(update_fields=['meeting_link'])
+                    interview.save(update_fields=['meeting_link', 'google_event_id', 'google_event_state'])
 
             # Send confirmation email
             confirmation_sent = self.send_confirmation_email(interview)

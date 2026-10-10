@@ -22,37 +22,93 @@ def hr_admins(company_id):
                                            role__in=HR_ADMIN_ROLES))
 
 
+def leave_dates(leave_request):
+    """E.g. "12 Oct – 14 Oct", or "12 Oct" for one day."""
+    if leave_request.start_date == leave_request.end_date:
+        return f"{leave_request.start_date:%d %b}"
+    return f"{leave_request.start_date:%d %b} – {leave_request.end_date:%d %b}"
+
+
 def leave_summary(leave_request):
     """E.g. "Vacation, 12 Oct – 14 Oct (3 days)"."""
     days = float(leave_request.days_requested or 0)
     days_text = f"{days:g} day{'' if days == 1 else 's'}"
-    when = (f"{leave_request.start_date:%d %b}" if leave_request.start_date == leave_request.end_date
-            else f"{leave_request.start_date:%d %b} – {leave_request.end_date:%d %b}")
-    return f"{leave_request.get_leave_type_display()}, {when} ({days_text})"
+    return f"{leave_request.get_leave_type_display()}, {leave_dates(leave_request)} ({days_text})"
+
+
+#: The leave screen opens on "Pending for me". A request is only there for its
+#: named approver; everyone else finds it under "All", and their own under "Mine".
+LEAVE_FOR_ME = '/hr/dashboard?tab=leave'
+LEAVE_ALL = '/hr/dashboard?tab=leave&view=all'
+LEAVE_MINE = '/hr/dashboard?tab=leave&view=mine'
+
+#: What became of a request, as its title and as a clause.
+_DECISIONS = {
+    'approved': ('Leave approved', 'was approved'),
+    'rejected': ('Leave declined', 'was declined'),
+    'cancelled': ('Leave request cancelled', 'was cancelled'),
+    'withdrawn': ('Leave withdrawn', 'was withdrawn'),
+}
+
+
+def leave_decided(leave_request, decided_by=None, note='', booked=0):
+    """To the person whose leave it is, when someone else settles it: approved
+    or declined, a waiting request cancelled for them, approved leave withdrawn.
+
+    Nobody was told before. Someone with a dashboard login hears in that bell
+    (and by email, as they have chosen). Someone with only My Space has no
+    leave screen, so this is how they learn the answer: their bell, and an
+    email. `decided_by` is the dashboard login that did it; what a person does
+    to their own request they are not told about. `booked` is how many
+    meetings they are still booked into during approved leave
+    (`hr_agent.leave_clashes`), so that they know too.
+    """
+    emp = leave_request.employee
+    words = _DECISIONS.get(leave_request.status)
+    if not emp or not emp.company_id or words is None:
+        return 0
+    from hr_agent.handover import dashboard_login
+    own_login = dashboard_login(emp)
+    if decided_by is not None and own_login is not None and own_login.id == decided_by.id:
+        return 0
+    by = f" by {decided_by.full_name}" if decided_by is not None and decided_by.full_name else ''
+    note = (note or '').strip()
+    title = f"{words[0]}: {leave_dates(leave_request)}"
+    message = (f"Your leave ({leave_summary(leave_request)}) {words[1]}{by}."
+               + (f' They wrote: "{note[:500]}"' if note else ''))
+    if booked:
+        message += (f" You are still booked into {booked} meeting{'' if booked == 1 else 's'} in that time; "
+                    f"whoever runs {'it' if booked == 1 else 'them'} has been told.")
+    if own_login is not None and own_login.is_active:
+        return notify_company_users([own_login], title=title, message=message, link=LEAVE_MINE,
+                                    kind='hr_leave_decided')
+    from core.notification_utils import notify_employees
+    return notify_employees([emp.user], title=title, message=message, kind='hr_leave_decided',
+                            email_subject=title)
 
 
 def leave_request_submitted(leave_request):
-    """To HR admins and the employee's manager; not to whoever asked."""
+    """To the person named to decide it and to the HR admins; not to whoever
+    asked. Each is sent to the view of the leave screen the request is on for
+    them: an HR admin who is not the approver used to land on an empty list."""
     emp = leave_request.employee
     if not emp or not emp.company_id:
         return 0
-    recipients = hr_admins(emp.company_id)
-    # The manager's dashboard login, by the link on their HR record or, as
-    # nothing ever sets that link, by their work address.
     from hr_agent.handover import dashboard_login
-    manager_login = dashboard_login(emp.manager) if emp.manager_id else None
-    if manager_login is not None:
-        recipients.append(manager_login)
     own_login = dashboard_login(emp)
-    recipients = [cu for cu in recipients if own_login is None or cu.id != own_login.id]
-
-    return notify_company_users(
-        recipients,
-        title=f"Leave request from {emp.full_name}",
-        message=f"{leave_summary(leave_request)}. Waiting for a decision.",
-        link='/hr/dashboard?tab=leave',
-        kind='hr_leave_request',
-    )
+    own_id = own_login.id if own_login is not None else None
+    # The approver's dashboard login, by the link on their HR record or by
+    # their work address.
+    approver_login = dashboard_login(leave_request.approver) if leave_request.approver_id else None
+    approver_id = approver_login.id if approver_login is not None else None
+    words = {'title': f"Leave request from {emp.full_name}",
+             'message': f"{leave_summary(leave_request)}. Waiting for a decision.",
+             'kind': 'hr_leave_request'}
+    told = 0
+    if approver_login is not None and approver_id != own_id:
+        told += notify_company_users([approver_login], link=LEAVE_FOR_ME, **words)
+    others = [cu for cu in hr_admins(emp.company_id) if cu.id not in (own_id, approver_id)]
+    return told + notify_company_users(others, link=LEAVE_ALL, **words)
 
 
 def run_outcome(execution) -> str:

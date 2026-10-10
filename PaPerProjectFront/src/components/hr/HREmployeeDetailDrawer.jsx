@@ -31,6 +31,7 @@ import {
 import hrAgentService from '@/services/hrAgentService';
 import HandoverDialog from './HandoverDialog';
 import HREmployeeLogins from './HREmployeeLogins';
+import TimeZoneSelect from '@/components/common/TimeZoneSelect';
 
 const STAT_BG = 'rgba(167,139,250,0.2)';
 const STAT_FG = '#a78bfa';
@@ -202,7 +203,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
         employment_type: emp.employment_type || 'full_time',
         start_date: emp.start_date || '',
         probation_end_date: emp.probation_end_date || '',
-        timezone_name: emp.timezone_name || 'UTC',
+        timezone_name: emp.timezone_name || '',
         phone: emp.phone || '',
       },
     });
@@ -639,7 +640,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
                   <KV icon={CalendarClock} label="Type" value={labelOf(e.employment_type)} />
                   <KV icon={CalendarClock} label="Start" value={e.start_date} />
                   {e.probation_end_date && <KV icon={CalendarClock} label="Probation ends" value={e.probation_end_date} />}
-                  {e.timezone_name && <KV icon={CalendarClock} label="Timezone" value={e.timezone_name} />}
+                  <KV icon={CalendarClock} label="Time zone" value={e.timezone_name || "The company's"} />
                 </div>
               </div>
               {!e.anonymized_at && (
@@ -1063,8 +1064,9 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
             <Input value={editForm.payload.phone || ''} onChange={(ev) => setEditField('phone', ev.target.value)} />
           </div>
           <div className="col-span-1">
-            <Label className="text-xs">Timezone</Label>
-            <Input placeholder="UTC" value={editForm.payload.timezone_name || ''} onChange={(ev) => setEditField('timezone_name', ev.target.value)} />
+            <Label className="text-xs">Time zone</Label>
+            <TimeZoneSelect value={editForm.payload.timezone_name || ''} emptyLabel="The company's"
+              onChange={(v) => setEditField('timezone_name', v)} />
           </div>
         </div>
         <DialogFooter>

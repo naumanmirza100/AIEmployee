@@ -141,10 +141,9 @@ class UserSerializer(serializers.ModelSerializer):
         return True
     
     def get_phone(self, obj):
-        """Get phone from user if exists"""
-        # Django User model doesn't have phone field by default
-        # Phone could be stored in UserProfile or we can return None
-        return None
+        """The phone number on the person's profile; the User model has none of its own."""
+        profile = getattr(obj, 'profile', None)
+        return getattr(profile, 'phone_number', None) or None
     
     def get_profile(self, obj):
         """Get user profile data"""

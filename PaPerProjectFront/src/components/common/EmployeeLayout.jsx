@@ -116,7 +116,9 @@ const EmployeeLayout = () => {
   }
   if (!user) return null;
 
-  const displayName = user.fullName || user.username || user.email?.split('@')[0] || 'Employee';
+  // Sign-in sends firstName and lastName, not fullName or username.
+  const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ')
+    || user.fullName || user.username || user.email?.split('@')[0] || 'Employee';
 
   return (
     <>
@@ -129,7 +131,7 @@ const EmployeeLayout = () => {
           icon={UserIcon}
           title="My Space"
           subtitle={displayName}
-          user={user}
+          user={{ ...user, fullName: displayName }}
           showNavTabs
           activeSection={section}
           onLogout={handleLogout}

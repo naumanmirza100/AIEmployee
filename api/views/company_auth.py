@@ -412,6 +412,8 @@ def _company_profile_payload(company, company_user):
             'industry': company.industry or '',
             'companySize': company.company_size or '',
             'description': company.description or '',
+            # '' until an admin sets it; leave is read in UTC until then.
+            'timezoneName': company.timezone_name or '',
             'createdAt': company.created_at.isoformat() if company.created_at else None,
         },
         'user': {
@@ -476,9 +478,33 @@ def update_company_profile(request):
         return Response({'status': 'error', 'message': 'Company name must be at least 2 characters.'},
                         status=status.HTTP_400_BAD_REQUEST)
 
+    # The company's time zone moves everyone's approved leave on the shared
+    # calendar, so changing it is for an owner or admin, and it must be a
+    # real zone. The profile form sends it back unchanged with every save;
+    # only a change is checked.
+    new_zone = None
+    zone_key = next((k for k in ('timezoneName', 'timezone_name') if k in data), None)
+    if zone_key:
+        wanted = str(data.get(zone_key) or '').strip()
+        if wanted != (company.timezone_name or ''):
+            from api.permissions import IsCompanyAdmin
+            from core.scheduling import zone_name
+            if company_user.role not in IsCompanyAdmin.ADMIN_ROLES:
+                return Response({'status': 'error',
+                                 'message': "Only an owner or admin can change the company's time zone."},
+                                status=status.HTTP_403_FORBIDDEN)
+            if wanted and not zone_name(wanted, default=''):
+                return Response({'status': 'error',
+                                 'message': f"{wanted[:64]!r} is not a time zone. Use a name such as Asia/Karachi."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            new_zone = wanted
+
     try:
         if updated_fields:
             company.save(update_fields=updated_fields)
+        if new_zone is not None:
+            from hr_agent import zones
+            zones.set_company_zone(company, new_zone)
     except Exception as e:
         logger.error(f"update_company_profile error: {e}", exc_info=True)
         return Response({'status': 'error', 'message': 'Failed to update profile'},

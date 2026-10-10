@@ -42,13 +42,13 @@ const LoginPage = () => {
     try {
       const response = await login(email, password);
       
-      // Check if user was created by a company user
+      // A platform admin goes to the admin dashboard; everyone else is an employee.
       const userData = response?.data?.user;
-      const isCompanyCreatedUser = userData?.createdByCompanyUser === true;
-      
+      const isPlatformAdmin = userData?.userType === 'admin' || userData?.is_staff;
+
       toast({
         title: '✅ Login Successful',
-        description: isCompanyCreatedUser ? 'Redirecting to your dashboard...' : 'Redirecting to admin dashboard...',
+        description: isPlatformAdmin ? 'Redirecting to admin dashboard...' : 'Opening your space...',
       });
       
       // Redirect based on user type. Employees (company-created + regular)
@@ -60,7 +60,7 @@ const LoginPage = () => {
       // every feature was refused. Their own project screen is linked from
       // My Space home.
       const asked = new URLSearchParams(location.search);
-      if (userData?.userType === 'admin' || userData?.is_staff) {
+      if (isPlatformAdmin) {
         takeReturnTo(null);
         navigate(from, { replace: true });
       } else {
@@ -82,8 +82,8 @@ const LoginPage = () => {
   return (
     <>
       <Helmet>
-        <title>Admin Login - Pay Per Project</title>
-        <meta name="description" content="Admin login page for Pay Per Project" />
+        <title>Sign in - Pay Per Project</title>
+        <meta name="description" content="Sign in to Pay Per Project" />
       </Helmet>
 
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-3 sm:p-4">
@@ -98,9 +98,10 @@ const LoginPage = () => {
               <div className="mx-auto mb-3 sm:mb-4 flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-primary/10">
                 <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-primary" />
               </div>
-              <CardTitle className="text-2xl sm:text-3xl font-bold">Admin Login</CardTitle>
+              {/* Every employee signs in here too, not only the platform's admins. */}
+              <CardTitle className="text-2xl sm:text-3xl font-bold">Sign in</CardTitle>
               <CardDescription className="text-xs sm:text-sm">
-                Enter your credentials to access the admin dashboard
+                Use the email and password you were given
               </CardDescription>
             </CardHeader>
             <CardContent className="px-4 sm:px-6 pb-6">
@@ -112,7 +113,7 @@ const LoginPage = () => {
                     <Input
                       id="email"
                       type="email"
-                      placeholder="admin@example.com"
+                      placeholder="you@company.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="pl-10 text-sm sm:text-base"
@@ -166,7 +167,8 @@ const LoginPage = () => {
 
               <div className="mt-4 sm:mt-6 text-center text-xs sm:text-sm text-muted-foreground">
                 <p>
-                  Only authorized administrators can access this page.
+                  Signing in to a company dashboard?{' '}
+                  <Link to="/company/login" className="text-primary hover:underline">Use the company sign-in</Link>
                 </p>
               </div>
             </CardContent>

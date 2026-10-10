@@ -591,6 +591,45 @@ class BookingTests(SDRBase):
         self.assertEqual(m.calendar_link, 'https://meet.google.com/abc')
         self.assertEqual(self.lead.status, 'meeting_scheduled')
 
+    def test_booking_keeps_the_google_event_so_it_can_follow_the_call(self):
+        # The event's id was thrown away: a call that moved stayed in Google at its old time.
+        from core.google_calendar import event_state
+        m = self.meeting()
+        when = (timezone.now() + timedelta(days=3)).replace(microsecond=0)
+        made = {'event_id': 'ev-42', 'meet_url': 'https://meet.google.com/abc'}
+        with mock.patch('core.google_calendar.create_google_event', return_value=made) as create:
+            with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
+                self.assertEqual(self.book(m, when).status_code, 200)
+        self.assertEqual(create.call_args.kwargs['start_dt'], when)
+        m.refresh_from_db()
+        self.assertEqual((m.google_event_id, m.google_event_state, m.calendar_link),
+                         ('ev-42', event_state(when, m.duration_minutes), 'https://meet.google.com/abc'))
+
+    def test_without_google_the_call_has_a_link_and_no_event(self):
+        m = self.meeting()
+        with mock.patch('core.google_calendar.create_google_event', return_value=None):
+            with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
+                self.assertEqual(self.book(m, timezone.now() + timedelta(days=3)).status_code, 200)
+        m.refresh_from_db()
+        self.assertEqual((m.google_event_id, m.google_event_state), ('', ''))
+        self.assertTrue(m.calendar_link.startswith('https://meet.jit.si/'))
+
+    def test_a_reopened_call_booked_again_moves_its_event_and_makes_no_second_one(self):
+        from core.google_calendar import event_state
+        was = (timezone.now() + timedelta(days=2)).replace(microsecond=0)
+        m = self.meeting(scheduled_at=was, calendar_link='https://meet.google.com/abc',
+                         google_event_id='ev-42', google_event_state=event_state(was, 30))
+        when = was + timedelta(days=1)
+        with mock.patch('core.google_calendar.create_google_event') as create:
+            with mock.patch('core.google_calendar.update_google_event', return_value=True) as move:
+                with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent'):
+                    self.assertEqual(self.book(m, when).status_code, 200)
+        create.assert_not_called()
+        move.assert_called_once_with(self.company, 'ev-42', start_dt=when, duration_minutes=30)
+        m.refresh_from_db()
+        self.assertEqual((m.google_event_id, m.google_event_state, m.calendar_link),
+                         ('ev-42', event_state(when, 30), 'https://meet.google.com/abc'))
+
     def test_booking_too_far_ahead_is_rejected(self):
         m = self.meeting()
         resp = self.book(m, timezone.now() + timedelta(days=400))

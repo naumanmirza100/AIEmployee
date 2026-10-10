@@ -7,7 +7,7 @@ interviewer found out from their own Meetings page, or when another booking was
 refused because they were "busy".
 
 Each alert is a `core.Notification` in the employee's bell, opening their
-Meetings page. This is called from the places where one of those things
+Meetings page, and an email. This is called from the places where one of those things
 happens, never from the Interview save signal: that fires on every reminder and
 status save and would flood people.
 """
@@ -51,7 +51,7 @@ def tell(interview, event, users=None) -> int:
     many were told. Never raises: an alert must not undo a booking."""
     try:
         from django.contrib.auth import get_user_model
-        from core.models import Notification
+        from core.notification_utils import notify_employees
 
         if users is None:
             people = list(interview.interviewers.all()) if interview.pk else []
@@ -61,12 +61,10 @@ def tell(interview, event, users=None) -> int:
         if not people:
             return 0
         title, message = _words(interview, event)
-        Notification.objects.bulk_create([
-            Notification(user=person, type=f'interview_{event}', notification_type='meeting_request',
-                         title=title[:255], message=message, action_url=MEETINGS_PAGE)
-            for person in people
-        ])
-        return len(people)
+        # In their bell, and by email: an interviewer who is not signed in
+        # that day used to hear nothing until they next opened My Space.
+        return notify_employees(people, title=title, message=message, link=MEETINGS_PAGE,
+                                kind=f'interview_{event}', email_subject=title)
     except Exception:
         logger.exception("Could not alert interviewers of interview %s (%s)", getattr(interview, 'pk', None), event)
         return 0

@@ -234,6 +234,8 @@ def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
 #: the GDPR export, anonymisation, leave-balance adjustment, the audit log.
 #: `company_user` is deliberately NOT here — see `_is_hr_admin`. Defined in
 #: hr_agent.alerts, which also uses it to pick who gets HR's bell alerts.
+from hr_agent import alerts as hr_alerts  # noqa: E402
+from core import meeting_notices  # noqa: E402
 from hr_agent.alerts import HR_ADMIN_ROLES  # noqa: E402
 
 #: Roles `set_company_user_role` may grant. A subset of CompanyUser.ROLE_CHOICES:
@@ -2378,6 +2380,8 @@ def create_hr_meeting(request):
             _seed_meeting_proposal(m, request.user)
     except ScheduleConflict as clash:
         return clash.response()
+    # The people booked are told. HR used to block their calendar and say nothing.
+    meeting_notices.tell('hr', m, None, actor_user_id=_caller_login_user_id(request.user))
     _write_audit_log(request.user, company, 'hr_meeting.create', 'HRMeeting', m.id,
                      before=None,
                      after={'title': m.title, 'meeting_type': m.meeting_type,
@@ -2670,6 +2674,7 @@ def cancel_leave_request(request, request_id):
             after={'status': lr.status, 'employee_id': lr.employee_id,
                    'days_requested': float(lr.days_requested or 0)},
         )
+        hr_alerts.leave_decided(lr, decided_by=request.user, note=lr.approval_note)
         return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status}})
     except Exception:
         logger.exception("cancel_leave_request failed")
@@ -2787,6 +2792,7 @@ def withdraw_leave_request(request, request_id):
                    'after_end_date': bool(already_taken),
                    'reason': reason[:500]},
         )
+        hr_alerts.leave_decided(lr, decided_by=request.user, note=reason)
         return Response({'status': 'success',
                          'data': {'id': lr.id, 'status': lr.status,
                                   'days_restored': restored}})
@@ -2841,11 +2847,7 @@ def decide_leave_request(request, request_id):
             # role list: the inlined copy here included 'company_user', so any
             # colleague — including the requester — could decide the request
             # (HR-SEC-1).
-            is_hr_admin = _is_hr_admin(cu)
-            approver_emp = (Employee.objects.filter(company=company, company_user=cu).first()
-                            or Employee.objects.filter(company=company, work_email__iexact=cu.email).first())
-            is_assigned_approver = bool(lr.approver_id and approver_emp and lr.approver_id == approver_emp.id)
-            if not (is_hr_admin or is_assigned_approver):
+            if not _may_decide_leave(cu, lr):
                 return Response({'status': 'error',
                                  'message': "You aren't authorized to decide this request — "
                                             "must be the assigned approver or HR admin."},
@@ -2898,12 +2900,101 @@ def decide_leave_request(request, request_id):
                 'days_requested': float(lr.days_requested or 0),
             },
         )
+        # Approved leave does not move the meetings the person is already
+        # booked into. Whoever runs each one is told, now that it is certain.
+        booked = told = 0
+        if lr.status == 'approved':
+            from hr_agent import leave_clashes
+            clashes = leave_clashes.booked_during(lr)
+            booked = len(clashes)
+            told = leave_clashes.tell_organisers(lr, clashes)
+        # The person who asked is told the answer. Nobody was, before.
+        hr_alerts.leave_decided(lr, decided_by=cu, note=lr.approval_note, booked=booked)
 
-        return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status}})
+        return Response({'status': 'success', 'data': {'id': lr.id, 'status': lr.status,
+                                                       'booked_during': booked, 'organisers_told': told}})
     except Exception:
         logger.exception("decide_leave_request failed")
         return Response({'status': 'error', 'message': 'Failed to decide leave request'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def hr_time_zones(request):
+    """Whose clock leave is read on (hr_agent/zones.py).
+
+    GET, for any login: the company's time zone, how many HR records follow
+    it, and how many still say the 'UTC' every record used to be given.
+
+    POST ``{action: 'follow_company'}``, HR admins only: move those records
+    onto the company's zone, and their approved leave with them. It is offered,
+    never done unasked: a UTC someone chose looks the same as the default.
+    """
+    from hr_agent import zones
+    company = request.user.company
+    if request.method == 'GET':
+        return Response({'status': 'success', 'data': zones.summary(company)})
+    if not _is_hr_admin(request.user):
+        return Response({'status': 'error', 'message': 'HR-admin access required'},
+                        status=status.HTTP_403_FORBIDDEN)
+    if (request.data or {}).get('action') != 'follow_company':
+        return Response({'status': 'error', 'message': "action must be 'follow_company'"},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if not zone_name(company.timezone_name, default=''):
+        return Response({'status': 'error',
+                         'message': 'Set the company time zone first, in the company profile.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    moved = zones.follow_company(company)
+    _write_audit_log(request.user, company, 'employee.follow_company_zone', 'company', company.id,
+                     before={'timezone_name': zones.OLD_DEFAULT},
+                     after={'timezone_name': '', 'company_zone': company.timezone_name, 'records': moved})
+    return Response({'status': 'success', 'data': {**zones.summary(company), 'moved': moved}})
+
+
+def _may_decide_leave(company_user, leave_request) -> bool:
+    """May this login decide the request? Its named approver (their HR record
+    found by its link or its work address), or anyone who runs HR."""
+    if _is_hr_admin(company_user):
+        return True
+    company = company_user.company
+    record = (Employee.objects.filter(company=company, company_user=company_user).first()
+              or Employee.objects.filter(company=company, work_email__iexact=company_user.email).first())
+    return bool(leave_request.approver_id and record and leave_request.approver_id == record.id)
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def leave_request_clashes(request, request_id):
+    """What the person is already booked into during this leave: the list the
+    approval dialog shows before a decision. For whoever may decide it.
+
+    ``?timezone=`` is the clock the times are written on (the viewer's).
+    Returns ``{checked, why, count, clashes: [{kind, title, when, ...}]}``.
+    ``checked`` is false, with ``why``, when the calendar cannot say: the
+    person has no employee login, or the leave is for a few unnamed hours.
+    """
+    from hr_agent import leave_clashes
+    lr = (LeaveRequest.objects.select_related('employee')
+          .filter(pk=request_id, employee__company=request.user.company).first())
+    if not lr:
+        return Response({'status': 'error', 'message': 'Leave request not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if not _may_decide_leave(request.user, lr):
+        return Response({'status': 'error', 'message': 'Only the approver or an HR admin can see this.'},
+                        status=status.HTTP_403_FORBIDDEN)
+    why = leave_clashes.why_not_checked(lr)
+    clashes = leave_clashes.booked_during(lr, reveal_private=_is_hr_admin(request.user))
+    return Response({'status': 'success', 'data': {
+        'checked': not why,
+        'why': why,
+        'count': len(clashes),
+        'clashes': leave_clashes.rows(clashes, zone_name(request.GET.get('timezone'))),
+    }})
 
 
 # ============================================================================
@@ -3818,6 +3909,7 @@ def hr_meeting_schedule(request):
                     'action': 'conflict',
                     'conflict': clash.payload()['data'],
                 }})
+            meeting_notices.tell('hr', m, None, actor_user_id=_caller_login_user_id(company_user))
             meeting_payload = _serialize_hr_meeting(m)
 
             # Build a strong success reply so the frontend never has to guess.
@@ -3908,6 +4000,9 @@ def update_hr_meeting(request, meeting_id):
     company = request.user.company
     d = request.data or {}
     dirty = []
+    # Who is in it and when, before anything changes: the people a change
+    # touches are told afterwards. The Edit dialog used to tell nobody.
+    seats_before = meeting_notices.snapshot('hr', m)
     before = {'title': m.title, 'status': m.status,
               'scheduled_at': m.scheduled_at.isoformat() if m.scheduled_at else None,
               'duration_minutes': m.duration_minutes,
@@ -4009,6 +4104,7 @@ def update_hr_meeting(request, meeting_id):
 
     participants_changed = new_participant_ids is not None
     m.refresh_from_db()
+    meeting_notices.tell('hr', m, seats_before, actor_user_id=_caller_login_user_id(request.user))
     if dirty or participants_changed:
         _write_audit_log(request.user, company, 'hr_meeting.update',
                          'HRMeeting', m.id, before=before,
@@ -4037,6 +4133,7 @@ def cancel_hr_meeting(request, meeting_id):
         return err
     reason = (request.data or {}).get('reason') or ''
     prev_status = m.status
+    seats_before = meeting_notices.snapshot('hr', m)
     m.status = 'cancelled'
     # A cancelled meeting is off the table — carry that through to the
     # negotiation state so the card stops showing "pending" on a dead meeting.
@@ -4045,6 +4142,8 @@ def cancel_hr_meeting(request, meeting_id):
         prefix = '\n\n[Cancelled] ' if m.notes else '[Cancelled] '
         m.notes = (m.notes or '') + prefix + reason
     m.save(update_fields=['status', 'response_status', 'notes', 'updated_at'])
+    # Everyone who was in it is told it is off. The Cancel button used to tell nobody.
+    meeting_notices.tell('hr', m, seats_before, actor_user_id=_caller_login_user_id(request.user))
     # Audit — cancellation was the only meeting mutation not logged. Compliance
     # queries like "who cancelled this exit interview?" now have an answer.
     _write_audit_log(
@@ -4475,7 +4574,8 @@ def list_leave_requests(request):
     Filters (query params):
       ``?status=pending|approved|rejected|cancelled``
       ``?mine=1`` — only requests submitted BY the caller
-      ``?pending_for_me=1`` — only pending requests where the caller is the approver
+      ``?pending_for_me=1`` — only pending requests the caller is to decide: the ones
+        they are the approver of and, for whoever runs HR, the ones with nobody named
     """
     try:
         company = request.user.company
@@ -4504,10 +4604,14 @@ def list_leave_requests(request):
                 qs = qs.none()
 
         if request.GET.get('pending_for_me') == '1':
-            if asker_emp:
-                qs = qs.filter(status='pending', approver=asker_emp)
-            else:
-                qs = qs.none()
+            waiting = Q(approver=asker_emp) if asker_emp else Q(pk__in=[])
+            if _is_hr_admin(request.user):
+                # A request with nobody named waits on whoever runs HR: a manager who cannot
+                # decide leave is passed over, and so is someone with no manager. It was only
+                # under "All", and this view told the one person who could decide it that
+                # nothing was waiting on them.
+                waiting |= Q(approver__isnull=True)
+            qs = qs.filter(waiting, status='pending')
 
         # Paginated rather than silently cut at 200 (HR-PERF-4).
         from api.pagination import paginate
@@ -5006,8 +5110,19 @@ def update_employee(request, employee_id):
         if 'phone' in d:
             emp.phone = (d['phone'] or '')[:40]
             fields.append('phone')
+        zone_changed = False
         if 'timezone_name' in d:
-            emp.timezone_name = (d['timezone_name'] or 'UTC')[:64]
+            # Blank means "the company's". A name that is not a time zone is
+            # refused: it used to be saved and then read, silently, as UTC.
+            wanted = str(d['timezone_name'] or '').strip()
+            if wanted and not zone_name(wanted, default=''):
+                return Response({
+                    'status': 'error',
+                    'message': f"{wanted[:64]!r} is not a time zone. Use a name such as Asia/Karachi, "
+                               "or leave it empty to follow the company's.",
+                }, status=status.HTTP_400_BAD_REQUEST)
+            zone_changed = wanted != emp.timezone_name
+            emp.timezone_name = wanted
             fields.append('timezone_name')
 
         # HR-admin-only fields.
@@ -5094,6 +5209,10 @@ def update_employee(request, employee_id):
 
         fields_to_save = list(set(fields)) + ['updated_at']
         emp.save(update_fields=fields_to_save)
+        if zone_changed:
+            # Their approved leave is on the calendar at the old zone's hours.
+            from hr_agent import zones
+            zones.resync_leave([emp.id])
 
         after = _serialize_employee(emp)
         _write_audit_log(request.user, company, 'employee.update', 'employee', emp.id,

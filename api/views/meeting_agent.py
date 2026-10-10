@@ -19,7 +19,13 @@ from rest_framework.throttling import SimpleRateThrottle
 
 from api.authentication import CompanyUserTokenAuthentication
 from api.permissions import IsCompanyUserOnly
+from datetime import timedelta
+
 from core.api_key_service import KeyServiceError
+from core.scheduling import (
+    ScheduleConflict, booking_guard, ensure_free, find_conflicts, login_user_id_for_company_user,
+    people_for, zone_name,
+)
 from meeting_agent.ai_agents import ExecAgentRegistry
 from meeting_agent.models import (
     ExecutiveMeeting,
@@ -536,6 +542,120 @@ class ExecCRUDThrottle(SimpleRateThrottle):
 # Helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The shared calendar
+#
+# Executive meetings were checked, at most, against the organiser's other
+# executive meetings. They could land on an interview, a project or HR meeting,
+# approved leave or a company holiday. They now ask the calendar every agent
+# shares (core.scheduling), and their own busy time is on it.
+# ---------------------------------------------------------------------------
+
+def _occupies_people(meeting) -> bool:
+    """Is this meeting on in a way that takes people's time? The calendar's own rule."""
+    from core.scheduling.sources import SOURCES
+    return meeting.status in SOURCES['exec'].ACTIVE
+
+
+def _calendar_people(company_users):
+    """The employee logins behind these dashboard logins and seats. Someone
+    who is nobody's employee login has no calendar, and is left out."""
+    ids = {login_user_id_for_company_user(cu) for cu in company_users}
+    return sorted(i for i in ids if i)
+
+
+def _company_zone(company_user) -> str:
+    """A company holiday is a whole day on the company's own clock."""
+    return zone_name(company_user.company.timezone_name)
+
+
+def _real(company_user, typed):
+    """The instant a time kept by this agent means. It is kept as typed and
+    filed as UTC; the shared calendar needs when it really is (meeting_agent.clock)."""
+    from meeting_agent.clock import real_instant
+    return real_instant(typed, company_user.company)
+
+
+def _participant_for(user_id, user_type, company):
+    """The row a picked person takes part through: a dashboard login, or the
+    seat that stands in for an employee login. None when there is no such
+    active person in this company."""
+    from core.models import CompanyUser
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    if user_type == 'profile':
+        # An employee login: they take part through a seat, which is not a login.
+        return _seat_for_employee(user_id, company)
+    return CompanyUser.objects.filter(id=user_id, company=company, is_active=True).first()
+
+
+def _picked_people(company, picks):
+    """The employee logins behind people picked in the dialog, given as
+    ``[{user_id, user_type}]``. Nobody is seated: this is for asking only."""
+    from core.models import CompanyUser, UserProfile
+    ids = set()
+    for pick in picks if isinstance(picks, list) else []:
+        try:
+            picked_id = int(pick.get('user_id'))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if pick.get('user_type') == 'profile':
+            found = (UserProfile.objects.filter(id=picked_id, company=company, user__is_active=True)
+                     .values_list('user_id', flat=True).first())
+        else:
+            login = CompanyUser.objects.filter(id=picked_id, company=company, is_active=True).first()
+            found = login_user_id_for_company_user(login) if login else None
+        if found:
+            ids.add(found)
+    return ids
+
+
+def _shared_clashes(people, typed, duration, company_user, exclude_id=None):
+    """What these people have then on the calendar every agent shares: other
+    meetings, interviews, sales calls, leave, a company holiday. In the shape
+    `check_conflicts` answers with, and each marked ``blocking``: the meeting
+    will be refused, not booked over it. `typed` is the time as this agent
+    keeps it."""
+    if not people:
+        return []
+    zone, starts = _company_zone(company_user), _real(company_user, typed)
+    found = find_conflicts(people, starts, starts + timedelta(minutes=duration),
+                           exclude=[('exec', exclude_id)] if exclude_id else (),
+                           viewer_source='exec', tz_name=zone)
+    return [{'id': clash.source_id if clash.source == 'exec' else None,
+             'title': clash.describe(zone), 'scheduled_at': clash.starts_at.isoformat(),
+             'duration_minutes': int((clash.ends_at - clash.starts_at).total_seconds() // 60),
+             'status': 'busy', 'source': clash.source, 'blocking': True}
+            for clash in found]
+
+
+def _all_clashes(own, shared):
+    """The agent's own answer and the shared calendar's, each meeting once.
+    A meeting both know of keeps the agent's wording, which the organiser may
+    read in full, and is marked as blocking."""
+    blocking = {c['id'] for c in shared if c['id']}
+    known = {c.get('id') for c in own}
+    return ([dict(c, blocking=True) if c.get('id') in blocking else c for c in own]
+            + [c for c in shared if not c['id'] or c['id'] not in known])
+
+
+def _invite_all(targets, meeting, organizer_name):
+    """Email each person their invitation, off the request: a meeting with ten
+    people must not make the organiser wait for ten emails."""
+    import threading
+    targets = [t for t in targets if t.email]
+    if not targets:
+        return
+
+    def send():
+        for target in targets:
+            _send_meeting_invite_email(target, meeting, organizer_name)
+
+    threading.Thread(target=send, daemon=True).start()
+
+
 def _get_agent(name, company_user):
     agent = ExecAgentRegistry.get_agent(name)
     agent.company_id = company_user.company_id
@@ -772,6 +892,9 @@ def schedule_meeting_ai(request):
 
             duration = int(parsed.get('duration_minutes') or 60)
             conflicts = agent.check_conflicts(company_user.id, scheduled_at, duration)
+            # And anything the organiser has in another agent, their leave, or a company holiday.
+            conflicts = _all_clashes(conflicts, _shared_clashes(_calendar_people([company_user]), scheduled_at,
+                                                                duration, company_user))
 
             if conflicts:
                 result['conflicts'] = conflicts
@@ -887,18 +1010,43 @@ def meeting_list(request):
         slug = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(10))
         meeting_link = f'https://meet.jit.si/exec-{slug}'
 
-    meeting = ExecutiveMeeting.objects.create(
-        organizer=company_user,
-        title=title,
-        description=request.data.get('description', ''),
-        agenda=request.data.get('agenda', []),
-        meeting_link=meeting_link,
-        scheduled_at=scheduled_at,
-        duration_minutes=int(request.data.get('duration_minutes', 60)),
-        timezone_name=request.data.get('timezone_name', 'UTC'),
-        recurrence=request.data.get('recurrence', 'none'),
-    )
-    return Response({'status': 'success', 'meeting': _serialize_meeting(meeting)}, status=status.HTTP_201_CREATED)
+    duration = int(request.data.get('duration_minutes', 60))
+    # The people invited come with the meeting, so it is booked for all of them or for nobody. They
+    # used to be added one request each afterwards: one busy person left a meeting made without them.
+    picks = request.data.get('participants') or []
+    targets = []
+    for pick in picks if isinstance(picks, list) else []:
+        target = _participant_for((pick or {}).get('user_id'), (pick or {}).get('user_type', 'company_user'),
+                                  company_user.company)
+        if target is None:
+            return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        if target.id != company_user.id and target not in targets:
+            targets.append(target)
+    people = _calendar_people([company_user, *targets])
+    try:
+        # Refused if the organiser or anyone invited is busy anywhere: another agent's meeting, an
+        # interview, a sales call, leave, a company holiday.
+        with booking_guard(people):
+            ensure_free(people, _real(company_user, scheduled_at), duration, tz_name=_company_zone(company_user),
+                        viewer_source='exec')
+            meeting = ExecutiveMeeting.objects.create(
+                organizer=company_user,
+                title=title,
+                description=request.data.get('description', ''),
+                agenda=request.data.get('agenda', []),
+                meeting_link=meeting_link,
+                scheduled_at=scheduled_at,
+                duration_minutes=duration,
+                timezone_name=zone_name(request.data.get('timezone_name')),
+                recurrence=request.data.get('recurrence', 'none'),
+            )
+            for target in targets:
+                ExecutiveMeetingParticipant.objects.create(meeting=meeting, company_user=target)
+    except ScheduleConflict as clash:
+        return clash.response()
+    _invite_all(targets, meeting, company_user.full_name)
+    return Response({'status': 'success', 'meeting': _serialize_meeting(meeting, include_participants=bool(targets))},
+                    status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET'])
@@ -944,6 +1092,7 @@ def meeting_detail(request, meeting_id):
         updatable = ['title', 'description', 'agenda', 'meeting_link',
                      'duration_minutes', 'timezone_name', 'status', 'recurrence']
         changed_fields = []
+        was = (_occupies_people(meeting), meeting.scheduled_at, meeting.duration_minutes)
         for field in updatable:
             if field in request.data:
                 if getattr(meeting, field) != request.data[field]:
@@ -954,7 +1103,20 @@ def meeting_detail(request, meeting_id):
             if dt and dt != meeting.scheduled_at:
                 changed_fields.append('date/time')
                 meeting.scheduled_at = dt
-        meeting.save()
+        now = (_occupies_people(meeting), meeting.scheduled_at, meeting.duration_minutes)
+        if now[0] and now != was:
+            # A new time or length, or a cancelled meeting brought back: everyone in it must be free.
+            people = people_for('exec', meeting)
+            try:
+                with booking_guard(people):
+                    ensure_free(people, _real(company_user, meeting.scheduled_at), meeting.duration_minutes,
+                                tz_name=_company_zone(company_user), exclude=[('exec', meeting.id)],
+                                viewer_source='exec')
+                    meeting.save()
+            except ScheduleConflict as clash:
+                return clash.response()
+        else:
+            meeting.save()
 
         # Notify existing participants only when calendar-relevant fields change.
         # Run in a background thread with a short delay so any concurrent
@@ -1224,18 +1386,21 @@ def meeting_participants(request, meeting_id):
         if not user_id:
             return Response({'status': 'error', 'message': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if user_type == 'profile':
-            # An employee login: they take part through a seat, which is not a login.
-            target = _seat_for_employee(user_id, company_user.company)
-            if target is None:
-                return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        else:
-            try:
-                target = CompanyUser.objects.get(id=user_id, company=company_user.company, is_active=True)
-            except CompanyUser.DoesNotExist:
-                return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        target = _participant_for(user_id, user_type, company_user.company)
+        if target is None:
+            return Response({'status': 'error', 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
+        # They must be free then, in every agent: an invitation counts as busy time.
+        people = _calendar_people([target])
+        try:
+            with booking_guard(people):
+                if _occupies_people(meeting):
+                    ensure_free(people, _real(company_user, meeting.scheduled_at), meeting.duration_minutes,
+                                tz_name=_company_zone(company_user), exclude=[('exec', meeting.id)],
+                                viewer_source='exec')
+                p, created = ExecutiveMeetingParticipant.objects.get_or_create(meeting=meeting, company_user=target)
+        except ScheduleConflict as clash:
+            return clash.response()
         if target.email:
             _send_meeting_invite_email(target, meeting, company_user.full_name)
         return Response({'status': 'success', 'participant': {
@@ -1354,9 +1519,15 @@ def meeting_suggest_slots(request):
 @permission_classes([IsCompanyUserOnly])
 @throttle_classes([ExecCRUDThrottle])
 def meeting_check_conflicts(request):
-    """Return meetings that clash with a proposed time window (no LLM, DB only).
-    Body: { scheduled_at, duration_minutes, exclude_meeting_id? }.
-    Used before creating/updating a meeting to warn the user of a double-booking."""
+    """What is in the way of a proposed time (no LLM, DB only).
+    Body: { scheduled_at, duration_minutes, exclude_meeting_id?, participants? }.
+
+    Asked before a meeting is made or moved. The answer covers the organiser,
+    the people picked (``participants``, as ``[{user_id, user_type}]``) and,
+    when a meeting is being moved, everyone already in it. A clash on the
+    calendar every agent shares is marked ``blocking`` and the answer says
+    ``blocking: true``: saving will be refused, so the screen must not offer to
+    book over it. A clash only the agent's own check finds is a warning."""
     company_user = request.user
     scheduled_at = _parse_datetime(request.data.get('scheduled_at'))
     if not scheduled_at:
@@ -1364,9 +1535,21 @@ def meeting_check_conflicts(request):
     duration = int(request.data.get('duration_minutes') or 60)
     exclude_id = request.data.get('exclude_meeting_id') or None
     try:
+        exclude_id = int(exclude_id) if exclude_id else None
+    except (TypeError, ValueError):
+        exclude_id = None
+    try:
         agent = _get_agent('meeting_scheduling', company_user)
         conflicts = agent.check_conflicts(company_user.id, scheduled_at, duration, exclude_id)
-        return Response({'status': 'success', 'conflicts': conflicts})
+        people = set(_calendar_people([company_user])) | _picked_people(company_user.company,
+                                                                         request.data.get('participants'))
+        moving = (ExecutiveMeeting.objects.filter(id=exclude_id, organizer=company_user).first()
+                  if exclude_id else None)
+        if moving is not None:
+            people |= set(people_for('exec', moving))
+        shared = _shared_clashes(sorted(people), scheduled_at, duration, company_user, exclude_id)
+        return Response({'status': 'success', 'conflicts': _all_clashes(conflicts, shared),
+                         'blocking': bool(shared)})
     except Exception as e:
         logger.error("meeting_check_conflicts error: %s", e)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

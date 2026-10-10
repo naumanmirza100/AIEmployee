@@ -251,16 +251,16 @@ class LeaveSource(Source):
     #: Where a half day splits, on the employee's clock.
     MIDDAY = time(13, 0)
 
-    def booking(self, lr, *, assume_active=False, include_declined=False):
-        if lr.status != 'approved' or not lr.employee_id:
-            return None
+    def window(self, lr):
+        """The hours a request covers, on the employee's clock, whatever its
+        status: (starts, ends), or None when it does not say which hours.
+        Also what HR looks through before approving one."""
         # "Some hours" leave doesn't say which hours, so it can't block any.
-        if lr.partial_day_period == 'hours':
+        if not lr.employee_id or lr.partial_day_period == 'hours':
             return None
-        employee = lr.employee
         from zoneinfo import ZoneInfo
         try:
-            zone = ZoneInfo(employee.timezone_name or 'UTC')
+            zone = ZoneInfo(lr.employee.zone)          # their own, else the company's
         except Exception:
             zone = ZoneInfo('UTC')
         starts = datetime.combine(lr.start_date, time(0), tzinfo=zone)
@@ -269,9 +269,18 @@ class LeaveSource(Source):
             ends = datetime.combine(lr.start_date, self.MIDDAY, tzinfo=zone)
         elif lr.partial_day_period == 'afternoon':
             starts = datetime.combine(lr.start_date, self.MIDDAY, tzinfo=zone)
+        return starts, ends
+
+    def booking(self, lr, *, assume_active=False, include_declined=False):
+        if lr.status != 'approved':
+            return None
+        window = self.window(lr)
+        if window is None:
+            return None
+        employee = lr.employee
         # Private and plainly titled: colleagues see "on leave", not the
         # leave type or the reason.
-        b = Booking(company_id=employee.company_id, starts_at=starts, ends_at=ends,
+        b = Booking(company_id=employee.company_id, starts_at=window[0], ends_at=window[1],
                     title='On leave', is_private=True)
         b.add(employee.user_id, PARTICIPANT, 'on_leave')
         return b
@@ -280,11 +289,89 @@ class LeaveSource(Source):
         qs = self.model.objects.filter(end_date__gte=(since - timedelta(days=1)).date())
         if company_id:
             qs = qs.filter(employee__company_id=company_id)
-        return qs.select_related('employee')
+        return qs.select_related('employee__company')
+
+
+class SalesCallSource(Source):
+    """A sales call occupies the salesperson whose call it is. The lead is
+    outside the company and has no calendar here.
+
+    Sales calls were left off the shared calendar when it was built (17
+    September 2026), so a lead could book a salesperson who was on leave, in
+    an interview or in another meeting. A time proposed to the lead and not
+    yet answered counts as busy, like any other pending invitation.
+    """
+    key = 'sdr'
+    label = 'Sales call'
+    model_label = 'ai_sdr_agent.SDRMeeting'
+    attendees_field = ''
+    relevant_fields = frozenset({'scheduled_at', 'duration_minutes', 'status', 'title',
+                                 'company_user', 'company_user_id'})
+    BOOKED = ('scheduled', 'awaiting_approval')
+
+    def booking(self, m, *, assume_active=False, include_declined=False):
+        if m.scheduled_at is None or not m.company_user_id:
+            return None
+        if not assume_active and m.status not in self.BOOKED:
+            return None
+        starts, ends = _window(m.scheduled_at, m.duration_minutes)
+        b = Booking(company_id=m.company_user.company_id, starts_at=starts, ends_at=ends,
+                    title=m.title or 'Sales call')
+        b.add(login_user_id_for_company_user(m.company_user), ORGANIZER, ORGANIZER)
+        return b
+
+    def upcoming(self, since, company_id=None):
+        qs = self.model.objects.filter(scheduled_at__gte=since - timedelta(days=1))
+        if company_id:
+            qs = qs.filter(company_user__company_id=company_id)
+        return qs.select_related('company_user')
+
+
+class ExecutiveSource(Source):
+    """An executive meeting occupies its organiser and everyone invited who
+    has not declined. They are dashboard logins, or the seat that stands in
+    for an employee; each counts when it maps to an employee login.
+
+    Its title is private: someone booking in another agent learns that the
+    person is busy in an executive meeting, not what the meeting is about.
+
+    That agent keeps a meeting's time as it was typed, filed as UTC. The busy
+    time is the real instant, read on the company's clock (meeting_agent.clock)."""
+    key = 'exec'
+    label = 'Executive meeting'
+    model_label = 'meeting_agent.ExecutiveMeeting'
+    participant_model_label = 'meeting_agent.ExecutiveMeetingParticipant'
+    attendees_field = ''
+    relevant_fields = frozenset({'scheduled_at', 'duration_minutes', 'status', 'title',
+                                 'organizer', 'organizer_id'})
+    ACTIVE = ('scheduled', 'in_progress', 'pending_confirmation')
+    BUSY = BUSY_RESPONSES + ('tentative',)
+
+    def booking(self, m, *, assume_active=False, include_declined=False):
+        if m.scheduled_at is None:
+            return None
+        if not assume_active and m.status not in self.ACTIVE:
+            return None
+        from meeting_agent.clock import real_start
+        starts, ends = _window(real_start(m), m.duration_minutes)
+        b = Booking(company_id=m.organizer.company_id, starts_at=starts, ends_at=ends, title=m.title or '',
+                    is_private=True)
+        for seat in self.participant_model.objects.filter(meeting_id=m.pk).select_related('company_user'):
+            if include_declined or seat.response in self.BUSY:
+                b.add(login_user_id_for_company_user(seat.company_user), PARTICIPANT, seat.response)
+        b.add(login_user_id_for_company_user(m.organizer), ORGANIZER, ORGANIZER)
+        return b
+
+    def upcoming(self, since, company_id=None):
+        qs = self.model.objects.filter(scheduled_at__gte=since - timedelta(days=1))
+        if company_id:
+            qs = qs.filter(organizer__company_id=company_id)
+        return qs.select_related('organizer__company')
 
 
 SOURCES: dict[str, Source] = {s.key: s for s in (ProjectManagerSource(), HRSource(), FrontlineSource(),
-                                                  RecruitmentSource(), LeaveSource())}
+                                                  RecruitmentSource(), LeaveSource(),
+                                                  SalesCallSource(), ExecutiveSource())}
 
 
 def people_for(source_key: str, meeting, *, include_declined=False) -> list[int]:

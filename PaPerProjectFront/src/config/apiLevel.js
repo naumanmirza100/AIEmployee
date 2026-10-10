@@ -6,4 +6,4 @@
  * While the server is below it, people see ServerVersionNotice instead of
  * buttons that quietly fail. See core/version.py for the full story.
  */
-export const REQUIRED_API_LEVEL = 5;
+export const REQUIRED_API_LEVEL = 6;

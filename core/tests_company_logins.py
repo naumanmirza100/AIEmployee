@@ -179,12 +179,16 @@ class WhoHearsTests(HRTestCase):
     """The leave alert reaches the manager's login even though nothing links it."""
 
     def test_a_leave_request_reaches_the_managers_login_found_by_their_work_address(self):
+        from hr_agent.leave_helpers import resolve_approver_for_leave
         boss_login = self.login(self.company, 'bea@test.local', 'Bea Boss', 'company_user')
         boss = Employee.objects.create(company=self.company, full_name='Bea Boss', work_email='BEA@test.local',
                                        employment_status='active')          # no link to the login
         Employee.objects.filter(pk=self.member_emp.pk).update(manager=boss)
         self.member_emp.refresh_from_db()
-        hr_alerts.leave_request_submitted(self.leave_request())
+        # As the leave form does: the manager is named to decide it, being able to.
+        approver = resolve_approver_for_leave(self.member_emp, self.company)
+        self.assertEqual(approver, boss)
+        hr_alerts.leave_request_submitted(self.leave_request(approver=approver))
         self.assertTrue(PMNotification.objects.filter(company_user=boss_login).exists())
         self.assertTrue(PMNotification.objects.filter(company_user=self.admin).exists())       # HR admins still do
         self.assertFalse(PMNotification.objects.filter(company_user=self.member).exists())     # not whoever asked
