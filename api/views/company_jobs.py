@@ -67,7 +67,6 @@ def create_company_job(request):
         company = company_user.company
         
         data = request.data.copy()
-        data['company'] = company.id
         # Honour is_active from the request; default True if not provided
         if 'is_active' not in data:
             data['is_active'] = True
