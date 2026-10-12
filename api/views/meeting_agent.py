@@ -2665,12 +2665,17 @@ def chat_messages(request, agent_name, chat_id):
 # ADMIN ENDPOINTS
 # ===========================================================================
 
+from rest_framework.permissions import IsAuthenticated
 from api.permissions import IsAdmin as IsAdminUser
+
+# These four are for the platform's own staff, who sign in with the default
+# (employee/staff) token like every other /api/admin/ page. They used to sign the
+# caller in as a dashboard login and then look up the staff account with the same
+# id number, which is a different person.
 
 
 @api_view(['GET'])
-@authentication_classes([CompanyUserTokenAuthentication])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated, IsAdminUser])
 @throttle_classes([ExecCRUDThrottle])
 def admin_meeting_list(request):
     """Admin: list all meetings across all companies."""
@@ -2691,8 +2696,7 @@ def admin_meeting_list(request):
 
 
 @api_view(['GET'])
-@authentication_classes([CompanyUserTokenAuthentication])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated, IsAdminUser])
 @throttle_classes([ExecCRUDThrottle])
 def admin_task_list(request):
     """Admin: list all executive tasks across all companies."""
@@ -2716,8 +2720,7 @@ def admin_task_list(request):
 
 
 @api_view(['GET'])
-@authentication_classes([CompanyUserTokenAuthentication])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated, IsAdminUser])
 @throttle_classes([ExecCRUDThrottle])
 def admin_notification_list(request):
     """Admin: list all notifications across all companies."""
@@ -2738,8 +2741,7 @@ def admin_notification_list(request):
 
 
 @api_view(['GET'])
-@authentication_classes([CompanyUserTokenAuthentication])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated, IsAdminUser])
 @throttle_classes([ExecCRUDThrottle])
 def admin_stats(request):
     """Admin: aggregate stats for the AI Executive Meeting Assistant."""

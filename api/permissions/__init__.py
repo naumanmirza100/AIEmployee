@@ -3,18 +3,24 @@ from rest_framework import permissions
 
 class IsAdmin(permissions.BasePermission):
     """Allow access only to admin users."""
-    
+
     def has_permission(self, request, view):
         # Basic checks
         if not request.user or not request.user.is_authenticated:
             return False
-        
+
+        # Only a staff account can be platform staff. A dashboard login
+        # (CompanyUser) is numbered separately, so looking its id up among the
+        # staff accounts below would answer for a different person.
+        from django.contrib.auth.models import User
+        if not isinstance(request.user, User):
+            return False
+
         # Get fresh user data from database to ensure we have latest is_staff status
         # This is important because user permissions might have changed after token was issued
         try:
             # Refresh from database to get latest user data
             user_id = request.user.id
-            from django.contrib.auth.models import User
             fresh_user = User.objects.get(id=user_id)
             
             # Check if user is staff or superuser
