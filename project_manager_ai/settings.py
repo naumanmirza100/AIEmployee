@@ -1390,3 +1390,14 @@ REST_FRAMEWORK = {
         'company_auth': '200/hour',
     },
 }
+
+# How many proxies sit between the internet and this server. The per-caller limits
+# above count by caller address, which is read from the X-Forwarded-For header.
+# Unset, the whole header is taken as the caller sent it, so a caller can pick a
+# new "address" for every request and never reach a limit. Set to the number of
+# proxies you run in front (1 for a single nginx or Caddy, 2 with Cloudflare in
+# front of that); 0 when the server is reached directly. Set too high and every
+# visitor looks like one address and shares one limit.
+_num_proxies = os.getenv('NUM_PROXIES', '').strip()
+if _num_proxies.isdigit():
+    REST_FRAMEWORK['NUM_PROXIES'] = int(_num_proxies)
