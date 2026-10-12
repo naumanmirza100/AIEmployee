@@ -77,8 +77,13 @@ def _make_agents(company):
         'groq_client': groq_client,
         'cv_agent': CVParserAgent(groq_client=groq_client, log_service=log_service),
         'sum_agent': SummarizationAgent(groq_client=groq_client, log_service=log_service),
-        'enrich_agent': LeadResearchEnrichmentAgent(log_service=log_service, sql_repository=django_repo),
-        'qualify_agent': LeadQualificationAgent(log_service=log_service, sql_repository=django_repo),
+        # No repository for these two. Given one, each step saves its result onto
+        # whatever candidate number it finds inside the data it was handed, without
+        # asking whose candidate that is, and two addresses below take that data
+        # straight from the request. The pipelines that really screen CVs write the
+        # record themselves, by an id they created.
+        'enrich_agent': LeadResearchEnrichmentAgent(log_service=log_service, sql_repository=None),
+        'qualify_agent': LeadQualificationAgent(log_service=log_service, sql_repository=None),
         'job_desc_agent': JobDescriptionParserAgent(groq_client=groq_client, log_service=log_service),
         'interview_agent': InterviewSchedulingAgent(log_service=log_service),
         'django_repo': django_repo,
@@ -340,6 +345,8 @@ def process_cvs(request):
                 # Ensure summary is a dict
                 if not isinstance(summary, dict):
                     summary = summary[0] if isinstance(summary, list) and len(summary) > 0 else {}
+                # The model wrote this from the CV's own text; it does not get to name a candidate record
+                summary = _own_data_only(summary)
                 
                 # Enrich
                 enriched = enrich_agent.enrich(parsed, summary)
@@ -3598,6 +3605,16 @@ def _cv_record_for_company_user(cv_record_id, company_user):
     return sharing.cvs(company_user).filter(id=cv_record_id).first()
 
 
+def _own_data_only(sent):
+    """CV data that arrived in a request, without any candidate number in it.
+
+    The screening steps read 'record_id' out of the data as "save my result on
+    this candidate". Data typed by the caller must never be able to say that."""
+    if isinstance(sent, dict) and 'record_id' in sent:
+        sent = {key: value for key, value in sent.items() if key != 'record_id'}
+    return sent
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -3676,7 +3693,7 @@ def api_cv_summarize(request):
             if not parsed:
                 return Response({'status': 'error', 'message': 'CV record has no parsed_json.'}, status=status.HTTP_400_BAD_REQUEST)
         if not parsed and data.get('parsed_json'):
-            parsed = data['parsed_json']
+            parsed = _own_data_only(data['parsed_json'])
         if not parsed:
             return Response({'status': 'error', 'message': "Provide 'parsed_json' or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
         insights = sum_agent.summarize(parsed, job_keywords=job_keywords)
@@ -3716,9 +3733,9 @@ def api_cv_enrich(request):
             if not parsed or not insights:
                 return Response({'status': 'error', 'message': 'CV record must have parsed_json and insights_json.'}, status=status.HTTP_400_BAD_REQUEST)
         if not parsed and data.get('parsed_json'):
-            parsed = data['parsed_json']
+            parsed = _own_data_only(data['parsed_json'])
         if not insights and data.get('insights_json'):
-            insights = data['insights_json']
+            insights = _own_data_only(data['insights_json'])
         if not parsed or not insights:
             return Response({'status': 'error', 'message': "Provide 'parsed_json' and 'insights_json', or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
         enrichment = enrich_agent.enrich(parsed, insights)
@@ -3771,9 +3788,9 @@ def api_cv_qualify(request):
             if not parsed or not insights:
                 return Response({'status': 'error', 'message': 'CV record must have parsed_json and insights_json.'}, status=status.HTTP_400_BAD_REQUEST)
         if not parsed and data.get('parsed_json'):
-            parsed = data['parsed_json']
+            parsed = _own_data_only(data['parsed_json'])
         if not insights and data.get('insights_json'):
-            insights = data['insights_json']
+            insights = _own_data_only(data['insights_json'])
         if not parsed or not insights:
             return Response({'status': 'error', 'message': "Provide 'parsed_json' and 'insights_json', or 'cv_record_id'."}, status=status.HTTP_400_BAD_REQUEST)
         if interview_threshold is None or hold_threshold is None:
