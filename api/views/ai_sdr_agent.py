@@ -2651,7 +2651,7 @@ def _booking_page_url(meeting):
     return f"{base}/book/{meeting.booking_token}/"
 
 
-def _approval_result_page(*, ok, title, heading, message, booking_url='', accent='#16a34a'):
+def _approval_result_page(*, ok, title, heading, message, booking_url='', accent='#16a34a', status=200, icon=None):
     """Self-contained HTML shown to a lead after they click Yes / Suggest.
 
     Deliberately depends on NOTHING external (no redirect to the frontend, no
@@ -2675,14 +2675,14 @@ def _approval_result_page(*, ok, title, heading, message, booking_url='', accent
 <body style="margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0f172a;color:#e2e8f0;">
   <div style="max-width:480px;margin:8vh auto;padding:40px 32px;background:#1e293b;border-radius:16px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.4);">
     <div style="width:64px;height:64px;border-radius:50%;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;background:{accent}22;font-size:32px;">
-      {'✅' if ok else '📅'}
+      {icon or ('✅' if ok else '📅')}
     </div>
     <h1 style="margin:0 0 12px;font-size:22px;color:#f8fafc;">{heading}</h1>
     <p style="margin:0;font-size:15px;line-height:1.6;color:#94a3b8;">{safe_msg}</p>
     {link_html}
   </div>
 </body></html>"""
-    return HttpResponse(html, status=200 if ok else 200, content_type='text/html')
+    return HttpResponse(html, status=status, content_type='text/html')
 
 
 def _confirm_action_page(*, title, heading, message, button_label, accent='#16a34a'):
@@ -2807,6 +2807,15 @@ def sdr_meeting_lead_approve(request, approval_token):
     )
 
 
+_UNSUBSCRIBE_NOT_DONE = dict(
+    ok=False, accent='#dc2626',
+    title='Not unsubscribed', icon='✉️',
+    heading='We could not unsubscribe you from this link',
+    message='This link is not valid any more, so nothing has been changed. Please reply to the email you '
+            'received with the word "unsubscribe" and you will be taken off the list.',
+)
+
+
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
 def sdr_unsubscribe(request, token):
@@ -2817,17 +2826,19 @@ def sdr_unsubscribe(request, token):
     header and the visible link work. The address is opted out of every
     campaign in the company, not just the one that emailed it.
     """
-    from ai_sdr_agent.agents.outreach_agent import apply_unsubscribe, read_unsubscribe_token
+    from ai_sdr_agent.agents.outreach_agent import (
+        apply_unsubscribe, read_unsubscribe_token, unsubscribe_address, unsubscribe_target)
 
-    enrollment_id = read_unsubscribe_token(token)
-    enrollment = None
-    if enrollment_id:
-        enrollment = (
-            SDRCampaignEnrollment.objects
-            .select_related('lead', 'campaign__company_user').filter(id=enrollment_id).first()
-        )
-    if enrollment is None:
-        return _approval_result_page(**_LINK_EXPIRED_PAGE)
+    # A link that cannot be honoured must say so, in words about unsubscribing,
+    # and must not answer 200: mail programs take 200 from the one-click
+    # unsubscribe to mean "done". It used to show the "meeting link expired" page.
+    claims = read_unsubscribe_token(token)
+    if claims is None:
+        return _approval_result_page(status=404, **_UNSUBSCRIBE_NOT_DONE)
+    target = unsubscribe_target(claims)
+    if target is None or not target[1]:
+        return _approval_result_page(status=410, **_UNSUBSCRIBE_NOT_DONE)
+    company_id, email_addr, enrollment = target
 
     if request.method == 'GET':
         return _confirm_action_page(
@@ -2838,8 +2849,12 @@ def sdr_unsubscribe(request, token):
             accent='#dc2626',
         )
 
-    apply_unsubscribe(enrollment)
-    logger.info("SDR [UNSUBSCRIBE] enrollment=%d lead=%s", enrollment.id, enrollment.lead.email)
+    if enrollment is not None:
+        apply_unsubscribe(enrollment)
+    else:
+        # The campaign was deleted or its leads cleared since this email went out.
+        unsubscribe_address(company_id, email_addr)
+    logger.info("SDR [UNSUBSCRIBE] company=%s enrollment=%s lead=%s", company_id, claims.get('e'), email_addr)
     return _approval_result_page(
         ok=True, accent='#16a34a',
         title='Unsubscribed',

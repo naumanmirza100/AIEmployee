@@ -159,47 +159,90 @@ def is_email_suppressed(company_user, email_addr: str) -> bool:
     return is_blocked(getattr(company_user, 'company_id', None), email_addr)
 
 
-def make_unsubscribe_token(enrollment_id: int) -> str:
+def make_unsubscribe_token(enrollment_id: int, company_id=None, email: str = '') -> str:
+    """The signed part of an unsubscribe link.
+
+    It names the company and the address as well as the enrolment. A link that
+    named only the enrolment stopped working the moment the campaign was deleted
+    or its leads cleared, because the enrolment row went with them."""
     from django.core import signing
-    return signing.dumps({'e': enrollment_id}, salt=_UNSUB_SALT)
+    claims = {'e': enrollment_id}
+    if company_id and (email or '').strip():
+        claims.update(c=company_id, m=email.strip())
+    return signing.dumps(claims, salt=_UNSUB_SALT)
 
 
 def read_unsubscribe_token(token: str):
-    """Return the enrollment id encoded in ``token`` or None if invalid."""
+    """What ``token`` says, or None if it is not one of ours.
+
+    {'e': enrolment id} and, in links made since the change above, 'c' (company
+    id) and 'm' (the address)."""
     from django.core import signing
     try:
-        return signing.loads(token, salt=_UNSUB_SALT)['e']
+        claims = signing.loads(token, salt=_UNSUB_SALT)
+        claims['e']
+        return claims
     except (signing.BadSignature, KeyError, TypeError):
         return None
 
 
 def build_unsubscribe_url(enrollment) -> str:
     from ai_sdr_agent.agents.meeting_scheduling_agent import _backend_base
-    return f"{_backend_base()}/api/sdr/unsubscribe/{make_unsubscribe_token(enrollment.id)}/"
+    token = make_unsubscribe_token(enrollment.id, enrollment.campaign.company_user.company_id,
+                                   enrollment.lead.email)
+    return f"{_backend_base()}/api/sdr/unsubscribe/{token}/"
 
 
-def apply_unsubscribe(enrollment) -> None:
-    """Opt the address out of every campaign for this company."""
+def unsubscribe_target(claims):
+    """(company id, address, enrolment or None) for what an unsubscribe link says, or None.
+
+    The enrolment if it still exists; else the company and address the link
+    carries; else, for a link sent before links carried them, the note left
+    behind when the enrolment was deleted (SDRRemovedEnrollment)."""
+    from ai_sdr_agent.models import SDRCampaignEnrollment, SDRRemovedEnrollment
+
+    enrollment = (SDRCampaignEnrollment.objects.select_related('lead', 'campaign__company_user')
+                  .filter(id=claims.get('e')).first())
+    if enrollment is not None:
+        return enrollment.campaign.company_user.company_id, (enrollment.lead.email or '').strip(), enrollment
+    if claims.get('c') and claims.get('m'):
+        return claims['c'], claims['m'], None
+    left = SDRRemovedEnrollment.objects.filter(enrollment_id=claims.get('e')).first()
+    if left is not None:
+        return left.company_id, left.email, None
+    return None
+
+
+def unsubscribe_address(company_id, email_addr: str) -> None:
+    """Opt an address out of everything this company sends."""
     from ai_sdr_agent.models import SDRCampaignEnrollment, SDRLead
 
     from django.db import transaction
     from core.do_not_email import UNSUBSCRIBED, block
 
+    email_addr = (email_addr or '').strip()
+    if not company_id or not email_addr:
+        return
+    # The person told the company to stop, so every salesperson's campaign
+    # stops, and the address goes on the list Marketing checks as well.
+    with transaction.atomic():
+        block(company_id, email_addr, UNSUBSCRIBED, source='ai_sdr')
+        SDRCampaignEnrollment.objects.filter(
+            campaign__company_user__company_id=company_id, lead__email__iexact=email_addr,
+        ).exclude(status='bounced').update(status='unsubscribed', replied_at=timezone.now())
+        SDRLead.all_objects.filter(
+            company_user__company_id=company_id, email__iexact=email_addr,
+        ).update(status='disqualified')
+
+
+def apply_unsubscribe(enrollment) -> None:
+    """Opt the address out of every campaign for this company."""
     lead = enrollment.lead
     company_id = enrollment.campaign.company_user.company_id
     now = timezone.now()
     email_addr = (lead.email or '').strip()
     if email_addr:
-        # The person told the company to stop, so every salesperson's campaign
-        # stops, and the address goes on the list Marketing checks as well.
-        with transaction.atomic():
-            block(company_id, email_addr, UNSUBSCRIBED, source='ai_sdr')
-            SDRCampaignEnrollment.objects.filter(
-                campaign__company_user__company_id=company_id, lead__email__iexact=email_addr,
-            ).exclude(status='bounced').update(status='unsubscribed', replied_at=now)
-            SDRLead.all_objects.filter(
-                company_user__company_id=company_id, email__iexact=email_addr,
-            ).update(status='disqualified')
+        unsubscribe_address(company_id, email_addr)
     else:
         enrollment.status = 'unsubscribed'
         enrollment.replied_at = now

@@ -1,7 +1,10 @@
+import logging
 import uuid
 from datetime import date as _date, timedelta as _timedelta
 
 from django.db import models
+from django.db.models.signals import pre_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 from ai_sdr_agent.fields import EncryptedCharField
@@ -363,6 +366,42 @@ class SDRCampaignEnrollment(models.Model):
 
     def __str__(self):
         return f"{self.lead.display_name} → {self.campaign.name} ({self.status})"
+
+
+class SDRRemovedEnrollment(models.Model):
+    """Who an unsubscribe link belongs to, kept after its enrolment is deleted.
+
+    Emails sent before 10 October 2026 carry an unsubscribe link that names only
+    the enrolment. Deleting a campaign or clearing its leads deletes the
+    enrolment, and the link then had nobody to unsubscribe. This keeps the two
+    facts such a link needs: the company and the address. Links made since
+    carry both themselves and do not need it.
+    """
+    enrollment_id = models.BigIntegerField(unique=True)
+    company = models.ForeignKey('core.Company', on_delete=models.CASCADE, related_name='+')
+    email = models.CharField(max_length=254)
+    removed_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'sdr_removed_enrollment'
+
+    def __str__(self):
+        return f"enrolment {self.enrollment_id}: {self.email}"
+
+
+@receiver(pre_delete, sender=SDRCampaignEnrollment)
+def remember_who_the_unsubscribe_link_was_for(sender, instance, **kwargs):
+    """Runs for a single delete, a bulk delete and a delete that follows from
+    its campaign or lead being deleted. Never stops the delete."""
+    try:
+        email = (instance.lead.email or '').strip()
+        company_id = instance.campaign.company_user.company_id
+        if email and company_id:
+            SDRRemovedEnrollment.objects.update_or_create(
+                enrollment_id=instance.pk, defaults={'company_id': company_id, 'email': email})
+    except Exception:
+        logging.getLogger(__name__).warning(
+            'Could not keep the unsubscribe details of enrolment %s', instance.pk, exc_info=True)
 
 
 class SDROutreachLog(models.Model):
