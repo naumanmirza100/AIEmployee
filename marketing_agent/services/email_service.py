@@ -188,6 +188,13 @@ class EmailService:
                 }
 
         context_vars = self._get_lead_context(lead, campaign)
+        # Every campaign email carries a way to unsubscribe
+        # (marketing_agent/services/unsubscribe.py). A template can place the link
+        # itself with {{unsubscribe_url}}; otherwise a footer is added below. Not
+        # on a test send: that goes to the person testing, not to the lead.
+        from marketing_agent.services import unsubscribe as unsubscribe_links
+        unsubscribe_url = unsubscribe_links.url_for(campaign, recipient_email) if test_email is None else ''
+        context_vars['unsubscribe_url'] = unsubscribe_url
         # Unconditionally ensure first_name/name are set when we have recipient (sequence sends often have blank lead)
         if recipient_email and '@' in recipient_email:
             has_first = bool((context_vars.get('first_name') or '').strip())
@@ -270,6 +277,20 @@ class EmailService:
             send_history.save()
             # Add tracking to HTML content
             html_content = self._add_email_tracking(html_content, send_history)
+
+        # The unsubscribe footer goes on after the links have been rewritten for click
+        # tracking, so it is the plain link. The text part is given its own: it is
+        # often the HTML with the tags stripped, which loses the address of a link.
+        if unsubscribe_url:
+            if unsubscribe_url not in html_content:
+                footer = unsubscribe_links.html_footer(unsubscribe_url)
+                if re.search(r'</body>', html_content, flags=re.IGNORECASE):
+                    html_content = re.sub(r'</body>', lambda _: footer + '</body>', html_content, count=1,
+                                          flags=re.IGNORECASE)
+                else:
+                    html_content += footer
+            if unsubscribe_url not in (text_content or ''):
+                text_content = (text_content or '') + unsubscribe_links.text_footer(unsubscribe_url)
         
         # Send email
         try:
@@ -316,6 +337,8 @@ class EmailService:
             
             # Add Message-ID header
             email.extra_headers['Message-ID'] = message_id
+            if unsubscribe_url:
+                email.extra_headers.update(unsubscribe_links.headers(unsubscribe_url))
             
             if html_content:
                 email.attach_alternative(html_content, "text/html")
@@ -714,8 +737,11 @@ class EmailService:
                 
                 logger.info(f"[EMAIL TRACKING] Processing link: {full_tag[:100]}... href={href}")
                 
-                # Skip if already a tracking URL or mailto/tel/javascript/data links
-                if ('/token?' in href or 'track/email' in href or 
+                # Skip if already a tracking URL or mailto/tel/javascript/data links.
+                # The unsubscribe link is left exactly as it is: it must work even if
+                # click tracking does not.
+                if ('/token?' in href or 'track/email' in href or
+                    '/marketing/unsubscribe/' in href or
                     href.startswith('mailto:') or 
                     href.startswith('tel:') or 
                     href.startswith('javascript:') or
