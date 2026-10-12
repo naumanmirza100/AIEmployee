@@ -15,6 +15,20 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def _own_mailbox(user, sent):
+    """(the user's own mailbox behind the number sent, None) or (None, a refusal).
+
+    The number used to be saved as it came, so a sequence could be pointed at a
+    mailbox belonging to somebody else and would send through it."""
+    if sent in (None, '', 0, '0'):
+        return None, None
+    try:
+        return EmailAccount.objects.get(id=int(sent), owner=user), None
+    except (EmailAccount.DoesNotExist, TypeError, ValueError):
+        return None, JsonResponse({'success': False, 'error': 'Email account not found or not owned by you.'},
+                                  status=400)
+
+
 @login_required
 def sequence_management(request, campaign_id):
     """Main page for managing email sequences for a campaign"""
@@ -152,10 +166,14 @@ def create_sequence(request, campaign_id):
         # Only allow active if campaign is also active
         effective_is_active = campaign_is_active and requested_is_active
         
+        mailbox, refused = _own_mailbox(request.user, data.get('email_account_id'))
+        if refused:
+            return refused
+
         sequence = EmailSequence.objects.create(
             name=data.get('name'),
             campaign=campaign,
-            email_account_id=data.get('email_account_id'),
+            email_account=mailbox,
             is_active=effective_is_active,
             parent_sequence=parent_sequence,
             is_sub_sequence=is_sub_sequence,
@@ -199,7 +217,10 @@ def update_sequence(request, campaign_id, sequence_id):
         
         sequence.name = data.get('name', sequence.name)
         if 'email_account_id' in data:
-            sequence.email_account_id = data.get('email_account_id')
+            mailbox, refused = _own_mailbox(request.user, data.get('email_account_id'))
+            if refused:
+                return refused
+            sequence.email_account = mailbox
         
         # Sync sequence status with campaign status
         # Sequence can only be active when campaign is active

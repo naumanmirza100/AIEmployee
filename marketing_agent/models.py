@@ -535,11 +535,18 @@ class EmailSequence(models.Model):
         Priority: sequence.email_account (explicit override) -> campaign.email_account (default).
         Returns None if neither is set; email_service.send_email then falls back
         to the owner's default active account.
+
+        A mailbox that is not the campaign owner's own is never returned, whatever
+        the row says: this is where its stored password would be used.
         """
-        if self.email_account_id:
-            return self.email_account
-        if self.campaign_id and self.campaign.email_account_id:
-            return self.campaign.email_account
+        campaign = self.campaign if self.campaign_id else None
+        candidates = (
+            self.email_account if self.email_account_id else None,
+            campaign.email_account if campaign and campaign.email_account_id else None,
+        )
+        for account in candidates:
+            if account is not None and campaign is not None and account.owner_id == campaign.owner_id:
+                return account
         return None
 
 
