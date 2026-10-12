@@ -1181,7 +1181,6 @@ def list_interviews(request):
                 'hr_employee': ({'id': interview.hr_employee_id, 'full_name': interview.hr_employee.full_name}
                                 if interview.hr_employee_id else None),
                 'meeting_link': interview.meeting_link or '',
-                'confirmation_token': interview.confirmation_token,
                 'cv_record_id': interview.cv_record_id,
                 'feedback_rating': interview.feedback_rating,
                 'feedback_notes': interview.feedback_notes,
