@@ -2,12 +2,13 @@
 import json
 
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from core.logins import user_for
 from core.models import Company, CompanyModulePurchase, CompanyUser
-from marketing_agent.models import (Campaign, CampaignLead, EmailAccount, EmailSequence, EmailSequenceStep,
-                                    EmailTemplate, Lead)
+from marketing_agent.models import (Campaign, CampaignLead, EmailAccount, EmailSendHistory, EmailSequence,
+                                    EmailSequenceStep, EmailTemplate, Lead)
 
 
 class MarketingTestCase(TestCase):
@@ -81,6 +82,11 @@ class MarketingTestCase(TestCase):
             outcome = answers.pop(0) if answers else True
             if outcome == 'blocked':
                 return {'success': False, 'blocked': True}
+            # The row the real service leaves behind; reply matching reads these.
+            EmailSendHistory.objects.create(
+                campaign=campaign, lead=lead, email_template=template, subject=template.subject,
+                recipient_email=lead.email, status='sent' if outcome else 'failed',
+                sent_at=timezone.now() if outcome else None)
             return {'success': True} if outcome else {'success': False, 'error': 'mailbox said no'}
 
         with mock.patch.object(sender.email_service, 'send_email', side_effect=send_email):

@@ -1845,7 +1845,7 @@ const SequenceManagementPage = ({ embedded = false }) => {
             <DialogTitle>{sequenceForm.parent_sequence_id ? 'Create Sub-Sequence (Reply Triggered)' : 'Create sequence'}</DialogTitle>
             <DialogDescription>
               {sequenceForm.parent_sequence_id
-                ? 'This sub-sequence starts when a lead replies to the main sequence. Choose which reply type to handle. First step: min 5 min; each step at least 5 min after the previous.'
+                ? 'This sub-sequence starts when a lead replies to the main sequence. Choose which reply type to handle. It stops for a lead as soon as they reply to one of its emails. First step: min 5 min; each step at least 5 min after the previous.'
                 : 'One main sequence per campaign. Add steps with template and delay. First step: min 5 min; each step at least 5 min after the previous.'}
             </DialogDescription>
           </DialogHeader>

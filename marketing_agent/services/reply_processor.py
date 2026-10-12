@@ -206,6 +206,29 @@ def find_triggering_email(campaign, lead, reply_subject, reply_content, replied_
     return triggering_email
 
 
+def _stop_answered_follow_ups(campaign, lead, triggering_email, reply_sub_sequence):
+    """Close this lead's open runs of the follow-up series they have just replied to.
+
+    Which series that is comes from the email they answered: every follow-up
+    series its template is a step of (a template can be used by more than one),
+    plus the one already worked out, which is all there is when the email was
+    matched by subject alone. Returns how many runs were closed."""
+    from marketing_agent.models import ReplySubSequenceRun
+
+    answered = set()
+    if reply_sub_sequence is not None:
+        answered.add(reply_sub_sequence.id)
+    template = getattr(triggering_email, 'email_template', None)
+    if template is not None:
+        answered.update(template.sequence_steps.filter(sequence__is_sub_sequence=True)
+                        .values_list('sequence_id', flat=True))
+    if not answered:
+        return 0
+    return ReplySubSequenceRun.objects.filter(
+        campaign=campaign, lead=lead, sub_sequence_id__in=answered, completed=False, cancelled=False,
+    ).update(cancelled=True)
+
+
 def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_date=None):
     """
     Process an email reply directly (without HTTP request)
@@ -458,9 +481,13 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
                         logger.info(f"Created ReplySubSequenceRun for reply #{reply_record.id} -> '{sub_sequence.name}'")
                     except Exception as e:
                         logger.warning(f"Could not create ReplySubSequenceRun: {e}")
-        # Design rule: replies to sub-sequence emails do nothing — no switch, no restart.
-        # The tick cleanup in send_sequence_emails clears the sub-sequence so no further
-        # emails go out. The lead resumes only if they reply to a main-sequence email.
+        # A reply to a follow-up email starts nothing new (no switch, no restart), and it
+        # ends that follow-up series for this lead: they have answered it. This comment
+        # used to say a clean-up in the sender did that; there was none, so the rest of
+        # the series went out whatever the lead had written.
+        follow_ups_stopped = 0
+        if is_sub_sequence_reply:
+            follow_ups_stopped = _stop_answered_follow_ups(campaign, lead, triggering_email, reply_sub_sequence)
 
         # Mark as replied (stops the main sequence). Sub-seq enrolment already
         # happened above as a per-reply ReplySubSequenceRun.
@@ -475,6 +502,8 @@ def process_reply_directly(campaign, lead, reply_subject, reply_content, reply_d
         # Build message
         if is_sub_sequence_reply:
             message = f'Reply received from {lead.email} for sub-sequence email. Reply recorded.'
+            if follow_ups_stopped:
+                message += ' The rest of that follow-up series will not be sent.'
         else:
             message = f'Contact {lead.email} marked as replied. Main sequence stopped.'
             if sub_sequence:
