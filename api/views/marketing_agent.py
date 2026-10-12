@@ -2550,6 +2550,8 @@ def _get_pending_and_upcoming_emails(campaign):
         return pending_list, upcoming_list
 
     email_svc = EmailService()
+    from marketing_agent.models import leads_still_in
+    still_in = leads_still_in(campaign)
     # Main sequence contacts: not completed, not replied.
     # is_sub_sequence=False is essential — sub-sequence emails are reply-triggered
     # and must NOT appear as upcoming main sends before the lead has replied.
@@ -2562,6 +2564,7 @@ def _get_pending_and_upcoming_emails(campaign):
             sequence__is_sub_sequence=False,
             completed=False,
             replied=False,
+            lead_id__in=still_in,       # as the sender does: not someone taken off the list
         )
         .select_related('lead', 'sequence')
         .prefetch_related('sequence__steps__template')
@@ -2635,7 +2638,7 @@ def _get_pending_and_upcoming_emails(campaign):
     from marketing_agent.models import ReplySubSequenceRun
     runs = (
         ReplySubSequenceRun.objects
-        .filter(campaign=campaign, completed=False, cancelled=False)
+        .filter(campaign=campaign, completed=False, cancelled=False, lead_id__in=still_in)
         .select_related('lead', 'contact', 'sub_sequence', 'sub_sequence__parent_sequence', 'reply')
         .prefetch_related('sub_sequence__steps__template')
     )[:200]
