@@ -1461,6 +1461,15 @@ def sdr_campaign_detail(request, campaign_id):
             mail_err = _validate_mail_settings(d, campaign)
             if mail_err:
                 return Response({'status': 'error', 'message': mail_err}, status=400)
+            # Leads are enrolled: the campaign's mailbox can be changed but not taken away.
+            # It is what sends to them and what their replies are read from.
+            emptied = [label for field, label in (('smtp_host', 'SMTP host'), ('smtp_username', 'SMTP username'))
+                       if field in d and not str(d[field] or '').strip() and getattr(campaign, field)]
+            if emptied and campaign.enrollments.exists():
+                return Response({'status': 'error', 'message': (
+                    'This campaign has leads enrolled, so its mailbox settings can be changed but not '
+                    'removed (%s). Remove the leads first, or enter the new mailbox.' % ', '.join(emptied))},
+                    status=400)
             if 'status' in d:
                 new_status = d['status']
                 if new_status not in dict(SDRCampaign.STATUS_CHOICES):

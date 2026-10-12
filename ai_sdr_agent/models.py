@@ -233,7 +233,8 @@ class SDRCampaign(models.Model):
     smtp_password = EncryptedCharField(max_length=1000, blank=True)   # Fernet-encrypted at rest
     smtp_use_tls = models.BooleanField(default=True)
 
-    # IMAP settings for reply detection (falls back to env EMAIL_HOST_USER/PASSWORD)
+    # IMAP settings for reply detection. The login is the SMTP one above; with none set,
+    # replies are not checked (never the platform's own mailbox login).
     imap_host = models.CharField(max_length=255, blank=True)
     imap_port = models.IntegerField(default=993)
 

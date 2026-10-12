@@ -465,21 +465,22 @@ Rules:
     # ------------------------------------------------------------------
 
     def _get_imap_credentials(self, campaign):
-        """Return (imap_host, imap_port, username, password) for campaign."""
-        imap_host = (
-            campaign.imap_host
-            or os.environ.get('IMAP_HOST', '')
-            or _derive_imap_host(campaign.smtp_host or getattr(settings, 'EMAIL_HOST', 'smtp.gmail.com'))
-        )
-        imap_port = campaign.imap_port or int(os.environ.get('IMAP_PORT', '993'))
+        """Return (imap_host, imap_port, username, password) for campaign.
 
-        if campaign.smtp_username:
-            username = campaign.smtp_username
-            password = campaign.smtp_password
-        else:
-            username = getattr(settings, 'EMAIL_HOST_USER', '')
-            password = getattr(settings, 'EMAIL_HOST_PASSWORD', '')
+        Everything comes from the campaign's own mailbox settings. A campaign
+        with no mailbox name used to borrow the platform's own name and password
+        (EMAIL_HOST_USER) while the inbox server stayed whatever was typed for
+        the campaign: the platform's login offered to a server it does not run,
+        and the platform's inbox read into a customer's campaign. With no name
+        or no password this now returns blanks, and the caller skips the check.
+        """
+        username = campaign.smtp_username or ''
+        password = campaign.smtp_password or ''
+        if not username or not password:
+            return '', campaign.imap_port or 993, '', ''
 
+        imap_host = campaign.imap_host or (_derive_imap_host(campaign.smtp_host) if campaign.smtp_host else '')
+        imap_port = campaign.imap_port or 993
         return imap_host, imap_port, username, password
 
     def check_inbox_for_replies(self, campaign, enrollments: list) -> list:
@@ -495,8 +496,8 @@ Rules:
             return []
 
         imap_host, imap_port, username, password = self._get_imap_credentials(campaign)
-        if not username or not password:
-            logger.warning("No IMAP credentials available for campaign %s", campaign.id)
+        if not username or not password or not imap_host:
+            logger.warning("Campaign %s has no mailbox of its own set up; its replies are not checked.", campaign.id)
             return []
 
         # Build two maps keyed by lead email (lower-case):
