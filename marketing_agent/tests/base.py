@@ -62,6 +62,31 @@ class MarketingTestCase(TestCase):
                                        subject=f'{sequence.name} {order}'))
         return sequence
 
+    def run_sender(self, *outcomes):
+        """One run of the scheduled sequence sender, with nothing really sent.
+
+        `outcomes` are what each send in turn reports (True, False or 'blocked');
+        any send beyond them succeeds. Returns who was sent what:
+        [(lead email, template subject), ...]."""
+        from io import StringIO
+        from unittest import mock
+        from django.core.management import call_command
+        from marketing_agent.management.commands import send_sequence_emails as sender
+
+        answers = list(outcomes)
+        sent = []
+
+        def send_email(template, lead, campaign, **more):
+            sent.append((lead.email, template.subject))
+            outcome = answers.pop(0) if answers else True
+            if outcome == 'blocked':
+                return {'success': False, 'blocked': True}
+            return {'success': True} if outcome else {'success': False, 'error': 'mailbox said no'}
+
+        with mock.patch.object(sender.email_service, 'send_email', side_effect=send_email):
+            call_command('send_sequence_emails', stdout=StringIO())
+        return sent
+
     def call(self, view, actor, data=None, method='post', **kwargs):
         request = getattr(APIRequestFactory(), method)('/', data or {}, format='json')
         force_authenticate(request, user=actor)
