@@ -30,8 +30,9 @@ class Topic:
     key: str
     label: str
     description: str
-    #: The module whose purchase makes it relevant; None for everyone.
-    agent: str | None
+    #: The module whose purchase makes it relevant; None for everyone. A tuple
+    #: of modules for a topic several agents share: any one of them is enough.
+    agent: str | tuple | None
     #: `kind` values passed to `notify_company_users` that belong here.
     kinds: tuple = ()
     email_default: bool = False
@@ -47,17 +48,29 @@ AGENT_LABELS = {
     'hr_agent': 'HR',
     'frontline_agent': 'Frontline',
     'recruitment_agent': 'Recruitment',
+    'exec_meeting_agent': 'Executive Meeting',
     None: 'Everyone',
 }
+#: The heading for topics that several agents share.
+SHARED = 'shared'
+SHARED_LABEL = 'Meetings and tasks'
 
 TOPICS = (
+    # Shared by several agents. These emails go to a person's work address, which
+    # may or may not be a dashboard login: `address_wants_email` asks the login
+    # with that address in the company, and sends when there is none.
+    Topic('meeting_reminders', 'Meeting reminders',
+          'Before a meeting in Project Manager, HR or Frontline that you organise or are in, and when '
+          "invitees to yours haven't replied. Project Manager's are always in the bell; the bell is how "
+          'a reminder is sent only once.',
+          ('project_manager_agent', 'hr_agent', 'frontline_agent'), email_default=True, in_app_locked=True),
+    Topic('tasks_assigned', 'Tasks assigned to you',
+          'Someone gives you a task in Project Manager or from an executive meeting, adds to one of '
+          'yours, or takes one away.',
+          ('project_manager_agent', 'exec_meeting_agent'), email_default=True, in_app=False),
     Topic('meeting_replies', 'Replies to meetings you organise',
           'An invitee accepts, declines or suggests another time.',
           'project_manager_agent', kinds=('pm_meeting_reply',), email_default=True),
-    Topic('meeting_reminders', 'Meeting reminders',
-          "An hour and 15 minutes before a meeting you organise, and when invitees haven't replied. "
-          'Always in the bell; the bell is how a reminder is sent only once.',
-          'project_manager_agent', email_default=True, in_app_locked=True),
     Topic('leave_requests', 'Leave requests waiting for a decision',
           "Someone you approve leave for, or anyone's if you run HR, asks for time off.",
           'hr_agent', kinds=('hr_leave_request',)),
@@ -99,6 +112,9 @@ TOPICS = (
     Topic('interviews_booked', 'A candidate books an interview',
           'A candidate picks a time for an interview you run.', 'recruitment_agent',
           kinds=('recruitment_interview_booked',), email_default=True),
+    Topic('exec_meetings', 'Executive meeting invitations and changes',
+          'You are invited to an executive meeting, its time or details change, or you are taken off it.',
+          'exec_meeting_agent', email_default=True, in_app=False),
     Topic('handover', 'Work handed over to you',
           "HR gives you a leaver's tasks, projects, meetings, people, leave or interviews.", None,
           kinds=('handover_',)),
@@ -156,6 +172,32 @@ def wants_email(company_user, topic_key) -> bool:
     return choices([company_user], topic_key)[company_user.id][1]
 
 
+def address_wants_email(company_id, address, topic_key) -> bool:
+    """Should an email about this topic go to this address?
+
+    For emails addressed to a person's work address and not to a dashboard login:
+    task assignments, HR and Frontline meeting reminders. If the address is a
+    dashboard login of this company, that login's settings decide, 'Pause all
+    emails' included. Any other address (an employee with no dashboard login, a
+    customer) has no settings and is sent to, as before.
+
+    Only ever asked within one company: the same address can be a login in two,
+    and one of them pausing must not silence the other.
+    """
+    address = (address or '').strip()
+    if not address:
+        return False
+    if not company_id:
+        return True
+    try:
+        from core.models import CompanyUser
+        login = CompanyUser.objects.filter(company_id=company_id, email__iexact=address).first()
+        return True if login is None else wants_email(login, topic_key)
+    except Exception:
+        logger.warning('Could not read the notification settings for an address; sending', exc_info=True)
+        return True
+
+
 def wants_in_app(company_user, topic_key) -> bool:
     if company_user is None:
         return False
@@ -197,12 +239,14 @@ def page(company_user) -> dict:
     unpaused = {k: v for k, v in stored.items() if k != ALL}
     topics = []
     for topic in TOPICS:
-        if topic.agent is not None and topic.agent not in owned:
+        several = isinstance(topic.agent, tuple)
+        if topic.agent is not None and not owned.intersection(topic.agent if several else (topic.agent,)):
             continue
         in_app, email = _effective(topic, unpaused)
         topics.append({
             'key': topic.key, 'label': topic.label, 'description': topic.description,
-            'agent': topic.agent or 'everyone', 'agent_label': AGENT_LABELS[topic.agent],
+            'agent': SHARED if several else (topic.agent or 'everyone'),
+            'agent_label': SHARED_LABEL if several else AGENT_LABELS[topic.agent],
             'in_app': in_app, 'email': email,
             'offers_in_app': topic.in_app, 'in_app_locked': topic.in_app_locked, 'offers_email': topic.email,
         })

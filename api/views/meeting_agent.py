@@ -151,6 +151,27 @@ def _send_email_safe(subject, html_body, recipient_email, plain_body=''):
         logger.error("Email send FAILED to %s: %s", recipient_email, exc)
 
 
+def _email_login(company_user, topic, subject, html_body):
+    """An Executive Meeting email to one of the company's logins, if they want it.
+
+    Every email this agent sends goes to a dashboard login, and none of them
+    asked that login's notification settings, so 'Pause all emails' did not stop
+    one of them. `topic` is 'exec_meetings' or 'tasks_assigned'
+    (core.notification_settings)."""
+    from core.notification_settings import wants_email
+    try:
+        wanted = wants_email(company_user, topic)
+    except Exception:
+        logger.warning("Could not read notification settings for login %s; sending",
+                       getattr(company_user, 'id', None), exc_info=True)
+        wanted = True
+    if not wanted:
+        logger.info("Email not sent to login %s: turned off in their notification settings (%s)",
+                    getattr(company_user, 'id', None), topic)
+        return
+    _send_email_safe(subject, html_body, company_user.email)
+
+
 def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_fields):
     scheduled = meeting.scheduled_at.strftime('%A, %B %d, %Y at %I:%M %p UTC')
     changed_str = ', '.join(changed_fields) if changed_fields else 'details'
@@ -194,7 +215,7 @@ def _send_meeting_update_email(participant_cu, meeting, organizer_name, changed_
       </p>
     """
     html = _email_base_html(content, preview_text=f"Your meeting '{meeting.title}' has been updated.")
-    _send_email_safe(f"Meeting Updated: {meeting.title}", html, participant_cu.email)
+    _email_login(participant_cu, 'exec_meetings', f"Meeting Updated: {meeting.title}", html)
 
 
 def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
@@ -271,7 +292,7 @@ def _send_meeting_invite_email(participant_cu, meeting, organizer_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"You've been invited to '{meeting.title}' by {organizer_name}.")
-    _send_email_safe(f"Meeting Invitation: {meeting.title}", html, participant_cu.email)
+    _email_login(participant_cu, 'exec_meetings', f"Meeting Invitation: {meeting.title}", html)
 
 
 def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
@@ -324,7 +345,7 @@ def _send_task_assignment_email(assignee_cu, task, assigned_by_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"New task assigned: {task.title}")
-    _send_email_safe(f"Task Assigned: {task.title}", html, assignee_cu.email)
+    _email_login(assignee_cu, 'tasks_assigned', f"Task Assigned: {task.title}", html)
 
 
 def _send_subtask_added_email(recipient_cu, parent_task, subtask, added_by_name):
@@ -382,7 +403,7 @@ def _send_subtask_added_email(recipient_cu, parent_task, subtask, added_by_name)
       </p>
     """
     html = _email_base_html(content, preview_text=f"New subtask added: {subtask.title}")
-    _send_email_safe(f"Subtask added to \"{parent_task.title}\": {subtask.title}", html, recipient_cu.email)
+    _email_login(recipient_cu, 'tasks_assigned', f"Subtask added to \"{parent_task.title}\": {subtask.title}", html)
 
 
 def _send_meeting_removal_email(cu, meeting, removed_by_name):
@@ -425,7 +446,7 @@ def _send_meeting_removal_email(cu, meeting, removed_by_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"You have been removed from '{meeting.title}'.")
-    _send_email_safe(f"Removed from Meeting: {meeting.title}", html, cu.email)
+    _email_login(cu, 'exec_meetings', f"Removed from Meeting: {meeting.title}", html)
 
 
 def _send_task_removal_email(cu, task, removed_by_name):
@@ -467,7 +488,7 @@ def _send_task_removal_email(cu, task, removed_by_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"You have been removed from task '{task.title}'.")
-    _send_email_safe(f"Removed from Task: {task.title}", html, cu.email)
+    _email_login(cu, 'tasks_assigned', f"Removed from Task: {task.title}", html)
 
 
 def _send_task_deleted_email(cu, task_title, task_priority, deleted_by_name):
@@ -509,7 +530,7 @@ def _send_task_deleted_email(cu, task_title, task_priority, deleted_by_name):
       </p>
     """
     html = _email_base_html(content, preview_text=f"Task '{task_title}' has been deleted.")
-    _send_email_safe(f"Task Deleted: {task_title}", html, cu.email)
+    _email_login(cu, 'tasks_assigned', f"Task Deleted: {task_title}", html)
 
 
 # ---------------------------------------------------------------------------

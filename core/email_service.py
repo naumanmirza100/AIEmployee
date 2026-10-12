@@ -87,6 +87,13 @@ class EmailService:
             profile = user.profile
             if not profile.email_notifications_enabled:
                 return False
+            # Someone who is also a dashboard login of the same company may have
+            # paused all emails, or turned task emails off, on the notification
+            # settings page. Until this asked, a paused person still got these.
+            if notification_type == 'task_assigned':
+                from core.notification_settings import address_wants_email
+                if not address_wants_email(profile.company_id, user.email, 'tasks_assigned'):
+                    return False
             
             # Check notification preferences if they exist
             from .models import NotificationPreference
@@ -260,17 +267,44 @@ Task URL: {self._get_task_url(task)}
                 related_object_id=task.id,
             )
     
-    def _get_task_url(self, task) -> str:
-        """Generate URL to task details page"""
-        from django.urls import reverse
-        try:
-            domain = getattr(settings, 'SITE_DOMAIN', 'http://127.0.0.1:8000')
-            if not domain.startswith('http'):
-                domain = f'http://{domain}'
-            # Assuming there's a task detail view - adjust path as needed
-            return f"{domain}/projects/{task.project.id}/tasks/{task.id}/"
-        except Exception:
-            return f"http://127.0.0.1:8000/tasks/{task.id}/"
+    def _get_task_url(self, task=None) -> str:
+        """Where the assignee sees their tasks: My Space, on the website.
+
+        This used to be built from the API server's address and pointed at
+        /projects/<id>/tasks/<id>/, a page that does not exist."""
+        base = (getattr(settings, 'FRONTEND_URL', '') or '').rstrip('/')
+        return f'{base}/me/tasks' if base else '/me/tasks'
+
+    def send_tasks_assigned_summary(self, assignee, tasks, reason: str = '') -> bool:
+        """One email for several tasks given to one person at once (a hand-over).
+
+        Takes the place of one "New Task Assigned" email per task. Obeys the same
+        switches as that email."""
+        tasks = list(tasks)
+        if not tasks or not getattr(assignee, 'email', ''):
+            return False
+        if len(tasks) == 1:
+            return self.send_task_assignment_email(tasks[0], assignee)
+        if not self._check_email_preferences(assignee, 'task_assigned'):
+            return False
+        lines = []
+        for task in tasks:
+            due = task.due_date.strftime('%Y-%m-%d') if task.due_date else 'no due date'
+            lines.append(f"- {task.title} ({task.project.name}; {task.get_priority_display()}; {due})")
+        message_text = (
+            f"Hello {assignee.get_full_name() or assignee.username},\n\n"
+            f"{len(tasks)} tasks have been assigned to you."
+            + (f" {reason}" if reason else '') + "\n\n"
+            + "\n".join(lines)
+            + f"\n\nSee them all: {self._get_task_url()}"
+        )
+        return self.send_email(
+            recipient=assignee.email,
+            subject=f"{len(tasks)} tasks assigned to you",
+            message_text=message_text,
+            related_object_type='Task',
+            related_object_id=tasks[0].id,
+        )
     
     def send_task_due_reminder(self, task, recipient, days_until_due: int = 1) -> bool:
         """

@@ -60,7 +60,12 @@ class AgentMixTests(TestCase):
             with self.subTest(bought=modules):
                 _, client = self.company_with(modules)
                 topics = json.loads(client.get('/api/company/notification-settings').content)['data']['topics']
-                self.assertLessEqual({t['agent'] for t in topics}, set(modules) | {'everyone'})
+                self.assertLessEqual({t['agent'] for t in topics}, set(modules) | {'everyone', 'shared'})
+                # A topic several agents share is offered only when one of them was bought.
+                from core.notification_settings import BY_KEY
+                for topic in topics:
+                    if topic['agent'] == 'shared':
+                        self.assertTrue(set(BY_KEY[topic['key']].agent) & set(modules), topic['key'])
 
     def test_each_agent_needs_only_itself(self):
         for modules in MIXES:

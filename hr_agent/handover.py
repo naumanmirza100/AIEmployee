@@ -338,10 +338,14 @@ def hand_over(employee, assignments: dict, actor, *, with_hr=True) -> dict:
         'interviews': lambda t: _move_interview_seats(company.id, ids, t),
     }
     results = {}
-    with transaction.atomic():
-        for key, move in movers.items():
-            if key in plan:
-                results[key] = move(plan[key])
+    # Tasks are reassigned one at a time and each would email and alert its new
+    # owner; they are told once instead, after everything has moved.
+    from core.signals import one_notice_per_assignee
+    with one_notice_per_assignee(f'From {employee.full_name}, who is leaving.'):
+        with transaction.atomic():
+            for key, move in movers.items():
+                if key in plan:
+                    results[key] = move(plan[key])
     _tell_recipients(employee, plan, results)
     return results
 
