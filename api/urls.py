@@ -37,6 +37,7 @@ from api.views import company_projects_tasks
 from api.views import user_project_manager
 from api.views import recruitment_agent
 from api.views import marketing_agent
+from api.views import marketing_unsubscribe
 from api.views import reply_draft_agent as reply_draft_api
 from api.views import frontline_agent
 from api.views import hr_agent
@@ -398,6 +399,9 @@ urlpatterns = [
     re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/delete/?$', recruitment_agent.api_delete_prompt, name='recruitment_delete_prompt'),  # DELETE
     re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/favorite/?$', recruitment_agent.api_toggle_prompt_favorite, name='recruitment_toggle_prompt_favorite'),  # PATCH
     re_path(r'^recruitment/ai/graph-prompts/(?P<prompt_id>\d+)/dashboard/?$', recruitment_agent.api_toggle_prompt_dashboard, name='recruitment_toggle_prompt_dashboard'),  # PATCH
+
+    # The unsubscribe link in every Marketing campaign email (public: the signed link is the proof)
+    re_path(r'^marketing/unsubscribe/(?P<token>[\w:-]+)/?$', marketing_unsubscribe.marketing_unsubscribe, name='marketing_unsubscribe'),  # GET (confirm page), POST (unsubscribes; also one-click)
 
     # Marketing AI Graph endpoints (Company User)
     re_path(r'^marketing/ai/generate-graph/?$', marketing_agent.api_marketing_generate_graph, name='marketing_generate_graph'),  # POST

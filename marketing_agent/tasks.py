@@ -7,7 +7,7 @@ from django.core.management import call_command
 from django.utils import timezone
 from datetime import timedelta
 
-from marketing_agent.models import Campaign, EmailSendHistory, EmailSequence, MarketingNotification
+from marketing_agent.models import Campaign, EmailSequence, MarketingNotification
 from marketing_agent.views import auto_pause_expired_campaigns
 
 
@@ -108,55 +108,6 @@ def auto_pause_expired_campaigns_task():
     except Exception as e:
         print(f'Error in auto-pause task: {str(e)}')
         return {'status': 'error', 'error': str(e)}
-
-
-@shared_task(bind=True, max_retries=2, default_retry_delay=600)
-def retry_failed_emails_task(self):
-    """
-    Celery task to retry failed email sends.
-    Handles: Emails with status 'failed' or 'pending'.
-    
-    Scheduled: Every 15 minutes via Celery Beat
-    NEW FEATURE: Not previously automated
-    """
-    try:
-        # Get failed/pending emails from last 24 hours
-        from datetime import timedelta
-        cutoff_time = timezone.now() - timedelta(hours=24)
-        
-        failed_emails = EmailSendHistory.objects.filter(
-            status__in=['failed', 'pending'],
-            created_at__gte=cutoff_time
-        ).select_related('lead', 'email_template', 'campaign')[:50]
-        
-        from marketing_agent.services.subscription import PayingCampaigns
-        paying = PayingCampaigns()      # no retries for a lapsed subscription
-
-        retried_count = 0
-        for email_history in failed_emails:
-            if not paying.allows(email_history.campaign):
-                continue
-            try:
-                from marketing_agent.services.email_service import email_service
-                # EmailSendHistory has no email_account FK, so we resolve via
-                # the campaign's default. send_email also falls back to the
-                # owner's default active account when this is None.
-                retry_account = email_history.campaign.email_account if email_history.campaign else None
-                result = email_service.send_email(
-                    template=email_history.email_template,
-                    lead=email_history.lead,
-                    campaign=email_history.campaign,
-                    email_account=retry_account,
-                )
-                if result.get('success'):
-                    retried_count += 1
-            except Exception as e:
-                print(f'Failed to retry email {email_history.id}: {str(e)}')
-        
-        return {'status': 'success', 'retried_count': retried_count}
-    except Exception as e:
-        print(f'Error in retry failed emails task: {str(e)}')
-        raise self.retry(exc=e)
 
 
 def _create_scheduled_launch_notification(campaign, user, title, message, action_required, action_url=None, metadata=None):

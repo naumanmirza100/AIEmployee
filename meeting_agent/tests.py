@@ -69,11 +69,13 @@ class EmployeeSeatTests(TestCase):
         self.assertIsNone(seat.reset_otp)                               # no code was made
         self.assertEqual([m.subject for m in mail.outbox], [])           # and none was sent
         # Even holding a code, the reset and the sign-in both refuse a seat.
-        seat.reset_otp, seat.reset_otp_expires = '123456', timezone.now() + timedelta(minutes=10)
+        from api.views.company_auth import _code_fingerprint
+        seat.reset_otp, seat.reset_otp_expires = _code_fingerprint(seat, '123456'), timezone.now() + timedelta(minutes=10)
         seat.save()
-        Client().post('/api/company/reset-password', json.dumps(
-            {'email': 'sara@test.local', 'otp': '123456', 'new_password': 'Chosen-by-sara-1'}),
+        reset = Client().post('/api/company/reset-password', json.dumps(
+            {'email': 'sara@test.local', 'otp': '123456', 'password': 'Chosen-by-sara-1'}),
             content_type='application/json')
+        self.assertEqual(reset.status_code, 400, reset.content[:200])
         login = Client().post('/api/company/login', json.dumps(
             {'email': 'sara@test.local', 'password': 'Chosen-by-sara-1'}), content_type='application/json')
         self.assertNotEqual(login.status_code, 200, login.content[:200])

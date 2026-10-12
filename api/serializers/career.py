@@ -26,7 +26,10 @@ class JobDescriptionSerializer(serializers.ModelSerializer):
                   'requirements', 'keywords_json', 'company', 'company_id', 'company_name',
                   'is_active', 'application_open_date', 'application_close_date',
                   'created_at', 'updated_at']
-        read_only_fields = ['id', 'keywords_json', 'created_at', 'updated_at']
+        # 'company' is shown, never taken from the request: a job belongs to the company
+        # of whoever created it (the view passes it to save()). Left writable, an update
+        # could move a job into another company's account and careers page.
+        read_only_fields = ['id', 'keywords_json', 'company', 'created_at', 'updated_at']
 
     def validate_title(self, value):
         return _validate_meaningful_text(value, 'Job title')

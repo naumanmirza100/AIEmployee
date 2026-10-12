@@ -441,6 +441,12 @@
                 }
             }
 
+            // Anything from the server that is put into markup below goes through this first.
+            function esc(value) {
+                return String(value == null ? '' : value).replace(/[&<>"']/g, ch => (
+                    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+            }
+
             function formatTime(hours, mins) {
                 const period = hours >= 12 ? 'pm' : 'am';
                 const displayHour = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
@@ -453,9 +459,13 @@
 
             function displayTimeSlotsGrid() {
                 if (!timeSlotsData || timeSlotsData.length === 0) {
+                    // The job title is typed by the company. It goes in as text, never as markup:
+                    // this page is served from the platform's own address.
                     const jobLabel = window.slotJobTitle ? ` for ${window.slotJobTitle}` : '';
-                    document.getElementById('timeSlotsGrid').innerHTML = 
-                        `<div style="text-align: center; padding: 40px; color: var(--text-secondary);">No available time slots found${jobLabel}. Please contact the recruiter.</div>`;
+                    const notice = document.createElement('div');
+                    notice.style.cssText = 'text-align: center; padding: 40px; color: var(--text-secondary);';
+                    notice.textContent = `No available time slots found${jobLabel}. Please contact the recruiter.`;
+                    document.getElementById('timeSlotsGrid').replaceChildren(notice);
                     return;
                 }
 
@@ -513,14 +523,14 @@
                     const dayName = date.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
                     const dayNum = date.getDate();
                     const isSelected = index === 0;
-                    gridHTML += `<div class="time-slot-column-header ${isSelected ? 'selected' : ''}" data-date="${dateStr}">${dayName} ${dayNum}</div>`;
+                    gridHTML += `<div class="time-slot-column-header ${isSelected ? 'selected' : ''}" data-date="${esc(dateStr)}">${esc(dayName)} ${esc(dayNum)}</div>`;
                 });
                 gridHTML += '</div>';
 
                 // Time rows
                 sortedTimes.forEach(timeStr => {
                     const [hours, mins] = timeStr.split(':').map(Number);
-                    const displayTime = formatTime(hours, mins);
+                    const displayTime = esc(formatTime(hours, mins));
                     gridHTML += '<div class="time-slots-row">';
                     gridHTML += `<div class="time-slot-row-label">${displayTime}</div>`;
                     
@@ -532,7 +542,7 @@
                         if (slot && slot.available && !isSlotTakenCheck) {
                             // Available slot - clickable
                             gridHTML += `<div class="time-slot-cell-wrapper">
-                                <div class="time-slot-cell" data-datetime="${slot.datetime}" onclick="selectSlot(this, '${slot.datetime}')">
+                                <div class="time-slot-cell" data-datetime="${esc(slot.datetime)}" onclick="selectSlot(this, this.dataset.datetime)">
                                     ${displayTime}
                                 </div>
                             </div>`;
@@ -595,7 +605,7 @@
                     const isAvailable = availableDates.includes(dateStr);
                     const isSelected = dateStr === availableDates[0];
                     
-                    html += `<div class="calendar-date ${isAvailable ? 'available' : ''} ${isSelected ? 'selected' : ''}" data-date="${dateStr}">${day}</div>`;
+                    html += `<div class="calendar-date ${isAvailable ? 'available' : ''} ${isSelected ? 'selected' : ''}" data-date="${esc(dateStr)}">${day}</div>`;
                 }
 
                 container.innerHTML = html;

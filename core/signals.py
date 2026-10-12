@@ -3,6 +3,10 @@ Django signals for Project Manager Agent features
 Handles automatic email sending and notifications on model changes.
 """
 
+import contextvars
+import logging
+from contextlib import contextmanager
+
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.contrib.auth.models import User
@@ -19,6 +23,53 @@ def get_email_service():
     if _email_service is None:
         _email_service = EmailService()
     return _email_service
+
+
+# ---- several tasks to one person at once -----------------------------------
+# Handing a leaver's tasks to someone reassigns them one at a time, and every
+# reassignment emailed and alerted on its own: thirty tasks, thirty emails.
+# Inside `one_notice_per_assignee()` the assignments are collected instead, and
+# on the way out each new assignee gets one email and one alert for the lot.
+# The collecting list lives in a context variable set only for the length of
+# the `with` block, so it cannot leak into an ordinary assignment made elsewhere.
+_assignment_batch = contextvars.ContextVar('task_assignment_batch', default=None)
+
+
+@contextmanager
+def one_notice_per_assignee(reason=''):
+    """`reason` is a sentence for the email and alert, e.g. who the tasks came from."""
+    if _assignment_batch.get() is not None:         # already collecting further out
+        yield
+        return
+    collected = {}
+    token = _assignment_batch.set(collected)
+    try:
+        yield
+    except BaseException:
+        _assignment_batch.reset(token)              # whatever was being done failed: say nothing
+        raise
+    _assignment_batch.reset(token)
+    for assignee, tasks in collected.values():
+        _tell_assignee_once(assignee, tasks, reason)
+
+
+def _tell_assignee_once(assignee, tasks, reason):
+    log = logging.getLogger(__name__)
+    try:
+        get_email_service().send_tasks_assigned_summary(assignee, tasks, reason)
+    except Exception as e:
+        log.error(f"Failed to send the tasks-assigned summary email: {str(e)}")
+    try:
+        if len(tasks) == 1:
+            title, message = f"New Task Assigned: {tasks[0].title}", f"You have been assigned a new task: {tasks[0].title}"
+        else:
+            title = f"{len(tasks)} tasks assigned to you"
+            message = (reason + ' ' if reason else '') + ', '.join(t.title for t in tasks[:5]) + (
+                f' and {len(tasks) - 5} more' if len(tasks) > 5 else '')
+        Notification.objects.create(user=assignee, type='task_assigned', notification_type='task_assigned',
+                                    title=title, message=message, link='/me/tasks', action_url='/me/tasks')
+    except Exception as e:
+        log.error(f"Failed to create the tasks-assigned alert: {str(e)}")
 
 
 # Store old task state before save to track changes
@@ -66,7 +117,11 @@ def task_post_save_handler(sender, instance, created, **kwargs):
         assignee_changed = old_state['assignee_id'] != instance.assignee_id
     
     # Send email when task is assigned (new assignment or reassignment)
-    if instance.assignee and (created or assignee_changed):
+    batch = _assignment_batch.get()
+    if instance.assignee and (created or assignee_changed) and batch is not None:
+        # Part of a hand-over: told once, at the end (one_notice_per_assignee).
+        batch.setdefault(instance.assignee_id, (instance.assignee, []))[1].append(instance)
+    elif instance.assignee and (created or assignee_changed):
         # Send assignment email
         try:
             email_service.send_task_assignment_email(

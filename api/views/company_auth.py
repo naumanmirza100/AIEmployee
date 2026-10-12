@@ -8,8 +8,11 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import AnonRateThrottle
+from django.core.cache import cache
+from django.db.models import F
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare, salted_hmac
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
@@ -25,6 +28,11 @@ logger = logging.getLogger(__name__)
 
 # Password reset OTP settings
 OTP_TTL_MINUTES = 10
+# A six-digit code is one of a million. What keeps it from being guessed is how
+# few guesses a login allows, so that is counted on the login itself, not per
+# caller address: five tries at a code, five codes an hour.
+OTP_MAX_TRIES = 5
+OTP_MAX_CODES_PER_HOUR = 5
 
 
 def _generate_registration_token():
@@ -530,7 +538,7 @@ _FORGOT_GENERIC = {
 @throttle_classes([CompanyAuthThrottle])
 def forgot_password(request):
     """Step 1: user submits their email. If a company account exists, generate
-    a 6-digit OTP, store it (hashed lifetime via expiry) and email it.
+    a 6-digit OTP, store its fingerprint and email the code.
     Always returns a generic success to prevent email enumeration."""
     try:
         email = (request.data.get('email') or '').strip()
@@ -544,10 +552,15 @@ def forgot_password(request):
 
         # Only actually send if the account exists and is active.
         if company_user and company_user.is_active:
+            if not _may_send_another_code(company_user):
+                logger.warning("Password reset: login %s asked for more than %d codes in an hour; none sent.",
+                               company_user.pk, OTP_MAX_CODES_PER_HOUR)
+                return Response(_FORGOT_GENERIC, status=status.HTTP_200_OK)
             otp = f"{secrets.randbelow(1_000_000):06d}"
-            company_user.reset_otp = otp
+            company_user.reset_otp = _code_fingerprint(company_user, otp)
             company_user.reset_otp_expires = timezone.now() + timedelta(minutes=OTP_TTL_MINUTES)
-            company_user.save(update_fields=['reset_otp', 'reset_otp_expires'])
+            company_user.reset_otp_attempts = 0
+            company_user.save(update_fields=['reset_otp', 'reset_otp_expires', 'reset_otp_attempts'])
 
             recipient_name = company_user.full_name or 'there'
             company_name = company_user.company.name if company_user.company else 'Pay Per Project'
@@ -583,11 +596,72 @@ def forgot_password(request):
         return Response(_FORGOT_GENERIC, status=status.HTTP_200_OK)
 
 
+def _code_fingerprint(company_user, code):
+    """What is kept in place of a reset code.
+
+    Keyed with the server's secret and tied to the login, so a copy of the
+    database does not hold a code that works, here or on another login."""
+    return salted_hmac('dashboard-password-reset', f'{company_user.pk}:{code}', algorithm='sha256').hexdigest()
+
+
+def _may_send_another_code(company_user):
+    """No more than a few codes an hour for one login, wherever the requests come from.
+
+    Each new code brings a fresh set of tries, so without this the limit on
+    tries would only be as good as the limit on asking."""
+    key = f'company-reset-codes-sent:{company_user.pk}'
+    cache.add(key, 0, 3600)
+    try:
+        return cache.incr(key) <= OTP_MAX_CODES_PER_HOUR
+    except ValueError:              # the hour ended between the two lines
+        cache.set(key, 1, 3600)
+        return True
+
+
+def _void_code(company_user):
+    CompanyUser.objects.filter(pk=company_user.pk).update(reset_otp=None, reset_otp_expires=None)
+    company_user.reset_otp = company_user.reset_otp_expires = None
+
+
+# One wording whatever went wrong, so the reply does not say whether the address
+# has a login. It tells the person what to do when the tries have run out.
+_WRONG_CODE = ('Invalid or expired code. A code stops working after %d wrong tries: '
+               'ask for a new one if that happened.' % OTP_MAX_TRIES)
+
+
 def _validate_otp(company_user):
-    """Return True if the stored OTP exists and hasn't expired."""
-    if not company_user or not company_user.reset_otp or not company_user.reset_otp_expires:
+    """Return True if the login is in use and its stored code exists and hasn't expired."""
+    if not company_user or not company_user.is_active:
+        return False
+    if not company_user.reset_otp or not company_user.reset_otp_expires:
         return False
     return company_user.reset_otp_expires >= timezone.now()
+
+
+def _code_is_right(company_user, typed):
+    """Is `typed` this login's live reset code? Every look is counted on the login.
+
+    A wrong code used to be refused and nothing else: the code stayed good and
+    could be tried again and again for its ten minutes. Now a try is taken
+    before the code is looked at, so tries made at the same moment cannot all
+    slip under the limit, and the last one allowed voids the code if it is
+    wrong. The right code hands the tries back: checking it on the 'verify' step
+    must not use up the one needed to set the password."""
+    if not _validate_otp(company_user):
+        return False
+    took_a_try = CompanyUser.objects.filter(
+        pk=company_user.pk, reset_otp_attempts__lt=OTP_MAX_TRIES,
+    ).update(reset_otp_attempts=F('reset_otp_attempts') + 1)
+    if not took_a_try:
+        _void_code(company_user)
+        return False
+    if constant_time_compare(company_user.reset_otp, _code_fingerprint(company_user, typed)):
+        CompanyUser.objects.filter(pk=company_user.pk).update(reset_otp_attempts=0)
+        return True
+    used = CompanyUser.objects.filter(pk=company_user.pk).values_list('reset_otp_attempts', flat=True).first()
+    if used is not None and used >= OTP_MAX_TRIES:
+        _void_code(company_user)
+    return False
 
 
 @api_view(['POST'])
@@ -607,10 +681,10 @@ def verify_reset_otp(request):
 
         company_user = _find_login_company_user(email)
 
-        if not _validate_otp(company_user) or company_user.reset_otp != otp:
+        if not _code_is_right(company_user, otp):
             return Response({
                 'status': 'error',
-                'message': 'Invalid or expired code'
+                'message': _WRONG_CODE
             }, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
@@ -650,17 +724,18 @@ def reset_password(request):
 
         company_user = _find_login_company_user(email)
 
-        if not _validate_otp(company_user) or company_user.reset_otp != otp:
+        if not _code_is_right(company_user, otp):
             return Response({
                 'status': 'error',
-                'message': 'Invalid or expired code'
+                'message': _WRONG_CODE
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Update password and invalidate the OTP + any existing sessions.
         company_user.password_hash = make_password(new_password)
         company_user.reset_otp = None
         company_user.reset_otp_expires = None
-        company_user.save(update_fields=['password_hash', 'reset_otp', 'reset_otp_expires'])
+        company_user.reset_otp_attempts = 0
+        company_user.save(update_fields=['password_hash', 'reset_otp', 'reset_otp_expires', 'reset_otp_attempts'])
         CompanyUserToken.objects.filter(company_user=company_user).delete()
 
         return Response({

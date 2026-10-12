@@ -1927,6 +1927,24 @@ def _validate_sequence_steps(steps_data):
     return True, None
 
 
+class _NotYourMailbox(Exception):
+    """The mailbox number sent is not one of the caller's own sending mailboxes."""
+
+
+def _own_sending_mailbox(user, sent):
+    """The caller's own mailbox behind the number a sequence form sent, or None for "use the campaign's".
+
+    The number used to be saved as it came. The scheduled sender then logged in to
+    that mailbox with its stored password, so a number belonging to another company
+    sent this campaign from their address. The screen sends the number as text."""
+    if sent in (None, '', 0, '0'):
+        return None
+    try:
+        return EmailAccount.objects.get(id=int(sent), owner=user, is_marketing_account=True)
+    except (EmailAccount.DoesNotExist, TypeError, ValueError):
+        raise _NotYourMailbox()
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1973,12 +1991,17 @@ def create_sequence(request, campaign_id):
                     {'status': 'error', 'message': 'Parent sequence not found or not a main sequence.', 'error': 'not_found'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+        try:
+            mailbox = _own_sending_mailbox(user, data.get('email_account_id'))
+        except _NotYourMailbox:
+            return Response({'status': 'error', 'message': 'Email account not found or not owned by you.', 'error': 'validation'},
+                            status=status.HTTP_400_BAD_REQUEST)
         campaign_is_active = campaign.status == 'active'
         effective_is_active = campaign_is_active and data.get('is_active', True)
         sequence = EmailSequence.objects.create(
             name=data.get('name', 'New Sequence'),
             campaign=campaign,
-            email_account_id=data.get('email_account_id') or None,
+            email_account=mailbox,
             is_active=effective_is_active,
             parent_sequence=parent_sequence,
             is_sub_sequence=is_sub_sequence,
@@ -2106,9 +2129,13 @@ def update_sequence(request, campaign_id, sequence_id):
                 status=status.HTTP_404_NOT_FOUND
             )
         data = request.data
-        sequence.name = data.get('name', sequence.name)
         if 'email_account_id' in data:
-            sequence.email_account_id = data.get('email_account_id') or None
+            try:
+                sequence.email_account = _own_sending_mailbox(user, data.get('email_account_id'))
+            except _NotYourMailbox:
+                return Response({'status': 'error', 'message': 'Email account not found or not owned by you.', 'error': 'validation'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        sequence.name = data.get('name', sequence.name)
         campaign_is_active = campaign.status == 'active'
         sequence.is_active = campaign_is_active and data.get('is_active', sequence.is_active)
         if sequence.is_sub_sequence and 'interest_level' in data:
@@ -2523,6 +2550,8 @@ def _get_pending_and_upcoming_emails(campaign):
         return pending_list, upcoming_list
 
     email_svc = EmailService()
+    from marketing_agent.models import leads_still_in
+    still_in = leads_still_in(campaign)
     # Main sequence contacts: not completed, not replied.
     # is_sub_sequence=False is essential — sub-sequence emails are reply-triggered
     # and must NOT appear as upcoming main sends before the lead has replied.
@@ -2535,6 +2564,7 @@ def _get_pending_and_upcoming_emails(campaign):
             sequence__is_sub_sequence=False,
             completed=False,
             replied=False,
+            lead_id__in=still_in,       # as the sender does: not someone taken off the list
         )
         .select_related('lead', 'sequence')
         .prefetch_related('sequence__steps__template')
@@ -2608,7 +2638,7 @@ def _get_pending_and_upcoming_emails(campaign):
     from marketing_agent.models import ReplySubSequenceRun
     runs = (
         ReplySubSequenceRun.objects
-        .filter(campaign=campaign, completed=False, cancelled=False)
+        .filter(campaign=campaign, completed=False, cancelled=False, lead_id__in=still_in)
         .select_related('lead', 'contact', 'sub_sequence', 'sub_sequence__parent_sequence', 'reply')
         .prefetch_related('sub_sequence__steps__template')
     )[:200]

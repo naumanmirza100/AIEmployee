@@ -67,7 +67,6 @@ def create_company_job(request):
         company = company_user.company
         
         data = request.data.copy()
-        data['company'] = company.id
         # Honour is_active from the request; default True if not provided
         if 'is_active' not in data:
             data['is_active'] = True
@@ -431,6 +430,8 @@ def process_job_applicants(request, jobId):
                 summary = sum_agent.summarize(parsed, job_kw_list)
                 if not isinstance(summary, dict):
                     summary = summary[0] if isinstance(summary, list) and summary else {}
+                # The model wrote this from the CV's own text; it does not get to name a candidate record
+                summary.pop('record_id', None)
 
                 enriched = enrich_agent.enrich(parsed, summary)
                 if not isinstance(enriched, dict):

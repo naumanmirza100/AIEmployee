@@ -18,7 +18,7 @@ from django.db.models import Q, F
 from datetime import timedelta, datetime
 from marketing_agent.models import (
     Campaign, EmailSequence, EmailSequenceStep, EmailSendHistory,
-    Lead, CampaignContact, Reply, ReplySubSequenceRun
+    Lead, CampaignContact, Reply, ReplySubSequenceRun, leads_still_in
 )
 from marketing_agent.services.email_service import email_service
 import logging
@@ -155,10 +155,14 @@ class Command(BaseCommand):
                         f'  Reactivated {reactivated} contact(s) for "{seq.name}" ({total_steps} steps now)'
                     ))
 
-            # Get main sequence contacts
+            # Get main sequence contacts. Only for leads still on the campaign's list:
+            # a contact row is kept when its lead is removed (the replies hang off it),
+            # and without this the removed person went on getting the remaining steps.
+            still_in = leads_still_in(campaign)
             all_contacts = CampaignContact.objects.filter(
                 campaign=campaign, sequence__is_active=True,
-                sequence__isnull=False, sequence__is_sub_sequence=False
+                sequence__isnull=False, sequence__is_sub_sequence=False,
+                lead_id__in=still_in,
             )
 
             main_contacts = all_contacts.filter(
@@ -170,7 +174,7 @@ class Command(BaseCommand):
             # their sub-sequences in parallel. Assignment already happened in
             # reply_processor when the reply came in — the sender just advances runs.
             reply_runs = ReplySubSequenceRun.objects.filter(
-                campaign=campaign, completed=False, cancelled=False,
+                campaign=campaign, completed=False, cancelled=False, lead_id__in=still_in,
             ).select_related('lead', 'sub_sequence', 'reply', 'contact').prefetch_related('sub_sequence__steps')
 
             # Process main sequence contacts

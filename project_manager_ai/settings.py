@@ -1051,12 +1051,11 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 600}
     },
     
-    # Retry failed emails - runs every 15 minutes
-    'retry-failed-emails': {
-        'task': 'marketing_agent.tasks.retry_failed_emails_task',
-        'schedule': 900.0,  # Every 15 minutes (900 seconds)
-        'options': {'expires': 1800}
-    },
+    # There is no separate "retry failed emails" job, on purpose. The sequence sender
+    # above does not move a contact forward when a send fails, so it tries that step
+    # again on its next run. The job that used to be here sent every failed row of the
+    # last day again every 15 minutes and never marked it done, so one failure could go
+    # out up to 96 times.
     
     # Auto-start scheduled campaigns - runs every 15 minutes (backup check)
     # NOTE: Campaigns are also auto-started immediately when saved with start_date <= today
@@ -1328,7 +1327,6 @@ print(f"  Scheduled Tasks: {len(CELERY_BEAT_SCHEDULE)} (Celery Beat)")
 print("  NOTE: AI SDR Agent jobs run via embedded scheduler (no Redis needed)")
 print("  - Sequence emails: Every 5 minutes")
 print("  - Inbox sync: Every 5 minutes")
-print("  - Retry failed: Every 15 minutes")
 print("  - Auto-start campaigns: Every hour")
 print("  - Monitor campaigns & notifications: Every 30 minutes (FULLY AUTOMATED)")
 print("  - Auto-pause campaigns: Daily")
@@ -1390,3 +1388,14 @@ REST_FRAMEWORK = {
         'company_auth': '200/hour',
     },
 }
+
+# How many proxies sit between the internet and this server. The per-caller limits
+# above count by caller address, which is read from the X-Forwarded-For header.
+# Unset, the whole header is taken as the caller sent it, so a caller can pick a
+# new "address" for every request and never reach a limit. Set to the number of
+# proxies you run in front (1 for a single nginx or Caddy, 2 with Cloudflare in
+# front of that); 0 when the server is reached directly. Set too high and every
+# visitor looks like one address and shares one limit.
+_num_proxies = os.getenv('NUM_PROXIES', '').strip()
+if _num_proxies.isdigit():
+    REST_FRAMEWORK['NUM_PROXIES'] = int(_num_proxies)

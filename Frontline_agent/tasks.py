@@ -363,6 +363,10 @@ def send_meeting_reminders():
         body = "\n\n".join(body_parts)
 
         recipients = _recipients(meeting)
+        # Anyone who is also a dashboard login can pause emails or turn reminders
+        # off (core.notification_settings).
+        from core.notification_settings import address_wants_email
+        recipients = [r for r in recipients if address_wants_email(meeting.company_id, r, 'meeting_reminders')]
         if not recipients:
             # Permanent for this meeting, not a transient failure — so the
             # caller stamps it anyway. Leaving it unstamped kept the row in

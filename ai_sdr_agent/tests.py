@@ -272,7 +272,7 @@ class PublicLinkTests(SDRBase):
         self.enr.refresh_from_db(); self.lead.refresh_from_db()
         self.assertEqual(self.enr.status, 'unsubscribed')
         self.assertEqual(self.lead.status, 'disqualified')
-        self.assertIn(b'expired', self.client.get('/api/sdr/unsubscribe/garbage/').content.lower())
+        self.assertIn(b'could not unsubscribe', self.client.get('/api/sdr/unsubscribe/garbage/').content.lower())
 
     def test_suppressed_lead_is_not_sent_by_another_campaign(self):
         self.client.post('/api/sdr/unsubscribe/' + oa.make_unsubscribe_token(self.enr.id) + '/')

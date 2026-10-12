@@ -938,6 +938,13 @@ def send_hr_meeting_reminders():
         recipients = _recipients(m)
         if not recipients:
             return False
+        # Anyone who is also a dashboard login can pause emails or turn reminders
+        # off (core.notification_settings). When that leaves nobody, the reminder
+        # counts as dealt with, so it is not looked at again every five minutes.
+        from core.notification_settings import address_wants_email
+        recipients = [r for r in recipients if address_wants_email(m.company_id, r, 'meeting_reminders')]
+        if not recipients:
+            return True
         try:
             send_mail(
                 subject=subject, message="\n\n".join(parts),

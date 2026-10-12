@@ -824,9 +824,12 @@ class CompanyUser(models.Model):
     last_login = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # Password reset via emailed OTP
-    reset_otp = models.CharField(max_length=6, null=True, blank=True)
+    # Password reset via emailed OTP. `reset_otp` holds a keyed fingerprint of the
+    # six-digit code, not the code (api/views/company_auth.py), and
+    # `reset_otp_attempts` counts tries against it: five and the code is void.
+    reset_otp = models.CharField(max_length=128, null=True, blank=True)
     reset_otp_expires = models.DateTimeField(null=True, blank=True)
+    reset_otp_attempts = models.PositiveSmallIntegerField(default=0)
 
     # The employee-login row (auth.User) this dashboard login acts as. Several
     # agents store auth.User FKs — ticket.created_by, task assignees — so a

@@ -108,6 +108,22 @@ class HandoverTests(HandoverTestCase):
         self.assertEqual(self.form(actor=self.member)[0], 403)
         self.assertEqual(self.hand_over({'tasks': self.tom.user_id}, actor=self.member)[0], 403)
 
+    def test_several_tasks_handed_over_send_their_new_owner_one_email_not_one_each(self):
+        from django.core import mail
+        from core.models import Notification
+        for title in ('Build the footer', 'Write the sitemap'):
+            Task.objects.create(title=title, project=self.project, assignee=self.lee.user, status='todo')
+        mail.outbox.clear()
+        Notification.objects.all().delete()
+
+        code, body = self.hand_over({'tasks': self.tom.user_id})
+
+        self.assertEqual(code, 200, body)
+        task_emails = [m for m in mail.outbox if 'assigned' in m.subject.lower()]
+        self.assertEqual([(m.to, m.subject) for m in task_emails], [(['tom@test.local'], '3 tasks assigned to you')])
+        self.assertIn('From Lee Leaver, who is leaving.', task_emails[0].body)
+        self.assertEqual(Notification.objects.filter(user=self.tom.user, type='task_assigned').count(), 1)
+
     # ---- handing over -------------------------------------------------------
 
     def test_each_group_goes_to_the_person_chosen(self):

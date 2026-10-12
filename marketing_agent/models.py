@@ -535,11 +535,18 @@ class EmailSequence(models.Model):
         Priority: sequence.email_account (explicit override) -> campaign.email_account (default).
         Returns None if neither is set; email_service.send_email then falls back
         to the owner's default active account.
+
+        A mailbox that is not the campaign owner's own is never returned, whatever
+        the row says: this is where its stored password would be used.
         """
-        if self.email_account_id:
-            return self.email_account
-        if self.campaign_id and self.campaign.email_account_id:
-            return self.campaign.email_account
+        campaign = self.campaign if self.campaign_id else None
+        candidates = (
+            self.email_account if self.email_account_id else None,
+            campaign.email_account if campaign and campaign.email_account_id else None,
+        )
+        for account in candidates:
+            if account is not None and campaign is not None and account.owner_id == campaign.owner_id:
+                return account
         return None
 
 
@@ -1048,6 +1055,36 @@ def mark_triggering_email_opened_on_reply(sender, instance, created, **kwargs):
 #             if created:
 #                 logger = logging.getLogger(__name__)
 #                 logger.info(f'Created CampaignContact for {lead.email} in campaign {instance.name}')
+
+def leads_still_in(campaign):
+    """The ids of the leads on a campaign's lead list right now, as a subquery.
+
+    The sender works from CampaignContact and follow-up run rows, and those
+    outlive a lead's removal from the list (the stored replies hang off them),
+    so everything that decides who is emailed next also asks this."""
+    return CampaignLead.objects.filter(campaign=campaign).values('lead_id')
+
+
+@receiver(m2m_changed, sender=Campaign.leads.through)
+def stop_follow_ups_for_removed_leads(sender, instance, action, pk_set, reverse=False, **kwargs):
+    """A lead taken off a campaign's list gets no more of its follow-up series.
+
+    The main sequence stops because the sender asks `leads_still_in`. An open
+    follow-up run is closed here as well, so that putting the lead back later
+    does not pick an old follow-up up half way."""
+    if action not in ('post_remove', 'post_clear'):
+        return
+    open_runs = ReplySubSequenceRun.objects.filter(completed=False, cancelled=False)
+    if reverse:                             # lead.campaigns.remove(...): instance is the lead
+        open_runs = open_runs.filter(lead=instance)
+        if pk_set is not None:
+            open_runs = open_runs.filter(campaign_id__in=pk_set)
+    else:
+        open_runs = open_runs.filter(campaign=instance)
+        if pk_set is not None:
+            open_runs = open_runs.filter(lead_id__in=pk_set)
+    open_runs.update(cancelled=True)
+
 
 @receiver(m2m_changed, sender=Campaign.leads.through)
 def create_campaign_contact(sender, instance, action, pk_set, **kwargs):
