@@ -17,7 +17,7 @@ import imaplib
 import email
 from contextlib import contextmanager
 from email.header import decode_header
-from email.utils import parsedate_to_datetime
+from email.utils import getaddresses, parsedate_to_datetime
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -1238,9 +1238,28 @@ class Command(BaseCommand):
         return raw.decode('latin-1', errors='ignore')
 
     def get_email_address(self, header_value):
-        """Extract email address from header value"""
+        """The address a From or To header names, lower-cased, or None.
+
+        The header is parsed as an address header (name and <address>), the way
+        mail programs read it, and the address part is kept. This used to take
+        the first thing in the whole line that looked like letters@letters, with
+        only letters, digits, dots and hyphens allowed before the @. So
+        "Mary <mary+work@gmail.com>" was stored as work@gmail.com and
+        o'brien@firm.com as brien@firm.com, other people's mailboxes, and a
+        display name that was itself an address ("billing@bank.com"
+        <someone@else.com>) was stored in place of the real sender. Reply Draft
+        sends the approved reply to whatever is stored here.
+
+        The raw header is parsed first. Encoded words (=?utf-8?...?=) are only
+        decoded if that finds no address at all: decoded first, a display name
+        could carry a '<' or a second address in front of the real one.
+        """
         if not header_value:
             return None
+
+        found = self._first_address(str(header_value), brackets_too=True)
+        if found:
+            return found
 
         decoded_header = decode_header(header_value)
         email_str = ''
@@ -1249,12 +1268,33 @@ class Command(BaseCommand):
                 email_str += self._safe_decode(part, encoding or 'utf-8')
             else:
                 email_str += part
+        return self._first_address(email_str)
 
-        # Extract email from string like "Name <email@example.com>" or "email@example.com"
-        match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', email_str)
-        if match:
-            return match.group(0).lower()
+    @staticmethod
+    def _well_formed(address):
+        address = (address or '').strip()
+        local, at, domain = address.rpartition('@')
+        if at and local and '.' in domain and not re.search(r'[\s<>]', address):
+            return address.lower()
+        return None
 
+    @classmethod
+    def _first_address(cls, header_text, brackets_too=False):
+        """The first well-formed address in an address header, or None.
+
+        `brackets_too`: for a header the parser gives up on, such as a display
+        name with an @ in it and no quotes (billing@bank.com <someone@else.com>),
+        take what stands between the angle brackets. Only ever used on the
+        header as it arrived, never on decoded text."""
+        for _name, address in getaddresses([header_text]):
+            found = cls._well_formed(address)
+            if found:
+                return found
+        if brackets_too:
+            for address in re.findall(r'<([^<>]*)>', header_text):
+                found = cls._well_formed(address)
+                if found:
+                    return found
         return None
 
     def decode_header(self, header_value):
