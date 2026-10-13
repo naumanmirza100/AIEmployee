@@ -1226,6 +1226,7 @@ def _serialize_campaign(c: SDRCampaign) -> dict:
         'name': c.name,
         'description': c.description,
         'status': c.status,
+        'paused_reason': c.paused_reason if c.status == 'paused' else '',
         'sender_name': c.sender_name,
         'sender_title': c.sender_title,
         'sender_company': c.sender_company,
@@ -1484,11 +1485,14 @@ def sdr_campaign_detail(request, campaign_id):
                         return Response({'status': 'error', 'message': 'Add SMTP settings before activating the campaign.'}, status=400)
                     if not campaign.steps.filter(is_active=True).exists():
                         return Response({'status': 'error', 'message': 'Add at least one step before activating the campaign.'}, status=400)
+            status_before = campaign.status
             for field in ['name', 'description', 'status', 'sender_name', 'sender_title',
                           'sender_company', 'postal_address', 'from_email', 'smtp_host', 'smtp_username',
                           'smtp_use_tls', 'imap_host', 'calendar_link', 'auto_check_replies']:
                 if field in d:
                     setattr(campaign, field, d[field])
+            if campaign.status != status_before:
+                campaign.paused_reason = ''        # a person changed it: the product's own reason is history
             if 'smtp_port' in d:
                 campaign.smtp_port = int(d['smtp_port'])
             if 'imap_port' in d:

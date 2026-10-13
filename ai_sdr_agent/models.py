@@ -220,6 +220,10 @@ class SDRCampaign(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    # Why the product itself paused this campaign (its mailbox refused to send, or
+    # its owner's login was switched off). Shown on the campaign; cleared when it
+    # is switched back on. Blank when a person paused it.
+    paused_reason = models.CharField(max_length=500, blank=True, default='')
 
     # Sender identity (used for email personalisation)
     sender_name = models.CharField(max_length=255, blank=True)

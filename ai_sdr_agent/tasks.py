@@ -195,6 +195,12 @@ def send_due_steps_impl():
                     "SDR [send-due-steps] enrollment=%d lead=%s email=%s → status=%s",
                     enrollment.id, lead_name, lead_email, status,
                 )
+                if status == 'mailbox_refused':
+                    # The campaign's own mailbox will not send and has been paused
+                    # (OutreachAgent.process_enrollment). The next lead would get
+                    # the same answer, so this campaign's run ends here.
+                    total_failed += 1
+                    break
                 if status == 'sent':
                     total_sent += 1
                     campaign_sent += 1

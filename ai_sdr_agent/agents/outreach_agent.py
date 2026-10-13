@@ -47,8 +47,23 @@ _BOUNCE_SUBJECT_HINTS = (
     'mail delivery failed', 'returned mail', 'failure notice', 'could not deliver',
     'message not delivered', 'address not found', 'user unknown',
 )
-# SMTP replies that mean "this recipient will never work" (not auth/transient).
-_PERMANENT_SMTP_CODES = {550, 551, 553, 554}
+# What a refusal from the mail server is about is read from its own words, never
+# from the number alone. 550, 553 and 554 are used both for "no such person" and
+# for "you may not send" (a daily limit reached, a From address the account does
+# not own), and the second kind is the same for every lead in the campaign.
+_ABOUT_THE_RECIPIENT = (
+    'user unknown', 'unknown user', 'no such user', 'no such recipient', 'unknown recipient',
+    'recipient address rejected', 'recipient rejected', 'recipient not found', 'invalid recipient',
+    'does not exist', "doesn't exist", 'mailbox unavailable', 'mailbox not found', 'no mailbox',
+    'account disabled', 'account has been disabled', 'account is disabled',
+    'user not found', 'not a valid mailbox', '5.1.1', '5.1.10', '5.2.1',
+)
+_ABOUT_THE_SENDER = (
+    'quota', 'limit', 'too many', 'rate', 'sender address rejected', 'sender rejected', 'sender denied',
+    'not owned by', 'not allowed to send', 'not permitted to send', 'not authorized', 'not authorised',
+    'authentication', 'relay', 'from address', 'client host rejected', 'suspended', 'spam', 'policy',
+    '5.4.5', '5.7.0', '5.7.8',
+)
 
 
 _SMTP_PORTS = (25, 465, 587, 2525)
@@ -94,6 +109,55 @@ def validate_mail_server(host: str, port, kind: str = 'smtp'):
 
 class PermanentSendError(ValueError):
     """The recipient address was rejected for good - retrying is pointless."""
+
+
+class MailboxRefusedError(ValueError):
+    """The campaign's own mailbox would not send: a sending limit, a From address
+    it may not use, a login that no longer works. Nothing to do with the person
+    being written to, and the same for every lead, so the campaign is paused and
+    the lead is left as it is."""
+
+
+def _refusal(code, message, stage):
+    """Who a refusal from the mail server is about: 'recipient', 'mailbox' or 'unclear'.
+
+    `stage` is where in the conversation it came: 'rcpt' (naming the recipient),
+    'data' (handing over the message) or 'other'. A refusal while naming the
+    recipient is about the recipient unless it says otherwise. Later ones are
+    only taken as either when they say so; an unclear one is tried again for
+    that lead and marks nobody."""
+    if isinstance(message, bytes):
+        message = message.decode('utf-8', 'replace')
+    said = (message or '').lower()
+    if not 500 <= int(code or 0) <= 599:
+        return 'unclear'                                # 4xx: try again later
+    about_recipient = any(hint in said for hint in _ABOUT_THE_RECIPIENT)
+    about_sender = any(hint in said for hint in _ABOUT_THE_SENDER)
+    if about_recipient:
+        return 'recipient'
+    if about_sender:
+        return 'mailbox'
+    return 'recipient' if stage == 'rcpt' else 'unclear'
+
+
+def pause_for_mailbox(campaign, message: str) -> bool:
+    """Pause a campaign whose own mailbox refuses to send, and say why. True if this paused it."""
+    from ai_sdr_agent.models import SDRCampaign
+
+    reason = ('Paused: the mailbox would not send. It answered: ' + ' '.join((message or '').split()))[:500]
+    paused = SDRCampaign.objects.filter(pk=campaign.pk, status='active').update(status='paused', paused_reason=reason)
+    campaign.status, campaign.paused_reason = 'paused', reason
+    if paused:
+        try:
+            from core.notification_utils import notify_company_users
+            notify_company_users(
+                [campaign.company_user], title=f'Campaign "{campaign.name}" was paused',
+                message=('Its mailbox would not send, so nothing more goes out until you resume it. '
+                         'The mailbox said: ' + ' '.join((message or '').split())[:300]),
+                link='/ai-sdr/outreach', kind='sdr_mailbox_refused')
+        except Exception:
+            logger.exception("Could not alert the owner of campaign %s", campaign.pk)
+    return bool(paused)
 
 
 def mark_bounced(enrollment, reason: str = '') -> None:
@@ -832,10 +896,23 @@ Rules:
                 server.login(username, password)
                 server.sendmail(from_addr, to_email, msg.as_string())
         except smtplib.SMTPRecipientsRefused as exc:
-            raise PermanentSendError(f"Recipient rejected: {exc}") from exc
+            code, said = (list(exc.recipients.values()) or [(0, b'')])[0]
+            about = _refusal(code, said, 'rcpt')
+            if about == 'recipient':
+                raise PermanentSendError(f"Recipient rejected: {exc}") from exc
+            if about == 'mailbox':
+                raise MailboxRefusedError(f"{code} {_text(said)}") from exc
+            raise ValueError(f"SMTP error: {exc}") from exc
+        except (smtplib.SMTPSenderRefused, smtplib.SMTPAuthenticationError) as exc:
+            # The server would not take this mailbox's login or its From address.
+            raise MailboxRefusedError(f"{exc.smtp_code} {_text(exc.smtp_error)}") from exc
         except smtplib.SMTPResponseException as exc:
-            if exc.smtp_code in _PERMANENT_SMTP_CODES:
+            stage = 'data' if isinstance(exc, smtplib.SMTPDataError) else 'other'
+            about = _refusal(exc.smtp_code, exc.smtp_error, stage)
+            if about == 'recipient':
                 raise PermanentSendError(f"SMTP error: {exc}") from exc
+            if about == 'mailbox':
+                raise MailboxRefusedError(f"{exc.smtp_code} {_text(exc.smtp_error)}") from exc
             raise ValueError(f"SMTP error: {exc}") from exc
         except smtplib.SMTPException as exc:
             raise ValueError(f"SMTP error: {exc}") from exc
@@ -1133,6 +1210,16 @@ Rules:
                     enrollment.current_step = idx
                     enrollment.next_action_at = timezone.now() + timedelta(minutes=30)
                     enrollment.save(update_fields=['next_action_at'])
+                    if isinstance(exc, MailboxRefusedError):
+                        # Not this lead's fault and the same for the next one: stop the
+                        # campaign here and tell its owner what the mailbox said. The
+                        # lead keeps its place and is tried again once it is resumed.
+                        pause_for_mailbox(campaign, error_message)
+                        logger.warning(
+                            "SDR [EMAIL-FAIL] campaign=%d paused - its mailbox refused to send: %s",
+                            campaign.id, error_message,
+                        )
+                        return dict(_failed_result, status='mailbox_refused')
                     logger.warning(
                         "SDR [EMAIL-FAIL] enrollment=%d step=%d rolled back — "
                         "will retry in 30 min",
@@ -1185,6 +1272,10 @@ Rules:
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+def _text(said) -> str:
+    return said.decode('utf-8', 'replace') if isinstance(said, bytes) else str(said or '')
+
 
 def _derive_imap_host(smtp_host: str) -> str:
     """Derive likely IMAP host from SMTP host (smtp.gmail.com → imap.gmail.com)."""

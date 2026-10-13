@@ -1143,7 +1143,10 @@ const SDROutreachTab = () => {
             : selectedCampaign.status === 'scheduled'
             ? <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Scheduled</b> — campaign will auto-start on {selectedCampaign.start_date}.</>
             : selectedCampaign.status === 'paused'
-            ? <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Paused</b> — campaign is paused. Resume to continue sending.</>
+            ? (selectedCampaign.paused_reason
+              // Paused by the product itself, with the reason it gave (e.g. what the mailbox answered).
+              ? <span data-testid="sdr-paused-reason"><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>{selectedCampaign.paused_reason}</b> Nothing was sent to the lead it was trying and no lead was marked as bounced. Fix it in Settings, then Resume.</span>
+              : <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Paused</b> — campaign is paused. Resume to continue sending.</>)
             : selectedCampaign.status === 'completed'
             ? <><b style={{ color: '#6b7280' }}>Campaign Completed</b> — all leads have been processed. Enroll new leads to restart.</>
             : <><b style={{ color: '#6b7280' }}>Draft</b> — campaign has not started yet.</>}
