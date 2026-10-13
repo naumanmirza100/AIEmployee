@@ -485,6 +485,13 @@ const CVRecords = () => {
   );
 };
 
+/** An applicant typed this on a public form. It is shown as a link only when it is a
+ *  web address; applications stored before the server checked may hold anything. */
+const webLink = (url) => {
+  const typed = (url || '').trim();
+  return /^https?:\/\//i.test(typed) ? typed : null;
+};
+
 /** Approved for interview but no invitation has gone: screening records the AI's
  *  decision and emails nobody, so somebody has to press Interview for them. */
 function NotInvitedYet({ record }) {
@@ -719,16 +726,16 @@ function ApplicationTab({ application }) {
       {(application.linkedin_url || application.github_url || application.other_links) && (
         <Section title="Links">
           <div className="space-y-1.5">
-            {application.linkedin_url && (
-              <a id="REC-cvrecords-application-linkedin-link" data-testid="REC-cvrecords-application-linkedin-link" href={application.linkedin_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors">
+            {application.linkedin_url && (webLink(application.linkedin_url) ? (
+              <a id="REC-cvrecords-application-linkedin-link" data-testid="REC-cvrecords-application-linkedin-link" href={webLink(application.linkedin_url)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors">
                 <Link2 className="h-3.5 w-3.5 shrink-0" />LinkedIn<ExternalLink className="h-3 w-3" />
               </a>
-            )}
-            {application.github_url && (
-              <a id="REC-cvrecords-application-github-link" data-testid="REC-cvrecords-application-github-link" href={application.github_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors">
+            ) : <p className="text-sm text-white/60 break-all">LinkedIn: {application.linkedin_url}</p>)}
+            {application.github_url && (webLink(application.github_url) ? (
+              <a id="REC-cvrecords-application-github-link" data-testid="REC-cvrecords-application-github-link" href={webLink(application.github_url)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-violet-400 hover:text-violet-300 transition-colors">
                 <Link2 className="h-3.5 w-3.5 shrink-0" />GitHub<ExternalLink className="h-3 w-3" />
               </a>
-            )}
+            ) : <p className="text-sm text-white/60 break-all">GitHub: {application.github_url}</p>)}
             {application.other_links && <p className="text-sm text-white/60 whitespace-pre-wrap">{application.other_links}</p>}
           </div>
         </Section>

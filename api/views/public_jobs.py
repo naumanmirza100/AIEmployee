@@ -6,12 +6,13 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 
-from rest_framework.decorators import api_view, permission_classes, parser_classes
+from rest_framework.decorators import api_view, permission_classes, parser_classes, throttle_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 
+from recruitment_agent import public_apply
 from recruitment_agent.models import JobDescription, JobApplication
 
 
@@ -111,6 +112,7 @@ def public_job_detail(request, job_id):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @parser_classes([MultiPartParser, FormParser])
+@throttle_classes([public_apply.PublicApplyThrottle])
 def public_job_apply(request, job_id):
     try:
         job = JobDescription.objects.get(pk=job_id)
@@ -151,6 +153,24 @@ def public_job_apply(request, job_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Everything below is checked before a row is made: making the row is what
+    # writes the file to storage (recruitment_agent/public_apply.py).
+    refused = public_apply.cv_problem(cv_file)
+    if refused:
+        return Response({'status': 'error', 'code': 'BAD_CV_FILE', 'message': refused},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    application = JobApplication(
+        job=job, first_name=first_name, last_name=last_name, email=email, phone=phone,
+        current_location=current_location, salary_expectation=salary_expectation, education=education,
+        previous_company=previous_company, previous_salary=previous_salary, linkedin_url=linkedin_url,
+        github_url=github_url, other_links=other_links, cover_letter=cover_letter,
+    )
+    refused = public_apply.details_problem(application)
+    if refused:
+        return Response({'status': 'error', 'code': 'BAD_DETAILS', 'message': refused},
+                        status=status.HTTP_400_BAD_REQUEST)
+
     email_taken = JobApplication.objects.filter(job=job, email=email).exists()
     phone_taken = JobApplication.objects.filter(job=job, phone=phone).exists()
 
@@ -187,27 +207,23 @@ def public_job_apply(request, job_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    access_token = secrets.token_urlsafe(40)
+    # A job can only have so many applications waiting to be screened. A new email
+    # and phone each time gets past "already applied" and a new caller address gets
+    # past the hourly limit; this holds whatever is changed.
+    waiting = JobApplication.objects.filter(job=job, cv_records__isnull=True).count()
+    if waiting >= public_apply.waiting_cap():
+        return Response(
+            {'status': 'error', 'code': 'TOO_MANY_WAITING',
+             'message': 'This position has received a great many applications and is not taking more for the '
+                        'moment. Please try again in a few days.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
 
-    application = JobApplication.objects.create(
-        job=job,
-        first_name=first_name,
-        last_name=last_name,
-        email=email,
-        phone=phone,
-        current_location=current_location,
-        salary_expectation=salary_expectation,
-        education=education,
-        previous_company=previous_company,
-        previous_salary=previous_salary,
-        linkedin_url=linkedin_url,
-        github_url=github_url,
-        other_links=other_links,
-        cover_letter=cover_letter,
-        cv_file=cv_file,
-        cv_file_name=cv_file.name if cv_file else None,
-        access_token=access_token,
-    )
+    access_token = secrets.token_urlsafe(40)
+    application.cv_file = cv_file
+    application.cv_file_name = cv_file.name[:255] if cv_file else None
+    application.access_token = access_token
+    application.save()
 
     # Build tracking URL — points to React frontend
     frontend_base = (getattr(settings, 'FRONTEND_URL', None) or getattr(settings, 'BACKEND_URL', None) or '').strip().rstrip('/')

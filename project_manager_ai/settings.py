@@ -1388,6 +1388,10 @@ REST_FRAMEWORK = {
         'exec_crud': '200/hour',
         # Company auth endpoints
         'company_auth': '200/hour',
+        # The public "apply for this job" form, per caller address
+        # (recruitment_agent/public_apply.py). Generous: an office or a university
+        # is one address for many applicants.
+        'public_apply': '60/hour',
     },
 }
 

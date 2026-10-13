@@ -65,6 +65,17 @@ const ApplicationForm = ({ position }) => {
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
+      // The server takes a PDF or a .docx of up to 10 MB and nothing else; say so
+      // here, before the upload, and not after it.
+      const problem = !/\.(pdf|docx)$/i.test(file.name)
+        ? 'Please upload a PDF or a Word document (.docx)'
+        : file.size > 10 * 1024 * 1024 ? 'That file is larger than 10 MB' : '';
+      if (problem) {
+        setCvFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setErrors((p) => ({ ...p, cv_file: problem }));
+        return;
+      }
       setCvFile(file);
       if (errors.cv_file) setErrors((p) => { const n = { ...p }; delete n.cv_file; return n; });
     }
@@ -319,9 +330,9 @@ const ApplicationForm = ({ position }) => {
 
           {/* CV Upload */}
           <div className="space-y-1.5">
-            <Label>Upload CV <span className="text-destructive">*</span> <span className="text-muted-foreground font-normal text-xs">(PDF, DOC, DOCX)</span></Label>
+            <Label>Upload CV <span className="text-destructive">*</span> <span className="text-muted-foreground font-normal text-xs">(PDF or DOCX)</span></Label>
             <input
-              ref={fileInputRef} type="file" accept=".pdf,.doc,.docx"
+              ref={fileInputRef} type="file" accept=".pdf,.docx"
               onChange={handleFileChange} className="hidden"
             />
             {cvFile ? (
@@ -343,7 +354,7 @@ const ApplicationForm = ({ position }) => {
               >
                 <Upload className="h-5 w-5 mx-auto text-muted-foreground mb-1.5" />
                 <p className="text-sm text-muted-foreground">Click to upload your CV</p>
-                <p className="text-xs text-muted-foreground/60 mt-0.5">PDF, DOC, DOCX up to 10MB</p>
+                <p className="text-xs text-muted-foreground/60 mt-0.5">PDF or DOCX, up to 10 MB</p>
               </button>
             )}
             {errors.cv_file && <p className="text-xs text-destructive">{errors.cv_file}</p>}
