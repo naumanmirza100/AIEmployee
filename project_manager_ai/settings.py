@@ -858,7 +858,9 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER if EMAIL_HO
 # Who is emailed when the live site breaks (comma-separated). Empty = nobody.
 # See core/error_alerts.py for what counts and how often.
 ERROR_ALERT_EMAILS = [a.strip() for a in os.getenv('ERROR_ALERT_EMAILS', '').split(',') if a.strip()]
-RECRUITER_EMAIL = os.getenv('RECRUITER_EMAIL', '').strip()
+# RECRUITER_EMAIL is no longer read. It was one mailbox that received the "candidate
+# has booked" email for every company's interviews; that email now goes to the login
+# that runs the interview. Take the line out of the server's .env.
 
 
 # --------------------
