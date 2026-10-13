@@ -136,8 +136,8 @@ def ping_crm_integrations():
 def queue_everything(agent, company) -> dict:
     """Queue all of a company's AI SDR leads, sent emails and timed meetings
     for its CRM. Used by "Sync All Leads", from the queue and directly.
-    Safe to repeat: contacts are upserted, and a meeting or email already in
-    the CRM is not sent twice."""
+    Safe to repeat: a contact the CRM already has only has its empty fields
+    filled, and a meeting or email already in the CRM is not sent twice."""
     from ai_sdr_agent.models import SDRLead, SDRMeeting, SDROutreachLog
 
     counts = {'leads': 0, 'emails': 0, 'meetings': 0}

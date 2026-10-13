@@ -11,7 +11,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError
+from .base import BaseCRMConnector, CRMError, is_blank
 
 logger = logging.getLogger(__name__)
 
@@ -71,17 +71,34 @@ class PipedriveConnector(BaseCRMConnector):
             return {'id': str(person.get('id', '')), 'properties': person}
         return None
 
+    def create_contact(self, email: str, properties: dict) -> str:
+        resp = self._post('/persons', json=self._build_person_payload(email, properties))
+        return str(((resp.json() or {}).get('data') or {}).get('id', ''))
+
     def upsert_contact(self, email: str, properties: dict) -> str:
         existing = self.find_contact_by_email(email)
-        pd_data = self._build_person_payload(email, properties)
+        if not existing:
+            return self.create_contact(email, properties)
 
-        if existing:
-            pid = existing['id']
-            self._put(f'/persons/{pid}', json=pd_data)
-            return pid
-
-        resp = self._post('/persons', json=pd_data)
-        return str(((resp.json() or {}).get('data') or {}).get('id', ''))
+        pid = existing['id']
+        # A person who is already there keeps their name and every email and phone
+        # they have. This used to PUT one name, a one-item email list and a one-item
+        # phone list, and a PUT replaces the lists whole. Only a phone or job title
+        # the person does not have at all is added, and for that the full record is
+        # read first: the search result does not say.
+        wanted = {key: properties.get(key) for key in ('phone', 'job_title') if not is_blank(properties.get(key))}
+        if wanted:
+            person = ((self._get(f'/persons/{pid}').json() or {}).get('data') or {})
+            blanks = {}
+            has_phone = any(not is_blank((p or {}).get('value') if isinstance(p, dict) else p)
+                            for p in (person.get('phone') or []))
+            if 'phone' in wanted and not has_phone:
+                blanks['phone'] = [{'value': str(wanted['phone']), 'primary': True}]
+            if 'job_title' in wanted and is_blank(person.get('job_title')):
+                blanks['job_title'] = str(wanted['job_title'])[:255]
+            if blanks:
+                self._put(f'/persons/{pid}', json=blanks)
+        return pid
 
     def log_email_activity(
         self,
