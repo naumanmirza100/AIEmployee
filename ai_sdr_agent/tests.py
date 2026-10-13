@@ -161,6 +161,13 @@ class SchedulerTests(SDRBase):
 
 
 class ReplyProcessingTests(SDRBase):
+    def setUp(self):
+        super().setUp()
+        # These are about a campaign that sends the AI's answer by itself; the
+        # check-before-sending switch has its own tests (tests_reply_answers.py).
+        SDRCampaign.objects.filter(pk=self.campaign.pk).update(review_ai_replies=False)
+        self.campaign.refresh_from_db()
+
     def _run_inbox(self, replies, classification):
         from ai_sdr_agent.tasks import check_inbox_replies_impl
         fake_agent = mock.MagicMock()

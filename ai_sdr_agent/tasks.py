@@ -374,9 +374,12 @@ def check_inbox_replies_impl():
                     campaign.replies_received = (campaign.replies_received or 0) + 1
                     total_replies += 1
                     try:
-                        info_email = email_agent.generate_more_info_email(lead, campaign, reply_text)
-                        agent.send_email(campaign, lead.email, info_email['subject'], info_email['body'])
-                        logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
+                        # Sent, or held for the owner to check when the campaign asks for that.
+                        from ai_sdr_agent.reply_answers import answer_wanting_more
+                        answered = answer_wanting_more(campaign, enrollment, lead, reply_text,
+                                                       email_agent=email_agent, outreach_agent=agent)
+                        if answered['sent']:
+                            logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
                     except Exception as exc:
                         logger.warning('SDR [MORE-INFO] email failed for %s: %s', lead.email, exc)
 

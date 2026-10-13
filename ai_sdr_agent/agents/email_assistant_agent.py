@@ -264,16 +264,30 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 ),
             }
 
+        # What the AI may say about the product is what the campaign says about it.
+        # It used to be asked for "key benefits" with nothing to take them from, so
+        # it made them up, in an email sent in the salesperson's name.
+        about = ' '.join((campaign.description or '').split())[:1500]
+        if about:
+            facts = f'What we offer (the ONLY facts you may use about it): {about}'
+            benefits = '- Gives 2-3 concise bullet points taken from "What we offer" above, in your own words'
+        else:
+            facts = 'What we offer: (nothing has been written down)'
+            benefits = ('- Does NOT describe the product, list benefits, quote prices or make any claim about it: '
+                        'you have been told nothing about it. Say you would be glad to walk them through it')
+
         prompt = f"""Write a SHORT reply to a prospect who asked for more information about our product/service.
 
 Prospect: {lead.full_name}, {lead.job_title or ''} at {lead.company_name or ''}
 Their reply: "{original_reply[:300]}"
 Sender: {campaign.sender_name}, {campaign.sender_title} at {campaign.sender_company}
 Calendar link: {calendar or '(none)'}
+{facts}
 
 Write a reply that:
 - Opens warmly, acknowledges their interest
-- Gives 2-3 concise bullet points about key benefits
+{benefits}
+- Never states a fact, number, price, customer name or feature that is not given above
 - Ends with a single CTA to book a call {"at: " + calendar if calendar else "(ask to reply with availability)"}
 - Under 120 words total
 - Conversational, not salesy

@@ -383,6 +383,16 @@ export const checkReplies = async (campaignId) => {
   }
 };
 
+// Answers the AI wrote to leads' replies, held for a person to check before they go
+export const listReplyDrafts = async (campaignId) =>
+  companyApi.get(`/sdr/campaigns/${campaignId}/reply-drafts/`);
+
+export const sendReplyDraft = async (draftId, data) =>
+  companyApi.post(`/sdr/reply-drafts/${draftId}/send/`, data);
+
+export const discardReplyDraft = async (draftId) =>
+  companyApi.post(`/sdr/reply-drafts/${draftId}/discard/`);
+
 // Meetings
 export const listMeetings = async ({
   status = '', campaign_id = '', campaign_status = '', search = '', search_field = 'all', temperature = '',
