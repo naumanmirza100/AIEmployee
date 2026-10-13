@@ -97,8 +97,18 @@ class CRMSyncAgent:
             'lead_first_name': lead.first_name or '',
             'lead_last_name': lead.last_name or '',
         }
+        # Once per email and per CRM. "Sync All Leads" comes back here for every
+        # email ever sent; one that has gone to the CRM (or is going now) used to
+        # be queued and logged there again on each press, because only entries
+        # still waiting were looked for. One still waiting is brought up to date
+        # by `_enqueue` instead, as for meetings.
+        sent = set(CRMSyncQueue.objects.filter(
+            object_type=CRMSyncQueue.TYPE_EMAIL, source_type=CRMSyncQueue.SOURCE_SDR_EMAIL,
+            source_id=outreach_log.pk,
+        ).exclude(status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED])
+            .values_list('integration_id', flat=True))
         for integration in self._integrations:
-            if not integration.sync_emails:
+            if not integration.sync_emails or integration.id in sent:
                 continue
             self._enqueue(
                 integration=integration,
