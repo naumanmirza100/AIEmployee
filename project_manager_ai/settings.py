@@ -1023,6 +1023,16 @@ CELERY_TASK_MAX_RETRIES = 3  # Max 3 retries
 from celery.schedules import crontab as _crontab
 
 # Celery Beat Schedule (Periodic Tasks)
+#
+# Anything that runs once a day or once a week is given a TIME OF DAY (crontab),
+# never "every 86400 seconds". An interval is counted from when the scheduler
+# started, the scheduler keeps the time of each last run in a file inside its own
+# container, and every deploy rebuilds that container. So after each deploy every
+# such job waited a full day (or week) before running, and with a deploy most days
+# they hardly ran: leave was not added to balances, recurring tasks were not made,
+# campaigns past their end date were not paused. A time of day needs no saved file.
+# Times are UTC. Short intervals (minutes, an hour) are fine as they are.
+#
 # IMPORTANT: Sequence emails run every 5 minutes to check for ready emails
 # Actual email timing respects user-defined delays (delay_days, delay_hours, delay_minutes)
 CELERY_BEAT_SCHEDULE = {
@@ -1076,11 +1086,11 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 3600}
     },
     
-    # Auto-pause expired campaigns - runs daily at midnight
+    # Auto-pause expired campaigns - daily, at 00:05 UTC
     'auto-pause-expired-campaigns': {
         'task': 'marketing_agent.tasks.auto_pause_expired_campaigns_task',
-        'schedule': 86400.0,  # Daily (86400 seconds = 24 hours)
-        'options': {'expires': 172800}  # Expires after 2 days
+        'schedule': _crontab(hour=0, minute=5),     # daily, just after the date changes (UTC)
+        'options': {'expires': 6 * 3600},
     },
 
     # Sync CampaignPerformance table with live email/reply data - every 30 minutes
@@ -1147,24 +1157,24 @@ CELERY_BEAT_SCHEDULE = {
     # Sends reminders after 48h, auto-withdraws after 7 days
     'check-stale-meetings': {
         'task': 'project_manager_agent.check_stale_meetings',
-        'schedule': 86400.0,  # Every 24 hours
-        'options': {'expires': 172800}
+        'schedule': _crontab(hour=1, minute=0),     # daily
+        'options': {'expires': 6 * 3600},
     },
 
     # Notification cleanup - runs daily
     # Deletes read notifications older than 30 days, caps at 200 per user
     'cleanup-old-notifications': {
         'task': 'project_manager_agent.cleanup_old_notifications',
-        'schedule': 86400.0,  # Every 24 hours
-        'options': {'expires': 172800}
+        'schedule': _crontab(hour=2, minute=30),    # daily
+        'options': {'expires': 6 * 3600},
     },
 
     # Recurring tasks generator (T-F2) - runs daily
     # Materialises new Task records from TaskRecurrence rows whose next_run_date <= today
     'generate-recurring-tasks': {
         'task': 'project_manager_agent.generate_recurring_tasks',
-        'schedule': 86400.0,  # Every 24 hours
-        'options': {'expires': 172800}
+        'schedule': _crontab(hour=0, minute=20),    # daily
+        'options': {'expires': 6 * 3600},
     },
 
     # Wake snoozed frontline tickets - runs every 5 minutes
@@ -1194,8 +1204,8 @@ CELERY_BEAT_SCHEDULE = {
     # Prune frontline documents that have exceeded their retention window. Daily.
     'frontline-prune-expired-documents': {
         'task': 'Frontline_agent.tasks.prune_expired_documents',
-        'schedule': 86400.0,  # Every 24 hours
-        'options': {'expires': 172800}
+        'schedule': _crontab(hour=2, minute=0),     # daily
+        'options': {'expires': 6 * 3600},
     },
 
     # Send 24h + 15min meeting reminders for frontline meetings. Every 5 minutes.
@@ -1208,16 +1218,16 @@ CELERY_BEAT_SCHEDULE = {
     # Weekly analytics digest per frontline tenant. Runs once a week.
     'frontline-weekly-analytics-digest': {
         'task': 'Frontline_agent.tasks.send_weekly_analytics_digest',
-        'schedule': 604800.0,  # Every 7 days
-        'options': {'expires': 1209600}
+        'schedule': _crontab(day_of_week=1, hour=6, minute=0),     # Mondays, 06:00 UTC
+        'options': {'expires': 6 * 3600},
     },
 
     # T4 — auto-close resolved tickets after FRONTLINE_AUTO_CLOSE_DAYS (default 7).
     # Daily tick: cheap query, idempotent via status filter.
     'frontline-auto-close-inactive-tickets': {
         'task': 'Frontline_agent.tasks.auto_close_inactive_tickets',
-        'schedule': 86400.0,  # daily
-        'options': {'expires': 172800},
+        'schedule': _crontab(hour=1, minute=30),    # daily
+        'options': {'expires': 6 * 3600},
     },
 
     # S3 — bump priority + fire `ticket_near_breach` event for tickets within
@@ -1240,8 +1250,8 @@ CELERY_BEAT_SCHEDULE = {
     # document expirations) — fans out into HRScheduledNotification rows.
     'hr-walk-time-based-events': {
         'task': 'hr_agent.tasks.walk_hr_time_based_events',
-        'schedule': 86400.0,  # Every 24 hours
-        'options': {'expires': 172800},
+        'schedule': _crontab(hour=0, minute=30),    # daily
+        'options': {'expires': 6 * 3600},
     },
     # 24h + 15min HR meeting reminders.
     'hr-send-meeting-reminders': {
@@ -1253,8 +1263,8 @@ CELERY_BEAT_SCHEDULE = {
     # internally (monthly / biweekly / annual). Cheap and idempotent.
     'hr-accrue-leave-balances': {
         'task': 'hr_agent.tasks.accrue_leave_balances',
-        'schedule': 86400.0,
-        'options': {'expires': 172800},
+        'schedule': _crontab(hour=0, minute=10),    # daily
+        'options': {'expires': 6 * 3600},
     },
 
     # ----- CRM & System Sync Agent -----
@@ -1280,8 +1290,8 @@ CELERY_BEAT_SCHEDULE = {
     # window (default 730 days). Prevents unbounded growth.
     'hr-purge-audit-log': {
         'task': 'hr_agent.tasks.purge_hr_audit_log',
-        'schedule': 86400.0 * 7,
-        'options': {'expires': 86400.0 * 14},
+        'schedule': _crontab(day_of_week=0, hour=4, minute=15),    # Sundays
+        'options': {'expires': 6 * 3600},
     },
 
     # ----- AI Executive Meeting Assistant -----
@@ -1306,8 +1316,8 @@ CELERY_BEAT_SCHEDULE = {
     # Clean up old read notifications — daily.
     'exec-meeting-cleanup-notifications': {
         'task': 'meeting_agent.cleanup_old_notifications',
-        'schedule': 86400.0,
-        'options': {'expires': 172800},
+        'schedule': _crontab(hour=2, minute=40),    # daily
+        'options': {'expires': 6 * 3600},
     },
 }
 
