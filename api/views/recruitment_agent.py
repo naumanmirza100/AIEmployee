@@ -380,20 +380,11 @@ def process_cvs(request):
             if top_n:
                 ranked = ranked[:top_n]
             
-            # Get interview agent for auto-scheduling
-            interview_agent = agents.get('interview_agent')
-            
-            # Use job's default interview type (Online/Onsite) for auto-scheduled invitations
-            auto_interview_type = 'ONLINE'
-            if job_desc:
-                job_int_settings = sharing.job_interview_settings(job_desc)
-                if job_int_settings and getattr(job_int_settings, 'default_interview_type', None):
-                    auto_interview_type = job_int_settings.default_interview_type
-
-            # The job owner's email timings for the interviews
-            email_settings = sharing.email_settings(settings_owner)
-
-            # Update CV records with qualification data and auto-schedule interviews
+            # Record what the AI decided on each CV. Nobody is emailed here: this used to
+            # send an interview invitation, with a live booking link, to everyone the AI
+            # marked INTERVIEW, in the same request, with nobody having looked and no
+            # word of it on a screen that says "analyze and rank". Inviting is now a
+            # person's step (the Interview decision, with its confirmation).
             for idx, result in enumerate(ranked):
                 if result['record_id']:
                     try:
@@ -425,71 +416,21 @@ def process_cvs(request):
                     except CVRecord.DoesNotExist:
                         pass
                 
-                # Auto-schedule interview if decision is INTERVIEW
                 qual_decision = result.get('qualified', {}).get('decision', '') if isinstance(result.get('qualified'), dict) else ''
-                if qual_decision == "INTERVIEW" and interview_agent:
-                    parsed_cv = result.get('parsed', {})
+                result['interview_scheduled'] = False
+                result['ready_to_invite'] = bool(
+                    qual_decision == 'INTERVIEW' and result.get('record_id')
+                    and _ready_to_invite(CVRecord.objects.select_related('job_application', 'job_description')
+                                         .filter(id=result['record_id']).first()))
 
-                    # Prefer real JobApplication data (candidate filled the form) over AI-parsed CV text
-                    _record_id = result.get('record_id')
-                    _cv_rec = CVRecord.objects.select_related('job_application').filter(id=_record_id).first() if _record_id else None
-                    _job_app = _cv_rec.job_application if _cv_rec else None
-
-                    if _job_app:
-                        candidate_name  = f"{_job_app.first_name} {_job_app.last_name}".strip() or 'Candidate'
-                        candidate_email = _job_app.email
-                        candidate_phone = _job_app.phone or (parsed_cv.get('phone') if isinstance(parsed_cv, dict) else None)
-                    else:
-                        # Fallback for manually uploaded CVs that have no linked JobApplication
-                        candidate_name  = (parsed_cv.get('name', 'Candidate') if isinstance(parsed_cv, dict) else 'Candidate') or 'Candidate'
-                        candidate_email = parsed_cv.get('email') if isinstance(parsed_cv, dict) else None
-                        candidate_phone = parsed_cv.get('phone') if isinstance(parsed_cv, dict) else None
-                    
-                    # Use the actual job title as job_role (not first line of description text)
-                    job_role = (job_desc.title if job_desc and job_desc.title else None) or "Position"
-                    
-                    if candidate_email:
-                        logger.info(f"Auto-scheduling interview for approved candidate: {candidate_name} ({candidate_email})")
-                        try:
-                            interview_result = interview_agent.schedule_interview(
-                                candidate_name=candidate_name,
-                                candidate_email=candidate_email,
-                                job_role=job_role,
-                                interview_type=auto_interview_type,  # From job's interview settings
-                                candidate_phone=candidate_phone,
-                                cv_record_id=result.get('record_id'),
-                                recruiter_id=None,  # Not using Django User
-                                company_user_id=company_user.id,
-                                email_settings=email_settings,
-                                custom_slots=None,
-                            )
-                            
-                            if interview_result.get('invitation_sent'):
-                                logger.info(f"Interview invitation sent successfully for {candidate_email}")
-                                result['interview_scheduled'] = True
-                                result['interview_id'] = interview_result.get('interview_id')
-                            else:
-                                logger.warning(f"Interview created but email failed for {candidate_email}")
-                                result['interview_scheduled'] = False
-                                result['interview_error'] = interview_result.get('message', 'Unknown error')
-                        except Exception as interview_exc:
-                            logger.error(f"Failed to schedule interview for {candidate_email}: {str(interview_exc)}")
-                            log_service.log_error("auto_interview_scheduling_error", {
-                                "record_id": result.get('record_id'),
-                                "candidate_email": candidate_email,
-                                "error": str(interview_exc),
-                            })
-                            result['interview_scheduled'] = False
-                            result['interview_error'] = str(interview_exc)
-                    else:
-                        logger.warning(f"Skipping interview scheduling - no email found for {candidate_name}")
-                        result['interview_scheduled'] = False
-                        result['interview_error'] = "No email address found"
-            
+            ready_to_invite = sum(1 for r in ranked if r.get('ready_to_invite'))
             return Response({
                 'status': 'success',
                 'results': ranked,
-                'total': len(ranked)
+                'total': len(ranked),
+                # Approved by the AI and not invited: for the screen to say so and offer to invite.
+                'ready_to_invite': ready_to_invite,
+                'invitations_sent': 0,
             })
             
         except KeyServiceError:
@@ -1792,6 +1733,18 @@ def list_cv_records(request):
             start = (page - 1) * page_size
             cv_records = cv_records[start:start + page_size]
 
+        cv_records = list(cv_records)
+        # Who has an interview already, by record and by (address, job): one query.
+        invited_records, invited_people = set(), set()
+        for record_id, email, job_id in (Interview.objects
+                                         .filter(cv_record__job_description_id__in={cv.job_description_id for cv in cv_records})
+                                         .exclude(status='CANCELLED')
+                                         .values_list('cv_record_id', 'candidate_email', 'cv_record__job_description_id')):
+            invited_records.add(record_id)
+            invited_people.add(((email or '').strip().lower(), job_id))
+        invited_records.update(Interview.objects.filter(cv_record_id__in=[cv.id for cv in cv_records])
+                               .values_list('cv_record_id', flat=True))
+
         records_list = []
         for cv in cv_records:
             parsed_data = json.loads(cv.parsed_json) if cv.parsed_json else {}
@@ -1814,6 +1767,11 @@ def list_cv_records(request):
                 'application_email': app.email if app else None,
                 'application_phone': app.phone if app else None,
                 'application_name': f'{app.first_name} {app.last_name}'.strip() if app else None,
+                # Has an interview (an invitation went out). False on an INTERVIEW decision
+                # means "approved, not invited yet": the AI no longer invites by itself.
+                'invited': (cv.id in invited_records or (
+                    ((app.email if app else (parsed_data.get('email') if isinstance(parsed_data, dict) else '')) or '')
+                    .strip().lower(), cv.job_description_id) in invited_people),
                 'parsed': parsed_data,
                 'insights': insights_data,
                 'enriched': enriched_data,
@@ -1878,17 +1836,11 @@ def _reject_recipient(cv_record):
     return None, 'Candidate'
 
 
-def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, log_service):
-    """
-    If this CV record has no existing interview and has candidate email,
-    schedule an interview and send invitation email. Returns ('sent', True), ('skipped', reason), or ('error', False).
-    Prefers real JobApplication data over AI-parsed CV text.
-    """
-    # Skip if interview already exists for this CV record
-    if Interview.objects.filter(cv_record=cv_record).exists():
-        return ('skipped', 'already_has_interview')
+def _candidate_contact(cv_record):
+    """(email, name, phone) to invite this candidate at, or (None, name, None) with a reason word.
 
-    # Prefer real JobApplication data (candidate filled the public form)
+    Prefers what the candidate typed on the public form over what was read out
+    of the CV. Returns (email, name, phone, why_not)."""
     _app = getattr(cv_record, 'job_application', None)
     if _app is None:
         # Try fetching the linked application in case select_related wasn't used
@@ -1899,19 +1851,54 @@ def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, 
             _app = None
 
     if _app:
-        candidate_email = _app.email
-        candidate_name  = f"{_app.first_name} {_app.last_name}".strip() or 'Candidate'
-        candidate_phone = _app.phone or None
-    else:
-        # Fallback to AI-parsed data for manually uploaded CVs
-        if not cv_record.parsed_json:
-            return ('skipped', 'no_parsed_json')
-        try:
-            parsed = json.loads(cv_record.parsed_json) if isinstance(cv_record.parsed_json, str) else cv_record.parsed_json
-        except (TypeError, ValueError):
-            return ('skipped', 'invalid_parsed_json')
-        candidate_email, candidate_name = _get_parsed_email_and_name(parsed)
-        candidate_phone = (parsed.get('phone') or '').strip() or None if isinstance(parsed, dict) else None
+        return _app.email, f"{_app.first_name} {_app.last_name}".strip() or 'Candidate', _app.phone or None, ''
+    # Fallback to AI-parsed data for manually uploaded CVs
+    if not cv_record.parsed_json:
+        return None, 'Candidate', None, 'no_parsed_json'
+    try:
+        parsed = json.loads(cv_record.parsed_json) if isinstance(cv_record.parsed_json, str) else cv_record.parsed_json
+    except (TypeError, ValueError):
+        return None, 'Candidate', None, 'invalid_parsed_json'
+    candidate_email, candidate_name = _get_parsed_email_and_name(parsed)
+    candidate_phone = (parsed.get('phone') or '').strip() or None if isinstance(parsed, dict) else None
+    return candidate_email, candidate_name, candidate_phone, '' if candidate_email else 'no_email'
+
+
+def _already_invited(cv_record, candidate_email=None):
+    """Has this person an interview for this job already?
+
+    By the record, and also by address and job: uploading the same CV a second
+    time makes a second record, and that used to send a second invitation with a
+    second working link. A cancelled interview does not count."""
+    if Interview.objects.filter(cv_record=cv_record).exists():
+        return True
+    email = (candidate_email or '').strip()
+    if not email or not cv_record.job_description_id:
+        return False
+    return (Interview.objects
+            .filter(candidate_email__iexact=email, cv_record__job_description_id=cv_record.job_description_id)
+            .exclude(status='CANCELLED').exists())
+
+
+def _ready_to_invite(cv_record):
+    """Approved for interview by whoever decided, reachable, and not invited yet."""
+    if cv_record is None or cv_record.qualification_decision != 'INTERVIEW':
+        return False
+    email = _candidate_contact(cv_record)[0]
+    return bool(email) and not _already_invited(cv_record, email)
+
+
+def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, log_service):
+    """
+    If this candidate has no interview for this job yet and has an email,
+    schedule an interview and send invitation email. Returns ('sent', True), ('skipped', reason), or ('error', False).
+    Prefers real JobApplication data over AI-parsed CV text.
+    """
+    candidate_email, candidate_name, candidate_phone, why_not = _candidate_contact(cv_record)
+    if _already_invited(cv_record, candidate_email):
+        return ('skipped', 'already_has_interview')
+    if why_not in ('no_parsed_json', 'invalid_parsed_json'):
+        return ('skipped', why_not)
 
     if not candidate_email:
         logger.info(f"Bulk INTERVIEW: CV record id={cv_record.id} skipped - no email available")

@@ -423,7 +423,10 @@ const CompanyDashboardPage = () => {
         } else {
           toast({
             title: `AI Analysis Complete`,
-            description: `Processed ${processed} of ${total} application(s).${skipped ? ` ${skipped} skipped.` : ''}`,
+            description: `Processed ${processed} of ${total} application(s).${skipped ? ` ${skipped} skipped.` : ''}`
+              + (response.ready_to_invite
+                ? ` ${response.ready_to_invite} approved for interview. Nobody has been emailed: invite them from Recruitment, Candidates.`
+                : ' Nobody has been emailed.'),
           });
           handleViewApplications(selectedJob.id);
         }

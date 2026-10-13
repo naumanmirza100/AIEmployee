@@ -369,7 +369,10 @@ const CVRecords = () => {
                               <h3 className="font-semibold text-sm truncate">{displayName}</h3>
                             </div>
                           </div>
-                          <div className="shrink-0">{getDecisionBadge(record.qualification_decision)}</div>
+                          <div className="shrink-0 flex flex-col items-end gap-1">
+                            {getDecisionBadge(record.qualification_decision)}
+                            <NotInvitedYet record={record} />
+                          </div>
                         </div>
                         <div className="space-y-1.5 text-xs text-muted-foreground">
                           {displayEmail && <div className="flex items-center gap-1.5"><Mail className="h-3 w-3 shrink-0" /><span className="truncate">{displayEmail}</span></div>}
@@ -427,7 +430,12 @@ const CVRecords = () => {
                         <TableCell>{displayName}</TableCell>
                         <TableCell className="text-muted-foreground">{displayEmail}</TableCell>
                         <TableCell className="max-w-[180px] truncate" title={record.job_description_title}>{record.job_description_title || '—'}</TableCell>
-                        <TableCell>{getDecisionBadge(record.qualification_decision)}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {getDecisionBadge(record.qualification_decision)}
+                            <NotInvitedYet record={record} />
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right">{record.qualification_confidence != null ? `${record.qualification_confidence}%` : '—'}</TableCell>
                         <TableCell className="text-muted-foreground text-xs">{record.created_at ? new Date(record.created_at).toLocaleDateString() : '—'}</TableCell>
                       </TableRow>
@@ -476,6 +484,19 @@ const CVRecords = () => {
     </div>
   );
 };
+
+/** Approved for interview but no invitation has gone: screening records the AI's
+ *  decision and emails nobody, so somebody has to press Interview for them. */
+function NotInvitedYet({ record }) {
+  if (record.qualification_decision !== 'INTERVIEW' || record.invited !== false) return null;
+  return (
+    <Badge variant="outline" data-testid="REC-cvrecords-not-invited"
+      title="Select this candidate and choose Interview to send the invitation"
+      className="text-[10px] border-amber-400/60 text-amber-600 dark:text-amber-300 whitespace-nowrap">
+      Not invited yet
+    </Badge>
+  );
+}
 
 /** What each bulk decision does to the candidates — said before it happens,
  *  because two of the three email them (api/views/recruitment_agent.py,
