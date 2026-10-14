@@ -61,6 +61,13 @@ mv "$TMP" "$OUT"
 find "$DEST" -name 'ppp-*.sql.gz' -mtime +"$KEEP_DAYS" -delete
 echo "$(date -Is) local ok $(du -h "$OUT" | cut -f1) $OUT"
 
+# A backup taken just before a deploy applies database changes (scripts/deploy.sh)
+# is wanted on this machine and at once. It must not fail, and hold the release up,
+# because the off-site store is slow or unreachable; tonight's run sends one there.
+if [ "${LOCAL_ONLY:-}" = "1" ]; then
+  exit 0
+fi
+
 # ---- 2. encrypt and ship off-site -----------------------------------------
 if [ -z "$B2_KEY_ID" ] || [ -z "$B2_APP_KEY" ] || [ -z "$B2_BUCKET" ] || [ -z "$BACKUP_GPG_PASSPHRASE" ]; then
   echo "$(date -Is) WARN: off-site upload skipped (B2_KEY_ID/B2_APP_KEY/B2_BUCKET/BACKUP_GPG_PASSPHRASE not all set in .env)" >&2
