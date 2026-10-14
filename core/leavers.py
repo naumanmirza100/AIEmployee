@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 PARTS = (
     'ai_sdr_agent.leavers',
     'marketing_agent.leavers',
+    'reply_draft_agent.leavers',
 )
 
 ADMIN_ROLES = ('owner', 'admin')
