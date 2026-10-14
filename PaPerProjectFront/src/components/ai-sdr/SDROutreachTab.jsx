@@ -16,6 +16,7 @@ import {
   getCampaignContacts, enrollLeads, updateCampaignStep, listLeads,
   clearCampaignLeads,
 } from '@/services/aiSdrService';
+import SDRReplyDrafts from './SDRReplyDrafts';
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -56,6 +57,7 @@ const BLANK_CAMPAIGN = {
   smtp_username: '', smtp_password: '', smtp_use_tls: true,
   start_date: '', calendar_link: '',
   auto_check_replies: true,
+  review_ai_replies: true,
   generate_steps: true,
 };
 
@@ -898,6 +900,13 @@ const SDROutreachTab = () => {
                       Auto-check inbox for replies every 5 min (recommended)
                     </label>
                   </div>
+                  <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <input type="checkbox" id="review_replies" checked={!!newCampaign.review_ai_replies} style={{ marginTop: 3 }}
+                      onChange={e => setNewCampaign(p => ({ ...p, review_ai_replies: e.target.checked }))} />
+                    <label htmlFor="review_replies" style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>
+                      Check the AI's answers before they are sent (recommended). When a lead asks for more, the answer waits on the campaign for you to read and send.
+                    </label>
+                  </div>
                 </div>
                 <p style={{ color: '#6b7280', fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
                   Sequence runs Day 1 (email) → Day 3 (LinkedIn) → Day 5 (follow-up) → Day 10 (last touch).
@@ -1143,7 +1152,10 @@ const SDROutreachTab = () => {
             : selectedCampaign.status === 'scheduled'
             ? <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Scheduled</b> — campaign will auto-start on {selectedCampaign.start_date}.</>
             : selectedCampaign.status === 'paused'
-            ? <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Paused</b> — campaign is paused. Resume to continue sending.</>
+            ? (selectedCampaign.paused_reason
+              // Paused by the product itself, with the reason it gave (e.g. what the mailbox answered).
+              ? <span data-testid="sdr-paused-reason"><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>{selectedCampaign.paused_reason}</b> Nothing was sent to the lead it was trying and no lead was marked as bounced. Fix it in Settings, then Resume.</span>
+              : <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Paused</b> — campaign is paused. Resume to continue sending.</>)
             : selectedCampaign.status === 'completed'
             ? <><b style={{ color: '#6b7280' }}>Campaign Completed</b> — all leads have been processed. Enroll new leads to restart.</>
             : <><b style={{ color: '#6b7280' }}>Draft</b> — campaign has not started yet.</>}
@@ -1162,6 +1174,10 @@ const SDROutreachTab = () => {
           Using custom SMTP: <b style={{ marginLeft: 4 }}>{selectedCampaign.smtp_host}</b>
         </div>
       )} */}
+
+      {/* Answers the AI wrote to leads who asked for more, waiting to be checked */}
+      <SDRReplyDrafts campaignId={selectedCampaign.id} waiting={selectedCampaign.answers_waiting || 0}
+        onChanged={() => loadDetail(selectedCampaign)} />
 
       {/* Main content: steps + enrollments */}
       <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, alignItems: 'flex-start' }}>
@@ -1556,6 +1572,13 @@ const SDROutreachTab = () => {
                       onChange={e => setSettingsDraft(p => ({ ...p, auto_check_replies: e.target.checked }))} />
                     <label htmlFor="s_auto_replies" style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>
                       Auto-check inbox for replies every 5 min
+                    </label>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <input type="checkbox" id="s_review_replies" checked={!!settingsDraft.review_ai_replies} style={{ marginTop: 3 }}
+                      onChange={e => setSettingsDraft(p => ({ ...p, review_ai_replies: e.target.checked }))} />
+                    <label htmlFor="s_review_replies" style={{ color: 'hsl(var(--pt-9ca3af))', fontSize: 13 }}>
+                      Check the AI's answers before they are sent. When a lead asks for more, the answer waits on this campaign for you to read and send. Off: the AI's answer is emailed to the lead straight away. A lead who asks to stop is always stopped at once.
                     </label>
                   </div>
                 </div>

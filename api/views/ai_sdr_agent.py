@@ -27,7 +27,7 @@ from api.permissions import IsCompanyUserOnly
 from ai_sdr_agent.models import (
     SDRIcpProfile, SDRLead, SDRLeadResearchJob,
     SDRCampaign, SDRCampaignStep, SDRCampaignEnrollment, SDROutreachLog, SDRMeeting,
-    SDRAgentSettings,
+    SDRAgentSettings, SDRReplyDraft,
 )
 from ai_sdr_agent.agents.lead_research_agent import (
     ApifyApprovalRequired, LeadResearchAgent, apify_actor_page_url,
@@ -1226,6 +1226,7 @@ def _serialize_campaign(c: SDRCampaign) -> dict:
         'name': c.name,
         'description': c.description,
         'status': c.status,
+        'paused_reason': c.paused_reason if c.status == 'paused' else '',
         'sender_name': c.sender_name,
         'sender_title': c.sender_title,
         'sender_company': c.sender_company,
@@ -1241,6 +1242,8 @@ def _serialize_campaign(c: SDRCampaign) -> dict:
         'start_date': c.start_date if isinstance(c.start_date, str) else (c.start_date.isoformat() if c.start_date else None),
         'end_date': c.end_date if isinstance(c.end_date, str) else (c.end_date.isoformat() if c.end_date else None),
         'auto_check_replies': c.auto_check_replies,
+        'review_ai_replies': c.review_ai_replies,
+        'answers_waiting': SDRReplyDraft.objects.filter(enrollment__campaign=c, status='pending').count(),
         'last_replies_checked_at': c.last_replies_checked_at.isoformat() if c.last_replies_checked_at else None,
         'activated_at': c.activated_at.isoformat() if c.activated_at else None,
         'total_leads': c.total_leads,
@@ -1402,6 +1405,7 @@ def sdr_campaigns_list(request):
             calendar_link=d.get('calendar_link', ''),
             start_date=start_date,
             auto_check_replies=bool(d.get('auto_check_replies', True)),
+            review_ai_replies=bool(d.get('review_ai_replies', True)),
             status=initial_status,
         )
 
@@ -1484,11 +1488,15 @@ def sdr_campaign_detail(request, campaign_id):
                         return Response({'status': 'error', 'message': 'Add SMTP settings before activating the campaign.'}, status=400)
                     if not campaign.steps.filter(is_active=True).exists():
                         return Response({'status': 'error', 'message': 'Add at least one step before activating the campaign.'}, status=400)
+            status_before = campaign.status
             for field in ['name', 'description', 'status', 'sender_name', 'sender_title',
                           'sender_company', 'postal_address', 'from_email', 'smtp_host', 'smtp_username',
-                          'smtp_use_tls', 'imap_host', 'calendar_link', 'auto_check_replies']:
+                          'smtp_use_tls', 'imap_host', 'calendar_link', 'auto_check_replies',
+                          'review_ai_replies']:
                 if field in d:
                     setattr(campaign, field, d[field])
+            if campaign.status != status_before:
+                campaign.paused_reason = ''        # a person changed it: the product's own reason is history
             if 'smtp_port' in d:
                 campaign.smtp_port = int(d['smtp_port'])
             if 'imap_port' in d:
@@ -1552,6 +1560,70 @@ def sdr_clear_campaign_leads(request, campaign_id):
     except Exception as exc:
         logger.error("SDR clear leads error: %s", exc)
         return Response({'status': 'error', 'message': str(exc)}, status=500)
+
+
+# ==========================================================================
+# Answers the AI wrote to leads' replies, waiting for a person to check them
+# (ai_sdr_agent/reply_answers.py)
+# ==========================================================================
+
+def _serialize_reply_draft(draft: SDRReplyDraft) -> dict:
+    lead = draft.enrollment.lead
+    return {
+        'id': draft.id,
+        'campaign_id': draft.enrollment.campaign_id,
+        'enrollment_id': draft.enrollment_id,
+        'lead_name': lead.display_name,
+        'lead_email': lead.email,
+        'lead_reply': draft.lead_reply,
+        'subject': draft.subject,
+        'body': draft.body,
+        'status': draft.status,
+        'error': draft.error,
+        'created_at': draft.created_at.isoformat(),
+    }
+
+
+def _own_reply_draft(company_user, draft_id):
+    return (SDRReplyDraft.objects.select_related('enrollment__lead', 'enrollment__campaign__company_user')
+            .filter(id=draft_id, enrollment__campaign__company_user=company_user).first())
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_reply_drafts(request, campaign_id):
+    """The answers waiting to be checked in one of the caller's campaigns."""
+    company_user = request.user
+    if not SDRCampaign.objects.filter(id=campaign_id, company_user=company_user).exists():
+        return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+    drafts = (SDRReplyDraft.objects.select_related('enrollment__lead')
+              .filter(enrollment__campaign_id=campaign_id, status='pending').order_by('created_at'))
+    return Response({'status': 'success', 'data': [_serialize_reply_draft(d) for d in drafts]})
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def sdr_reply_draft_decide(request, draft_id, decision):
+    """Send a waiting answer (as written, or with the subject and text sent here), or discard it."""
+    from ai_sdr_agent import reply_answers
+
+    company_user = request.user
+    draft = _own_reply_draft(company_user, draft_id)
+    if draft is None:
+        return Response({'status': 'error', 'message': 'Answer not found.'}, status=404)
+    try:
+        if decision == 'send':
+            d = request.data if isinstance(request.data, dict) else {}
+            draft = reply_answers.send_draft(
+                draft, company_user, outreach_agent=_get_outreach_agent(company_user.company),
+                subject=d.get('subject'), body=d.get('body'))
+        else:
+            draft = reply_answers.discard_draft(draft, company_user)
+    except reply_answers.NotSendable as refused:
+        return Response({'status': 'error', 'message': str(refused)}, status=400)
+    return Response({'status': 'success', 'data': _serialize_reply_draft(draft)})
 
 
 # ==========================================================================
@@ -1901,24 +1973,25 @@ def _apply_reply_action(company_user, campaign, enrollment, lead, classification
         campaign.replies_received = (campaign.replies_received or 0) + 1
         campaign.save(update_fields=['replies_received'])
 
-        info_sent = False
+        info_sent = held = False
         try:
             from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
-            email_agent = EmailAssistantAgent(company=company_user.company)
-            email_data = email_agent.generate_more_info_email(lead, campaign, reply_text)
-            _get_outreach_agent(company_user.company).send_email(
-                campaign, lead.email,
-                email_data['subject'], email_data['body'],
-            )
-            info_sent = True
-            logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
+            from ai_sdr_agent.reply_answers import answer_wanting_more
+            # Sent, or held for the owner to check when the campaign asks for that.
+            answered = answer_wanting_more(
+                campaign, enrollment, lead, reply_text,
+                email_agent=EmailAssistantAgent(company=company_user.company),
+                outreach_agent=_get_outreach_agent(company_user.company))
+            info_sent, held = answered['sent'], answered['held']
+            if info_sent:
+                logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
         except KeyServiceError:
             raise
         except Exception as exc:
             logger.warning('SDR [MORE-INFO] email failed for lead=%s: %s', lead.id, exc)
 
-        return {'action': 'sent_more_info', 'meeting_created': False,
-                'category': category, 'info_email_sent': info_sent}
+        return {'action': 'answer_waiting' if held else 'sent_more_info', 'meeting_created': False,
+                'category': category, 'info_email_sent': info_sent, 'answer_held': held}
 
     # ── Positive → Book Meeting ───────────────────────────────────────────
     if action == 'book_meeting':

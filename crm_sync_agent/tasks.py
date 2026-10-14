@@ -14,6 +14,9 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+#: How long an entry may sit at 'processing' before it is taken to be abandoned.
+STUCK_AFTER_MINUTES = 10
+
 
 @shared_task(bind=True, name='crm_sync_agent.tasks.process_crm_sync_queue', max_retries=0)
 def process_crm_sync_queue(self, company_id: int | None = None):
@@ -78,9 +81,19 @@ def retry_failed_crm_syncs():
     so that the next process_crm_sync_queue run picks them up.
     This handles items that were failed but whose back-off window has now expired.
     """
+    from datetime import timedelta
     from crm_sync_agent.models import CRMSyncQueue
 
     now = timezone.now()
+    # An entry is marked 'processing' before the CRM is called. If the process
+    # stopped at that moment nothing ever looked at it again, and because an email
+    # or meeting 'being sent' counts as sent, it could never be queued again
+    # either. Ten minutes is far longer than any call to a CRM takes.
+    stuck = CRMSyncQueue.objects.filter(
+        status=CRMSyncQueue.STATUS_PROCESSING, last_attempted_at__lt=now - timedelta(minutes=STUCK_AFTER_MINUTES),
+    ).update(status=CRMSyncQueue.STATUS_PENDING, scheduled_at=now)
+    if stuck:
+        logger.warning('CRM sync: %d item(s) left at "processing" put back in the queue', stuck)
     # Items that failed, haven't maxed out retries, and are past their scheduled_at
     ready = CRMSyncQueue.objects.filter(
         status=CRMSyncQueue.STATUS_FAILED,
@@ -136,8 +149,8 @@ def ping_crm_integrations():
 def queue_everything(agent, company) -> dict:
     """Queue all of a company's AI SDR leads, sent emails and timed meetings
     for its CRM. Used by "Sync All Leads", from the queue and directly.
-    Safe to repeat: contacts are upserted, and a meeting or email already in
-    the CRM is not sent twice."""
+    Safe to repeat: a contact the CRM already has only has its empty fields
+    filled, and a meeting or email already in the CRM is not sent twice."""
     from ai_sdr_agent.models import SDRLead, SDRMeeting, SDROutreachLog
 
     counts = {'leads': 0, 'emails': 0, 'meetings': 0}

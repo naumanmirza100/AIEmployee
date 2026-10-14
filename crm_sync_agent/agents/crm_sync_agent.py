@@ -97,8 +97,18 @@ class CRMSyncAgent:
             'lead_first_name': lead.first_name or '',
             'lead_last_name': lead.last_name or '',
         }
+        # Once per email and per CRM. "Sync All Leads" comes back here for every
+        # email ever sent; one that has gone to the CRM (or is going now) used to
+        # be queued and logged there again on each press, because only entries
+        # still waiting were looked for. One still waiting is brought up to date
+        # by `_enqueue` instead, as for meetings.
+        sent = set(CRMSyncQueue.objects.filter(
+            object_type=CRMSyncQueue.TYPE_EMAIL, source_type=CRMSyncQueue.SOURCE_SDR_EMAIL,
+            source_id=outreach_log.pk,
+        ).exclude(status__in=[CRMSyncQueue.STATUS_PENDING, CRMSyncQueue.STATUS_FAILED])
+            .values_list('integration_id', flat=True))
         for integration in self._integrations:
-            if not integration.sync_emails:
+            if not integration.sync_emails or integration.id in sent:
                 continue
             self._enqueue(
                 integration=integration,
@@ -412,21 +422,26 @@ class CRMSyncAgent:
         props: dict,
     ) -> Optional[str]:
         """
-        Look up the CRM contact ID from the mapping table.
-        If not found, attempt a just-in-time upsert and persist the mapping.
+        The CRM contact an email, meeting or note is to be filed under.
+
+        From the saved link when there is one. Otherwise the contact is looked
+        up in the CRM and, only if it is not there, created from the lead's own
+        details. An existing contact is never changed from here: `props` is the
+        email's, meeting's or note's own payload and holds no names, and passing
+        it to an upsert is what renamed people to the first half of their email
+        address. With 'Contacts' switched off for the CRM nothing is created.
         Works for leads with email OR linkedin_url (Apify leads often have no email).
         """
         from ai_sdr_agent.models import SDRLead
 
-        # Try mapping table first (fast path — no API call)
+        lead = None
         try:
-            lead = None
             if email:
-                lead = SDRLead.objects.filter(
+                lead = SDRLead.all_objects.filter(
                     company_user__company=self.company, email__iexact=email
                 ).first()
             if not lead and props.get('linkedin_url'):
-                lead = SDRLead.objects.filter(
+                lead = SDRLead.all_objects.filter(
                     company_user__company=self.company,
                     linkedin_url=props['linkedin_url'],
                 ).first()
@@ -437,31 +452,23 @@ class CRMSyncAgent:
                     source_id=lead.pk,
                 ).first()
                 if mapping:
-                    return mapping.crm_contact_id
+                    return mapping.crm_contact_id          # fast path: no API call
         except Exception:
-            pass
+            lead = None
 
-        # Fall back: upsert in CRM (handles email or linkedin_url as identifier)
-        crm_id = connector.upsert_contact(email, props)
-        if crm_id:
+        # Without the lead there are no real details to make a contact from.
+        may_create = bool(integration.sync_contacts and lead is not None)
+        details = self._lead_to_contact_payload(lead) if lead is not None else {
+            'email': email, 'linkedin_url': props.get('linkedin_url', '')}
+        crm_id = connector.find_or_create_contact(email, details, create=may_create)
+        if crm_id and lead is not None:
             try:
-                lead = None
-                if email:
-                    lead = SDRLead.objects.filter(
-                        company_user__company=self.company, email__iexact=email
-                    ).first()
-                if not lead and props.get('linkedin_url'):
-                    lead = SDRLead.objects.filter(
-                        company_user__company=self.company,
-                        linkedin_url=props['linkedin_url'],
-                    ).first()
-                if lead:
-                    CRMContactMapping.objects.update_or_create(
-                        integration=integration,
-                        source_type=source_type,
-                        source_id=lead.pk,
-                        defaults={'crm_contact_id': crm_id, 'company': self.company},
-                    )
+                CRMContactMapping.objects.update_or_create(
+                    integration=integration,
+                    source_type=source_type,
+                    source_id=lead.pk,
+                    defaults={'crm_contact_id': crm_id, 'company': self.company},
+                )
             except Exception:
                 pass
         return crm_id

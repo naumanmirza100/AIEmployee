@@ -220,6 +220,10 @@ class SDRCampaign(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    # Why the product itself paused this campaign (its mailbox refused to send, or
+    # its owner's login was switched off). Shown on the campaign; cleared when it
+    # is switched back on. Blank when a person paused it.
+    paused_reason = models.CharField(max_length=500, blank=True, default='')
 
     # Sender identity (used for email personalisation)
     sender_name = models.CharField(max_length=255, blank=True)
@@ -248,6 +252,11 @@ class SDRCampaign(models.Model):
     start_date = models.DateField(null=True, blank=True)        # auto-activates when reached
     end_date = models.DateField(null=True, blank=True)          # informational; auto-derived
     auto_check_replies = models.BooleanField(default=True)       # poll IMAP every 5 min
+    # A lead who writes back asking for more gets an answer written by the AI. On:
+    # the answer waits as a draft for the campaign's owner to read and send
+    # (ai_sdr_agent/reply_answers.py). Off: it is sent at once, as it always was.
+    # On for new campaigns; campaigns that existed before the switch keep sending.
+    review_ai_replies = models.BooleanField(default=True)
     last_replies_checked_at = models.DateTimeField(null=True, blank=True)
     activated_at = models.DateTimeField(null=True, blank=True)
 
@@ -402,6 +411,39 @@ def remember_who_the_unsubscribe_link_was_for(sender, instance, **kwargs):
     except Exception:
         logging.getLogger(__name__).warning(
             'Could not keep the unsubscribe details of enrolment %s', instance.pk, exc_info=True)
+
+
+class SDRReplyDraft(models.Model):
+    """An answer the AI wrote to a lead's reply, kept for a person to check.
+
+    Made when the campaign has 'Check the AI's answers before they are sent' on.
+    'sending' is held only for the moment the email is going out, so that two
+    people pressing Send together send one email."""
+
+    STATUS_CHOICES = [
+        ('pending', 'Waiting to be checked'),
+        ('sending', 'Being sent'),
+        ('sent', 'Sent'),
+        ('discarded', 'Discarded'),
+    ]
+
+    enrollment = models.ForeignKey(SDRCampaignEnrollment, on_delete=models.CASCADE, related_name='reply_drafts')
+    lead_reply = models.TextField(blank=True)          # what the lead wrote
+    subject = models.CharField(max_length=500, blank=True)
+    body = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    error = models.CharField(max_length=500, blank=True, default='')
+    created_at = models.DateTimeField(default=timezone.now)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='+')
+
+    class Meta:
+        db_table = 'sdr_reply_draft'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Answer to enrolment {self.enrollment_id} ({self.status})"
 
 
 class SDROutreachLog(models.Model):

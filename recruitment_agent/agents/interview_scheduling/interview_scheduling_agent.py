@@ -1084,6 +1084,17 @@ class InterviewSchedulingAgent:
             "email_sent": email_sent,
         }
 
+    @staticmethod
+    def _who_runs(interview):
+        """(address, name) of the person who runs this interview, or (None, 'Recruiter')."""
+        login = interview.company_user if interview.company_user_id else None
+        if login is not None and login.is_active and (login.email or '').strip():
+            return login.email.strip(), (login.full_name or '').strip() or 'Recruiter'
+        old = interview.recruiter if interview.recruiter_id else None
+        if old is not None and (old.email or '').strip():
+            return old.email.strip(), old.get_full_name() or old.username
+        return None, 'Recruiter'
+
     def send_confirmation_email(self, interview: Interview) -> bool:
         """
         Send confirmation email to candidate and recruiter.
@@ -1178,22 +1189,14 @@ class InterviewSchedulingAgent:
             # Recruiter notification (if recruiter email available)
             recruiter_email_sent = False
             
-            # Get recruiter email: try user email first, then env variable
-            recruiter_email = None
-            recruiter_name = "Recruiter"
-            
-            if interview.recruiter and interview.recruiter.email:
-                recruiter_email = interview.recruiter.email
-                recruiter_name = interview.recruiter.get_full_name() or interview.recruiter.username
-            else:
-                # Fallback to environment variable
-                recruiter_email = getattr(settings, 'RECRUITER_EMAIL', '')
-                if recruiter_email:
-                    if interview.recruiter:
-                        recruiter_name = interview.recruiter.get_full_name() or interview.recruiter.username
-                    else:
-                        recruiter_name = "Recruiter"
-                    print(f"✓ Using recruiter email from environment variable")
+            # Who runs this interview: the dashboard login that invited the
+            # candidate or was handed the interview, the same person who gets the
+            # bell alert. Rows from before interviews belonged to a dashboard login
+            # carry an employee-login recruiter instead. There is no other address:
+            # this used to fall back to one RECRUITER_EMAIL mailbox set on the
+            # server, so every company's candidate names, emails and meeting links
+            # went to that one inbox and the recruiter was never emailed.
+            recruiter_email, recruiter_name = self._who_runs(interview)
 
             # The recruiter can turn this email off ("A candidate books an
             # interview", core.notification_settings); the bell alert stays.
@@ -1258,9 +1261,8 @@ class InterviewSchedulingAgent:
                     print(f"❌ ERROR: Recruiter email failed: {send_error}")
                     raise
             else:
-                print(f"\n⚠️  No recruiter email configured (skipping recruiter notification)")
-                print(f"   Tip: Set RECRUITER_EMAIL in .env file or add email to user account")
-            
+                print(f"\n⚠️  No recruiter to email, or they turned this email off (skipping recruiter notification)")
+
             interview.confirmation_sent_at = timezone.now()
             interview.save(update_fields=['confirmation_sent_at'])
             

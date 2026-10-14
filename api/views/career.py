@@ -4,20 +4,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
 from django.utils import timezone
-import secrets
-import string
 
 from recruitment_agent.models import JobDescription, CareerApplication
 from api.serializers.career import JobDescriptionSerializer, CareerApplicationSerializer
 from api.permissions import IsAdmin
-
-
-def generate_application_token():
-    """Generate a unique application token"""
-    return ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(64))
 
 
 @api_view(['GET'])
@@ -104,101 +95,6 @@ def list_job_positions(request):
         return Response({
             'status': 'error',
             'message': 'Failed to fetch job positions',
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def submit_career_application(request):
-    """Submit career application with optional resume file upload"""
-    try:
-        data = request.data.copy()
-        
-        # Handle file upload if present
-        resume_path = None
-        if 'file' in request.FILES or 'resume' in request.FILES:
-            uploaded_file = request.FILES.get('file') or request.FILES.get('resume')
-            import re as _re
-            safe_name = _re.sub(r'[^A-Za-z0-9._-]+', '_', uploaded_file.name)
-            # Resolve position before building path (position fetched below, so pre-fetch here)
-            _pre_position_id = data.get('positionId') or data.get('position_id')
-            if _pre_position_id:
-                try:
-                    from recruitment_agent.models import JobDescription as _JD
-                    _pre_pos = _JD.objects.values('id', 'company_id').get(id=_pre_position_id)
-                    file_path = f"cvs/{_pre_pos['company_id'] or 'unknown'}/{_pre_pos['id']}/{safe_name}"
-                except Exception:
-                    file_path = f'cvs/general/{safe_name}'
-            else:
-                file_path = f'cvs/general/{safe_name}'
-            saved_path = default_storage.save(file_path, ContentFile(uploaded_file.read()))
-            resume_path = saved_path
-        
-        # Map field names (handle both camelCase and snake_case)
-        position_id = data.get('positionId') or data.get('position_id')
-        position_title = data.get('positionTitle') or data.get('position_title')
-        applicant_name = data.get('applicantName') or data.get('applicant_name') or data.get('name')
-        email = data.get('email')
-        phone = data.get('phone')
-        cover_letter = data.get('coverLetter') or data.get('cover_letter') or data.get('message')
-        
-        if not email:
-            return Response({
-                'status': 'error',
-                'message': 'Email is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get position if provided and determine position title
-        position = None
-        final_position_title = (position_title or '').strip() or 'General Application'
-        
-        if position_id:
-            try:
-                position = JobDescription.objects.get(id=position_id)
-                final_position_title = position.title
-            except JobDescription.DoesNotExist:
-                return Response({
-                    'status': 'error',
-                    'message': 'Invalid position ID'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Generate application token
-        application_token = generate_application_token()
-        
-        # Get company if position is provided
-        company = position.company if position else None
-        
-        # Create application
-        application = CareerApplication.objects.create(
-            position=position,
-            position_title=final_position_title,
-            applicant_name=applicant_name,
-            email=email,
-            phone=phone,
-            cover_letter=cover_letter,
-            resume_path=resume_path,
-            company=company,
-            application_token=application_token,
-            status='pending'
-        )
-        
-        serializer = CareerApplicationSerializer(application)
-        
-        return Response({
-            'status': 'success',
-            'message': 'Application submitted successfully',
-            'data': {
-                **serializer.data,
-                'resumePath': resume_path,
-                'statusCheckLink': f'/api/applicant/status?token={application_token}'
-            }
-        }, status=status.HTTP_201_CREATED)
-    
-    except Exception as e:
-        return Response({
-            'status': 'error',
-            'message': 'Failed to submit application',
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

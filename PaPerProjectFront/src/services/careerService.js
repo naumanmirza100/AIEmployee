@@ -29,37 +29,6 @@ export const getPositions = async (params = {}) => {
 };
 
 /**
- * Submit career application (supports file upload)
- */
-export const submitApplication = async (applicationData, resumeFile = null) => {
-  try {
-    // Always use FormData to support file uploads
-    const formDataToSend = new FormData();
-    
-    // Add text fields - positionTitle is required
-    formDataToSend.append('positionTitle', applicationData.positionTitle || '');
-    if (applicationData.positionId) formDataToSend.append('positionId', applicationData.positionId.toString());
-    if (applicationData.applicantName) formDataToSend.append('applicantName', applicationData.applicantName);
-    if (applicationData.name) formDataToSend.append('name', applicationData.name);
-    formDataToSend.append('email', applicationData.email || '');
-    if (applicationData.phone) formDataToSend.append('phone', applicationData.phone);
-    if (applicationData.coverLetter) formDataToSend.append('coverLetter', applicationData.coverLetter);
-    if (applicationData.message) formDataToSend.append('message', applicationData.message);
-    
-    // Add resume file if provided
-    if (resumeFile) {
-      formDataToSend.append('resume', resumeFile);
-    }
-    
-    const response = await api.upload('/careers/applications', formDataToSend);
-    return response;
-  } catch (error) {
-    console.error('Submit application error:', error);
-    throw error;
-  }
-};
-
-/**
  * Get all career applications (Admin only)
  */
 export const getAllApplications = async (params = {}) => {
@@ -109,7 +78,6 @@ export const updateApplicationStatus = async (id, status) => {
 
 export default {
   getPositions,
-  submitApplication,
   getAllApplications,
   getApplicationById,
   updateApplicationStatus,

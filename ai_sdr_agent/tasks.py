@@ -195,6 +195,12 @@ def send_due_steps_impl():
                     "SDR [send-due-steps] enrollment=%d lead=%s email=%s → status=%s",
                     enrollment.id, lead_name, lead_email, status,
                 )
+                if status == 'mailbox_refused':
+                    # The campaign's own mailbox will not send and has been paused
+                    # (OutreachAgent.process_enrollment). The next lead would get
+                    # the same answer, so this campaign's run ends here.
+                    total_failed += 1
+                    break
                 if status == 'sent':
                     total_sent += 1
                     campaign_sent += 1
@@ -368,9 +374,12 @@ def check_inbox_replies_impl():
                     campaign.replies_received = (campaign.replies_received or 0) + 1
                     total_replies += 1
                     try:
-                        info_email = email_agent.generate_more_info_email(lead, campaign, reply_text)
-                        agent.send_email(campaign, lead.email, info_email['subject'], info_email['body'])
-                        logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
+                        # Sent, or held for the owner to check when the campaign asks for that.
+                        from ai_sdr_agent.reply_answers import answer_wanting_more
+                        answered = answer_wanting_more(campaign, enrollment, lead, reply_text,
+                                                       email_agent=email_agent, outreach_agent=agent)
+                        if answered['sent']:
+                            logger.info('SDR [MORE-INFO] sent follow-up to %s', lead.email)
                     except Exception as exc:
                         logger.warning('SDR [MORE-INFO] email failed for %s: %s', lead.email, exc)
 

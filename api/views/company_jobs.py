@@ -17,7 +17,7 @@ from api.serializers.career import JobDescriptionSerializer, CareerApplicationSe
 from api.permissions import IsCompanyUser, IsCompanyUserOnly
 from api.authentication import CompanyUserTokenAuthentication
 from core.models import CompanyUser, Company, CompanyModulePurchase
-from api.views.recruitment_agent import _make_agents
+from api.views.recruitment_agent import _make_agents, _ready_to_invite
 from recruitment_agent import sharing
 
 
@@ -304,8 +304,8 @@ def process_job_applicants(request, jobId):
     """Run AI pipeline on all unprocessed JobApplications for a job.
 
     Fetches every JobApplication where cv_record is null, downloads the CV
-    file, runs parse → summarize → enrich → qualify, creates a linked CVRecord,
-    and auto-schedules interviews for INTERVIEW decisions.
+    file, runs parse → summarize → enrich → qualify and creates a linked CVRecord
+    with the AI's decision. It invites nobody: that is a person's step.
     """
     try:
         company_user = request.user
@@ -365,7 +365,6 @@ def process_job_applicants(request, jobId):
         sum_agent = agents['sum_agent']
         enrich_agent = agents['enrich_agent']
         qualify_agent = agents['qualify_agent']
-        interview_agent = agents.get('interview_agent')
         django_repo = agents['django_repo']
 
         # Build keyword list from job
@@ -383,12 +382,6 @@ def process_job_applicants(request, jobId):
         # The job owner's screening thresholds
         settings_owner = sharing.owner(job, company_user)
         interview_threshold, hold_threshold = sharing.thresholds(settings_owner)
-
-        # Email / interview defaults
-        auto_interview_type = 'ONLINE'
-        if interview_settings and getattr(interview_settings, 'default_interview_type', None):
-            auto_interview_type = interview_settings.default_interview_type
-        email_settings = sharing.email_settings(settings_owner)
 
         results = []
         for idx, app in enumerate(unprocessed):
@@ -457,28 +450,11 @@ def process_job_applicants(request, jobId):
                     except CVRecord.DoesNotExist:
                         pass
 
+                # The AI's decision is recorded; nobody is emailed. This used to send an
+                # interview invitation to every applicant it marked INTERVIEW. Inviting is
+                # a person's step now, from Candidates, with its confirmation.
                 interview_scheduled = False
                 qual_decision = qualified.get('decision', '') if isinstance(qualified, dict) else ''
-                if qual_decision == 'INTERVIEW' and interview_agent and app.email:
-                    candidate_name = f'{app.first_name} {app.last_name}'.strip() or 'Candidate'
-                    import re
-                    job_role = re.sub(r'[\r\n\t\s]+', ' ', (job_description_text.split('\n')[0][:100])).strip() if job_description_text else job.title
-                    try:
-                        interview_result = interview_agent.schedule_interview(
-                            candidate_name=candidate_name,
-                            candidate_email=app.email,
-                            job_role=job_role,
-                            interview_type=auto_interview_type,
-                            candidate_phone=app.phone,
-                            cv_record_id=record_id,
-                            recruiter_id=None,
-                            company_user_id=company_user.id,
-                            email_settings=email_settings,
-                            custom_slots=None,
-                        )
-                        interview_scheduled = interview_result.get('invitation_sent', False)
-                    except Exception as ie:
-                        logger.error(f'Interview scheduling failed for {app.email}: {ie}')
 
                 results.append({
                     'application_id': app.id,
@@ -487,6 +463,8 @@ def process_job_applicants(request, jobId):
                     'decision': qual_decision,
                     'role_fit_score': summary.get('role_fit_score') if isinstance(summary, dict) else None,
                     'interview_scheduled': interview_scheduled,
+                    'ready_to_invite': bool(record_id) and _ready_to_invite(
+                        CVRecord.objects.select_related('job_application', 'job_description').filter(id=record_id).first()),
                     'skipped': False,
                 })
 
@@ -525,6 +503,10 @@ def process_job_applicants(request, jobId):
             message = f'Processed {processed_count} of {len(unprocessed)} application(s).'
             if skipped_count:
                 message += f' {skipped_count} skipped.'
+        ready_to_invite = sum(1 for r in results if r.get('ready_to_invite'))
+        if ready_to_invite:
+            message += (f' {ready_to_invite} approved for interview and not invited yet: '
+                        'invite them from Recruitment, Candidates.')
 
         return Response({
             'status': 'success',
@@ -533,6 +515,8 @@ def process_job_applicants(request, jobId):
             'skipped': skipped_count,
             'skip_reasons': skip_reasons,
             'total': len(unprocessed),
+            'ready_to_invite': ready_to_invite,
+            'invitations_sent': 0,
             'results': results,
         }, status=status.HTTP_200_OK)
 

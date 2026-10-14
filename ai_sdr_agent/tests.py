@@ -81,7 +81,9 @@ class OutreachSendTests(SDRBase):
         server = mock.MagicMock()
         server.__enter__.return_value = server
         for code, exc_cls in ((550, oa.PermanentSendError), (535, ValueError)):
-            server.sendmail.side_effect = smtplib.SMTPResponseException(code, b'x')
+            # 550 as the answer to naming the recipient; 535 as the answer to the login.
+            server.sendmail.side_effect = (smtplib.SMTPRecipientsRefused({'to@x.com': (550, b'x')}) if code == 550
+                                           else smtplib.SMTPAuthenticationError(535, b'x'))
             with mock.patch('smtplib.SMTP', return_value=server), \
                     mock.patch.object(oa, 'validate_mail_server', return_value=None):
                 with self.assertRaises(exc_cls) as ctx:
@@ -159,6 +161,13 @@ class SchedulerTests(SDRBase):
 
 
 class ReplyProcessingTests(SDRBase):
+    def setUp(self):
+        super().setUp()
+        # These are about a campaign that sends the AI's answer by itself; the
+        # check-before-sending switch has its own tests (tests_reply_answers.py).
+        SDRCampaign.objects.filter(pk=self.campaign.pk).update(review_ai_replies=False)
+        self.campaign.refresh_from_db()
+
     def _run_inbox(self, replies, classification):
         from ai_sdr_agent.tasks import check_inbox_replies_impl
         fake_agent = mock.MagicMock()

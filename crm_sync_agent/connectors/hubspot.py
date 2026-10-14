@@ -21,7 +21,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError
+from .base import BaseCRMConnector, CRMError, is_blank
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,12 @@ def _to_hs_timestamp(dt) -> int:
     if hasattr(dt, 'timestamp'):
         return int(dt.timestamp() * 1000)
     return int(datetime.now(dt_timezone.utc).timestamp() * 1000)
+
+
+# What is asked back about a contact that exists, so that only its empty fields are filled.
+_READ_BACK = ('email', 'firstname', 'lastname', 'phone', 'company', 'jobtitle', 'hs_lead_status',
+              'hs_object_id', 'hs_linkedin_url')
+_NEVER_ON_EXISTING = ('hs_lead_status',)
 
 
 class HubSpotConnector(BaseCRMConnector):
@@ -71,7 +77,7 @@ class HubSpotConnector(BaseCRMConnector):
                     'value': email.lower().strip(),
                 }],
             }],
-            'properties': ['email', 'firstname', 'lastname', 'phone', 'hs_object_id', 'hs_linkedin_url'],
+            'properties': list(_READ_BACK),
             'limit': 1,
         }
         resp = self._post('/crm/v3/objects/contacts/search', json=body)
@@ -90,7 +96,7 @@ class HubSpotConnector(BaseCRMConnector):
                     'value': linkedin_url.strip(),
                 }],
             }],
-            'properties': ['email', 'firstname', 'lastname', 'hs_object_id', 'hs_linkedin_url'],
+            'properties': list(_READ_BACK),
             'limit': 1,
         }
         try:
@@ -100,26 +106,27 @@ class HubSpotConnector(BaseCRMConnector):
         except CRMError:
             return None
 
-    def upsert_contact(self, email: str, properties: dict) -> str:
-        linkedin_url = properties.get('linkedin_url', '')
+    def find_contact(self, email: str, properties: dict) -> Optional[dict]:
+        """By email first, then by LinkedIn URL (leads found on LinkedIn often have no email)."""
+        existing = self.find_contact_by_email(email) if email else None
+        if not existing and (properties or {}).get('linkedin_url'):
+            existing = self.find_contact_by_linkedin(properties['linkedin_url'])
+        return existing
 
-        # Try to find existing contact by email first, then by LinkedIn URL
-        existing = None
-        if email:
-            existing = self.find_contact_by_email(email)
-        if not existing and linkedin_url:
-            existing = self.find_contact_by_linkedin(linkedin_url)
-
-        hs_props = self._build_contact_props(email, properties)
-
-        if existing:
-            hs_id = str(existing.get('id', ''))
-            if hs_id and self._contact_needs_update(existing.get('properties', {}), hs_props):
-                self._patch(f'/crm/v3/objects/contacts/{hs_id}', json={'properties': hs_props})
-            return hs_id
-
-        resp = self._post('/crm/v3/objects/contacts', json={'properties': hs_props})
+    def create_contact(self, email: str, properties: dict) -> str:
+        resp = self._post('/crm/v3/objects/contacts', json={'properties': self._build_contact_props(email, properties)})
         return str((resp.json() or {}).get('id', ''))
+
+    def upsert_contact(self, email: str, properties: dict) -> str:
+        existing = self.find_contact(email, properties)
+        if not existing:
+            return self.create_contact(email, properties)
+
+        hs_id = str(existing.get('id', ''))
+        blanks = self._blanks_to_fill(existing.get('properties') or {}, self._build_contact_props(email, properties))
+        if hs_id and blanks:
+            self._patch(f'/crm/v3/objects/contacts/{hs_id}', json={'properties': blanks})
+        return hs_id
 
     def log_email_activity(
         self,
@@ -230,13 +237,14 @@ class HubSpotConnector(BaseCRMConnector):
         return out
 
     @staticmethod
-    def _contact_needs_update(existing: dict, new_props: dict) -> bool:
-        for key, value in new_props.items():
-            if key == 'email':
-                continue
-            if str(existing.get(key) or '').strip() != str(value or '').strip():
-                return True
-        return False
+    def _blanks_to_fill(existing: dict, ours: dict) -> dict:
+        """Of our values, the ones for fields the HubSpot contact has empty.
+
+        Never the lead status: that is the customer's own pipeline field, and
+        ours ('hot', 'warm', 'cold') is a guess mapped onto it. It is set only
+        on a contact we create."""
+        return {key: value for key, value in ours.items()
+                if key not in _NEVER_ON_EXISTING and not is_blank(value) and is_blank(existing.get(key))}
 
     def _headers(self) -> dict:
         return {

@@ -216,7 +216,9 @@ urlpatterns = [
     
     # Career endpoints
     re_path(r'^careers/positions/?$', career.list_job_positions, name='list_job_positions'),
-    re_path(r'^careers/applications/?$', career.submit_career_application, name='submit_career_application'),  # POST
+    # (The old open POST careers/applications is gone: it stored any file from anyone, with no
+    # checks at all, and no screen has called it since the public jobs form replaced it. Past
+    # applications are still listed for the platform's staff below.)
     re_path(r'^careers/admin/applications/?$', career.list_career_applications, name='list_career_applications'),  # GET (admin)
     re_path(r'^careers/admin/applications/(?P<id>\d+)/?$', career.get_career_application, name='get_career_application'),  # GET (admin)
     re_path(r'^careers/admin/applications/(?P<id>\d+)/status/?$', career.update_career_application_status, name='update_career_application_status'),  # PATCH (admin)
@@ -798,6 +800,9 @@ urlpatterns = [
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/enrollments/(?P<enrollment_id>\d+)/reset/?$', sdr_api.sdr_reset_enrollment, name='sdr_reset_enrollment'),  # POST
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/check-replies/?$', sdr_api.sdr_check_replies, name='sdr_check_replies'),  # POST
     re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/clear-leads/?$', sdr_api.sdr_clear_campaign_leads, name='sdr_clear_campaign_leads'),  # POST
+    # Answers the AI wrote to leads' replies, held for a person to check
+    re_path(r'^sdr/campaigns/(?P<campaign_id>\d+)/reply-drafts/?$', sdr_api.sdr_reply_drafts, name='sdr_reply_drafts'),  # GET
+    re_path(r'^sdr/reply-drafts/(?P<draft_id>\d+)/(?P<decision>send|discard)/?$', sdr_api.sdr_reply_draft_decide, name='sdr_reply_draft_decide'),  # POST
     re_path(r'^sdr/meetings/?$', sdr_api.sdr_meetings_list, name='sdr_meetings_list'),  # GET, POST
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/?$', sdr_api.sdr_meeting_detail, name='sdr_meeting_detail'),  # GET, PUT, DELETE
     re_path(r'^sdr/meetings/(?P<meeting_id>\d+)/confirm/?$', sdr_api.sdr_confirm_meeting, name='sdr_confirm_meeting'),  # POST

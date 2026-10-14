@@ -18,7 +18,7 @@ from typing import Optional
 
 import requests
 
-from .base import BaseCRMConnector, CRMError
+from .base import BaseCRMConnector, CRMError, is_blank
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class SalesforceConnector(BaseCRMConnector):
 
     def find_contact_by_email(self, email: str) -> Optional[dict]:
         self._ensure_token()
-        q = f"SELECT Id, FirstName, LastName, Email, Phone FROM Contact WHERE Email = '{email.replace(chr(39), '')}' LIMIT 1"
+        q = f"SELECT Id, FirstName, LastName, Email, Phone, Title FROM Contact WHERE Email = '{email.replace(chr(39), '')}' LIMIT 1"
         resp = self._get(f'/services/data/{SF_API_VERSION}/query', params={'q': q})
         records = (resp.json() or {}).get('records') or []
         if records:
@@ -75,21 +75,23 @@ class SalesforceConnector(BaseCRMConnector):
             return {'id': r['Id'], 'properties': r}
         return None
 
+    def create_contact(self, email: str, properties: dict) -> str:
+        self._ensure_token()
+        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Contact/',
+                          json=self._build_contact_payload(email, properties))
+        return str((resp.json() or {}).get('id', ''))
+
     def upsert_contact(self, email: str, properties: dict) -> str:
         self._ensure_token()
         existing = self.find_contact_by_email(email)
-        sf_data = self._build_contact_payload(email, properties)
+        if not existing:
+            return self.create_contact(email, properties)
 
-        if existing:
-            sf_id = existing['id']
-            self._patch(
-                f'/services/data/{SF_API_VERSION}/sobjects/Contact/{sf_id}',
-                json=sf_data,
-            )
-            return sf_id
-
-        resp = self._post(f'/services/data/{SF_API_VERSION}/sobjects/Contact/', json=sf_data)
-        return str((resp.json() or {}).get('id', ''))
+        sf_id = existing['id']
+        blanks = self._blanks_to_fill(existing.get('properties') or {}, properties)
+        if blanks:
+            self._patch(f'/services/data/{SF_API_VERSION}/sobjects/Contact/{sf_id}', json=blanks)
+        return sf_id
 
     def log_email_activity(
         self,
@@ -198,14 +200,29 @@ class SalesforceConnector(BaseCRMConnector):
             out['LastName'] = (parts[-1] if parts else 'Unknown')[:80]
         if props.get('phone'):
             out['Phone'] = str(props['phone'])[:40]
-        if props.get('company'):
-            out['AccountId'] = None  # would require account lookup — skipped
-            out['Company'] = str(props['company'])[:255]  # not a real SF field but harmless
+        # The company name is not sent. A Contact has no 'Company' field, and the
+        # 'AccountId': None that used to go with it would, on an update, have cut an
+        # existing contact loose from its account.
         if props.get('job_title'):
             out['Title'] = str(props['job_title'])[:128]
         if props.get('lead_score') is not None:
             out['Description'] = f"Lead score: {props['lead_score']}"
         return out
+
+    @staticmethod
+    def _blanks_to_fill(existing: dict, props: dict) -> dict:
+        """Of the lead's details, the ones for fields the Salesforce contact has empty.
+
+        Names, phone and title only. Description is the customer's own notes
+        field: it is written on a contact we create and never on one that exists."""
+        ours = {
+            'FirstName': str(props.get('first_name') or '')[:40],
+            'LastName': str(props.get('last_name') or '')[:80],
+            'Phone': str(props.get('phone') or '')[:40],
+            'Title': str(props.get('job_title') or '')[:128],
+        }
+        return {field: value for field, value in ours.items()
+                if not is_blank(value) and is_blank(existing.get(field))}
 
     def _headers(self) -> dict:
         return {
