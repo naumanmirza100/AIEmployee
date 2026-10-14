@@ -120,6 +120,15 @@ class HandedOnTests(ReplyMailboxTestCase):
         self.switch_off(by=rita)
         self.assertEqual(self.owner_of(self.mailbox), user_for(self.omar).id)
 
+    def test_a_mailbox_they_only_send_marketing_from_is_not_handed_on(self):
+        # Marketing's mailboxes go with its campaigns, which are paused, not given away.
+        sending = self.reply_mailbox(self.omar, 'offers@acme.test', is_reply_agent_account=False,
+                                     is_marketing_account=True)
+        said = ' '.join(self.switch_off(by=self.dana))
+        self.assertEqual(self.owner_of(sending), user_for(self.omar).id)
+        self.assertNotIn('offers@acme.test', said)
+        self.assertEqual(self.owner_of(self.mailbox), user_for(self.dana).id)       # the reply mailbox still went
+
     def test_a_login_with_no_reply_mailbox_has_nothing_to_hand_on(self):
         self.assertEqual(leavers.login_switched_off(self.mo), '')
         self.assertEqual(self.owner_of(self.mailbox), user_for(self.omar).id)
@@ -164,6 +173,8 @@ class AlreadyConnectedForSendingTests(ReplyMailboxTestCase):
         self.switch_off(by=self.dana)
         self.assertEqual(InboxEmail.objects.filter(email_account=self.danas, message_id='<m1@customer.test>').count(),
                          1)
+        dana = user_for(self.dana).id
+        self.assertEqual((self.owner_of(self.mail), self.owner_of(self.draft)), (dana, dana))     # and the rest still moved
 
 
 class StrandedBeforeThisTests(ReplyMailboxTestCase):
@@ -181,6 +192,14 @@ class StrandedBeforeThisTests(ReplyMailboxTestCase):
         self.assertEqual((self.owner_of(self.mailbox), self.owner_of(self.mail), self.owner_of(self.draft)),
                          (dana, dana, dana))
         self.assertEqual(self.seen_by(self.mo), ['support@acme.test'])
+
+    def test_it_is_not_given_to_another_login_that_is_switched_off(self):
+        gone = self.login('zara@acme.test', 'Zara Owner', 'owner', active=False)     # an owner, but she left too
+        user_for(gone)
+        CompanyUser.objects.filter(pk=self.omar.pk).update(is_active=False)
+        dana = user_for(self.dana).id
+        self.rescue()
+        self.assertEqual(self.owner_of(self.mailbox), dana)
 
     def test_a_mailbox_whose_login_is_still_on_is_left_alone(self):
         user_for(self.dana)
