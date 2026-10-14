@@ -216,7 +216,7 @@ The following API endpoints are still pending implementation:
 
 ✅ **Career APIs** (`/api/careers/`)
 - GET `/api/careers/positions/` - List job positions
-- POST `/api/careers/applications/` - Submit career application
+- ~~POST `/api/careers/applications/` - Submit career application~~ Removed: it stored any file from anyone. Applications go through POST `/api/public/jobs/<job_id>/apply/`
 - GET `/api/careers/admin/applications/` - List applications (admin)
 - GET `/api/careers/admin/applications/<id>/` - Get application (admin)
 - PATCH `/api/careers/admin/applications/<id>/status/` - Update status (admin)
