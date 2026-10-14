@@ -187,6 +187,11 @@ def company_login(request, login_id):
             if 'is_active' in changed and not new_active:
                 CompanyUserToken.objects.filter(company_user=target).delete()     # signed out everywhere
 
+    # What that login was running in each agent is paused or handed on (core/leavers.py).
+    tidied = []
+    if 'is_active' in changed and not target.is_active:
+        from core.leavers import login_switched_off
+        tidied = login_switched_off(target, by=viewer)
     if changed:
         logger.info('Company %s: login %s changed by %s: role %s -> %s, active %s -> %s', viewer.company_id,
                     target.id, viewer.id, was_role, target.role, was_active, target.is_active)
@@ -195,4 +200,5 @@ def company_login(request, login_id):
             [target], title=f'Your role is now {LABELS.get(target.role, target.role)}',
             message=f'{viewer.full_name or viewer.email} changed it from {LABELS.get(was_role, was_role)}.',
             link='/company/settings/team', kind='company_role_changed', email=False)
-    return Response({'status': 'success', 'data': _page(viewer), 'changed': bool(changed)})
+    return Response({'status': 'success', 'data': _page(viewer), 'changed': bool(changed),
+                     'switched_off': tidied})

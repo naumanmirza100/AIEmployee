@@ -69,7 +69,10 @@ def send_due_steps_impl():
     if resumed:
         logger.info("SDR [send-due-steps] resumed %d out-of-office enrollments", resumed)
 
-    active_campaigns = SDRCampaign.objects.filter(status='active').select_related('company_user__company')
+    # Never for a login that has been switched off: its campaigns are paused then
+    # (ai_sdr_agent/leavers.py), and this holds for any that were missed.
+    active_campaigns = (SDRCampaign.objects.filter(status='active', company_user__is_active=True)
+                        .select_related('company_user__company'))
     total_processed = 0
     total_sent = 0
     total_failed = 0
@@ -238,7 +241,8 @@ def check_inbox_replies_impl():
     from ai_sdr_agent.agents.email_assistant_agent import EmailAssistantAgent
 
     campaigns = SDRCampaign.objects.filter(
-        status='active', auto_check_replies=True
+        status='active', auto_check_replies=True,
+        company_user__is_active=True,       # a switched-off login's mailbox is not read, nor its leads answered
     ).select_related('company_user__company')
 
     total_replies = 0
@@ -455,7 +459,7 @@ def auto_start_campaigns_impl():
     from ai_sdr_agent.models import SDRCampaign
 
     today = timezone.now().date()
-    qs = SDRCampaign.objects.filter(status='scheduled', start_date__lte=today)
+    qs = SDRCampaign.objects.filter(status='scheduled', start_date__lte=today, company_user__is_active=True)
 
     started = 0
     skipped_no_steps = 0
@@ -526,6 +530,7 @@ def send_meeting_reminders_impl():
         scheduled_at__gte=window_start,
         scheduled_at__lte=window_end,
         reminder_sent_at__isnull=True,
+        company_user__is_active=True,       # not on behalf of someone whose login is switched off
     ).select_related('lead', 'enrollment__campaign', 'company_user__company')
 
     sent = failed = 0
@@ -569,7 +574,7 @@ def send_daily_analytics_impl():
 
     # Find distinct company users with at least one active campaign
     company_user_ids = (
-        SDRCampaign.objects.filter(status='active')
+        SDRCampaign.objects.filter(status='active', company_user__is_active=True)
         .values_list('company_user_id', flat=True)
         .distinct()
     )

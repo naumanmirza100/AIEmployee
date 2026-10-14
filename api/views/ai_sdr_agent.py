@@ -1220,9 +1220,13 @@ def sdr_send_daily_summary(request):
 # Campaign serialiser helpers
 # ==========================================================================
 
-def _serialize_campaign(c: SDRCampaign) -> dict:
+def _serialize_campaign(c: SDRCampaign, viewer=None) -> dict:
+    from ai_sdr_agent.leavers import owner_of
     return {
         'id': c.id,
+        # Whose campaign it is. An owner or admin is shown colleagues' campaigns
+        # too, and may pause, resume or delete them; the rest is the owner's.
+        'owner': owner_of(c, viewer) if viewer is not None else None,
         'name': c.name,
         'description': c.description,
         'status': c.status,
@@ -1355,10 +1359,13 @@ def sdr_campaigns_list(request):
 
     if request.method == 'GET':
         try:
-            campaigns = SDRCampaign.objects.filter(company_user=company_user)
+            # Its own; and for an owner or admin, everybody's in the company, so that a
+            # campaign is never something only the person who made it can see or stop.
+            from ai_sdr_agent.leavers import campaigns_for
+            campaigns = campaigns_for(company_user).select_related('company_user')
             return Response({
                 'status': 'success',
-                'data': [_serialize_campaign(c) for c in campaigns],
+                'data': [_serialize_campaign(c, company_user) for c in campaigns],
             })
         except KeyServiceError:
             raise
@@ -1432,7 +1439,7 @@ def sdr_campaigns_list(request):
             campaign.end_date = campaign.derive_end_date()
             campaign.save()
 
-        return Response({'status': 'success', 'data': _serialize_campaign(campaign)}, status=201)
+        return Response({'status': 'success', 'data': _serialize_campaign(campaign, company_user)}, status=201)
     except KeyServiceError:
         raise
     except Exception as exc:
@@ -1449,15 +1456,29 @@ def sdr_campaigns_list(request):
 @permission_classes([IsCompanyUserOnly])
 def sdr_campaign_detail(request, campaign_id):
     company_user = request.user
-    try:
-        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
-    except SDRCampaign.DoesNotExist:
+    from ai_sdr_agent.leavers import campaigns_for
+    campaign = campaigns_for(company_user).select_related('company_user').filter(id=campaign_id).first()
+    if campaign is None:
         return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
+    mine = campaign.company_user_id == company_user.id
 
     if request.method == 'GET':
-        data = _serialize_campaign(campaign)
+        data = _serialize_campaign(campaign, company_user)
         data['steps'] = [_serialize_step(s) for s in campaign.steps.filter(is_active=True)]
         return Response({'status': 'success', 'data': data})
+
+    if request.method == 'PUT' and not mine:
+        # A colleague's campaign: an owner or admin may pause it or start it again,
+        # and nothing else. Its mailbox, its sender and its wording stay its owner's.
+        sent = set((request.data or {}).keys()) if hasattr(request.data, 'keys') else set()
+        if sent != {'status'} or request.data.get('status') not in ('paused', 'active'):
+            return Response({'status': 'error', 'message': (
+                "This is a colleague's campaign. You can pause it, start it again or delete it; "
+                'only they can change it.')}, status=403)
+        if request.data['status'] == 'active' and not campaign.company_user.is_active:
+            return Response({'status': 'error', 'message': (
+                'This campaign belongs to a login that is switched off, so it cannot be started again. '
+                'Switch the login back on first, or delete the campaign.')}, status=400)
 
     if request.method == 'PUT':
         try:
@@ -1508,7 +1529,7 @@ def sdr_campaign_detail(request, campaign_id):
                 if campaign.start_date and campaign.status == 'draft':
                     campaign.status = 'scheduled'
             campaign.save()
-            return Response({'status': 'success', 'data': _serialize_campaign(campaign)})
+            return Response({'status': 'success', 'data': _serialize_campaign(campaign, company_user)})
         except KeyServiceError:
             raise
         except Exception as exc:
@@ -1553,7 +1574,7 @@ def sdr_clear_campaign_leads(request, campaign_id):
         return Response({
             'status': 'success',
             'message': f'Cleared {deleted_count} enrollment records.',
-            'data': _serialize_campaign(campaign),
+            'data': _serialize_campaign(campaign, company_user),
         })
     except KeyServiceError:
         raise
@@ -1635,9 +1656,9 @@ def sdr_reply_draft_decide(request, draft_id, decision):
 @permission_classes([IsCompanyUserOnly])
 def sdr_campaign_steps(request, campaign_id):
     company_user = request.user
-    try:
-        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
-    except SDRCampaign.DoesNotExist:
+    from ai_sdr_agent.leavers import campaigns_for
+    campaign = campaigns_for(company_user).filter(id=campaign_id).first()
+    if campaign is None or (request.method != 'GET' and campaign.company_user_id != company_user.id):
         return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
 
     if request.method == 'GET':
@@ -1889,9 +1910,9 @@ def sdr_enroll_leads(request, campaign_id):
 @permission_classes([IsCompanyUserOnly])
 def sdr_campaign_enrollments(request, campaign_id):
     company_user = request.user
-    try:
-        campaign = SDRCampaign.objects.get(id=campaign_id, company_user=company_user)
-    except SDRCampaign.DoesNotExist:
+    from ai_sdr_agent.leavers import campaigns_for
+    campaign = campaigns_for(company_user).filter(id=campaign_id).first()
+    if campaign is None:
         return Response({'status': 'error', 'message': 'Campaign not found.'}, status=404)
 
     try:

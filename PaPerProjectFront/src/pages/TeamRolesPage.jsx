@@ -64,6 +64,14 @@ export default function TeamRolesPage() {
     try {
       const res = await companyApi.patch(`/company/logins/${login.id}`, patch);
       setData(res?.data || data);
+      // Switching a login off pauses what it was running (campaigns, and so on); say what.
+      if (res?.switched_off?.length) {
+        toast({
+          title: `${login.full_name || login.email}'s login is switched off`,
+          description: res.switched_off.join(' '),
+          duration: 12000,
+        });
+      }
     } catch (e) {
       toast({ title: 'Not changed', description: e?.message || 'Please try again.', variant: 'destructive' });
     } finally {

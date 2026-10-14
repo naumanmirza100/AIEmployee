@@ -774,6 +774,16 @@ const SDROutreachTab = () => {
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: sc.color, display: 'inline-block' }} />
                     {sc.label}
                   </span>
+                  {/* An owner or admin is shown colleagues' campaigns as well as their own. */}
+                  {c.owner && !c.owner.is_you && (
+                    <span data-testid="sdr-campaign-owner" style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', marginLeft: 6,
+                      borderRadius: 12, fontSize: 11, fontWeight: 600, marginBottom: 14,
+                      background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa',
+                    }}>
+                      {c.owner.name}{c.owner.is_active ? '' : ' · login switched off'}
+                    </span>
+                  )}
 
                   {/* Stats */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
@@ -1023,6 +1033,9 @@ const SDROutreachTab = () => {
 
   // ── Campaign detail view ───────────────────────────────────────────────
   const sc = STATUS_COLORS[selectedCampaign.status] || STATUS_COLORS.draft;
+  // A colleague's campaign, open to this login because it is an owner or admin:
+  // it can be paused, started again or deleted here, and nothing else.
+  const mine = !selectedCampaign.owner || selectedCampaign.owner.is_you;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -1064,19 +1077,23 @@ const SDROutreachTab = () => {
         </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
+          {mine && (
           <Button onClick={() => { setSettingsDraft({ ...selectedCampaign, smtp_password: '' }); setShowSettingsModal(true); }} variant="outline" style={{
             border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8,
             display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
           }}>
             <Edit2 size={14} /> Settings
           </Button>
+          )}
+          {mine && (
           <Button onClick={openEnrollModal} variant="outline" style={{
             border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8,
             display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
           }}>
             <Users size={14} /> Enroll Leads
           </Button>
-          {enrollments.length > 0 && (
+          )}
+          {mine && enrollments.length > 0 && (
             <Button onClick={() => setClearLeadsConfirm(true)} disabled={clearingLeads} variant="outline" style={{
               border: '1px solid rgba(244,63,94,0.35)', color: '#f87171', borderRadius: 8,
               display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
@@ -1100,6 +1117,18 @@ const SDROutreachTab = () => {
           )}
         </div>
       </div>
+
+      {!mine && (
+        <div data-testid="sdr-colleagues-campaign" style={{
+          padding: '10px 14px', borderRadius: 8, fontSize: 13, lineHeight: 1.5,
+          background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.25)', color: 'hsl(var(--pt-93c5fd))',
+        }}>
+          <b>This is {selectedCampaign.owner.name}'s campaign.</b>{' '}
+          {selectedCampaign.owner.is_active
+            ? 'You can see it because you run the company. You can pause it, start it again or delete it; only they can change it.'
+            : 'Their login is switched off, so it cannot send. You can delete it, or switch their login back on to run it again.'}
+        </div>
+      )}
 
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
@@ -1176,8 +1205,10 @@ const SDROutreachTab = () => {
       )} */}
 
       {/* Answers the AI wrote to leads who asked for more, waiting to be checked */}
-      <SDRReplyDrafts campaignId={selectedCampaign.id} waiting={selectedCampaign.answers_waiting || 0}
-        onChanged={() => loadDetail(selectedCampaign)} />
+      {mine && (
+        <SDRReplyDrafts campaignId={selectedCampaign.id} waiting={selectedCampaign.answers_waiting || 0}
+          onChanged={() => loadDetail(selectedCampaign)} />
+      )}
 
       {/* Main content: steps + enrollments */}
       <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, alignItems: 'flex-start' }}>
