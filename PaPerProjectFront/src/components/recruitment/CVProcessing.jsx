@@ -8,10 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Upload, FileText, CheckCircle, XCircle, AlertCircle, User, Mail, Percent, ChevronsUpDown, Check, Search, Settings, ArrowRight, Info } from 'lucide-react';
-import { processCVs, getJobDescriptions, getInterviewSettings, bulkUpdateCVRecords } from '@/services/recruitmentAgentService';
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
+import { processCVs, getJobDescriptions, getInterviewSettings } from '@/services/recruitmentAgentService';
 import QualificationReasoning from './QualificationReasoning';
 
 // Module-level draft cache. Survives this component unmounting (e.g. the user
@@ -33,10 +30,6 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
   const [topN, setTopN] = useState(() => cvProcessingDraft?.topN || '');
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState(null);
-  // Screening records the AI's decision and emails nobody. Inviting the ones it
-  // approved is this step, confirmed by a person.
-  const [confirmInvite, setConfirmInvite] = useState(false);
-  const [inviting, setInviting] = useState(false);
   const [displayedKeywords, setDisplayedKeywords] = useState([]);
   const [jobSearchOpen, setJobSearchOpen] = useState(false);
   const [jobSearchQuery, setJobSearchQuery] = useState('');
@@ -237,11 +230,9 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
         // Processing done — the draft has served its purpose; drop it so it
         // won't be restored on a later visit.
         cvProcessingDraft = null;
-        const ready = response.ready_to_invite || 0;
         toast({
           title: 'Success',
-          description: `Processed ${response.results?.length || 0} CV(s) successfully.`
-            + (ready ? ` ${ready} approved for interview. Nobody has been emailed: invite them below.` : ' Nobody has been emailed.'),
+          description: `Processed ${response.results?.length || 0} CV(s) successfully`,
         });
         if (onProcessComplete) {
           onProcessComplete();
@@ -258,33 +249,6 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
       });
     } finally {
       setProcessing(false);
-    }
-  };
-
-  // Approved by the AI, reachable, and not invited yet (the server says which).
-  const readyToInvite = (results?.results || []).filter((r) => r.ready_to_invite && r.record_id);
-  const nameOf = (r) => r.parsed?.name || r.file_name || 'Unnamed';
-
-  const handleInvite = async () => {
-    const ids = readyToInvite.map((r) => r.record_id);
-    if (!ids.length) return;
-    try {
-      setInviting(true);
-      const response = await bulkUpdateCVRecords(ids, 'INTERVIEW');
-      if (response.status !== 'success') throw new Error(response.message || 'Could not send the invitations');
-      toast({ title: 'Invitations', description: response.message });
-      // Whatever the outcome for each, none of them is waiting on this button any more.
-      setResults((prev) => ({
-        ...prev,
-        ready_to_invite: 0,
-        results: prev.results.map((r) => (ids.includes(r.record_id) ? { ...r, ready_to_invite: false, invited_now: true } : r)),
-      }));
-      setConfirmInvite(false);
-      if (onProcessComplete) onProcessComplete();
-    } catch (error) {
-      toast({ title: 'Error', description: error?.message || 'Could not send the invitations', variant: 'destructive' });
-    } finally {
-      setInviting(false);
     }
   };
 
@@ -339,8 +303,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
           <CardHeader className="p-4 sm:p-6">
             <CardTitle className="text-lg sm:text-xl text-white">Process CV Files</CardTitle>
             <CardDescription className="text-xs sm:text-sm text-white/60">
-              Upload CV files to analyze and rank candidates based on job requirements.
-              Nobody is emailed by this: you choose who to invite once you have seen the results.
+              Upload CV files to analyze and rank candidates based on job requirements
             </CardDescription>
           </CardHeader>
           <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 space-y-4">
@@ -542,29 +505,6 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
           </CardContent>
         </Card>
 
-        {/* Inviting is a person's step: say who will be emailed before it happens. */}
-        <Dialog open={confirmInvite} onOpenChange={(open) => { if (!open && !inviting) setConfirmInvite(false); }}>
-          <DialogContent className="w-[95vw] max-w-md" data-testid="REC-cvprocessing-invite-dialog">
-            <DialogHeader>
-              <DialogTitle>Invite {readyToInvite.length} candidate{readyToInvite.length === 1 ? '' : 's'} to interview?</DialogTitle>
-              <DialogDescription>
-                Each is emailed an invitation with a link to pick an interview time, and is reminded if they do not answer.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="rounded-lg bg-muted/60 px-3 py-2 text-sm text-foreground">
-              {readyToInvite.slice(0, 8).map(nameOf).join(', ')}
-              {readyToInvite.length > 8 ? `, and ${readyToInvite.length - 8} more` : ''}
-            </div>
-            <DialogFooter className="gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmInvite(false)} disabled={inviting}>Cancel</Button>
-              <Button size="sm" data-testid="REC-cvprocessing-invite-confirm" onClick={handleInvite} disabled={inviting}>
-                {inviting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Confirm and send invitations
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
         {/* Results */}
         {results && results.results && (
           <Card id="REC-cvprocessing-results-card" data-testid="REC-cvprocessing-results-card" className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
@@ -575,21 +515,6 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
-              {readyToInvite.length > 0 && (
-                <div data-testid="REC-cvprocessing-ready-to-invite"
-                  className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3">
-                  <p className="text-xs sm:text-sm text-white/80">
-                    <span className="font-semibold text-white">
-                      {readyToInvite.length} candidate{readyToInvite.length === 1 ? ' is' : 's are'} approved for interview.
-                    </span>{' '}
-                    No invitation has been sent. Look through the results, then invite them, or change a decision in Candidates first.
-                  </p>
-                  <Button size="sm" data-testid="REC-cvprocessing-invite-btn" onClick={() => setConfirmInvite(true)}>
-                    <Mail className="h-4 w-4 mr-2" />
-                    Invite {readyToInvite.length} to interview
-                  </Button>
-                </div>
-              )}
               <div id="REC-cvprocessing-results-list" data-testid="REC-cvprocessing-results-list" className="space-y-3 sm:space-y-4">
                 {results.results.map((result, index) => {
                   const qualified = result.qualified || {};
@@ -615,16 +540,6 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                           </div>
                           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                             {getDecisionBadge(qualified.decision)}
-                            {result.ready_to_invite && (
-                              <Badge variant="outline" className="text-[10px] sm:text-xs border-amber-400/50 text-amber-300">
-                                Not invited yet
-                              </Badge>
-                            )}
-                            {result.invited_now && (
-                              <Badge variant="outline" className="text-[10px] sm:text-xs border-emerald-400/50 text-emerald-300">
-                                Invitation sent
-                              </Badge>
-                            )}
                             {qualified.priority && (
                               <Badge variant="outline" className="text-[10px] sm:text-xs">
                                 {labelOf(qualified.priority)} priority
