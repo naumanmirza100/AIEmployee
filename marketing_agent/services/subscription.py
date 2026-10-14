@@ -30,6 +30,7 @@ class PayingCampaigns:
     def __init__(self):
         self.paying = active_company_ids('marketing_agent')
         self._company_by_owner = {}
+        self._owner_gone = {}
 
     def allows(self, campaign) -> bool:
         if campaign is None:
@@ -41,4 +42,17 @@ class PayingCampaigns:
             except Exception:
                 logger.exception('Could not work out the company for campaign %s', getattr(campaign, 'pk', None))
                 self._company_by_owner[owner_id] = None
-        return may_run_for(self._company_by_owner[owner_id], self.paying)
+        if not may_run_for(self._company_by_owner[owner_id], self.paying):
+            return False
+        # Nor for someone whose login has been switched off. Their campaigns are
+        # paused at that moment (marketing_agent/leavers.py); this is for any that
+        # were missed, and for logins switched off before that was done.
+        if owner_id not in self._owner_gone:
+            try:
+                from marketing_agent.leavers import owner_switched_off
+                self._owner_gone[owner_id] = owner_switched_off(owner_id)
+            except Exception:
+                logger.exception('Could not tell whether the owner of campaign %s is switched off',
+                                 getattr(campaign, 'pk', None))
+                self._owner_gone[owner_id] = False
+        return not self._owner_gone[owner_id]

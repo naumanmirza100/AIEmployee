@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 #: returning a sentence about what it did, or '' when it had nothing to do.
 PARTS = (
     'ai_sdr_agent.leavers',
+    'marketing_agent.leavers',
 )
 
 ADMIN_ROLES = ('owner', 'admin')

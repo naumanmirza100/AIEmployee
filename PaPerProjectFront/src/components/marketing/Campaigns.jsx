@@ -20,6 +20,7 @@ import {
 import marketingAgentService from '@/services/marketingAgentService';
 import OutreachCampaign from './OutreachCampaign';
 import CampaignFilterBar from './CampaignFilterBar';
+import ColleaguesCampaigns from './ColleaguesCampaigns';
 import HoverTip from '@/components/common/HoverTip';
 
 const PAGE_SIZE = 10;
@@ -375,6 +376,9 @@ const Campaigns = ({ onRefresh }) => {
       })()}
       </div>
       </div>
+
+      {/* For an owner or admin: everyone else's campaigns in the company, to see and to stop */}
+      <ColleaguesCampaigns />
 
       {/* Bulk Delete Confirmation Dialog */}
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>

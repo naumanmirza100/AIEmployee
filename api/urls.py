@@ -416,6 +416,9 @@ urlpatterns = [
     # Marketing Agent endpoints (Company User)
     re_path(r'^marketing/dashboard/?$', marketing_agent.marketing_dashboard, name='marketing_dashboard'),  # GET
     re_path(r'^marketing/campaigns/?$', marketing_agent.list_campaigns, name='marketing_list_campaigns'),  # GET
+    # For an owner or admin: the campaigns of everyone else in the company, and stopping one
+    re_path(r'^marketing/colleagues-campaigns/?$', marketing_agent.colleagues_campaigns, name='marketing_colleagues_campaigns'),  # GET
+    re_path(r'^marketing/colleagues-campaigns/(?P<campaign_id>\d+)/stop/?$', marketing_agent.stop_colleagues_campaign, name='marketing_stop_colleagues_campaign'),  # POST
     re_path(r'^marketing/campaigns/create/?$', marketing_agent.create_campaign, name='marketing_create_campaign'),  # POST
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/?$', marketing_agent.get_campaign, name='marketing_get_campaign'),  # GET
     re_path(r'^marketing/campaigns/(?P<campaign_id>\d+)/update/?$', marketing_agent.update_campaign, name='marketing_update_campaign'),  # PUT/PATCH
