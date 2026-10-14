@@ -16,7 +16,8 @@ def login_switched_off(company_user, by=None) -> str:
     from ai_sdr_agent.models import SDRCampaign
 
     name = company_user.full_name or company_user.email
-    reason = f"Paused: {name}'s login was switched off."[:500]
+    reason = (f"Paused: {name}'s login was switched off. It stays paused when the login is switched back on, "
+              "until someone resumes it.")[:500]
     running = list(SDRCampaign.objects.filter(company_user=company_user, status__in=('active', 'scheduled')))
     for campaign in running:
         SDRCampaign.objects.filter(pk=campaign.pk).update(status='paused', paused_reason=reason)

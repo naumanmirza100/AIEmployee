@@ -144,7 +144,11 @@ def pause_for_mailbox(campaign, message: str) -> bool:
     """Pause a campaign whose own mailbox refuses to send, and say why. True if this paused it."""
     from ai_sdr_agent.models import SDRCampaign
 
-    reason = ('Paused: the mailbox would not send. It answered: ' + ' '.join((message or '').split()))[:500]
+    # The whole of what the campaign screen shows, next step included: the mailbox's
+    # own words go last, so a long answer is what gets cut short.
+    reason = ('Paused: the mailbox would not send. Nothing was sent to the lead it was trying and no lead was '
+              'marked as bounced. Fix it in Settings, then Resume. The mailbox answered: '
+              + ' '.join((message or '').split()))[:500]
     paused = SDRCampaign.objects.filter(pk=campaign.pk, status='active').update(status='paused', paused_reason=reason)
     campaign.status, campaign.paused_reason = 'paused', reason
     if paused:
@@ -351,12 +355,14 @@ def _detect_bounce(msg, raw_bytes, sender_email, subject, email_map):
 class OutreachAgent:
     """Generates personalised outreach, sends campaign steps, detects replies."""
 
-    def __init__(self, company=None):
+    def __init__(self, company=None, needs_ai=True):
         self._key_ctx = None
         self.groq_client = None
         self._company = company
 
-        if company is not None:
+        if not needs_ai:
+            pass        # only sending text a person has already read: no AI key is asked for or used
+        elif company is not None:
             from ai_sdr_agent.agents.sdr_key_resolver import resolve_sdr_groq_client
             self.groq_client, self._key_ctx = resolve_sdr_groq_client(company)
         else:

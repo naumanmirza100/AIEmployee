@@ -106,6 +106,13 @@ class BothWaysOfSwitchingOffTests(LeaversTestCase):
         self.assertEqual(self.status(), 'paused')
         self.assertIn('1 sales campaign of theirs was paused', response.data['switched_off'][0])
 
+    def test_switching_a_login_back_on_pauses_nothing(self):
+        """Only switching off tidies up. A login switched back on, with a campaign since resumed, keeps it running."""
+        CompanyUser.objects.filter(pk=self.sal.pk).update(is_active=False)
+        response = self.call(company_logins.company_login, self.cu, 'patch', {'is_active': True},
+                             login_id=self.sal.id)
+        self.assertEqual((response.status_code, response.data['switched_off'], self.status()), (200, [], 'active'))
+
     def test_changing_only_a_role_pauses_nothing(self):
         response = self.call(company_logins.company_login, self.cu, 'patch', {'role': 'manager'},
                              login_id=self.sal.id)
@@ -156,11 +163,17 @@ class BackgroundJobsTests(LeaversTestCase):
     def test_no_meeting_reminder_goes_out_in_their_name(self):
         from ai_sdr_agent.tasks import send_meeting_reminders_impl
         SDRMeeting.objects.create(company_user=self.sal, lead=self.sals_lead, status='scheduled',
+                                  enrollment=self.sals.enrollments.get(),
                                   scheduled_at=timezone.now() + timedelta(hours=25))
         with mock.patch('ai_sdr_agent.agents.meeting_scheduling_agent.MeetingSchedulingAgent') as scheduler:
             send_meeting_reminders_impl()
-        scheduler.return_value.send_reminder_email.assert_not_called()
-        self.assertIsNone(SDRMeeting.objects.get().reminder_sent_at)
+            scheduler.return_value.send_reminder_email.assert_not_called()
+            self.assertIsNone(SDRMeeting.objects.get().reminder_sent_at)
+            # With the login back on the same meeting is reminded, so the check above means something.
+            CompanyUser.objects.filter(pk=self.sal.pk).update(is_active=True)
+            send_meeting_reminders_impl()
+            scheduler.return_value.send_reminder_email.assert_called_once()
+        self.assertIsNotNone(SDRMeeting.objects.get().reminder_sent_at)
 
 
 class OwnersAndAdminsTests(LeaversTestCase):

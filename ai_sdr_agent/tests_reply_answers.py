@@ -123,7 +123,7 @@ class SendingOrDiscardingTests(ReplyAnswersTestCase):
         self.sender = mock.MagicMock()
 
     def decide(self, decision, data=None, actor=None, draft=None):
-        with mock.patch.object(views, '_get_outreach_agent', return_value=self.sender):
+        with mock.patch.object(views, 'OutreachAgent', return_value=self.sender):
             return self.call(views.sdr_reply_draft_decide, 'post', data, actor=actor,
                              draft_id=(draft or self.draft).id, decision=decision)
 
@@ -144,6 +144,22 @@ class SendingOrDiscardingTests(ReplyAnswersTestCase):
         self.draft.refresh_from_db()
         self.assertEqual((self.draft.status, self.draft.decided_by_id), ('sent', self.cu.id))
         self.assertEqual(self.waiting(), [])
+
+    def test_sending_a_written_answer_needs_the_mailbox_and_no_ai_key(self):
+        """The text is already written. A company whose AI key has run out can still send it."""
+        from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+        from core.api_key_service import KeyServiceError
+
+        SDRCampaign.objects.filter(pk=self.campaign.pk).update(
+            smtp_host='smtp.acme.test', smtp_username='sal@acme.test', smtp_password='not-a-real-one')
+        with mock.patch('ai_sdr_agent.agents.sdr_key_resolver.resolve_sdr_groq_client',
+                        side_effect=KeyServiceError('no key')) as asked_for_a_key, \
+                mock.patch.object(OutreachAgent, '_send_via_smtp') as smtp:
+            response = self.call(views.sdr_reply_draft_decide, 'post', draft_id=self.draft.id, decision='send')
+        self.assertEqual(response.status_code, 200, response.data)
+        asked_for_a_key.assert_not_called()
+        self.assertEqual(smtp.call_args.kwargs['to_email'], 'bob@acme.com')
+        self.assertEqual(SDRReplyDraft.objects.get().status, 'sent')
 
     def test_sent_as_the_person_changed_it(self):
         self.decide('send', {'subject': 'About your question', 'body': 'A better answer.'})

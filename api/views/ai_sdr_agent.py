@@ -1637,8 +1637,9 @@ def sdr_reply_draft_decide(request, draft_id, decision):
     try:
         if decision == 'send':
             d = request.data if isinstance(request.data, dict) else {}
+            # The answer is already written, so this needs the mailbox and no AI key.
             draft = reply_answers.send_draft(
-                draft, company_user, outreach_agent=_get_outreach_agent(company_user.company),
+                draft, company_user, outreach_agent=OutreachAgent(company=company_user.company, needs_ai=False),
                 subject=d.get('subject'), body=d.get('body'))
         else:
             draft = reply_answers.discard_draft(draft, company_user)
