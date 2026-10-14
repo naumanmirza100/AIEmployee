@@ -54,20 +54,9 @@ def move_mailbox(EmailAccount, InboxEmail, ReplyDraft, account, to_user_id):
     return kept
 
 
-def _who_takes_it(company_user, by):
-    """The login a leaver's reply mailbox goes to, or None when nobody is left."""
-    from core.models import CompanyUser
-
-    if by is not None and by.is_active and by.company_id == company_user.company_id and by.pk != company_user.pk:
-        return by
-    others = CompanyUser.objects.filter(company_id=company_user.company_id, is_active=True).exclude(pk=company_user.pk)
-    return (others.filter(role='owner').order_by('id').first()
-            or others.filter(role='admin').order_by('id').first()
-            or others.order_by('id').first())
-
-
 def login_switched_off(company_user, by=None) -> str:
     """Hand this login's reply mailbox on. Says to whom."""
+    from core.leavers import heir_for
     from core.logins import user_for
     from marketing_agent.models import EmailAccount
     from reply_draft_agent.models import InboxEmail, ReplyDraft
@@ -77,7 +66,7 @@ def login_switched_off(company_user, by=None) -> str:
     mailboxes = list(EmailAccount.objects.filter(owner_id=company_user.login_user_id, is_reply_agent_account=True))
     if not mailboxes:
         return ''
-    heir = _who_takes_it(company_user, by)
+    heir = heir_for(company_user, by)
     if heir is None:
         return ('The reply mailbox %s is still under their login: the company has no other login to give it to.'
                 % ', '.join(m.email for m in mailboxes))

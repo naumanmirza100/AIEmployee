@@ -26,6 +26,7 @@ PARTS = (
     'ai_sdr_agent.leavers',
     'marketing_agent.leavers',
     'reply_draft_agent.leavers',
+    'meeting_agent.leavers',
 )
 
 ADMIN_ROLES = ('owner', 'admin')
@@ -35,6 +36,21 @@ def is_admin(company_user) -> bool:
     """Runs the company: may see and stop what any login in it has running."""
     return bool(company_user is not None and getattr(company_user, 'is_active', False)
                 and getattr(company_user, 'role', '') in ADMIN_ROLES)
+
+
+def heir_for(company_user, by=None):
+    """The login that takes over what a switched-off login was holding, or None when nobody is left.
+
+    The admin who switched it off, when a person did; otherwise an owner, an
+    admin, or failing those anyone still active in the same company."""
+    from core.models import CompanyUser
+
+    if by is not None and by.is_active and by.company_id == company_user.company_id and by.pk != company_user.pk:
+        return by
+    others = CompanyUser.objects.filter(company_id=company_user.company_id, is_active=True).exclude(pk=company_user.pk)
+    return (others.filter(role='owner').order_by('id').first()
+            or others.filter(role='admin').order_by('id').first()
+            or others.order_by('id').first())
 
 
 def login_switched_off(company_user, by=None) -> list:

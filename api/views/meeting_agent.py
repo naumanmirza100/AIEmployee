@@ -159,6 +159,12 @@ def _email_login(company_user, topic, subject, html_body):
     one of them. `topic` is 'exec_meetings' or 'tasks_assigned'
     (core.notification_settings)."""
     from core.notification_settings import wants_email
+    from meeting_agent.leavers import still_with_the_company
+    # Someone who has left stays on the lists of the meetings they were in; they
+    # used to go on being sent the full details of every change.
+    if not still_with_the_company(company_user):
+        logger.info("Email not sent to %s: no longer with the company", getattr(company_user, 'id', None))
+        return
     try:
         wanted = wants_email(company_user, topic)
     except Exception:
