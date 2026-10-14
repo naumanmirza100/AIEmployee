@@ -906,6 +906,61 @@ def update_campaign_lead(request, campaign_id, lead_id):
         )
 
 
+@api_view(["GET"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def colleagues_campaigns(request):
+    """For an owner or admin: every campaign in the company that is not their own.
+
+    A campaign belongs to the login that made it and no screen showed it to
+    anyone else, so nobody could stop the campaign of a person who had left.
+    This lists them, with whose each is; `stop_colleagues_campaign` pauses one."""
+    from core.leavers import is_admin
+    from marketing_agent import leavers
+
+    company_user = request.user
+    if not is_admin(company_user):
+        return Response({'status': 'success', 'data': {'can_manage': False, 'campaigns': []}})
+    rows = []
+    for campaign, login in leavers.colleagues_campaigns(company_user):
+        rows.append({
+            'id': campaign.id,
+            'name': campaign.name,
+            'status': campaign.status,
+            'start_date': campaign.start_date.isoformat() if campaign.start_date else None,
+            'end_date': campaign.end_date.isoformat() if campaign.end_date else None,
+            'leads': campaign.leads.count(),
+            'created_at': campaign.created_at.isoformat(),
+            'owner': {'id': login.id, 'name': login.full_name or login.email, 'is_active': login.is_active},
+        })
+    return Response({'status': 'success', 'data': {'can_manage': True, 'campaigns': rows}})
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def stop_colleagues_campaign(request, campaign_id):
+    """An owner or admin pauses a colleague's campaign. Its owner can start it again."""
+    from core.leavers import is_admin
+    from marketing_agent import leavers
+
+    company_user = request.user
+    if not is_admin(company_user):
+        return Response({'status': 'error', 'message': "Only an owner or admin can stop a colleague's campaign."},
+                        status=status.HTTP_403_FORBIDDEN)
+    found = next(((c, login) for c, login in leavers.colleagues_campaigns(company_user) if c.id == campaign_id), None)
+    if found is None:
+        return Response({'status': 'error', 'message': 'Campaign not found.', 'error': 'not_found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    campaign, login = found
+    if campaign.status in ('active', 'scheduled'):
+        campaign.status = 'paused'
+        campaign.save()             # through save(): that is what switches its sequences off
+        logger.info('Marketing campaign %s of login %s paused by admin %s', campaign.id, login.id, company_user.id)
+    return Response({'status': 'success', 'message': f'"{campaign.name}" is paused. Nothing more will be sent.',
+                     'data': {'id': campaign.id, 'status': campaign.status}})
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -3075,11 +3130,14 @@ def create_email_account(request):
         # Existing legacy duplicates (same email under different owners
         # before this rule shipped) are grandfathered in by the absence
         # of a DB constraint; the app-level check below stops NEW dupes.
-        cross_tenant = (
-            EmailAccount.objects
-            .filter(email__iexact=email)
-            .exclude(owner=user)
-            .first()
+        # The rule is one company per mailbox, and it used to be applied as one
+        # LOGIN per mailbox: a colleague could not connect the company's own shared
+        # mailbox because somebody else in the same company already had.
+        from marketing_agent.leavers import same_company
+        cross_tenant = next(
+            (account for account in EmailAccount.objects.filter(email__iexact=email).exclude(owner=user)
+             .select_related('owner') if not same_company(account.owner, user)),
+            None,
         )
         if cross_tenant is not None:
             return Response({

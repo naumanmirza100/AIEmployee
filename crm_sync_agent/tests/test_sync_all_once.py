@@ -75,9 +75,14 @@ class SyncAllOnceTests(TestCase):
 
     def test_one_still_waiting_or_failed_is_kept_as_one_entry(self):
         self.press_sync_all()
-        self.emails().update(status=CRMSyncQueue.STATUS_FAILED)
+        later = timezone.now() + timedelta(hours=6)
+        self.emails().update(status=CRMSyncQueue.STATUS_FAILED, scheduled_at=later, payload={'subject': 'stale'})
         self.press_sync_all()
         self.assertEqual(self.emails().count(), 2)
+        # ... and brought up to date: it is due now, with the email as it stands.
+        for entry in self.emails():
+            self.assertLessEqual(entry.scheduled_at, timezone.now())
+            self.assertIn(entry.payload['subject'], ('Email 1', 'Email 2'))
 
     def test_an_email_sent_since_the_last_press_is_queued(self):
         self.press_sync_all()
@@ -128,7 +133,7 @@ class StuckEntryTests(TestCase):
         return CRMSyncQueue.objects.get(pk=entry.pk).status
 
     def test_an_entry_left_being_sent_for_too_long_goes_back_in_the_queue(self):
-        abandoned = self.entry(CRMSyncQueue.STATUS_PROCESSING, minutes_ago=tasks.STUCK_AFTER_MINUTES + 5)
+        abandoned = self.entry(CRMSyncQueue.STATUS_PROCESSING, minutes_ago=15)       # a quarter of an hour is abandoned
         tasks.retry_failed_crm_syncs()
         self.assertEqual(self.status(abandoned), CRMSyncQueue.STATUS_PENDING)
         self.assertLessEqual(CRMSyncQueue.objects.get(pk=abandoned.pk).scheduled_at, timezone.now())

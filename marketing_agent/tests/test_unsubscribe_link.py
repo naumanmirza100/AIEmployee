@@ -85,6 +85,7 @@ class UnsubscribeLinkTests(MarketingTestCase):
         html = message.alternatives[0][0]
         self.assertEqual(html.count('/api/marketing/unsubscribe/'), 1)
         self.assertIn('Stop these', html)
+        self.assertIn('<a href="https://api.example.test/api/marketing/unsubscribe/', html)      # the plain link
         self.assertEqual(message.body.count('/api/marketing/unsubscribe/'), 1)
         self.assertIn('List-Unsubscribe', message.extra_headers)
 

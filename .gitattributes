@@ -1,0 +1,3 @@
+# Shell scripts run on the Linux server (scripts/deploy.sh is what every release goes through).
+# A script saved with Windows line endings does not run there, whoever commits it.
+*.sh text eol=lf

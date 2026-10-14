@@ -74,6 +74,12 @@ class ResetCodeTests(TestCase):
 
     # ---- guessing ----------------------------------------------------------
 
+    def test_the_limits_are_small_enough_to_mean_something(self):
+        # One code in a million, five tries a code, five codes an hour.
+        self.assertLessEqual(company_auth.OTP_MAX_TRIES, 5)
+        self.assertLessEqual(company_auth.OTP_MAX_CODES_PER_HOUR, 5)
+        self.assertLessEqual(company_auth.OTP_TTL_MINUTES, 10)
+
     def test_five_wrong_tries_and_the_code_is_dead(self):
         code = self.ask()
         for _ in range(company_auth.OTP_MAX_TRIES):

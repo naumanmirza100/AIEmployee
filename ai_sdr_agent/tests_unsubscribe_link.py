@@ -68,6 +68,12 @@ class UnsubscribeLinkTests(SDRBase):
         self.assertTrue(self.blocked())
         self.assertEqual(SDRLead.all_objects.get(pk=self.lead.pk).status, 'disqualified')
 
+    def test_a_new_link_needs_nothing_else_to_have_been_kept(self):
+        self.campaign.delete()
+        SDRRemovedEnrollment.objects.all().delete()
+        self.assertEqual(Client().post(self.new_link).status_code, 200)
+        self.assertTrue(self.blocked())
+
     def test_and_so_does_a_link_from_an_email_sent_before_this_change(self):
         self.campaign.delete()
         self.assertEqual(Client().post(self.old_link).status_code, 200)
@@ -123,11 +129,15 @@ class UnsubscribeLinkTests(SDRBase):
         rita = CompanyUser.objects.create(company=rival, email='rita@rival.test', full_name='Rita', role='admin',
                                           password_hash='x', is_active=True)
         theirs = SDRLead.objects.create(company_user=rita, email='bob@acme.com', first_name='Bob')
+        their_campaign = SDRCampaign.objects.create(company_user=rita, name='Rival outreach', status='active')
+        their_enrolment = self.enroll(theirs, campaign=their_campaign)
         self.campaign.delete()
         Client().post(self.new_link)
         self.assertTrue(self.blocked())
         self.assertFalse(is_blocked(rival.id, 'bob@acme.com'))
         self.assertNotEqual(SDRLead.all_objects.get(pk=theirs.pk).status, 'disqualified')
+        their_enrolment.refresh_from_db()
+        self.assertEqual(their_enrolment.status, 'active')            # their campaign carries on
 
     def test_while_the_enrolment_exists_it_works_as_before(self):
         self.assertEqual(Client().post(self.new_link).status_code, 200)

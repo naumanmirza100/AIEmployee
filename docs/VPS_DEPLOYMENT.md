@@ -102,7 +102,8 @@ COMPOSE_PROFILES=localdb
 
 The `db` service carries `profiles: ["localdb"]`, so a plain
 `docker compose up -d` ignores it entirely. This matters because
-`.github/workflows/deploy.yml` runs `docker compose up --build -d` on every push
+`.github/workflows/deploy.yml` runs `scripts/deploy.sh`, which builds, applies
+migrations and then runs `docker compose up -d`, on every push
 to `main`: without the profile, merging the database change would start an empty
 MariaDB and point the app at it on the next deploy. With it, only a host that
 has opted in ever runs a local database, and only after you say so.

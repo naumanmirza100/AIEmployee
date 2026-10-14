@@ -84,7 +84,9 @@ class TheFileTests(PublicApplyTestCase):
         self.assertEqual(public_apply.MAX_CV_BYTES, 10 * 1024 * 1024)
 
     def test_an_empty_file_is_refused(self):
-        self.assertEqual(self.apply(cv=('cara.pdf', b''))[0], 400)
+        code, reply = self.apply(cv=('cara.pdf', b''))
+        self.assertEqual((code, reply['code']), (400, 'BAD_CV_FILE'))
+        self.assertIn('empty', reply['message'])        # says what is wrong with it, not "not a real PDF"
 
     def test_the_file_is_checked_before_anything_is_written(self):
         with mock.patch('django.core.files.storage.FileSystemStorage._save') as write:

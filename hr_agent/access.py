@@ -58,6 +58,10 @@ def end_access(employee) -> dict:
             record['company_user_id'] = login.pk
             if login.login_user_id:
                 user_ids.add(login.login_user_id)
+            # What that login was running in each agent is paused or handed on.
+            login.is_active = False
+            from core.leavers import login_switched_off
+            login_switched_off(login)
 
     # Platform staff are not a company's to switch off.
     for user in User.objects.filter(pk__in=user_ids, is_active=True, is_staff=False, is_superuser=False):

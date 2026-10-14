@@ -774,6 +774,16 @@ const SDROutreachTab = () => {
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: sc.color, display: 'inline-block' }} />
                     {sc.label}
                   </span>
+                  {/* An owner or admin is shown colleagues' campaigns as well as their own. */}
+                  {c.owner && !c.owner.is_you && (
+                    <span data-testid="sdr-campaign-owner" style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', marginLeft: 6,
+                      borderRadius: 12, fontSize: 11, fontWeight: 600, marginBottom: 14,
+                      background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa',
+                    }}>
+                      {c.owner.name}{c.owner.is_active ? '' : ' · login switched off'}
+                    </span>
+                  )}
 
                   {/* Stats */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
@@ -1023,6 +1033,9 @@ const SDROutreachTab = () => {
 
   // ── Campaign detail view ───────────────────────────────────────────────
   const sc = STATUS_COLORS[selectedCampaign.status] || STATUS_COLORS.draft;
+  // A colleague's campaign, open to this login because it is an owner or admin:
+  // it can be paused, started again or deleted here, and nothing else.
+  const mine = !selectedCampaign.owner || selectedCampaign.owner.is_you;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -1064,19 +1077,23 @@ const SDROutreachTab = () => {
         </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
+          {mine && (
           <Button onClick={() => { setSettingsDraft({ ...selectedCampaign, smtp_password: '' }); setShowSettingsModal(true); }} variant="outline" style={{
             border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8,
             display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
           }}>
             <Edit2 size={14} /> Settings
           </Button>
+          )}
+          {mine && (
           <Button onClick={openEnrollModal} variant="outline" style={{
             border: '1px solid var(--line-1)', color: 'hsl(var(--pt-9ca3af))', borderRadius: 8,
             display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
           }}>
             <Users size={14} /> Enroll Leads
           </Button>
-          {enrollments.length > 0 && (
+          )}
+          {mine && enrollments.length > 0 && (
             <Button onClick={() => setClearLeadsConfirm(true)} disabled={clearingLeads} variant="outline" style={{
               border: '1px solid rgba(244,63,94,0.35)', color: '#f87171', borderRadius: 8,
               display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
@@ -1085,8 +1102,10 @@ const SDROutreachTab = () => {
               Clear Leads
             </Button>
           )}
-          {/* Pause / Resume — only for active or paused campaigns */}
-          {(selectedCampaign.status === 'active' || selectedCampaign.status === 'paused') && (
+          {/* Pause / Resume — only for active or paused campaigns. No Resume on the
+              campaign of a switched-off login: the server refuses it. */}
+          {(selectedCampaign.status === 'active'
+            || (selectedCampaign.status === 'paused' && (mine || selectedCampaign.owner.is_active))) && (
             <Button onClick={handlePauseResume} disabled={pausingCampaign} variant="outline" style={{
               border: selectedCampaign.status === 'active' ? '1px solid rgba(245,158,11,0.4)' : '1px solid rgba(16,185,129,0.4)',
               color: selectedCampaign.status === 'active' ? 'hsl(var(--pt-f59e0b))' : '#10b981',
@@ -1100,6 +1119,18 @@ const SDROutreachTab = () => {
           )}
         </div>
       </div>
+
+      {!mine && (
+        <div data-testid="sdr-colleagues-campaign" style={{
+          padding: '10px 14px', borderRadius: 8, fontSize: 13, lineHeight: 1.5,
+          background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.25)', color: 'hsl(var(--pt-93c5fd))',
+        }}>
+          <b>This is {selectedCampaign.owner.name}'s campaign.</b>{' '}
+          {selectedCampaign.owner.is_active
+            ? 'You can see it because you run the company. You can pause it, start it again or delete it; only they can change it.'
+            : 'Their login is switched off, so it cannot send. You can delete it, or switch their login back on to run it again.'}
+        </div>
+      )}
 
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
@@ -1122,7 +1153,7 @@ const SDROutreachTab = () => {
       </div>
 
       {/* SMTP missing warning — shown prominently if credentials not set */}
-      {!(selectedCampaign.smtp_host && selectedCampaign.smtp_username) && (
+      {mine && !(selectedCampaign.smtp_host && selectedCampaign.smtp_username) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
           borderRadius: 8, background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.35)',
@@ -1154,7 +1185,16 @@ const SDROutreachTab = () => {
             : selectedCampaign.status === 'paused'
             ? (selectedCampaign.paused_reason
               // Paused by the product itself, with the reason it gave (e.g. what the mailbox answered).
-              ? <span data-testid="sdr-paused-reason"><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>{selectedCampaign.paused_reason}</b> Nothing was sent to the lead it was trying and no lead was marked as bounced. Fix it in Settings, then Resume.</span>
+              // The server writes the whole of it, next step included; its first sentence is the headline.
+              ? (() => {
+                const [headline, ...rest] = selectedCampaign.paused_reason.split('. ');
+                return (
+                  <span data-testid="sdr-paused-reason">
+                    <b style={{ color: 'hsl(var(--pt-f59e0b))' }}>{headline}{rest.length ? '.' : ''}</b>
+                    {rest.length ? ` ${rest.join('. ')}` : ''}
+                  </span>
+                );
+              })()
               : <><b style={{ color: 'hsl(var(--pt-f59e0b))' }}>Paused</b> — campaign is paused. Resume to continue sending.</>)
             : selectedCampaign.status === 'completed'
             ? <><b style={{ color: '#6b7280' }}>Campaign Completed</b> — all leads have been processed. Enroll new leads to restart.</>
@@ -1176,8 +1216,10 @@ const SDROutreachTab = () => {
       )} */}
 
       {/* Answers the AI wrote to leads who asked for more, waiting to be checked */}
-      <SDRReplyDrafts campaignId={selectedCampaign.id} waiting={selectedCampaign.answers_waiting || 0}
-        onChanged={() => loadDetail(selectedCampaign)} />
+      {mine && (
+        <SDRReplyDrafts campaignId={selectedCampaign.id} waiting={selectedCampaign.answers_waiting || 0}
+          onChanged={() => loadDetail(selectedCampaign)} />
+      )}
 
       {/* Main content: steps + enrollments */}
       <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, alignItems: 'flex-start' }}>
@@ -1186,14 +1228,16 @@ const SDROutreachTab = () => {
         <div style={{ ...cardStyle, padding: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <h3 style={{ color: 'var(--text-soft)', fontWeight: 700, fontSize: 14, margin: 0 }}>Outreach Sequence</h3>
-            <button onClick={handleGenerateSteps} disabled={generatingSteps} style={{
-              background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)',
-              borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: 'hsl(var(--pt-c084fc))',
-              fontSize: 11, display: 'flex', alignItems: 'center', gap: 4,
-            }}>
-              {generatingSteps ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
-              {generatingSteps ? 'Generating…' : 'Regenerate'}
-            </button>
+            {mine && (
+              <button onClick={handleGenerateSteps} disabled={generatingSteps} style={{
+                background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)',
+                borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: 'hsl(var(--pt-c084fc))',
+                fontSize: 11, display: 'flex', alignItems: 'center', gap: 4,
+              }}>
+                {generatingSteps ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
+                {generatingSteps ? 'Generating…' : 'Regenerate'}
+              </button>
+            )}
           </div>
 
           {loadingDetail ? (
@@ -1203,13 +1247,15 @@ const SDROutreachTab = () => {
           ) : steps.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 24 }}>
               <p style={{ color: '#4b5563', fontSize: 13, marginBottom: 12 }}>No steps yet.</p>
-              <button onClick={handleGenerateSteps} disabled={generatingSteps} style={{
-                background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff',
-                border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer',
-                fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, margin: '0 auto',
-              }}>
-                <Zap size={13} /> Generate Steps with AI
-              </button>
+              {mine && (
+                <button onClick={handleGenerateSteps} disabled={generatingSteps} style={{
+                  background: 'linear-gradient(90deg,hsl(var(--brand-600)),#a855f7)', color: '#fff',
+                  border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer',
+                  fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, margin: '0 auto',
+                }}>
+                  <Zap size={13} /> Generate Steps with AI
+                </button>
+              )}
             </div>
           ) : (
             steps.map((step, i) => (
@@ -1217,7 +1263,7 @@ const SDROutreachTab = () => {
                 key={step.id}
                 step={step}
                 isLast={i === steps.length - 1}
-                onEdit={(s) => { setEditingStep({ ...s }); setShowEditStepModal(true); }}
+                onEdit={mine ? (s) => { setEditingStep({ ...s }); setShowEditStepModal(true); } : undefined}
               />
             ))
           )}
@@ -1246,7 +1292,7 @@ const SDROutreachTab = () => {
             <div style={{ textAlign: 'center', padding: 40 }}>
               <Users size={32} style={{ color: '#1e0f38', margin: '0 auto 10px' }} />
               <p style={{ color: '#6b7280', fontSize: 13 }}>No leads enrolled yet.</p>
-              <p style={{ color: '#4b5563', fontSize: 12 }}>Click "Enroll Leads" to add leads to this campaign.</p>
+              {mine && <p style={{ color: '#4b5563', fontSize: 12 }}>Click "Enroll Leads" to add leads to this campaign.</p>}
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1677,7 +1723,7 @@ const SDROutreachTab = () => {
           not_interested: { color: '#f87171', bg: 'rgba(248,113,113,0.1)', icon: '❌', label: '✗ Not interested — asked to stop contact' },
           negative:       { color: '#f87171', bg: 'rgba(248,113,113,0.1)', icon: '❌', label: '✗ Not interested' },
           out_of_office:  { color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  icon: '🏖️', label: '🏖️ Out of office — follow-up paused' },
-          wants_more_info:{ color: '#60a5fa', bg: 'rgba(96,165,250,0.1)',  icon: 'ℹ️', label: 'ℹ️ Wants more info — info email sent' },
+          wants_more_info:{ color: '#60a5fa', bg: 'rgba(96,165,250,0.1)',  icon: 'ℹ️', label: 'ℹ️ Wants more info' },
           neutral:        { color: '#9ca3af', bg: 'rgba(107,114,128,0.1)', icon: '💬', label: '~ Neutral reply' },
         };
         const ACTION_TAKEN = {

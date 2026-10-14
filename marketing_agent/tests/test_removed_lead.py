@@ -100,6 +100,9 @@ class RemovedLeadTests(MarketingTestCase):
         self.assertEqual(listed(), ['bilal@customer.test', 'sana@customer.test'])
         self.remove(self.bilal)
         self.assertEqual(listed(), ['sana@customer.test'])
+        # A follow-up row closed by nothing (removed before this fix) is not listed either.
+        self.follow_up(self.bilal, self.spring)
+        self.assertEqual(listed(), ['sana@customer.test'])
 
     def test_put_back_they_carry_on_from_where_they_were_not_from_the_start(self):
         self.run_sender()
@@ -112,9 +115,12 @@ class RemovedLeadTests(MarketingTestCase):
     def test_removed_from_the_lead_side_counts_as_well(self):
         self.run_sender()
         run = self.follow_up(self.bilal, self.spring)
+        elsewhere = self.follow_up(self.bilal, self.autumn)
         self.bilal.campaigns.remove(self.spring)
         run.refresh_from_db()
+        elsewhere.refresh_from_db()
         self.assertTrue(run.cancelled)
+        self.assertFalse(elsewhere.cancelled)             # only the campaign they were taken out of
         self.assertNotIn('Spring 2', [subject for email, subject in self.run_sender()
                                       if email == 'bilal@customer.test'])
 

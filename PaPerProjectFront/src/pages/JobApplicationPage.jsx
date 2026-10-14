@@ -92,6 +92,17 @@ const JobApplicationPage = () => {
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
+      // The server takes a PDF or a .docx of up to 10 MB and nothing else; say so
+      // here, before the upload, and not after it.
+      const problem = !/\.(pdf|docx)$/i.test(file.name)
+        ? 'Please upload a PDF or a Word document (.docx)'
+        : file.size > 10 * 1024 * 1024 ? 'That file is larger than 10 MB' : '';
+      if (problem) {
+        setCvFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setErrors((p) => ({ ...p, cv_file: problem }));
+        return;
+      }
       setCvFile(file);
       if (errors.cv_file) setErrors((p) => { const n = { ...p }; delete n.cv_file; return n; });
     }
@@ -414,9 +425,9 @@ const JobApplicationPage = () => {
             <div>
               <label className="block text-xs font-medium text-white/60 mb-1.5">
                 Upload CV <span className="text-red-400">*</span>
-                <span className="ml-1 font-normal text-white/30">(PDF, DOC, DOCX)</span>
+                <span className="ml-1 font-normal text-white/30">(PDF or DOCX)</span>
               </label>
-              <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} className="hidden" />
+              <input ref={fileInputRef} type="file" accept=".pdf,.docx" onChange={handleFileChange} className="hidden" />
               {cvFile ? (
                 <div
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5"
@@ -439,7 +450,7 @@ const JobApplicationPage = () => {
                 >
                   <Upload className="h-5 w-5 mx-auto text-white/30 mb-1.5" />
                   <p className="text-sm text-white/50">Click to upload your CV</p>
-                  <p className="text-xs text-white/30 mt-0.5">PDF, DOC, DOCX up to 10MB</p>
+                  <p className="text-xs text-white/30 mt-0.5">PDF or DOCX, up to 10 MB</p>
                 </button>
               )}
               {errors.cv_file && <p className="mt-1 text-xs text-red-400">{errors.cv_file}</p>}
