@@ -1,8 +1,5 @@
 import json
 import logging
-import tempfile
-import time
-from pathlib import Path
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -11,14 +8,14 @@ from rest_framework.permissions import AllowAny
 from django.shortcuts import get_object_or_404
 
 from recruitment_agent.models import (
-    JobDescription, CareerApplication, JobApplication, CVRecord,
+    JobDescription, CareerApplication, JobApplication,
 )
 from api.serializers.career import JobDescriptionSerializer, CareerApplicationSerializer, JobApplicationSerializer
 from api.permissions import IsCompanyUser, IsCompanyUserOnly
 from api.authentication import CompanyUserTokenAuthentication
 from core.models import CompanyUser, Company, CompanyModulePurchase
 from api.views.recruitment_agent import _make_agents
-from recruitment_agent import application_status, sharing
+from recruitment_agent import applicant_screening, sharing
 
 
 def _company_has_recruitment_agent(company):
@@ -323,22 +320,7 @@ def process_job_applicants(request, jobId):
         job = get_object_or_404(sharing.jobs(company_user), id=jobId)
 
         # Verify interview settings are complete (same guard as process_cvs)
-        interview_settings = sharing.job_interview_settings(job)
-        missing_fields = []
-        if not interview_settings:
-            missing_fields.append('Interview settings not configured')
-        else:
-            if not interview_settings.schedule_from_date:
-                missing_fields.append('Start date')
-            if not interview_settings.schedule_to_date:
-                missing_fields.append('End date')
-            if not interview_settings.start_time:
-                missing_fields.append('Start time')
-            if not interview_settings.end_time:
-                missing_fields.append('End time')
-            if not (interview_settings.time_slots_json and len(interview_settings.time_slots_json) > 0):
-                missing_fields.append('Time slots')
-
+        missing_fields = applicant_screening.missing_interview_settings(job)
         if missing_fields:
             return Response({
                 'status': 'error',
@@ -360,151 +342,8 @@ def process_job_applicants(request, jobId):
                 'results': [],
             }, status=status.HTTP_200_OK)
 
-        agents = _make_agents(company)
-        cv_agent = agents['cv_agent']
-        sum_agent = agents['sum_agent']
-        enrich_agent = agents['enrich_agent']
-        qualify_agent = agents['qualify_agent']
-        interview_agent = agents.get('interview_agent')
-        django_repo = agents['django_repo']
-
-        # Build keyword list from job
-        job_kw_list = None
-        job_description_text = job.description or ''
-        if job.keywords_json:
-            try:
-                stored = json.loads(job.keywords_json)
-                extracted = stored.get('keywords', [])
-                if extracted:
-                    job_kw_list = extracted
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # The job owner's screening thresholds
-        settings_owner = sharing.owner(job, company_user)
-        interview_threshold, hold_threshold = sharing.thresholds(settings_owner)
-
-        # Email / interview defaults
-        auto_interview_type = 'ONLINE'
-        if interview_settings and getattr(interview_settings, 'default_interview_type', None):
-            auto_interview_type = interview_settings.default_interview_type
-        email_settings = sharing.email_settings(settings_owner)
-
-        results = []
-        for idx, app in enumerate(unprocessed):
-            if not app.cv_file:
-                results.append({
-                    'application_id': app.id,
-                    'applicant': f'{app.first_name} {app.last_name}'.strip(),
-                    'skipped': True,
-                    'reason': 'No CV file uploaded',
-                })
-                continue
-
-            if idx > 0:
-                time.sleep(0.5)
-
-            temp_path = None
-            try:
-                suffix = Path(app.cv_file.name).suffix or '.pdf'
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    app.cv_file.open('rb')
-                    tmp.write(app.cv_file.read())
-                    app.cv_file.close()
-                    temp_path = Path(tmp.name)
-
-                parsed = cv_agent.parse_file(str(temp_path))
-                record_id = django_repo.store_parsed(app.cv_file_name or app.cv_file.name, parsed)
-
-                # Link CVRecord to company_user, job, and the JobApplication
-                if record_id:
-                    try:
-                        cv_record = CVRecord.objects.get(id=record_id)
-                        cv_record.company_user = company_user
-                        cv_record.job_description = job
-                        cv_record.job_application = app
-                        cv_record.save()
-                    except CVRecord.DoesNotExist:
-                        pass
-
-                summary = sum_agent.summarize(parsed, job_kw_list)
-                if not isinstance(summary, dict):
-                    summary = summary[0] if isinstance(summary, list) and summary else {}
-                # The model wrote this from the CV's own text; it does not get to name a candidate record
-                summary.pop('record_id', None)
-
-                enriched = enrich_agent.enrich(parsed, summary)
-                if not isinstance(enriched, dict):
-                    enriched = enriched[0] if isinstance(enriched, list) and enriched else {}
-
-                qualified = qualify_agent.qualify(parsed, summary, job_kw_list, enriched, interview_threshold, hold_threshold)
-                if not isinstance(qualified, dict):
-                    qualified = qualified[0] if isinstance(qualified, list) and qualified else {}
-
-                # Persist full analysis back to CVRecord
-                if record_id:
-                    try:
-                        cv_record = CVRecord.objects.get(id=record_id)
-                        cv_record.insights_json = json.dumps(summary)
-                        cv_record.enriched_json = json.dumps(enriched)
-                        cv_record.qualification_json = json.dumps(qualified)
-                        cv_record.role_fit_score = summary.get('role_fit_score') if isinstance(summary, dict) else None
-                        cv_record.qualification_decision = qualified.get('decision') if isinstance(qualified, dict) else None
-                        cv_record.qualification_confidence = qualified.get('confidence_score') if isinstance(qualified, dict) else None
-                        cv_record.qualification_priority = qualified.get('priority') if isinstance(qualified, dict) else None
-                        cv_record.rank = idx + 1
-                        cv_record.save()
-                        application_status.after_screening(cv_record)
-                    except CVRecord.DoesNotExist:
-                        pass
-
-                interview_scheduled = False
-                qual_decision = qualified.get('decision', '') if isinstance(qualified, dict) else ''
-                if qual_decision == 'INTERVIEW' and interview_agent and app.email:
-                    candidate_name = f'{app.first_name} {app.last_name}'.strip() or 'Candidate'
-                    import re
-                    job_role = re.sub(r'[\r\n\t\s]+', ' ', (job_description_text.split('\n')[0][:100])).strip() if job_description_text else job.title
-                    try:
-                        interview_result = interview_agent.schedule_interview(
-                            candidate_name=candidate_name,
-                            candidate_email=app.email,
-                            job_role=job_role,
-                            interview_type=auto_interview_type,
-                            candidate_phone=app.phone,
-                            cv_record_id=record_id,
-                            recruiter_id=None,
-                            company_user_id=company_user.id,
-                            email_settings=email_settings,
-                            custom_slots=None,
-                        )
-                        interview_scheduled = interview_result.get('invitation_sent', False)
-                    except Exception as ie:
-                        logger.error(f'Interview scheduling failed for {app.email}: {ie}')
-
-                results.append({
-                    'application_id': app.id,
-                    'applicant': f'{app.first_name} {app.last_name}'.strip(),
-                    'record_id': record_id,
-                    'decision': qual_decision,
-                    'role_fit_score': summary.get('role_fit_score') if isinstance(summary, dict) else None,
-                    'interview_scheduled': interview_scheduled,
-                    'skipped': False,
-                })
-
-            except Exception as exc:
-                logger.error(f'Error processing application {app.id}: {exc}', exc_info=True)
-                results.append({
-                    'application_id': app.id,
-                    'applicant': f'{app.first_name} {app.last_name}'.strip(),
-                    'skipped': True,
-                    'reason': str(exc),
-                })
-            finally:
-                if temp_path:
-                    try:
-                        temp_path.unlink()
-                    except Exception:
-                        pass
+        # The same steps screen a new application as it arrives (recruitment_agent/applicant_screening.py).
+        results = applicant_screening.screen(job, unprocessed, company_user, _make_agents(company))
 
         processed_count = sum(1 for r in results if not r.get('skipped'))
         skipped_results = [r for r in results if r.get('skipped')]

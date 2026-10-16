@@ -1,6 +1,7 @@
 import secrets
 from datetime import timedelta
 
+from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from django.core.mail import send_mail
@@ -12,7 +13,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 
-from recruitment_agent import public_apply
+from recruitment_agent import applicant_screening, public_apply
 from recruitment_agent.models import JobDescription, JobApplication
 
 
@@ -224,6 +225,10 @@ def public_job_apply(request, job_id):
     application.cv_file_name = cv_file.name[:255] if cv_file else None
     application.access_token = access_token
     application.save()
+
+    # Screened as it arrives, as Recruitment's screens promise, once the company has the
+    # agent and the job's interview hours are set. The applicant does not wait for it.
+    transaction.on_commit(lambda: applicant_screening.screen_soon(application.id))
 
     # Build tracking URL — points to React frontend
     frontend_base = (getattr(settings, 'FRONTEND_URL', None) or getattr(settings, 'BACKEND_URL', None) or '').strip().rstrip('/')
