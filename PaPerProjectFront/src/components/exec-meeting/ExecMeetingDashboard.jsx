@@ -100,6 +100,10 @@ const ExecMeetingDashboard = () => {
   const [notifsLoading, setNotifsLoading] = useState(false);
   const [digest, setDigest] = useState(null);
   const [digestLoading, setDigestLoading] = useState(false);
+  // Set when the server refuses for too many requests in the hour (HTTP 429). The lists
+  // used to swallow that and show "No meetings scheduled yet", as if there were none.
+  const [tooBusy, setTooBusy] = useState(false);
+  const noteRefusal = (err) => { if (err?.status === 429) setTooBusy(true); };
 
   // ── Per-tab filters (search / dropdowns / date). Server-side: each change
   // re-fetches the list with query params. `search` is debounced (see effect).
@@ -234,7 +238,7 @@ const ExecMeetingDashboard = () => {
     if (activeTab === 'meetings') { if (meetings.length === 0) loadMeetings(); if (meetingFilterUsers.length === 0) loadMeetingFilterUsers(); }
     if (activeTab === 'tasks' && tasks.length === 0) loadTasks();
     if (activeTab === 'notifications') loadNotifications();
-    if (activeTab === 'overview' && !digest) loadDigest();
+    if (activeTab === 'overview' && !digest) loadDigest(false);
     if (activeTab === 'documents') { loadDocuments(); loadMeetings(); }
   }, [activeTab]);
 
@@ -274,7 +278,8 @@ const ExecMeetingDashboard = () => {
     try {
       const data = await execMeetingService.getStats();
       setStats(data);
-    } catch {
+    } catch (err) {
+      noteRefusal(err);
       setStats({ upcoming_meetings: 0, total_tasks: 0, pending_action_items: 0, unread_notifications: 0, overdue_tasks: 0 });
     } finally {
       setStatsLoading(false);
@@ -287,7 +292,8 @@ const ExecMeetingDashboard = () => {
       const data = await execMeetingService.getMeetings({ ...filters, page, page_size: PAGE_SIZE });
       setMeetings(data.meetings || []);
       setMeetingPageMeta(data.pagination || null);
-    } catch {
+    } catch (err) {
+      noteRefusal(err);
       setMeetings([]);
       setMeetingPageMeta(null);
     } finally {
@@ -304,7 +310,8 @@ const ExecMeetingDashboard = () => {
     try {
       const data = await execMeetingService.getMeetingFilterUsers();
       setMeetingFilterUsers(data.users || []);
-    } catch {
+    } catch (err) {
+      noteRefusal(err);
       setMeetingFilterUsers([]);
     }
   };
@@ -335,7 +342,8 @@ const ExecMeetingDashboard = () => {
       const data = await execMeetingService.getTasks({ ...filters, page, page_size: PAGE_SIZE });
       setTasks(data.tasks || []);
       setTaskPageMeta(data.pagination || null);
-    } catch {
+    } catch (err) {
+      noteRefusal(err);
       setTasks([]);
       setTaskPageMeta(null);
     } finally {
@@ -349,7 +357,8 @@ const ExecMeetingDashboard = () => {
       const data = await execMeetingService.getNotifications({ ...filters, page, page_size: pageSize });
       setNotifications(data.notifications || []);
       setNotifPageMeta(data.pagination || null);
-    } catch {
+    } catch (err) {
+      noteRefusal(err);
       setNotifications([]);
       setNotifPageMeta(null);
     } finally {
@@ -359,14 +368,16 @@ const ExecMeetingDashboard = () => {
   const goToTaskPage = (p) => { setTaskPage(p); loadTasks(taskFilters, p); };
   const goToNotifPage = (p) => { setNotifPage(p); loadNotifications(notifFilters, p); };
 
-  const loadDigest = async () => {
+  // The server keeps today's digest; only the refresh button asks the AI for a new one.
+  const loadDigest = async (refresh = false) => {
     setDigestLoading(true);
     try {
-      const data = await execMeetingService.getDailyDigest();
+      const data = await execMeetingService.getDailyDigest(refresh);
       const d = data.digest || data;
       // only store if it looks like a real digest object, not an error response
       setDigest(d && typeof d === 'object' && !d.status ? d : null);
-    } catch {
+    } catch (err) {
+      noteRefusal(err);
       setDigest(null);
     } finally {
       setDigestLoading(false);
@@ -379,7 +390,8 @@ const ExecMeetingDashboard = () => {
       const data = await execMeetingService.listDocuments({ ...filters, page, page_size: PAGE_SIZE });
       setSavedDocs(data.documents || []);
       setDocPageMeta(data.pagination || null);
-    } catch {
+    } catch (err) {
+      noteRefusal(err);
       setSavedDocs([]);
       setDocPageMeta(null);
     } finally {
@@ -927,6 +939,11 @@ const ExecMeetingDashboard = () => {
           <h3 className="text-white font-semibold flex items-center gap-2">
             <LayoutDashboard className="h-4 w-4 text-violet-400" />
             Daily Digest
+            {digest?.made_at && (
+              <span className="text-white/35 text-xs font-normal">
+                made at {new Date(digest.made_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
           </h3>
           <div className="flex items-center gap-2">
             <HoverTip tip="Go to Meetings and schedule a new one">
@@ -950,7 +967,7 @@ const ExecMeetingDashboard = () => {
               </Button>
             </HoverTip>
             <HoverTip tip="Regenerate today's digest">
-              <Button size="sm" variant="ghost" onClick={loadDigest} disabled={digestLoading} className="text-white/50 hover:text-white h-8 w-8 p-0">
+              <Button size="sm" variant="ghost" onClick={() => loadDigest(true)} disabled={digestLoading} className="text-white/50 hover:text-white h-8 w-8 p-0">
                 <RefreshCw className={`h-4 w-4 ${digestLoading ? 'animate-spin' : ''}`} />
               </Button>
             </HoverTip>
@@ -1307,6 +1324,13 @@ const ExecMeetingDashboard = () => {
           {/* Mobile tab menu removed — agent tabs now live in the left sidebar. */}
           </div>
         </div>
+
+        {tooBusy && (
+          <div role="alert" className="mb-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm text-amber-200 flex items-center justify-between gap-3">
+            <span>Too many requests in the last hour. Some lists could not load; try again in a few minutes.</span>
+            <button type="button" onClick={() => setTooBusy(false)} className="text-amber-200/70 hover:text-amber-100 text-xs font-semibold">Dismiss</button>
+          </div>
+        )}
 
         {/* Tabs — the tab BAR now lives in the left sidebar; this keeps the
             ?tab=-driven content switching. */}

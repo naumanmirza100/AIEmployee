@@ -1395,7 +1395,9 @@ REST_FRAMEWORK = {
         'hr_crud': '1000/hour',
         # AI Executive Meeting Assistant throttles
         'exec_llm': '30/hour',
-        'exec_crud': '200/hour',
+        # As Project Manager: the overview alone makes three list calls and is refreshed
+        # from many places, and the people search sends a call per letter typed.
+        'exec_crud': '1000/hour',
         # Company auth endpoints
         'company_auth': '200/hour',
         # The public "apply for this job" form, per caller address

@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 
+from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
@@ -563,6 +564,47 @@ class ExecCRUDThrottle(SimpleRateThrottle):
             if ident:
                 return self.cache_format % {'scope': self.scope, 'ident': ident}
         return self.get_ident(request)
+
+
+# One address both reads a meeting's stored notes and asks the AI to write them. Reading
+# was counted as AI use: every meeting card opened spent one of the 30 an hour, and after
+# a morning's use the AI stopped and notes showed as missing. A key of None is not counted.
+_READS = ('GET', 'HEAD', 'OPTIONS')
+
+
+class ExecLLMWhenWritingThrottle(ExecLLMThrottle):
+    def get_cache_key(self, request, view):
+        return None if request.method in _READS else super().get_cache_key(request, view)
+
+
+class ExecCRUDWhenReadingThrottle(ExecCRUDThrottle):
+    def get_cache_key(self, request, view):
+        return super().get_cache_key(request, view) if request.method in _READS else None
+
+
+# The daily digest was asked of the AI every time the overview opened. It is now kept for
+# the day and made again only when the refresh button asks for it.
+DIGEST_KEEP_SECONDS = 26 * 3600
+
+
+def _digest_key(company_user):
+    from meeting_agent.clock import company_zone
+    from zoneinfo import ZoneInfo
+    day = timezone.now().astimezone(ZoneInfo(company_zone(company_user.company))).date()
+    return f'exec_digest:{company_user.id}:{day.isoformat()}'
+
+
+def _wants_new_digest(request):
+    return str(request.data.get('refresh', '')).lower() in ('1', 'true', 'yes')
+
+
+class ExecDigestThrottle(ExecLLMThrottle):
+    """Counted only when the AI is really asked: a digest already made today costs nothing."""
+
+    def get_cache_key(self, request, view):
+        if not _wants_new_digest(request) and cache.get(_digest_key(request.user)) is not None:
+            return None
+        return super().get_cache_key(request, view)
 
 
 # ---------------------------------------------------------------------------
@@ -1589,7 +1631,7 @@ def meeting_check_conflicts(request):
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
-@throttle_classes([ExecLLMThrottle])
+@throttle_classes([ExecLLMWhenWritingThrottle, ExecCRUDWhenReadingThrottle])
 def meeting_notes(request, meeting_id):
     """Get or submit notes/transcript for a meeting."""
     company_user = request.user
@@ -2568,13 +2610,20 @@ def notification_bulk_delete(request):
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
-@throttle_classes([ExecLLMThrottle])
+@throttle_classes([ExecDigestThrottle])
 def notification_daily_digest(request):
-    """Get AI-generated daily digest."""
+    """Today's AI digest: the one already made today, or a new one when {"refresh": true}."""
     company_user = request.user
+    key = _digest_key(company_user)
+    if not _wants_new_digest(request):
+        kept = cache.get(key)
+        if kept is not None:
+            return Response({'status': 'success', 'digest': kept})
     try:
         agent = _get_agent('proactive_notification', company_user)
         digest = agent.generate_daily_digest(company_user.id, company_user.full_name)
+        digest['made_at'] = timezone.now().isoformat()
+        cache.set(key, digest, DIGEST_KEEP_SECONDS)
         return Response({'status': 'success', 'digest': digest})
     except KeyServiceError:
         raise
