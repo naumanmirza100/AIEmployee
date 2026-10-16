@@ -9,6 +9,8 @@ markdown writing and stores the result in OperationsGeneratedDocument.
 import logging
 from typing import Dict, List, Optional
 
+from django.conf import settings
+
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
 from operations_agent.models import OperationsDocument
 
@@ -243,21 +245,29 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 {'role': 'user', 'content': prepared['user_prompt']},
             ]
 
-            # Groq chat streaming.
+            # self.model is the Groq model name. With an OpenAI key it was sent to OpenAI as it
+            # was, which has no such model, so every new document failed. Choose as _call_groq_qa does.
+            provider = key_ctx.provider if key_ctx else 'groq'
+            model = getattr(settings, 'OPENAI_MODEL', 'gpt-4o-mini') if provider == 'openai' else self.model
             create_kwargs = dict(
-                model=self.model,
+                model=model,
                 messages=messages,
                 temperature=0.4,
                 max_tokens=self.MAX_TOKENS,
                 stream=True,
             )
             try:
-                stream = stream_client.chat.completions.create(
-                    **create_kwargs,
-                    stream_options={'include_usage': True},
-                )
-            except TypeError:
-                stream = stream_client.chat.completions.create(**create_kwargs)
+                try:
+                    stream = stream_client.chat.completions.create(
+                        **create_kwargs,
+                        stream_options={'include_usage': True},
+                    )
+                except TypeError:
+                    stream = stream_client.chat.completions.create(**create_kwargs)
+            except Exception as call_error:
+                from core.api_key_service import raise_if_auth_error
+                raise_if_auth_error(call_error, key_ctx)
+                raise
 
             full_text = ''
             usage = None
@@ -288,8 +298,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             tokens_used = {}
             if usage:
                 tokens_used = {
-                    'provider': 'groq',
-                    'model': self.model,
+                    'provider': provider,
+                    'model': model,
                     'prompt_tokens': getattr(usage, 'prompt_tokens', None),
                     'completion_tokens': getattr(usage, 'completion_tokens', None),
                     'total_tokens': getattr(usage, 'total_tokens', None),
@@ -300,8 +310,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 est_prompt = max(1, int(len(prepared['user_prompt']) / 4))
                 est_completion = max(1, int(len(content) / 4))
                 tokens_used = {
-                    'provider': 'groq',
-                    'model': self.model,
+                    'provider': provider,
+                    'model': model,
                     'prompt_tokens': est_prompt,
                     'completion_tokens': est_completion,
                     'total_tokens': est_prompt + est_completion,
