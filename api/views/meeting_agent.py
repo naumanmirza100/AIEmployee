@@ -1557,6 +1557,15 @@ def meeting_respond(request, meeting_id):
         meeting=meeting,
         data={'participant_id': company_user.id, 'response': response_val, 'meeting_id': meeting.id},
     )
+    # And in the bell: the alert above shows only on Executive Meeting's own page.
+    from core.notification_utils import notify_company_users
+    said = {'accepted': 'accepted', 'rejected': 'declined', 'tentative': 'tentatively accepted',
+            'counter_proposed': 'suggested another time for'}[response_val]
+    notify_company_users(
+        [meeting.organizer], title=f'{company_user.full_name} {said} {meeting.title}'[:255],
+        message=f'{company_user.full_name} {said} the meeting "{meeting.title}".' + (f' Reason: {reason}' if reason else ''),
+        link='/exec-meeting/dashboard?tab=meetings', kind='exec_meeting_reply',
+        data={'meeting_id': meeting.id})
 
     return Response({'status': 'success', 'participant': {
         'response': participant.response,

@@ -108,3 +108,27 @@ class GivenTaskTests(TestCase):
         listed = self.listed(self.omar)
         self.assertNotIn('Collect uptime figures', listed)
         self.assertIn('Collect uptime figures', [s['title'] for s in listed['Prepare the renewal']['subtasks']])
+
+
+class ReplyInTheBellTests(TestCase):
+    """A reply to an executive meeting reaches the organiser's bell, not only Executive Meeting's own page."""
+
+    def test_the_organiser_s_bell_has_the_reply(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from meeting_agent.models import ExecutiveMeeting, ExecutiveMeetingParticipant
+        company = Company.objects.create(name='Averon', email='averon@test.local')
+        hamza, omar = (CompanyUser.objects.create(company=company, email=f'{n}@averon.test', full_name=f,
+                                                  role='admin', password_hash='x', is_active=True)
+                       for n, f in (('hamza', 'Hamza Ahmed'), ('omar', 'Omar Farooq')))
+        meeting = ExecutiveMeeting.objects.create(organizer=hamza, title='FinEdge account review',
+                                                  scheduled_at=timezone.now() + timedelta(days=2))
+        ExecutiveMeetingParticipant.objects.create(meeting=meeting, company_user=omar)
+        request = APIRequestFactory().post('/', {'response': 'rejected', 'reason': 'On leave'}, format='json')
+        force_authenticate(request, user=omar)
+        with mock.patch('core.notification_settings.send_email'):
+            response = views.meeting_respond(request, meeting_id=meeting.id)
+        self.assertEqual(response.status_code, 200)
+        [alert] = PMNotification.objects.filter(company_user=hamza)
+        self.assertEqual(alert.title, 'Omar Farooq declined FinEdge account review')
+        self.assertIn('Reason: On leave', alert.message)
