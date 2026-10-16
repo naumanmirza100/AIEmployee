@@ -47,12 +47,24 @@ Transcript:
 Return a clean bullet-point summary. Focus on what was discussed, decided, and agreed upon."""
         return self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=500)
 
-    def extract_action_items(self, transcript: str, participant_names: list = None) -> list:
+    @staticmethod
+    def _dates_hint(held_on) -> str:
+        """The day the meeting was held, for working out the due dates said in it.
+
+        Told nothing, the AI turned "by Friday" into a Friday in 2023."""
+        if not held_on:
+            return ''
+        return (f"The meeting was held on {held_on:%A}, {held_on.isoformat()}. Work out every due date from that "
+                "day: 'Friday' is the first Friday after it, 'next week' is the week after it, 'end of the month' is "
+                "the last day of its month. No due date is before that day. If no date was said, use null.")
+
+    def extract_action_items(self, transcript: str, participant_names: list = None, held_on=None) -> list:
         """Extract action items from transcript as structured JSON list."""
         self.log_action("extract_action_items")
         participants_hint = f"Known participants: {', '.join(participant_names)}" if participant_names else ""
         prompt = f"""Extract all action items from this meeting transcript.
 {participants_hint}
+{self._dates_hint(held_on)}
 
 Transcript:
 {transcript[:4000]}
@@ -108,11 +120,12 @@ Key Decisions:
 Write a professional email body (no subject line). Keep it under 200 words. Be clear and actionable."""
         return self._call_llm(prompt, self.system_prompt, temperature=0.4, max_tokens=400)
 
-    def process_full_transcript(self, transcript: str, meeting_title: str = '', participant_names: list = None) -> dict:
+    def process_full_transcript(self, transcript: str, meeting_title: str = '', participant_names: list = None,
+                                held_on=None) -> dict:
         """Run full notetaker pipeline: summary + action items + decisions."""
         self.log_action("process_full_transcript")
         summary = self.generate_summary(transcript)
-        action_items = self.extract_action_items(transcript, participant_names)
+        action_items = self.extract_action_items(transcript, participant_names, held_on)
         decisions = self.extract_key_decisions(transcript)
         followup = self.draft_followup_email(meeting_title, summary, action_items, decisions)
         return {
@@ -131,12 +144,13 @@ Write a professional email body (no subject line). Keep it under 200 words. Be c
                         kwargs['transcript'],
                         kwargs.get('meeting_title', ''),
                         kwargs.get('participant_names'),
+                        kwargs.get('held_on'),
                     ),
                 }
             if action == 'summary':
                 return {'success': True, 'summary': self.generate_summary(kwargs['transcript'])}
             if action == 'action_items':
-                return {'success': True, 'action_items': self.extract_action_items(kwargs['transcript'], kwargs.get('participant_names'))}
+                return {'success': True, 'action_items': self.extract_action_items(kwargs['transcript'], kwargs.get('participant_names'), kwargs.get('held_on'))}
             if action == 'decisions':
                 return {'success': True, 'decisions': self.extract_key_decisions(kwargs['transcript'])}
             if action == 'followup_email':

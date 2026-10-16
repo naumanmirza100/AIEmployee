@@ -1630,7 +1630,9 @@ def meeting_notes(request, meeting_id):
         participant_names = list(
             meeting.participants.select_related('company_user').values_list('company_user__full_name', flat=True)
         )
-        result = agent.process_full_transcript(transcript, meeting.title, participant_names)
+        from meeting_agent.clock import held_on
+        meeting_day = held_on(meeting)
+        result = agent.process_full_transcript(transcript, meeting.title, participant_names, held_on=meeting_day)
 
         note, _ = MeetingNote.objects.update_or_create(
             meeting=meeting,
@@ -1657,9 +1659,12 @@ def meeting_notes(request, meeting_id):
             if s.lower() in ('null', 'none', 'n/a', 'tbd', ''):
                 return None
             try:
-                return datetime.strptime(s[:10], '%Y-%m-%d').date()
+                due = datetime.strptime(s[:10], '%Y-%m-%d').date()
             except (ValueError, TypeError):
                 return None
+            # Nothing agreed in a meeting is due before it was held. A date like that is the
+            # AI guessing a year (it gave 2023), and no date is better than a wrong one.
+            return due if due >= meeting_day else None
 
         valid_priorities = ('low', 'medium', 'high', 'critical')
 
