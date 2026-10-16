@@ -41,6 +41,7 @@ from api.views import marketing_unsubscribe
 from api.views import reply_draft_agent as reply_draft_api
 from api.views import frontline_agent
 from api.views import hr_agent
+from api.views import hr_self_service
 from api.views import module_purchase
 from api.views import company_api_keys
 from api.views import admin_api_keys
@@ -172,6 +173,11 @@ urlpatterns = [
     re_path(r'^meetings/?$', notification.meeting_list_for_user, name='user_meeting_list'),
     re_path(r'^meetings/(?P<meeting_id>\d+)/respond/?$', notification.meeting_respond, name='user_meeting_respond'),
     re_path(r'^meetings/hr/(?P<meeting_id>\d+)/respond/?$', hr_agent.respond_hr_meeting_as_employee, name='user_hr_meeting_respond'),
+    # HR for employees, from their own login (My Space)
+    re_path(r'^user/hr/?$', hr_self_service.my_hr, name='user_hr'),  # GET
+    re_path(r'^user/hr/leave/?$', hr_self_service.my_hr_request_leave, name='user_hr_request_leave'),  # POST
+    re_path(r'^user/hr/leave/(?P<request_id>\d+)/cancel/?$', hr_self_service.my_hr_cancel_leave, name='user_hr_cancel_leave'),  # POST
+    re_path(r'^user/hr/ask/?$', hr_self_service.my_hr_ask, name='user_hr_ask'),  # POST
     # Public signed-token meeting accept/reject — clicked straight from the
     # invitation email, no auth required (token IS the auth).
     re_path(r'^meetings/email-action/(?P<action>accepted|rejected)/(?P<token>[^/]+)/?$',

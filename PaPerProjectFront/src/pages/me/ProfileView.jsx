@@ -89,24 +89,21 @@ export default function ProfileView() {
         </CardContent>
       </Card>
 
+      {/* An employee's HR is My HR. HR's own self-service page needs a dashboard login: an
+          employee sent there was told "Not logged in" and dropped on the company sign-in. */}
       <Card className="bg-white/[0.03] border-white/[0.08]">
         <CardHeader>
-          <CardTitle className="text-white text-base">HR self-service</CardTitle>
+          <CardTitle className="text-white text-base">HR</CardTitle>
           <CardDescription className="text-white/50">
-            If your company has the HR module, you can view leave balances,
-            documents, goals, and reviews here.
+            Your leave balance, asking for leave, and questions to HR, if your company uses the HR agent.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Link to="/hr/me">
+          <Link to={localStorage.getItem('auth_token') ? '/me/hr' : '/hr/me'}>
             <Button variant="outline" size="sm" className="border-white/15 text-white/70 hover:bg-white/[0.06] hover:text-white">
-              Open HR self-service <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
+              Open My HR <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
             </Button>
           </Link>
-          <p className="text-[10px] text-white/40 mt-2">
-            Requires a company_user account. Backend gating is being unified — see
-            USER_DASHBOARD_REDESIGN.md, Chunk F.
-          </p>
         </CardContent>
       </Card>
 

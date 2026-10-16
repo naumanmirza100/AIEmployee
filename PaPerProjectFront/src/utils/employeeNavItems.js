@@ -1,4 +1,4 @@
-import { Home, CheckSquare, Calendar, User, Bell, ListChecks } from 'lucide-react';
+import { Home, CheckSquare, Calendar, User, Bell, ListChecks, Briefcase } from 'lucide-react';
 
 /**
  * Nav items for the employee (individual user) sidebar shell.
@@ -55,6 +55,15 @@ export function getEmployeeNavItems(navigate, counts = {}) {
       badge: pendingMeetings,
     },
     {
+      // Leave balance, asking for leave, and questions to HR (only when the company has HR).
+      section: 'me-hr',
+      label: 'My HR',
+      icon: Briefcase,
+      path: '/me/hr',
+      basePath: '/me/hr',
+      onClick: () => navigate('/me/hr'),
+    },
+    {
       section: 'me-notifications',
       label: 'Notifications',
       icon: Bell,
@@ -81,5 +90,6 @@ export const EMPLOYEE_SECTION_FROM_PATH = (pathname) => {
   if (pathname.startsWith('/me/meetings')) return 'me-meetings';
   if (pathname.startsWith('/me/notifications')) return 'me-notifications';
   if (pathname.startsWith('/me/profile')) return 'me-profile';
+  if (pathname.startsWith('/me/hr')) return 'me-hr';
   return 'me-home';
 };
