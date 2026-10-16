@@ -366,6 +366,17 @@ const ExecMeetingDashboard = () => {
     }
   };
   const goToTaskPage = (p) => { setTaskPage(p); loadTasks(taskFilters, p); };
+
+  // A task someone else gave this login: only its status can be changed here.
+  const changeGivenTaskStatus = async (task, newStatus) => {
+    try {
+      await execMeetingService.updateTask(task.id, { status: newStatus });
+      setTasks(prev => prev.map(t => (t.id === task.id ? { ...t, status: newStatus } : t)));
+    } catch (err) {
+      noteRefusal(err);
+      toast({ title: 'Could not change the status', description: err?.message || '', variant: 'destructive' });
+    }
+  };
   const goToNotifPage = (p) => { setNotifPage(p); loadNotifications(notifFilters, p); };
 
   // The server keeps today's digest; only the refresh button asks the AI for a new one.
@@ -1227,6 +1238,7 @@ const ExecMeetingDashboard = () => {
         bulkDeleting={bulkDeleting}
         filters={taskFilters} setFilters={setTaskFilters}
         pageMeta={taskPageMeta} onPageChange={goToTaskPage}
+        onChangeStatus={changeGivenTaskStatus}
       />
     ),
     calendar: () => (

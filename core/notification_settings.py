@@ -115,6 +115,10 @@ TOPICS = (
     Topic('exec_meetings', 'Executive meeting invitations and changes',
           'You are invited to an executive meeting, its time or details change, or you are taken off it.',
           'exec_meeting_agent', email_default=True, in_app=False),
+    Topic('exec_tasks', 'Executive Meeting tasks',
+          'Someone gives you a task in Executive Meeting, or moves on a task you gave them. '
+          'The email for a new task is under "Tasks assigned to you".',
+          'exec_meeting_agent', kinds=('exec_task_assigned', 'exec_task_progress'), email=False),
     Topic('handover', 'Work handed over to you',
           "HR gives you a leaver's tasks, projects, meetings, people, leave or interviews.", None,
           kinds=('handover_',)),

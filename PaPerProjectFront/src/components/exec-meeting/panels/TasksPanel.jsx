@@ -36,7 +36,11 @@ export const TasksPanel = ({
   selectedTaskIds, toggleSelected, setSelectedTaskIds, bulkDeleteTasks, bulkDeleting,
   filters = {}, setFilters = () => {},
   pageMeta = null, onPageChange = () => {},
+  onChangeStatus = () => {},
 }) => {
+  // A task someone else gave you (yours === false): you see it and move its status on;
+  // changing, deleting or adding to it stays with the person who made it.
+  const owned = (task) => task?.yours !== false;
   const filtersActive = !!(filters.search || filters.status || filters.priority || filters.date);
   return (
     <div className="space-y-4">
@@ -124,10 +128,12 @@ export const TasksPanel = ({
                   className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-white/[0.04] transition-colors"
                   onClick={() => setExpandedTaskId(isOpen ? null : t.id)}
                 >
-                  <SelectCheckbox
-                    checked={selectedTaskIds.has(t.id)}
-                    onChange={() => toggleSelected(setSelectedTaskIds, t.id)}
-                  />
+                  {owned(t) ? (
+                    <SelectCheckbox
+                      checked={selectedTaskIds.has(t.id)}
+                      onChange={() => toggleSelected(setSelectedTaskIds, t.id)}
+                    />
+                  ) : <span className="w-4 flex-shrink-0" />}
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{t.title}</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -140,12 +146,18 @@ export const TasksPanel = ({
                         </span>
                       )}
                       <AssigneeAvatars assignees={t.assignees} />
+                      {!owned(t) && t.given_by && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-fuchsia-500/15 text-fuchsia-200 border border-fuchsia-500/30">
+                          From {t.given_by}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {priorityBadge(t.priority)}
                     {statusBadge(t.status)}
                     {/* Quick actions inline with the badges */}
+                    {owned(t) && (
                     <div className="flex items-center gap-0.5">
                       <HoverTip tip="Edit this task">
                         <button
@@ -172,6 +184,7 @@ export const TasksPanel = ({
                         </button>
                       </HoverTip>
                     </div>
+                    )}
                     <ChevronRight className={`h-4 w-4 text-white/30 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                   </div>
                 </div>
@@ -212,6 +225,7 @@ export const TasksPanel = ({
                         {statusBadge(t.status)}
                       </div>
                     </div>
+                    {owned(t) ? (
                     <div className="flex items-center gap-0.5 flex-shrink-0 ml-3">
                       <HoverTip tip="Edit this task">
                         <button type="button" onClick={() => setEditingTask(t)}
@@ -226,10 +240,27 @@ export const TasksPanel = ({
                         </button>
                       </HoverTip>
                     </div>
+                    ) : (
+                    <label className="flex items-center gap-2 flex-shrink-0 ml-3 text-xs text-white/50">
+                      Status
+                      <select
+                        value={t.status}
+                        onChange={e => onChangeStatus(t, e.target.value)}
+                        className="rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-white"
+                      >
+                        {TASK_STATUS_OPTIONS.map(o => (
+                          <option key={o.value} value={o.value} className="bg-[var(--sfc-0d0b1f)]">{o.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    )}
                   </div>
 
                   {/* Body */}
                   <div className="flex-1 overflow-y-auto no-scrollbar px-6 py-5 space-y-4">
+                    {!owned(t) && t.given_by && (
+                      <p className="text-white/50 text-xs">Given to you by {t.given_by}. You can change its status.</p>
+                    )}
                     {t.description && (
                       <div>
                         <p className="text-white/40 text-xs uppercase tracking-wide mb-1">Description</p>
@@ -272,8 +303,8 @@ export const TasksPanel = ({
                         <div className="space-y-1.5">
                           {subtasks.map(st => (
                             <div key={st.id}
-                              className="flex items-center gap-3 rounded-lg px-3 py-2 bg-white/[0.03] border border-white/5 cursor-pointer hover:bg-white/[0.06]"
-                              onClick={() => setEditingTask(st)}>
+                              className={`flex items-center gap-3 rounded-lg px-3 py-2 bg-white/[0.03] border border-white/5 ${owned(st) ? 'cursor-pointer hover:bg-white/[0.06]' : ''}`}
+                              onClick={() => { if (owned(st)) setEditingTask(st); }}>
                               <div className="flex-1 min-w-0">
                                 <p className={`text-xs font-medium truncate ${st.status === 'done' ? 'text-white/40 line-through' : 'text-white/80'}`}>{st.title}</p>
                                 {st.due_date && <p className="text-white/30 text-[10px]">Due: {st.due_date}</p>}
@@ -281,6 +312,7 @@ export const TasksPanel = ({
                               <AssigneeAvatars assignees={st.assignees} size="sm" />
                               {priorityBadge(st.priority)}
                               {statusBadge(st.status)}
+                              {owned(st) && (
                               <HoverTip tip="Delete this subtask">
                                 <button
                                   className="text-white/20 hover:text-red-400 text-xs px-1"
@@ -288,6 +320,7 @@ export const TasksPanel = ({
                                   <Trash2 className="h-3 w-3" />
                                 </button>
                               </HoverTip>
+                              )}
                             </div>
                           ))}
                         </div>

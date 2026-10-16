@@ -841,13 +841,16 @@ def _resolve_assignees(assignee_list, company):
     return result
 
 
-def _serialize_task(task, include_subtasks=True):
+def _serialize_task(task, include_subtasks=True, viewer=None):
     assignees = [
         {'id': cu.id, 'full_name': cu.full_name, 'email': cu.email}
         for cu in task.assignees.all()
     ]
     data = {
         'id': task.id,
+        # A task given to the viewer by someone else: they may move its status on, nothing more.
+        'yours': viewer is None or task.company_user_id == viewer.id,
+        'given_by': task.company_user.full_name if task.company_user_id else '',
         'title': task.title,
         'description': task.description,
         'status': task.status,
@@ -863,7 +866,7 @@ def _serialize_task(task, include_subtasks=True):
     }
     if include_subtasks:
         subtasks = list(task.subtasks.all())
-        data['subtasks'] = [_serialize_task(st, include_subtasks=False) for st in subtasks]
+        data['subtasks'] = [_serialize_task(st, include_subtasks=False, viewer=viewer) for st in subtasks]
         data['subtask_count'] = len(subtasks)
         data['subtask_done_count'] = sum(1 for st in subtasks if st.status == 'done')
     return data
@@ -1859,6 +1862,51 @@ def action_item_convert_to_task(request, item_id):
 # TASKS
 # ===========================================================================
 
+# A task assigned from here was listed, and could be opened, only by the person who made
+# it. The assignee got an email telling them to log in, and then could not see it.
+EXEC_TASKS_LINK = '/exec-meeting/dashboard?tab=tasks'
+
+
+def _visible_tasks(company_user):
+    """Tasks this login made, and tasks given to it."""
+    return ExecutiveTask.objects.filter(
+        models.Q(company_user=company_user) | models.Q(assignees=company_user)).distinct()
+
+
+def _listed_tasks(company_user):
+    """The task list: top-level tasks this login made, and every task given to it, except
+    a subtask whose parent it already sees (the subtask is listed under that parent)."""
+    given = ExecutiveTask.objects.filter(assignees=company_user).exclude(company_user=company_user)
+    parent_seen = models.Q(parent_task__company_user=company_user) | models.Q(parent_task__assignees=company_user)
+    return ExecutiveTask.objects.filter(
+        models.Q(company_user=company_user, parent_task__isnull=True)
+        | models.Q(pk__in=given.filter(parent_task__isnull=True).values('pk'))
+        | models.Q(pk__in=given.filter(parent_task__isnull=False).exclude(parent_seen).values('pk')))
+
+
+def _tell_assigned(people, task, given_by):
+    """The bell of each person newly given the task. The email is sent separately."""
+    from core.notification_utils import notify_company_users
+    due = f' It is due on {task.due_date}.' if task.due_date else ''
+    notify_company_users(
+        [cu for cu in people if cu.id != task.company_user_id],
+        title=f'New task: {task.title}'[:255],
+        message=f'{given_by.full_name or given_by.email} gave you a task in Executive Meeting.{due}',
+        link=EXEC_TASKS_LINK, kind='exec_task_assigned', email=False,
+        data={'exec_task_id': task.id})
+
+
+def _tell_owner_of_progress(task, by):
+    """The person who gave the task hears when its assignee moves it on."""
+    from core.notification_utils import notify_company_users
+    notify_company_users(
+        [task.company_user],
+        title=f'{by.full_name or by.email}: {task.title} is now {task.get_status_display()}'[:255],
+        message=f'{by.full_name or by.email} changed the status of a task you gave them.',
+        link=EXEC_TASKS_LINK, kind='exec_task_progress', email=False,
+        data={'exec_task_id': task.id})
+
+
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -1874,7 +1922,7 @@ def task_list(request):
         date_filter = (request.query_params.get('date') or '').strip()
         # Top-level list only — subtasks ride along nested under their parent
         # (via _serialize_task's 'subtasks' key) instead of appearing twice.
-        qs = ExecutiveTask.objects.filter(company_user=company_user, parent_task__isnull=True)
+        qs = _listed_tasks(company_user)
         if status_filter:
             qs = qs.filter(status=status_filter)
         if priority_filter:
@@ -1885,7 +1933,7 @@ def task_list(request):
             # due_date is stored as a DateField (or ISO string) — match the day.
             qs = qs.filter(due_date=date_filter)
         page_items, meta = _paginate(qs, request)
-        data = [_serialize_task(t) for t in page_items]
+        data = [_serialize_task(t, viewer=company_user) for t in page_items]
         return Response({'status': 'success', 'tasks': data, 'count': len(data), 'pagination': meta})
 
     title = request.data.get('title', '').strip()
@@ -1943,6 +1991,7 @@ def task_list(request):
         for cu in resolved:
             if cu.email:
                 _send_task_assignment_email(cu, task, company_user.full_name)
+        _tell_assigned(resolved, task, company_user)
 
     # For a subtask, also notify the PARENT task's assignees that a subtask was
     # added under their task (so they see it appear on their work item). Skip
@@ -1964,10 +2013,26 @@ def task_list(request):
 def task_detail(request, task_id):
     """Get, update, or delete a task."""
     company_user = request.user
-    task = get_object_or_404(ExecutiveTask, id=task_id, company_user=company_user)
+    task = get_object_or_404(_visible_tasks(company_user), id=task_id)
 
     if request.method == 'GET':
-        return Response({'status': 'success', 'task': _serialize_task(task)})
+        return Response({'status': 'success', 'task': _serialize_task(task, viewer=company_user)})
+
+    if task.company_user_id != company_user.id:
+        # Given by someone else: its assignee may move the status on, and that is all.
+        changes = set(request.data.keys()) if request.method == 'PATCH' else {'delete'}
+        if not changes or not changes <= {'status'}:
+            return Response({'status': 'error',
+                             'message': 'Only the person who made this task can change or delete it. '
+                                        'You can change its status.'}, status=status.HTTP_403_FORBIDDEN)
+        new_status = request.data.get('status')
+        if new_status not in dict(ExecutiveTask.STATUS_CHOICES):
+            return Response({'status': 'error', 'message': 'Unknown status.'}, status=status.HTTP_400_BAD_REQUEST)
+        if new_status != task.status:
+            task.status = new_status
+            task.save(update_fields=['status', 'updated_at'])
+            _tell_owner_of_progress(task, company_user)
+        return Response({'status': 'success', 'task': _serialize_task(task, viewer=company_user)})
 
     if request.method == 'PATCH':
         # Renaming to an existing title is a duplicate too — block it.
@@ -1999,11 +2064,12 @@ def task_detail(request, task_id):
             for cu in resolved:
                 if cu.id not in existing_ids and cu.email:
                     _send_task_assignment_email(cu, task, company_user.full_name)
+            _tell_assigned([cu for cu in resolved if cu.id not in existing_ids], task, company_user)
             # Email removed assignees
             for cu in existing_qs:
                 if cu.id not in new_ids and cu.email:
                     _send_task_removal_email(cu, task, company_user.full_name)
-        return Response({'status': 'success', 'task': _serialize_task(task)})
+        return Response({'status': 'success', 'task': _serialize_task(task, viewer=company_user)})
 
     # Snapshot before delete so we can reference after
     task_title = task.title
