@@ -49,6 +49,8 @@ AGENT_LABELS = {
     'frontline_agent': 'Frontline',
     'recruitment_agent': 'Recruitment',
     'exec_meeting_agent': 'Executive Meeting',
+    'marketing_agent': 'Marketing',
+    'operations_agent': 'Operations',
     None: 'Everyone',
 }
 #: The heading for topics that several agents share.
@@ -122,6 +124,13 @@ TOPICS = (
           'Someone gives you a task in Executive Meeting, or moves on a task you gave them. '
           'The email for a new task is under "Tasks assigned to you".',
           'exec_meeting_agent', kinds=('exec_task_assigned', 'exec_task_progress'), email=False),
+    Topic('marketing_action', 'Marketing campaigns that need you',
+          "A campaign of yours cannot go on without you: it could not start, its mailbox stopped "
+          "sending, or something else needs a decision. At most once a day for each.",
+          'marketing_agent', kinds=('marketing_action_required',)),
+    Topic('operations_failed', 'Documents that could not be read',
+          'A document you uploaded to Operations failed to process.',
+          'operations_agent', kinds=('operations_document_failed',)),
     Topic('handover', 'Work handed over to you',
           "HR gives you a leaver's tasks, projects, meetings, people, leave or interviews.", None,
           kinds=('handover_',)),

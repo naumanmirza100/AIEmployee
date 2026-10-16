@@ -203,6 +203,22 @@ def notifications_for_summary(sender, instance: OperationsDocumentSummary,
 # Document signals
 # ──────────────────────────────────────────────
 
+def _tell_uploader(document):
+    """A document that could not be read reaches its uploader's bell, once.
+
+    Operations' alerts stayed on its own Notifications page, so someone who uploaded
+    a file and moved on never learnt that it had failed."""
+    from core.notification_utils import notify_company_users
+    if not document.uploaded_by_id:
+        return
+    notify_company_users(
+        [document.uploaded_by], title=f'Could not read {document.original_filename}'[:255],
+        message=(f'{(document.processing_error or "").strip()[:300]} '
+                 'Open Documents in Operations to retry it or upload it again.').strip(),
+        link='/operations/documents', severity='warning', kind='operations_document_failed',
+        data={'document_id': document.id})
+
+
 @receiver(post_save, sender=OperationsDocument)
 def notifications_for_document(sender, instance: OperationsDocument,
                                created: bool, **kwargs):
@@ -210,7 +226,7 @@ def notifications_for_document(sender, instance: OperationsDocument,
     try:
         # Processing failed (permanent)
         if instance.processing_error and not instance.is_processed:
-            _create_once(
+            created_alert = _create_once(
                 company=instance.company,
                 notification_type='document_update',
                 severity='critical',
@@ -222,6 +238,8 @@ def notifications_for_document(sender, instance: OperationsDocument,
                 },
                 dedupe_key=f'document:{instance.id}:failed',
             )
+            if created_alert is not None:
+                _tell_uploader(instance)
             return
 
         # Successfully processed → subtle info notification (the first time)

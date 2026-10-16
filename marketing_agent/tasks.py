@@ -119,12 +119,15 @@ def _create_scheduled_launch_notification(campaign, user, title, message, action
     ).first()
     if dup and not dup.is_read:
         return None
-    return MarketingNotification.objects.create(
+    notification = MarketingNotification.objects.create(
         user=user, campaign=campaign, notification_type='campaign_status',
         priority='high', title=title, message=message,
         action_required=action_required, action_url=action_url or '',
         metadata=metadata or {}
     )
+    from marketing_agent.bell import forward
+    forward(notification)
+    return notification
 
 
 @shared_task

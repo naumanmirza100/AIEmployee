@@ -2143,6 +2143,8 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             action_url=action_url or '',
             metadata=metadata or {}
         )
+        from marketing_agent.bell import forward
+        forward(notification)
         return notification
     
     def get_notifications(self, user_id: int, unread_only: bool = False,
