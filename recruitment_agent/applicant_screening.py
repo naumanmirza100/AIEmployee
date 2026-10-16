@@ -216,6 +216,30 @@ def screen_new_application(application_id) -> str:
     return 'skipped: ' + result['reason'] if result.get('skipped') else f"screened: {result.get('decision')}"
 
 
+def tell_recruiter(application):
+    """The recruiter's bell, when someone applies through the job's public page.
+
+    The applicant was emailed a confirmation and nobody at the company was told."""
+    from core.notification_utils import notify_company_users
+    job = application.job
+    recruiter = recruiter_for(job)
+    if recruiter is None:
+        return
+    name = f'{application.first_name} {application.last_name}'.strip() or application.email
+    if not has_recruitment(job.company):
+        next_step = 'Open the job on the Company Dashboard to see the application.'
+    elif missing_interview_settings(job):
+        next_step = ("It is waiting to be screened: set the job's interview hours, then press "
+                     "Process with AI on the job.")
+    else:
+        next_step = 'The AI is screening it now; its score and decision will be with the candidates.'
+    notify_company_users(
+        [recruiter], title=f'New application: {name}, {job.title}'[:255],
+        message=f'{name} applied for {job.title} through its public page. {next_step}',
+        link='/recruitment/candidates', kind='recruitment_new_application',
+        data={'job_id': job.id, 'application_id': application.id})
+
+
 def screen_soon(application_id):
     """Screen a new application without keeping the applicant waiting for the AI.
 

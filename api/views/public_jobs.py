@@ -228,6 +228,7 @@ def public_job_apply(request, job_id):
 
     # Screened as it arrives, as Recruitment's screens promise, once the company has the
     # agent and the job's interview hours are set. The applicant does not wait for it.
+    transaction.on_commit(lambda: applicant_screening.tell_recruiter(application))
     transaction.on_commit(lambda: applicant_screening.screen_soon(application.id))
 
     # Build tracking URL — points to React frontend
