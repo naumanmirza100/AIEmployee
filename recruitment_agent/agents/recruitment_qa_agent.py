@@ -8,13 +8,14 @@ Recruitment Knowledge Q&A Agent
 import json
 import logging
 import re
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from django.db.models import Count, Avg, Max, Min, Q
+from django.utils import timezone
 
 from recruitment_agent.core import GroqClient, GroqClientError
 from recruitment_agent.models import (
-    CareerApplication,
     CVRecord,
     JobApplication,
     JobDescription,
@@ -868,23 +869,19 @@ FORMATTING:
                     "selected_slot": intv.selected_slot or "",
                 })
 
-            # Per-job career applications
-            job_apps_qs = CareerApplication.objects.filter(position=job).order_by().values(
-                'status'
-            ).annotate(cnt=Count('id'))
-            job_app_counts = {}
-            for row in job_apps_qs:
-                job_app_counts[row['status']] = row['cnt']
-
-            # Per-job career application details
+            # Applications through the job's public page. They were read from CareerApplication,
+            # an older table the apply form no longer writes to, so the answer was nearly always 0.
+            job_applications = JobApplication.objects.filter(job=job)
+            job_app_counts = dict(job_applications.order_by().values_list('status').annotate(cnt=Count('id')))
+            job_apps_this_week = job_applications.filter(applied_at__gte=timezone.now() - timedelta(days=7)).count()
             job_app_details = []
-            for app in CareerApplication.objects.filter(position=job).order_by('-created_at')[:20]:
+            for app in job_applications.order_by('-applied_at')[:20]:
                 job_app_details.append({
-                    "applicant_name": app.applicant_name,
+                    "applicant_name": f"{app.first_name or ''} {app.last_name or ''}".strip() or app.email,
                     "email": app.email,
                     "phone": app.phone or "",
                     "status": app.status,
-                    "created_at": str(app.created_at.date()) if app.created_at else "",
+                    "created_at": str(app.applied_at.date()) if app.applied_at else "",
                 })
 
             # Per-job time slots from interview settings
@@ -938,6 +935,7 @@ FORMATTING:
                 "interview_details": job_interview_details,
                 "career_app_counts": job_app_counts,
                 "career_app_details": job_app_details,
+                "applications_this_week": job_apps_this_week,
                 "time_slots": job_time_slots,
                 "interview_setting": {
                     "start_time": str(job_interview_setting.start_time) if job_interview_setting else "",
@@ -982,13 +980,11 @@ FORMATTING:
         for row in interview_outcome_qs:
             interview_outcome_counts[row['outcome']] = row['cnt']
 
-        # Career application counts (global)
-        app_qs = CareerApplication.objects.filter(
-            position__in=sharing.jobs(company_user)
-        ).order_by().values('status').annotate(cnt=Count('id'))
-        career_application_counts = {}
-        for row in app_qs:
-            career_application_counts[row['status']] = row['cnt']
+        # Applications to the company's jobs (global), from the table the apply form writes to
+        career_application_counts = dict(
+            JobApplication.objects.filter(job__in=sharing.jobs(company_user))
+            .order_by().values_list('status').annotate(cnt=Count('id'))
+        )
 
         # Settings
         email_settings = RecruiterEmailSettings.objects.filter(
@@ -1054,11 +1050,11 @@ FORMATTING:
             f"CANDIDATES_INTERVIEW_DECISION: {qual_counts.get('INTERVIEW', 0)}",
             f"CANDIDATES_HOLD: {qual_counts.get('HOLD', 0)}",
             f"CANDIDATES_REJECT: {qual_counts.get('REJECT', 0)}",
-            f"CAREER_APPLICATIONS_TOTAL: {sum(app_counts.values())}",
+            f"JOB_APPLICATIONS_TOTAL: {sum(app_counts.values())}",
         ]
         # Application status breakdown
         for status, count in app_counts.items():
-            lines.append(f"CAREER_APPLICATIONS_{status.upper()}: {count}")
+            lines.append(f"JOB_APPLICATIONS_{status.upper()}: {count}")
         # Interview outcome breakdown
         for outcome, count in interview_outcomes.items():
             lines.append(f"INTERVIEW_OUTCOME_{outcome}: {count}")
@@ -1566,13 +1562,17 @@ FORMATTING:
             total_apps = sum(jac.values())
 
             if any(x in q for x in ("how many", "total", "count", "kitne", "number")):
+                if "week" in q:
+                    week = matched_job.get("applications_this_week", 0)
+                    return (f"**{title}** had **{week}** application(s) in the last 7 days "
+                            f"(**{total_apps}** in total).")
                 parts = [f"{k}: {v}" for k, v in jac.items() if v > 0]
                 detail = f" ({', '.join(parts)})" if parts else ""
-                return f"**{title}** has **{total_apps}** career application(s){detail}."
+                return f"**{title}** has **{total_apps}** application(s){detail}."
 
             if any(x in q for x in ("list", "show", "who", "which", "tell", "give", "detail")):
                 if not jad:
-                    return f"No career applications found for **{title}**."
+                    return f"No applications found for **{title}**."
                 answer = f"**Applications for {title}** ({total_apps} total):\n\n"
                 for app in jad[:15]:
                     answer += f"- **{app['applicant_name']}** ({app['email']}): Status={app['status']}, Applied={app.get('created_at', 'N/A')}\n"
@@ -1580,7 +1580,7 @@ FORMATTING:
 
             parts = [f"{k}: {v}" for k, v in jac.items() if v > 0]
             detail = f" ({', '.join(parts)})" if parts else ""
-            return f"**{title}** has **{total_apps}** career application(s){detail}."
+            return f"**{title}** has **{total_apps}** application(s){detail}."
 
         # ════════════════════════════════════════════════════════════
         # JOB-SPECIFIC: Job details/info/description
@@ -1774,11 +1774,11 @@ FORMATTING:
         # ── Career application questions (global) ──
         if "application" in q and "pending" in q:
             pending_apps = app_counts.get("pending", 0)
-            return f"You have **{pending_apps}** pending career application(s)."
+            return f"You have **{pending_apps}** pending application(s)."
         if "application" in q and any(x in q for x in ("how many", "total", "kitne")):
             total_apps = sum(app_counts.values())
             parts = ", ".join(f"{status}: **{count}**" for status, count in app_counts.items() if count > 0)
-            return f"You have **{total_apps}** career application(s) in total" + (f" ({parts})." if parts else ".")
+            return f"You have **{total_apps}** application(s) in total" + (f" ({parts})." if parts else ".")
 
         # ── Qualification / interview settings ──
         if "qualification setting" in q or "threshold" in q:
