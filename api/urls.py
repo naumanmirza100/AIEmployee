@@ -473,6 +473,7 @@ urlpatterns = [
     # Public widget/form (no auth – use widget_key to identify company)
     re_path(r'^frontline/public/qa/?$', frontline_agent.public_qa, name='frontline_public_qa'),  # POST
     re_path(r'^frontline/public/submit/?$', frontline_agent.public_submit, name='frontline_public_submit'),  # POST
+    re_path(r'^frontline/public/handoff-contact/?$', frontline_agent.public_handoff_contact, name='frontline_public_handoff_contact'),  # POST
     re_path(r'^frontline/widget-config/?$', frontline_agent.frontline_widget_config, name='frontline_widget_config'),  # GET
     re_path(r'^frontline/widget-config/update/?$', frontline_agent.update_frontline_widget_config, name='frontline_update_widget_config'),  # PATCH
     re_path(r'^frontline/widget/public-config/?$', frontline_agent.public_widget_config, name='frontline_public_widget_config'),  # GET (public, needs widget_key)
