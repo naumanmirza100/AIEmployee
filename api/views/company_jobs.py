@@ -18,7 +18,7 @@ from api.permissions import IsCompanyUser, IsCompanyUserOnly
 from api.authentication import CompanyUserTokenAuthentication
 from core.models import CompanyUser, Company, CompanyModulePurchase
 from api.views.recruitment_agent import _make_agents
-from recruitment_agent import sharing
+from recruitment_agent import application_status, sharing
 
 
 def _company_has_recruitment_agent(company):
@@ -454,6 +454,7 @@ def process_job_applicants(request, jobId):
                         cv_record.qualification_priority = qualified.get('priority') if isinstance(qualified, dict) else None
                         cv_record.rank = idx + 1
                         cv_record.save()
+                        application_status.after_screening(cv_record)
                     except CVRecord.DoesNotExist:
                         pass
 
