@@ -7,6 +7,7 @@ extracts proper insights, saves only the summary (not the document), and cleans 
 import os
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict
 
@@ -14,6 +15,17 @@ from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
 from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
 
 logger = logging.getLogger(__name__)
+
+_WHOLE_FENCE = re.compile(r'^\s*```[\w-]*[ \t]*\r?\n(.*?)\r?\n?```\s*$', re.S)
+
+
+def unfence(text: str) -> str:
+    """The summary without a ``` block wrapped round all of it.
+
+    Asked for markdown, the AI sometimes returns the whole summary inside a code
+    block, and the screen then shows it as raw code: hashes, stars and all."""
+    match = _WHOLE_FENCE.match(text or '')
+    return (match.group(1) if match else text or '').strip()
 
 
 class DocumentSummarizationAgent(MarketingBaseAgent):
@@ -360,7 +372,7 @@ IMPORTANT:
             if not result or not result.strip():
                 return {'success': False, 'error': 'LLM returned empty response'}
 
-            rich_summary = result.strip()
+            rich_summary = unfence(result)
             key_findings = self._extract_section_items(rich_summary, 'Key Findings')
             action_items = self._extract_section_items(rich_summary, 'Action Items')
 
@@ -478,7 +490,7 @@ Be thorough, use proper markdown, include all significant details. Return ONLY t
             if not result or not result.strip():
                 return {'success': False, 'error': 'Final summary returned empty'}
 
-            rich_summary = result.strip()
+            rich_summary = unfence(result)
             key_findings = self._extract_section_items(rich_summary, 'Key Findings')
             action_items = self._extract_section_items(rich_summary, 'Action Items')
 

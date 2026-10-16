@@ -32,6 +32,13 @@ const formatFileSize = (bytes) => {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 };
 
+// The AI sometimes wrapped the whole summary in a ``` block, and it showed as raw code.
+// New summaries are saved without it (summarization_agent.unfence); this covers older ones.
+const unfence = (text) => {
+  const match = /^\s*```[\w-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```\s*$/.exec(text || '');
+  return (match ? match[1] : text || '').trim();
+};
+
 const formatDate = (iso) => {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -276,7 +283,7 @@ const SummaryDetailPage = () => {
             <Sparkles className="h-5 w-5 text-amber-400" />
             <h3 className="text-base font-bold text-white">Summary</h3>
           </div>
-          <ReactMarkdown components={markdownComponents}>{summary.rich_summary}</ReactMarkdown>
+          <ReactMarkdown components={markdownComponents}>{unfence(summary.rich_summary)}</ReactMarkdown>
         </div>
       )}
 
