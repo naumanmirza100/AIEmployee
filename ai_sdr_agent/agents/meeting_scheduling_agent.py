@@ -8,6 +8,7 @@ Handles the full lifecycle after a positive reply:
   4. Sends confirmation email when meeting is booked
 """
 
+import email.utils
 import functools
 import html as _html
 import json
@@ -1077,6 +1078,10 @@ Return exactly this JSON:
         from_addr = campaign.from_email or campaign.smtp_username
         msg['From'] = f"{display_name} <{from_addr}>" if display_name else from_addr
         msg['To'] = to_email
+        # As the outreach emails: a date and an id on every email, and the same check of the
+        # tenant's mail server before connecting to it.
+        msg['Date'] = email.utils.formatdate(localtime=True)
+        msg['Message-ID'] = email.utils.make_msgid(domain=from_addr.rsplit('@', 1)[-1] if '@' in from_addr else None)
 
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
         if html:
@@ -1084,6 +1089,10 @@ Return exactly this JSON:
 
         context = ssl.create_default_context()
         port = campaign.smtp_port or 587
+        from ai_sdr_agent.agents.outreach_agent import validate_mail_server
+        host_error = validate_mail_server(campaign.smtp_host, port, 'smtp')
+        if host_error:
+            raise ValueError(host_error)
         try:
             with smtplib.SMTP(campaign.smtp_host, port, timeout=20) as server:
                 server.ehlo()
