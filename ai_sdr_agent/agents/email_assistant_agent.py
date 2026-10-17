@@ -219,10 +219,15 @@ Rules:
 - Remove generic openers like "I hope this finds you well"
 - One specific CTA only
 - Sound human
+- You know only the four facts above about the prospect. Never say you have seen, read or noticed anything
+  about them or their company (news, launches, plans, growth), and never guess what they are working on
+- Add no fact, number, customer name or promise about our offer that is not in the original email
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
 
         try:
+            # It used to make up things it had "seen" about the prospect, in an email sent in the
+            # salesperson's name; the last two rules above are there for that.
             resp = self.groq_client.chat.completions.create(
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
