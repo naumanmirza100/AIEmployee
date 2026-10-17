@@ -3055,7 +3055,14 @@ def list_email_accounts(request):
                 .values_list('template_id', flat=True)
                 .distinct()
             )
-            sent_qs = EmailSendHistory.objects.filter(email_template_id__in=template_ids) if template_ids else EmailSendHistory.objects.none()
+            # A sequence left on "use the campaign's mailbox" names no account, so its emails
+            # were counted for none and the dashboard said 0 emails sent. They went out from
+            # the campaign's mailbox: count those, unless their sequence names another one.
+            elsewhere = (EmailSequenceStep.objects.filter(sequence__email_account__isnull=False)
+                         .exclude(sequence__email_account_id=a.id).values_list('template_id', flat=True))
+            sent_qs = EmailSendHistory.objects.filter(
+                Q(email_template_id__in=template_ids)
+                | (Q(campaign__email_account_id=a.id) & ~Q(email_template_id__in=elsewhere)))
             sent_count = sent_qs.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
             opened_count = sent_qs.filter(status__in=['opened', 'clicked']).count()
             clicked_count = sent_qs.filter(status='clicked').count()
