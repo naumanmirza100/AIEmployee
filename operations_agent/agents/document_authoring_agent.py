@@ -413,7 +413,11 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         reference_document_ids: Optional[List[int]],
     ):
         if not reference_document_ids:
-            return 'REFERENCE MATERIAL: None provided. Base the document on the user instructions only.\n\n', []
+            # With nothing to go on it wrote "95% customer satisfaction" and the like into a company's
+            # report; it has to be told it knows nothing beyond the instructions.
+            return ('REFERENCE MATERIAL: None provided. You know nothing about this company beyond the user '
+                    'instructions: state no figure, percentage, date, name or result that is not in them, and '
+                    'write *[placeholder]* wherever the document needs one.\n\n'), []
 
         docs = list(
             OperationsDocument.objects.filter(
