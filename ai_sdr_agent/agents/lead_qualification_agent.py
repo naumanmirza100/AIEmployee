@@ -159,8 +159,10 @@ Score this lead now:"""
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
+            # The model thinks before it answers, out of the same budget; 500 tokens left no room
+            # for the answer itself, so it was cut off and every lead fell back to the rule-based score.
             temperature=0.1,
-            max_tokens=500,
+            max_tokens=2000,
         )
 
         from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage

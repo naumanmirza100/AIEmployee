@@ -744,7 +744,7 @@ Return exactly this JSON:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_tokens=700,
+            max_tokens=2000,
         )
         from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
         record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))

@@ -227,7 +227,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.4,
-                max_tokens=600,
+                max_tokens=2000,
             )
             from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
             record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
@@ -299,7 +299,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.5,
-                max_tokens=500,
+                max_tokens=2000,
             )
             from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
             record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
@@ -347,7 +347,7 @@ Return ONLY JSON: {{"category": "...", "reason": "one sentence explanation"}}"""
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.1,
-                max_tokens=120,
+                max_tokens=800,
             )
             from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
             record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))

@@ -418,7 +418,7 @@ Rules:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_tokens=1200,
+            max_tokens=3000,
         )
         from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
         record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
