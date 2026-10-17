@@ -678,6 +678,7 @@ export const MeetingsPanel = ({
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs text-white/75">
                                       • {a.title}
+                                      {(a.assignee_name || a.owner_name) ? <span className="text-violet-200/80"> · {a.assignee_name || a.owner_name}</span> : ''}
                                       {a.due_date ? <span className="text-white/40"> · {a.due_date}</span> : ''}
                                     </p>
                                   </div>

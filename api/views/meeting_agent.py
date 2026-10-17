@@ -816,6 +816,19 @@ def _seat_for_employee(profile_id, company):
     return seat
 
 
+def _login_named(company, name):
+    """The company's active login with this name: the full name, or a first name only one login has."""
+    from core.models import CompanyUser as _CU
+    name = ' '.join((name or '').split())
+    if not name:
+        return None
+    logins = _CU.objects.filter(company=company, is_active=True)
+    found = list(logins.filter(full_name__iexact=name)[:2])
+    if len(found) != 1 and ' ' not in name:
+        found = list(logins.filter(full_name__istartswith=name + ' ')[:2])
+    return found[0] if len(found) == 1 else None
+
+
 def _resolve_assignees(assignee_list, company):
     """
     Accepts a list of {id, user_type} dicts from the frontend.
@@ -1654,8 +1667,13 @@ def meeting_notes(request, meeting_id):
             note = meeting.note
             action_items = list(meeting.action_items.values(
                 'id', 'title', 'description', 'status', 'priority',
-                'due_date', 'ai_extracted', 'assignee_id',
+                'due_date', 'ai_extracted', 'assignee_id', 'owner_name',
             ))
+            from core.models import CompanyUser
+            names = dict(CompanyUser.objects.filter(
+                id__in=[a['assignee_id'] for a in action_items if a['assignee_id']]).values_list('id', 'full_name'))
+            for a in action_items:
+                a['assignee_name'] = names.get(a['assignee_id'], '')
             # Titles of tasks already created from this meeting — lets the UI
             # keep showing "Task created" on matching action items across page
             # reloads, without storing any link on the action item itself.
@@ -1722,6 +1740,12 @@ def meeting_notes(request, meeting_id):
 
         valid_priorities = ('low', 'medium', 'high', 'critical')
 
+        # The AI names who does each item. That name was asked for and then dropped, so no item
+        # had an owner, and a task made from one was given to nobody.
+        def _owner_named(raw):
+            name = ' '.join(str(raw or '').split())[:255]
+            return '' if name.lower() in ('null', 'none', 'n/a', 'tbd', 'unassigned', 'unknown') else name
+
         created_items = []
         for item_data in result.get('action_items', []):
             title = (item_data.get('title') or 'Action Item').strip()
@@ -1730,6 +1754,7 @@ def meeting_notes(request, meeting_id):
             prio = str(item_data.get('priority', 'medium')).strip().lower()
             if prio not in valid_priorities:
                 prio = 'medium'
+            owner = _owner_named(item_data.get('assignee_hint'))
             item = MeetingActionItem.objects.create(
                 meeting=meeting,
                 title=title,
@@ -1737,6 +1762,8 @@ def meeting_notes(request, meeting_id):
                 due_date=_clean_due(item_data.get('due_date')),
                 priority=prio,
                 ai_extracted=True,
+                owner_name=owner,
+                assignee=_login_named(company_user.company, owner),
             )
             kept_titles.add(title.lower())  # also dedupe within this batch
             created_items.append({'id': item.id, 'title': item.title})
@@ -1864,6 +1891,13 @@ def action_item_convert_to_task(request, item_id):
         linked_meeting=item.meeting,
         parent_task_id=parent_task_id,
     )
+    # The person the notes say does it gets the task, and is told, as anyone given a task is.
+    owner = item.assignee if item.assignee_id and item.assignee.is_active else None
+    if owner and owner.company_id == company_user.company_id:
+        task.assignees.set([owner])
+        if owner.email and owner.id != company_user.id:
+            _send_task_assignment_email(owner, task, company_user.full_name)
+        _tell_assigned([owner], task, company_user)
     return Response({'status': 'success', 'task': _serialize_task(task), 'message': 'Action item converted to task.'}, status=status.HTTP_201_CREATED)
 
 

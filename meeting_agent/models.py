@@ -148,6 +148,10 @@ class MeetingActionItem(models.Model):
         on_delete=models.SET_NULL,
         related_name='exec_action_items',
     )
+    owner_name = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text='Who the notes say does it, as written. Kept also when nobody with a login has that name.',
+    )
     due_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')

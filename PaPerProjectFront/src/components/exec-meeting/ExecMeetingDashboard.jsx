@@ -673,10 +673,12 @@ const ExecMeetingDashboard = () => {
   // left untouched (no 'done' flag, no link), so we only refresh the tasks list.
   const convertActionItem = async (meetingId, itemId) => {
     try {
-      await execMeetingService.convertActionItemToTask(itemId);
+      const res = await execMeetingService.convertActionItemToTask(itemId);
       setConvertedActionItemIds(prev => new Set(prev).add(itemId));
       loadTasks(); loadStats();
-      toast({ title: 'Task created', description: 'Find it in the Tasks tab.' });
+      // The person the notes named gets the task (and is told); say who.
+      const who = (res?.task?.assignees || []).map(a => a.full_name || a.email).filter(Boolean).join(', ');
+      toast({ title: 'Task created', description: who ? `Given to ${who}. Find it in the Tasks tab.` : 'Find it in the Tasks tab.' });
     } catch (err) {
       toast({ title: 'Failed to create task', description: err.message, variant: 'destructive' });
     }
