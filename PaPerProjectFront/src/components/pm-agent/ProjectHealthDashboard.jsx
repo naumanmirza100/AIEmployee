@@ -169,10 +169,16 @@ export default function ProjectHealthDashboard({ onOpenPilot }) {
                   </div>
                   <div className="h-20 w-px bg-white/[0.05]" />
                   <div className="space-y-2 text-sm">
-                    {health.metrics && Object.entries(health.metrics).map(([key, val]) => (
+                    {/* Counts are counts and only rates are percentages ("total tasks: 15", not 15%).
+                        Nested breakdowns and the score itself (the big number) are not listed. */}
+                    {health.metrics && Object.entries(health.metrics)
+                      .filter(([key, val]) => key !== 'health_score' && (val === null || typeof val !== 'object'))
+                      .map(([key, val]) => (
                       <div key={key} className="flex items-center gap-2">
                         <span className="text-white/55 capitalize">{key.replace(/_/g, ' ')}:</span>
-                        <span className="text-white font-medium">{typeof val === 'number' ? `${val}%` : String(val)}</span>
+                        <span className="text-white font-medium">
+                          {typeof val === 'number' && /rate|percent/.test(key) ? `${Math.round(val * 10) / 10}%` : String(val ?? '—')}
+                        </span>
                       </div>
                     ))}
                   </div>
