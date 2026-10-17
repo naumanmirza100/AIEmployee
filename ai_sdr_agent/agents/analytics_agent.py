@@ -131,7 +131,11 @@ class AnalyticsAgent:
 
         # ── Rates ─────────────────────────────────────────────────────
         reply_rate_week = round((replied_week / emails_week * 100) if emails_week else 0, 1)
-        meeting_rate    = round((meetings_total / replied_total * 100) if replied_total else 0, 1)
+        # Of the leads who replied, how many have a meeting. All meetings over replies counted the ones
+        # added by hand too, which follow no reply, and the rate read 200%.
+        replied_with_meeting = (meet_qs.filter(enrollment__in=enroll_qs.filter(status__in=['replied', 'unsubscribed']))
+                                .values('enrollment').distinct().count())
+        meeting_rate    = round((replied_with_meeting / replied_total * 100) if replied_total else 0, 1)
 
         # ── Daily trend (last 7 days) ──────────────────────────────────
         daily_trend = []
