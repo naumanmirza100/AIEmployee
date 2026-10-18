@@ -6292,6 +6292,10 @@ def reply_to_ticket(request, ticket_id):
         # Build subject with stable tag.
         tag = build_subject_tag(ticket.id)
         subject = ticket.title or '(no subject)'
+        # A widget hand-off's title starts "Hand-off:" for the staff's queue; the customer
+        # reading the reply sees their own question.
+        if subject.startswith('Hand-off: '):
+            subject = subject[len('Hand-off: '):]
         if tag not in subject:
             subject = f"Re: {subject} {tag}"
 
