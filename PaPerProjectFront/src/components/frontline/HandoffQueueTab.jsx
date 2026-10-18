@@ -443,7 +443,10 @@ export function HandoffQueueTab() {
                 <div><span className="text-muted-foreground">Question:</span> {drawer.ticket.handoff_context.question}</div>
               )}
               {drawer.ticket.handoff_context.ai_answer && (
-                <div className="line-clamp-3"><span className="text-muted-foreground">AI answer:</span> {drawer.ticket.handoff_context.ai_answer}</div>
+                <div className="line-clamp-3"><span className="text-muted-foreground">AI answer:</span> {
+                  // The answer is markdown; in three lines of preview its ** and list dashes were shown as typed.
+                  String(drawer.ticket.handoff_context.ai_answer).replace(/\*\*|__|`/g, '').replace(/^\s*[-*]\s+/gm, '• ')
+                }</div>
               )}
               {drawer.ticket.handoff_context.best_score != null && (
                 <div>
