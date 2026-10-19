@@ -3318,6 +3318,18 @@ _HR_WEEKDAY_TOKENS = {
 }
 
 
+_HR_MONTHS = r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*'
+# "30 October", "30th of Oct", "October 30", "Oct 30th", "30/10", "30-10-2026", "2026-10-30". A time such as
+# "10.30" or "3-4 pm" is not a date.
+_HR_CALENDAR_DATE_RE = re.compile(
+    rf'\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?{_HR_MONTHS}\b'
+    rf'|\b{_HR_MONTHS}\s+\d{{1,2}}(?:st|nd|rd|th)?\b'
+    r'|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b'
+    r'|\b\d{1,2}-\d{1,2}-\d{2,4}\b'
+    r'|\b\d{4}-\d{1,2}-\d{1,2}\b'
+)
+
+
 def _hr_resolve_relative_date(message, now_dt):
     """
     Return a `datetime.date` (or None) if the message contains a
@@ -3336,11 +3348,16 @@ def _hr_resolve_relative_date(message, now_dt):
                                         today itself)
       * bare "<weekday>"              → next occurrence (today+7 if
                                         today matches)
+    A message that names a calendar date ("Friday 30 October", "30/10",
+    "2026-10-30") is left alone: the date says which Friday is meant, and the
+    weekday rule moved "Friday 30 October" to the coming Friday.
     """
     import re as _re
     from datetime import timedelta as _td
     msg = (message or '').lower()
     if not msg:
+        return None
+    if _HR_CALENDAR_DATE_RE.search(msg):
         return None
     today = now_dt.date()
 
