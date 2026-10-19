@@ -57,7 +57,7 @@ from core.tenancy import (
 )
 from core.scheduling import (
     ScheduleConflict, booking_guard, ensure_free, login_user_id_for_company_user, people_for,
-    zone_name,
+    when_text, zone_name,
 )
 
 from project_manager_agent.ai_agents.base_agent import BaseAgent
@@ -4034,7 +4034,7 @@ def meeting_schedule(request):
                     ),
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            old_time = meeting.proposed_time.strftime("%A, %B %d at %I:%M %p") if meeting.proposed_time else "unknown"
+            old_time = when_text(meeting.proposed_time, meeting.timezone_name or tz_name, year=False) if meeting.proposed_time else "unknown"
             people = people_for('pm', meeting)
 
             if not result.get("confirmed"):
@@ -4072,7 +4072,7 @@ def meeting_schedule(request):
                 return Response({"status": "success", "data": _meeting_conflict_reply(clash)},
                                 status=status.HTTP_200_OK)
 
-            new_time_display = new_time.strftime("%A, %B %d, %Y at %I:%M %p")
+            new_time_display = when_text(new_time, meeting.timezone_name or tz_name)
 
             # The meeting as it now stands, as a calendar file. The move email
             # used to carry none, so each invitee's own calendar kept the old time.
@@ -4159,7 +4159,7 @@ def meeting_schedule(request):
 
             # The same person can come back twice from the LLM parse; one seat each.
             invitee_users = list({u.id: u for u in invitee_users}.values())
-            time_display = proposed_time.strftime("%A, %B %d, %Y at %I:%M %p")
+            time_display = when_text(proposed_time, tz_name)
             invitee_names = [u.get_full_name() or u.username for u in invitee_users]
             try:
                 duration = max(5, min(24 * 60, int(data.get("duration_minutes") or 30)))
@@ -4425,7 +4425,7 @@ def meeting_respond(request):
         from core.models import Notification as UserNotification
         invitee_name = meeting.invitee.get_full_name() or meeting.invitee.username
         invitee_email = meeting.invitee.email
-        time_display = meeting.proposed_time.strftime("%A, %B %d, %Y at %I:%M %p") if meeting.proposed_time else "TBD"
+        time_display = when_text(meeting.proposed_time, meeting.timezone_name)
 
         # Generate .ics for accepted/cancelled
         confirm_ics = None
@@ -4461,7 +4461,7 @@ def meeting_respond(request):
                     body_html=f"<p><strong>{company_user.full_name}</strong> has cancelled the meeting <strong>\"{meeting.title}\"</strong>.{' Reason: ' + reason if reason else ''}</p>")
 
         elif action == 'counter_proposed':
-            new_time_display = counter_time.strftime("%A, %B %d, %Y at %I:%M %p")
+            new_time_display = when_text(counter_time, meeting.timezone_name)
             reason_text = f" Reason: {reason}" if reason else ""
             UserNotification.objects.create(
                 user=meeting.invitee, type='meeting_counter_proposed', notification_type='meeting_request',
