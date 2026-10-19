@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '@/config/apiConfig';
+import { withParentOrigin } from '@/utils/embedOrigin';
 import { Loader2, Send, CheckCircle, Paperclip, X } from 'lucide-react';
 
 // Mirror the backend caps so the user gets a friendly error before the
@@ -98,12 +99,12 @@ export default function FrontlineEmbedFormPage() {
         form.append('email', email.trim());
         form.append('message', message.trim());
         files.forEach((f) => form.append('files', f, f.name));
-        res = await fetch(`${API_BASE_URL}/frontline/public/submit/`, {
+        res = await fetch(withParentOrigin(`${API_BASE_URL}/frontline/public/submit/`), {
           method: 'POST',
           body: form,
         });
       } else {
-        res = await fetch(`${API_BASE_URL}/frontline/public/submit/`, {
+        res = await fetch(withParentOrigin(`${API_BASE_URL}/frontline/public/submit/`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -141,7 +142,7 @@ export default function FrontlineEmbedFormPage() {
     setAnswer('');
     setAskLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/frontline/public/qa/`, {
+      const res = await fetch(withParentOrigin(`${API_BASE_URL}/frontline/public/qa/`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: q, widget_key: widgetKey }),

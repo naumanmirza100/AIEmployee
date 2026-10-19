@@ -1403,6 +1403,32 @@ def _origin_matches(request_origin: str, allowed_origins_csv: str) -> bool:
     return request_origin.strip().rstrip('/').lower() in allowlist
 
 
+def _origin_of(value) -> str:
+    """`scheme://host[:port]` of a URL or origin, lower-cased; '' when it is not one."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(str(value or '').strip())
+    except Exception:
+        return ''
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        return ''
+    return f'{parsed.scheme}://{parsed.netloc}'.lower()
+
+
+def _is_app_origin(origin: str) -> bool:
+    """Is `origin` the product's own site (FRONTEND_URL), where the embed pages are served from?
+
+    The embed code is copied from the dashboard, so it names whichever of the site's addresses the owner was
+    on: with or without "www.".
+    """
+    ours = _origin_of(getattr(settings, 'FRONTEND_URL', ''))
+    theirs = _origin_of(origin)
+    if not ours or not theirs:
+        return False
+    strip = lambda o: o.replace('://www.', '://', 1)   # noqa: E731
+    return strip(ours) == strip(theirs)
+
+
 def _get_company_by_widget_key(request):
     """Resolve company from widget_key in body (POST) or query/header. Returns (company, error_response) or (company, None).
 
@@ -1447,6 +1473,13 @@ def _get_company_by_widget_key(request):
                         origin = f"{parsed.scheme}://{parsed.netloc}"
                 except Exception:
                     origin = ''
+        # The chat and the contact form run in a frame served from our own site, so their requests carry our
+        # origin, never the website's: with any allowlist set, the widget was refused on the very site listed.
+        # Our embed pages send the origin of the page they are framed in, as the browser reports it to them
+        # (ancestorOrigins, or the referrer). Taken only from our own pages: a script on another site sends its
+        # own Origin, and cannot claim to be one of ours.
+        if _is_app_origin(origin):
+            origin = _origin_of(request.GET.get('parent_origin'))
         if not _origin_matches(origin, allowed):
             logger.warning(
                 "Widget-key origin rejected: key=%s company=%s origin=%s",
