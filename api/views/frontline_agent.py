@@ -641,6 +641,16 @@ def _should_send_notification_to_recipient(company_id, recipient_email, channel,
         return True
 
 
+def _tickets_of(company_user, user):
+    """The tickets a dashboard login works with: the ones it raised or was given, in its own company.
+
+    The list, the aging list, the top cards and the analytics all count these, so their numbers agree. The cards
+    and the analytics used to count only the tickets the viewer raised, so a support lead given every ticket
+    saw 0 at the top of a full list.
+    """
+    return Ticket.objects.filter(Q(created_by=user) | Q(assigned_to=user), company=company_user.company)
+
+
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -655,7 +665,7 @@ def frontline_dashboard(request):
         
         # Get company's documents
         documents = Document.objects.filter(company=company)
-        tickets = Ticket.objects.filter(company=company, created_by=user)
+        tickets = _tickets_of(company_user, user)
         
         # Get stats
         total_documents = documents.count()
@@ -2454,9 +2464,7 @@ def list_tickets(request):
         # Tenant gate — without `company=`, a user whose Django auth User happens
         # to be shared across companies (or whose id collides) could see another
         # tenant's tickets. Belt-and-suspenders alongside created_by.
-        qs = Ticket.objects.filter(
-            Q(created_by=user) | Q(assigned_to=user), company=company_user.company,
-        ).order_by('-created_at')
+        qs = _tickets_of(company_user, user).order_by('-created_at')
 
         status_filter = request.GET.get('status')
         if status_filter:
@@ -2597,9 +2605,7 @@ def list_tickets_aging(request):
         now = timezone.now()
         at_risk_threshold = now + timedelta(hours=2)
         resolved_statuses = {'resolved', 'closed', 'auto_resolved'}
-        qs = Ticket.objects.filter(
-            Q(created_by=user) | Q(assigned_to=user),
-            company=company_user.company,   # FL-SEC-4: was scoped by creator only
+        qs = _tickets_of(company_user, user).filter(   # FL-SEC-4: was scoped by creator only
             sla_due_at__isnull=False,
             sla_paused_at__isnull=True,  # paused tickets don't age
         ).exclude(status__in=resolved_statuses).order_by('sla_due_at')
@@ -5485,7 +5491,7 @@ def list_workflow_company_users(request):
 def _compute_frontline_analytics_data(company_user, date_from_str=None, date_to_str=None):
     """Compute analytics data for the company user's tickets (same logic as frontline_analytics). Returns dict."""
     user = _get_or_create_user_for_company_user(company_user)
-    qs = Ticket.objects.filter(company=company_user.company, created_by=user)
+    qs = _tickets_of(company_user, user)
     if date_from_str:
         try:
             qs = qs.filter(created_at__date__gte=datetime.strptime(date_from_str, '%Y-%m-%d').date())
