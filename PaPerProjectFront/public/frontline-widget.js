@@ -48,6 +48,26 @@
     document.body.appendChild(button);
   }
 
+  // The chat page tells us the company's saved colour, side and button words. Only a
+  // message from our own frame is read, and only a hex colour and a known side are used.
+  window.addEventListener('message', function (event) {
+    var data = event.data;
+    if (!iframe || event.source !== iframe.contentWindow || !data || data.type !== 'frontline-widget-theme') return;
+    if (typeof data.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(data.color)) {
+      button.style.background = data.color;
+    }
+    var side = data.position === 'bottom-left' ? 'left' : 'right';
+    var other = side === 'left' ? 'right' : 'left';
+    button.style[other] = 'auto';
+    button.style[side] = '20px';
+    container.style[other] = 'auto';
+    container.style[side] = '20px';
+    if (typeof data.launcherText === 'string' && data.launcherText) {
+      button.setAttribute('aria-label', data.launcherText);
+      button.setAttribute('title', data.launcherText);
+    }
+  });
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', create);
   } else {

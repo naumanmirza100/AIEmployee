@@ -1,6 +1,7 @@
 import secrets
 from datetime import timedelta
 
+from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from django.core.mail import send_mail
@@ -12,7 +13,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 
-from recruitment_agent import public_apply
+from recruitment_agent import applicant_screening, public_apply
 from recruitment_agent.models import JobDescription, JobApplication
 
 
@@ -225,6 +226,11 @@ def public_job_apply(request, job_id):
     application.access_token = access_token
     application.save()
 
+    # Screened as it arrives, as Recruitment's screens promise, once the company has the
+    # agent and the job's interview hours are set. The applicant does not wait for it.
+    transaction.on_commit(lambda: applicant_screening.tell_recruiter(application))
+    transaction.on_commit(lambda: applicant_screening.screen_soon(application.id))
+
     # Build tracking URL — points to React frontend
     frontend_base = (getattr(settings, 'FRONTEND_URL', None) or getattr(settings, 'BACKEND_URL', None) or '').strip().rstrip('/')
     if frontend_base and not frontend_base.startswith('http'):
@@ -343,15 +349,14 @@ def _build_app_payload(app):
         'job': {
             'id': job.id,
             'title': job.title,
-            'company_name': getattr(job, 'company_name', None),
+            # JobDescription has no company_name field, so this was always blank.
+            'company_name': job.company.name if job.company_id else None,
             'location': getattr(job, 'location', None),
             'department': getattr(job, 'department', None),
             'type': getattr(job, 'type', None),
         },
-        'cv_record': {
-            'qualification_decision': cv_record.qualification_decision,
-            'role_fit_score': cv_record.role_fit_score,
-        } if cv_record else None,
+        # The AI's decision and score are not sent: the page never showed them, and
+        # anyone holding the link could read them.
         'interview': interview_data,
     }
 

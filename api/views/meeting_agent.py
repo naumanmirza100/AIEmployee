@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 
+from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
@@ -565,6 +566,47 @@ class ExecCRUDThrottle(SimpleRateThrottle):
         return self.get_ident(request)
 
 
+# One address both reads a meeting's stored notes and asks the AI to write them. Reading
+# was counted as AI use: every meeting card opened spent one of the 30 an hour, and after
+# a morning's use the AI stopped and notes showed as missing. A key of None is not counted.
+_READS = ('GET', 'HEAD', 'OPTIONS')
+
+
+class ExecLLMWhenWritingThrottle(ExecLLMThrottle):
+    def get_cache_key(self, request, view):
+        return None if request.method in _READS else super().get_cache_key(request, view)
+
+
+class ExecCRUDWhenReadingThrottle(ExecCRUDThrottle):
+    def get_cache_key(self, request, view):
+        return super().get_cache_key(request, view) if request.method in _READS else None
+
+
+# The daily digest was asked of the AI every time the overview opened. It is now kept for
+# the day and made again only when the refresh button asks for it.
+DIGEST_KEEP_SECONDS = 26 * 3600
+
+
+def _digest_key(company_user):
+    from meeting_agent.clock import company_zone
+    from zoneinfo import ZoneInfo
+    day = timezone.now().astimezone(ZoneInfo(company_zone(company_user.company))).date()
+    return f'exec_digest:{company_user.id}:{day.isoformat()}'
+
+
+def _wants_new_digest(request):
+    return str(request.data.get('refresh', '')).lower() in ('1', 'true', 'yes')
+
+
+class ExecDigestThrottle(ExecLLMThrottle):
+    """Counted only when the AI is really asked: a digest already made today costs nothing."""
+
+    def get_cache_key(self, request, view):
+        if not _wants_new_digest(request) and cache.get(_digest_key(request.user)) is not None:
+            return None
+        return super().get_cache_key(request, view)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -774,6 +816,19 @@ def _seat_for_employee(profile_id, company):
     return seat
 
 
+def _login_named(company, name):
+    """The company's active login with this name: the full name, or a first name only one login has."""
+    from core.models import CompanyUser as _CU
+    name = ' '.join((name or '').split())
+    if not name:
+        return None
+    logins = _CU.objects.filter(company=company, is_active=True)
+    found = list(logins.filter(full_name__iexact=name)[:2])
+    if len(found) != 1 and ' ' not in name:
+        found = list(logins.filter(full_name__istartswith=name + ' ')[:2])
+    return found[0] if len(found) == 1 else None
+
+
 def _resolve_assignees(assignee_list, company):
     """
     Accepts a list of {id, user_type} dicts from the frontend.
@@ -799,13 +854,16 @@ def _resolve_assignees(assignee_list, company):
     return result
 
 
-def _serialize_task(task, include_subtasks=True):
+def _serialize_task(task, include_subtasks=True, viewer=None):
     assignees = [
         {'id': cu.id, 'full_name': cu.full_name, 'email': cu.email}
         for cu in task.assignees.all()
     ]
     data = {
         'id': task.id,
+        # A task given to the viewer by someone else: they may move its status on, nothing more.
+        'yours': viewer is None or task.company_user_id == viewer.id,
+        'given_by': task.company_user.full_name if task.company_user_id else '',
         'title': task.title,
         'description': task.description,
         'status': task.status,
@@ -821,7 +879,7 @@ def _serialize_task(task, include_subtasks=True):
     }
     if include_subtasks:
         subtasks = list(task.subtasks.all())
-        data['subtasks'] = [_serialize_task(st, include_subtasks=False) for st in subtasks]
+        data['subtasks'] = [_serialize_task(st, include_subtasks=False, viewer=viewer) for st in subtasks]
         data['subtask_count'] = len(subtasks)
         data['subtask_done_count'] = sum(1 for st in subtasks if st.status == 'done')
     return data
@@ -1512,6 +1570,15 @@ def meeting_respond(request, meeting_id):
         meeting=meeting,
         data={'participant_id': company_user.id, 'response': response_val, 'meeting_id': meeting.id},
     )
+    # And in the bell: the alert above shows only on Executive Meeting's own page.
+    from core.notification_utils import notify_company_users
+    said = {'accepted': 'accepted', 'rejected': 'declined', 'tentative': 'tentatively accepted',
+            'counter_proposed': 'suggested another time for'}[response_val]
+    notify_company_users(
+        [meeting.organizer], title=f'{company_user.full_name} {said} {meeting.title}'[:255],
+        message=f'{company_user.full_name} {said} the meeting "{meeting.title}".' + (f' Reason: {reason}' if reason else ''),
+        link='/exec-meeting/dashboard?tab=meetings', kind='exec_meeting_reply',
+        data={'meeting_id': meeting.id})
 
     return Response({'status': 'success', 'participant': {
         'response': participant.response,
@@ -1589,7 +1656,7 @@ def meeting_check_conflicts(request):
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
-@throttle_classes([ExecLLMThrottle])
+@throttle_classes([ExecLLMWhenWritingThrottle, ExecCRUDWhenReadingThrottle])
 def meeting_notes(request, meeting_id):
     """Get or submit notes/transcript for a meeting."""
     company_user = request.user
@@ -1600,8 +1667,13 @@ def meeting_notes(request, meeting_id):
             note = meeting.note
             action_items = list(meeting.action_items.values(
                 'id', 'title', 'description', 'status', 'priority',
-                'due_date', 'ai_extracted', 'assignee_id',
+                'due_date', 'ai_extracted', 'assignee_id', 'owner_name',
             ))
+            from core.models import CompanyUser
+            names = dict(CompanyUser.objects.filter(
+                id__in=[a['assignee_id'] for a in action_items if a['assignee_id']]).values_list('id', 'full_name'))
+            for a in action_items:
+                a['assignee_name'] = names.get(a['assignee_id'], '')
             # Titles of tasks already created from this meeting — lets the UI
             # keep showing "Task created" on matching action items across page
             # reloads, without storing any link on the action item itself.
@@ -1630,7 +1702,9 @@ def meeting_notes(request, meeting_id):
         participant_names = list(
             meeting.participants.select_related('company_user').values_list('company_user__full_name', flat=True)
         )
-        result = agent.process_full_transcript(transcript, meeting.title, participant_names)
+        from meeting_agent.clock import held_on
+        meeting_day = held_on(meeting)
+        result = agent.process_full_transcript(transcript, meeting.title, participant_names, held_on=meeting_day)
 
         note, _ = MeetingNote.objects.update_or_create(
             meeting=meeting,
@@ -1657,11 +1731,20 @@ def meeting_notes(request, meeting_id):
             if s.lower() in ('null', 'none', 'n/a', 'tbd', ''):
                 return None
             try:
-                return datetime.strptime(s[:10], '%Y-%m-%d').date()
+                due = datetime.strptime(s[:10], '%Y-%m-%d').date()
             except (ValueError, TypeError):
                 return None
+            # Nothing agreed in a meeting is due before it was held. A date like that is the
+            # AI guessing a year (it gave 2023), and no date is better than a wrong one.
+            return due if due >= meeting_day else None
 
         valid_priorities = ('low', 'medium', 'high', 'critical')
+
+        # The AI names who does each item. That name was asked for and then dropped, so no item
+        # had an owner, and a task made from one was given to nobody.
+        def _owner_named(raw):
+            name = ' '.join(str(raw or '').split())[:255]
+            return '' if name.lower() in ('null', 'none', 'n/a', 'tbd', 'unassigned', 'unknown') else name
 
         created_items = []
         for item_data in result.get('action_items', []):
@@ -1671,6 +1754,7 @@ def meeting_notes(request, meeting_id):
             prio = str(item_data.get('priority', 'medium')).strip().lower()
             if prio not in valid_priorities:
                 prio = 'medium'
+            owner = _owner_named(item_data.get('assignee_hint'))
             item = MeetingActionItem.objects.create(
                 meeting=meeting,
                 title=title,
@@ -1678,6 +1762,8 @@ def meeting_notes(request, meeting_id):
                 due_date=_clean_due(item_data.get('due_date')),
                 priority=prio,
                 ai_extracted=True,
+                owner_name=owner,
+                assignee=_login_named(company_user.company, owner),
             )
             kept_titles.add(title.lower())  # also dedupe within this batch
             created_items.append({'id': item.id, 'title': item.title})
@@ -1805,12 +1891,64 @@ def action_item_convert_to_task(request, item_id):
         linked_meeting=item.meeting,
         parent_task_id=parent_task_id,
     )
+    # The person the notes say does it gets the task, and is told, as anyone given a task is.
+    owner = item.assignee if item.assignee_id and item.assignee.is_active else None
+    if owner and owner.company_id == company_user.company_id:
+        task.assignees.set([owner])
+        if owner.email and owner.id != company_user.id:
+            _send_task_assignment_email(owner, task, company_user.full_name)
+        _tell_assigned([owner], task, company_user)
     return Response({'status': 'success', 'task': _serialize_task(task), 'message': 'Action item converted to task.'}, status=status.HTTP_201_CREATED)
 
 
 # ===========================================================================
 # TASKS
 # ===========================================================================
+
+# A task assigned from here was listed, and could be opened, only by the person who made
+# it. The assignee got an email telling them to log in, and then could not see it.
+EXEC_TASKS_LINK = '/exec-meeting/dashboard?tab=tasks'
+
+
+def _visible_tasks(company_user):
+    """Tasks this login made, and tasks given to it."""
+    return ExecutiveTask.objects.filter(
+        models.Q(company_user=company_user) | models.Q(assignees=company_user)).distinct()
+
+
+def _listed_tasks(company_user):
+    """The task list: top-level tasks this login made, and every task given to it, except
+    a subtask whose parent it already sees (the subtask is listed under that parent)."""
+    given = ExecutiveTask.objects.filter(assignees=company_user).exclude(company_user=company_user)
+    parent_seen = models.Q(parent_task__company_user=company_user) | models.Q(parent_task__assignees=company_user)
+    return ExecutiveTask.objects.filter(
+        models.Q(company_user=company_user, parent_task__isnull=True)
+        | models.Q(pk__in=given.filter(parent_task__isnull=True).values('pk'))
+        | models.Q(pk__in=given.filter(parent_task__isnull=False).exclude(parent_seen).values('pk')))
+
+
+def _tell_assigned(people, task, given_by):
+    """The bell of each person newly given the task. The email is sent separately."""
+    from core.notification_utils import notify_company_users
+    due = f' It is due on {task.due_date}.' if task.due_date else ''
+    notify_company_users(
+        [cu for cu in people if cu.id != task.company_user_id],
+        title=f'New task: {task.title}'[:255],
+        message=f'{given_by.full_name or given_by.email} gave you a task in Executive Meeting.{due}',
+        link=EXEC_TASKS_LINK, kind='exec_task_assigned', email=False,
+        data={'exec_task_id': task.id})
+
+
+def _tell_owner_of_progress(task, by):
+    """The person who gave the task hears when its assignee moves it on."""
+    from core.notification_utils import notify_company_users
+    notify_company_users(
+        [task.company_user],
+        title=f'{by.full_name or by.email}: {task.title} is now {task.get_status_display()}'[:255],
+        message=f'{by.full_name or by.email} changed the status of a task you gave them.',
+        link=EXEC_TASKS_LINK, kind='exec_task_progress', email=False,
+        data={'exec_task_id': task.id})
+
 
 @api_view(['GET', 'POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
@@ -1827,7 +1965,7 @@ def task_list(request):
         date_filter = (request.query_params.get('date') or '').strip()
         # Top-level list only — subtasks ride along nested under their parent
         # (via _serialize_task's 'subtasks' key) instead of appearing twice.
-        qs = ExecutiveTask.objects.filter(company_user=company_user, parent_task__isnull=True)
+        qs = _listed_tasks(company_user)
         if status_filter:
             qs = qs.filter(status=status_filter)
         if priority_filter:
@@ -1838,7 +1976,7 @@ def task_list(request):
             # due_date is stored as a DateField (or ISO string) — match the day.
             qs = qs.filter(due_date=date_filter)
         page_items, meta = _paginate(qs, request)
-        data = [_serialize_task(t) for t in page_items]
+        data = [_serialize_task(t, viewer=company_user) for t in page_items]
         return Response({'status': 'success', 'tasks': data, 'count': len(data), 'pagination': meta})
 
     title = request.data.get('title', '').strip()
@@ -1896,6 +2034,7 @@ def task_list(request):
         for cu in resolved:
             if cu.email:
                 _send_task_assignment_email(cu, task, company_user.full_name)
+        _tell_assigned(resolved, task, company_user)
 
     # For a subtask, also notify the PARENT task's assignees that a subtask was
     # added under their task (so they see it appear on their work item). Skip
@@ -1917,10 +2056,26 @@ def task_list(request):
 def task_detail(request, task_id):
     """Get, update, or delete a task."""
     company_user = request.user
-    task = get_object_or_404(ExecutiveTask, id=task_id, company_user=company_user)
+    task = get_object_or_404(_visible_tasks(company_user), id=task_id)
 
     if request.method == 'GET':
-        return Response({'status': 'success', 'task': _serialize_task(task)})
+        return Response({'status': 'success', 'task': _serialize_task(task, viewer=company_user)})
+
+    if task.company_user_id != company_user.id:
+        # Given by someone else: its assignee may move the status on, and that is all.
+        changes = set(request.data.keys()) if request.method == 'PATCH' else {'delete'}
+        if not changes or not changes <= {'status'}:
+            return Response({'status': 'error',
+                             'message': 'Only the person who made this task can change or delete it. '
+                                        'You can change its status.'}, status=status.HTTP_403_FORBIDDEN)
+        new_status = request.data.get('status')
+        if new_status not in dict(ExecutiveTask.STATUS_CHOICES):
+            return Response({'status': 'error', 'message': 'Unknown status.'}, status=status.HTTP_400_BAD_REQUEST)
+        if new_status != task.status:
+            task.status = new_status
+            task.save(update_fields=['status', 'updated_at'])
+            _tell_owner_of_progress(task, company_user)
+        return Response({'status': 'success', 'task': _serialize_task(task, viewer=company_user)})
 
     if request.method == 'PATCH':
         # Renaming to an existing title is a duplicate too — block it.
@@ -1952,11 +2107,12 @@ def task_detail(request, task_id):
             for cu in resolved:
                 if cu.id not in existing_ids and cu.email:
                     _send_task_assignment_email(cu, task, company_user.full_name)
+            _tell_assigned([cu for cu in resolved if cu.id not in existing_ids], task, company_user)
             # Email removed assignees
             for cu in existing_qs:
                 if cu.id not in new_ids and cu.email:
                     _send_task_removal_email(cu, task, company_user.full_name)
-        return Response({'status': 'success', 'task': _serialize_task(task)})
+        return Response({'status': 'success', 'task': _serialize_task(task, viewer=company_user)})
 
     # Snapshot before delete so we can reference after
     task_title = task.title
@@ -2563,13 +2719,20 @@ def notification_bulk_delete(request):
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
-@throttle_classes([ExecLLMThrottle])
+@throttle_classes([ExecDigestThrottle])
 def notification_daily_digest(request):
-    """Get AI-generated daily digest."""
+    """Today's AI digest: the one already made today, or a new one when {"refresh": true}."""
     company_user = request.user
+    key = _digest_key(company_user)
+    if not _wants_new_digest(request):
+        kept = cache.get(key)
+        if kept is not None:
+            return Response({'status': 'success', 'digest': kept})
     try:
         agent = _get_agent('proactive_notification', company_user)
         digest = agent.generate_daily_digest(company_user.id, company_user.full_name)
+        digest['made_at'] = timezone.now().isoformat()
+        cache.set(key, digest, DIGEST_KEEP_SECONDS)
         return Response({'status': 'success', 'digest': digest})
     except KeyServiceError:
         raise

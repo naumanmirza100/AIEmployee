@@ -305,7 +305,7 @@ export default function ApplicationTrackerPage() {
     );
   }
 
-  const { application, job, cv_record, interview } = data;
+  const { application, job, interview } = data;
   const steps = buildSteps(application.status, interview);
   const appDate = fmt(application.applied_at);
 

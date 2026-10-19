@@ -18,7 +18,7 @@ offset. That is a fault of its own, older than this module.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
@@ -44,6 +44,16 @@ def real_instant(stored: datetime | None, company) -> datetime | None:
 def real_start(meeting) -> datetime | None:
     """When this executive meeting really starts."""
     return real_instant(meeting.scheduled_at, meeting.organizer.company)
+
+
+def held_on(meeting) -> date:
+    """The day a meeting was held, on the company's clock: the day typed for it.
+
+    The note-taker works out "by Friday" from this day. A meeting with no time,
+    or one whose notes are written before its day comes, counts as held today."""
+    today = timezone.now().astimezone(ZoneInfo(company_zone(meeting.organizer.company))).date()
+    start = real_start(meeting)
+    return min(start.date(), today) if start else today
 
 
 def resync_company(company) -> int:

@@ -300,10 +300,15 @@ const MarketingDashboard = () => {
     }
   }, [activeTab, fetchNotificationUnreadCount]);
 
+  // The cards above every tab add up the mailboxes' sent emails, so the mailboxes are needed on
+  // every tab; loaded only on two, the other tabs said 0 emails sent.
+  useEffect(() => {
+    fetchEmailAccounts();
+  }, [activeTab]);
+
   useEffect(() => {
     if (activeTab === 'dashboard') {
       fetchCampaigns(campaignsPage);
-      fetchEmailAccounts();
       getSavedGraphPrompts()
         .then((res) => {
           if (res?.status === 'success' && Array.isArray(res.data)) {
@@ -311,8 +316,6 @@ const MarketingDashboard = () => {
           }
         })
         .catch(() => setDashboardGraphPrompts([]));
-    } else if (activeTab === 'email') {
-      fetchEmailAccounts();
     } else if (activeTab === 'saved-graphs') {
       fetchSavedGraphPrompts(1);
     }

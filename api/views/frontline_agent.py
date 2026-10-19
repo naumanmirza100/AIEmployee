@@ -21,6 +21,7 @@ from django.db.models import Q, Count
 from django.contrib.auth.models import User
 from django.http import HttpResponse
 from django.conf import settings
+from django.core import signing
 from datetime import timedelta, datetime
 import json
 import logging
@@ -1659,6 +1660,11 @@ def public_qa(request):
                 result = dict(result)
                 result['handoff_requested'] = True
                 result['handoff_ticket_id'] = ticket.id
+                if contact is None:
+                    # Nobody could answer them: the chat asks for an address and sends it back
+                    # with this token, which names this one ticket (public_handoff_contact).
+                    result['handoff_token'] = signing.dumps({'ticket': ticket.id, 'company': company.id},
+                                                            salt=HANDOFF_CONTACT_SALT)
                 handoff_triggered = True
         except Exception:
             logger.exception("public_qa handoff detection failed")
@@ -1750,6 +1756,60 @@ def public_qa(request):
                 'fallback': True,
             },
         }, status=status.HTTP_200_OK)
+
+
+HANDOFF_CONTACT_SALT = 'frontline-handoff-contact'
+HANDOFF_CONTACT_MAX_AGE = 6 * 3600
+
+
+@api_view(["POST"])
+@permission_classes([])
+@authentication_classes([])
+@throttle_classes([FrontlinePublicThrottle, FrontlineWidgetKeyThrottle])
+def public_handoff_contact(request):
+    """A website visitor who asked for a person leaves the address the answer should go to.
+
+    The chat asked nobody for an address, so a hand-off from it had no one to reply to.
+    Body: widget_key, handoff_token (from public_qa), email, name. The token names the one
+    hand-off ticket it came with, so an address can be added to that ticket and no other,
+    once, within a few hours."""
+    from django.core.exceptions import ValidationError
+    from django.core.validators import validate_email
+    try:
+        company, err = _get_company_by_widget_key(request)
+        if err:
+            return err
+        data = json.loads(request.body) if request.body else {}
+        email = (data.get('email') or '').strip()[:254]
+        name = (data.get('name') or '').strip()[:255]
+        try:
+            validate_email(email)
+        except ValidationError:
+            return Response({'status': 'error', 'message': 'Please enter a valid email address.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            claim = signing.loads(data.get('handoff_token') or '', salt=HANDOFF_CONTACT_SALT,
+                                  max_age=HANDOFF_CONTACT_MAX_AGE)
+        except signing.BadSignature:
+            return Response({'status': 'error', 'message': 'This chat has expired. Please ask again.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        ticket = Ticket.objects.filter(pk=claim.get('ticket'), company=company, contact__isnull=True).first()
+        if claim.get('company') != company.id or ticket is None:
+            return Response({'status': 'error', 'message': 'This chat has expired. Please ask again.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        from Frontline_agent.contacts import recompute_contact_stats, upsert_contact_from_email
+        contact = upsert_contact_from_email(company, email, name)
+        ticket.contact = contact
+        context = dict(ticket.handoff_context or {})
+        context['from_email'] = contact.email
+        ticket.handoff_context = context
+        ticket.save(update_fields=['contact', 'handoff_context', 'updated_at'])
+        recompute_contact_stats(contact)
+        return Response({'status': 'success', 'message': "Thank you. We'll reply to you by email."})
+    except Exception:
+        logger.exception("public_handoff_contact failed")
+        return Response({'status': 'error', 'message': 'Something went wrong. Please try again.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])
@@ -6210,6 +6270,10 @@ def reply_to_ticket(request, ticket_id):
                             .order_by('-created_at').first())
             if last_inbound and last_inbound.from_address:
                 to_addresses = [last_inbound.from_address]
+        # A ticket from the website chat or the web form has no email in its thread, only
+        # the customer's contact, so a reply to it always failed with "No recipient".
+        if not to_addresses and ticket.contact_id and ticket.contact.email:
+            to_addresses = [ticket.contact.email]
         if not to_addresses:
             return Response({'status': 'error', 'message': 'No recipient available'},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -6228,6 +6292,10 @@ def reply_to_ticket(request, ticket_id):
         # Build subject with stable tag.
         tag = build_subject_tag(ticket.id)
         subject = ticket.title or '(no subject)'
+        # A widget hand-off's title starts "Hand-off:" for the staff's queue; the customer
+        # reading the reply sees their own question.
+        if subject.startswith('Hand-off: '):
+            subject = subject[len('Hand-off: '):]
         if tag not in subject:
             subject = f"Re: {subject} {tag}"
 

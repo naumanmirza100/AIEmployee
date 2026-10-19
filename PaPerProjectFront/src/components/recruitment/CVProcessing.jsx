@@ -293,7 +293,8 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
             <p className="text-sm font-semibold text-white">This page is for manual CV processing</p>
             <p className="text-xs text-white/60 mt-0.5">
               Upload CVs here to screen candidates yourself. Applications submitted through a job's public
-              apply link are screened automatically — you don't need to upload those.
+              apply link are screened automatically as they arrive, once the job's interview hours are set —
+              you don't need to upload those.
             </p>
           </div>
         </div>

@@ -44,6 +44,9 @@ MIGRATION_MODULES = _SkipMigrations()
 
 PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
+# Links in emails are built on this, and tests read them. It came from a developer's .env, which CI does not
+# have, so there the links were empty and three tests failed.
+FRONTEND_URL = 'http://localhost:3000'
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
 WHITENOISE_AUTOREFRESH = True

@@ -84,7 +84,7 @@ def leave_decided(leave_request, decided_by=None, note='', booked=0):
                                     kind='hr_leave_decided')
     from core.notification_utils import notify_employees
     return notify_employees([emp.user], title=title, message=message, kind='hr_leave_decided',
-                            email_subject=title)
+                            link='/me/hr', email_subject=title)
 
 
 def leave_request_submitted(leave_request):

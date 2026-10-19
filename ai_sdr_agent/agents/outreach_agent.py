@@ -418,7 +418,7 @@ Rules:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_tokens=1200,
+            max_tokens=3000,
         )
         from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
         record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
@@ -883,6 +883,10 @@ Rules:
         msg['Subject'] = subject
         msg['From'] = f"{display_name} <{from_addr}>" if display_name else from_addr
         msg['To'] = to_email
+        # Every email must carry these; without them spam filters mark it down, and a mail server
+        # that does not add them leaves the lead's inbox with no date and nothing to thread on.
+        msg['Date'] = email.utils.formatdate(localtime=True)
+        msg['Message-ID'] = email.utils.make_msgid(domain=from_addr.rsplit('@', 1)[-1] if '@' in from_addr else None)
         if unsubscribe_url:
             msg['List-Unsubscribe'] = f"<{unsubscribe_url}>"
             msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'

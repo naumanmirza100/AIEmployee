@@ -13,8 +13,9 @@ There are two kinds of login, and each sees only what it can open and act on:
     waiting for a person and questions the assistant could not answer, for the
     logins who are alerted about them; leave requests
     and HR workflows waiting for its decision; new times suggested for
-    meetings it organises; interviews it ran that still need feedback; and PM
-    tasks assigned to the employee login it maps to.
+    meetings it organises; interviews it ran that still need feedback; PM
+    tasks assigned to the employee login it maps to; and Executive Meeting
+    tasks given to it.
   * an employee login (`auth.User`, the My Space pages): its PM tasks, and
     meeting invites waiting for its reply.
 
@@ -34,7 +35,8 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-AGENT_LABELS = {'pm': 'Project Manager', 'hr': 'HR', 'frontline': 'Frontline', 'recruitment': 'Recruitment'}
+AGENT_LABELS = {'pm': 'Project Manager', 'hr': 'HR', 'frontline': 'Frontline', 'recruitment': 'Recruitment',
+                'exec': 'Executive Meeting'}
 #: Most items one source adds, so a large backlog can't make the list unbounded.
 LIMIT = 100
 OPEN_TICKET_STATUSES = ('new', 'open', 'in_progress')
@@ -103,6 +105,8 @@ def for_company_user(company_user, now=None):
         sources.append(_interview_feedback)
     if 'project_manager_agent' in modules:
         sources += [_pm_times_suggested, _dashboard_tasks]
+    if 'exec_meeting_agent' in modules:
+        sources.append(_exec_tasks)
     return _gather(sources, person, now)
 
 
@@ -402,6 +406,25 @@ def _dashboard_tasks(person, now):
         return []
     tasks = _open_tasks(tasks_for_company_user(person.company_user).filter(assignee_id__in=person.user_ids))
     return _task_items(tasks, '/project-manager/dashboard?tab=tasks')
+
+
+# ---- Executive Meeting ----------------------------------------------------------
+
+def _exec_tasks(person, now):
+    """Executive Meeting tasks given to this login and not done yet."""
+    from meeting_agent.models import ExecutiveTask
+    tasks = (ExecutiveTask.objects
+             .filter(assignees=person.company_user)
+             .exclude(status='done')
+             .select_related('company_user')
+             .order_by(F('due_date').asc(nulls_last=True), 'id')[:LIMIT])
+    items = []
+    for t in tasks:
+        given = '' if t.company_user_id == person.company_user.id else f'From {t.company_user.full_name}'
+        items.append(_item('exec', 'exec_task', t.id, t.title,
+                           detail=' · '.join(p for p in (given, t.get_status_display()) if p),
+                           due=t.due_date, action='Open task', link='/exec-meeting/dashboard?tab=tasks'))
+    return items
 
 
 # ---- Employee login -------------------------------------------------------------

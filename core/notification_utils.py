@@ -116,9 +116,10 @@ def notify_employees(users, *, title, message, link=None, kind='custom',
                      if email_subject and u.email and not u.email.lower().endswith('.invalid')]
         if addresses:
             body = email_body or message
-            if link:
-                from core.notification_settings import frontend_url
-                body = f"{body}\n\nOpen it: {frontend_url(link)}"
+            from core.notification_settings import frontend_url
+            url = frontend_url(link) if link else ''
+            if url:                 # with no FRONTEND_URL set there is no address to give, only "Open it: "
+                body = f"{body}\n\nOpen it: {url}"
             transaction.on_commit(lambda: _email_each(addresses, email_subject, body, attachments))
         return len(people)
     except Exception as exc:

@@ -64,8 +64,11 @@ else:
 
 # In-process cache — avoid re-loading the index file on every query.
 # Keyed by company_id. Guarded by a lock so concurrent threads don't race.
+# Re-entrant: get_store queues a rebuild while holding it, and where tasks run in
+# the same thread (CELERY_TASK_ALWAYS_EAGER) the rebuild calls get_store again.
+# With a plain Lock that thread waited on itself, and the question never came back.
 _CACHE: dict[int, 'FaissVectorStore'] = {}
-_CACHE_LOCK = threading.Lock()
+_CACHE_LOCK = threading.RLock()
 
 
 def _index_dir() -> Path:

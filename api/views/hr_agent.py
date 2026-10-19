@@ -2452,6 +2452,78 @@ def hr_meeting_availability(request):
 # Leave requests — bonus first-class HR object
 # ============================================================================
 
+def make_leave_request(emp, company, d):
+    """Create a pending LeaveRequest for `emp` from request data `d`.
+
+    Works out the working days (weekends and company holidays skipped) and the
+    approver (the manager, or HR). Used by HR's own screen and by an employee
+    asking for their own leave in My Space, so the two cannot drift apart.
+    Returns (leave_request, None), or (None, a Response saying what is wrong).
+    """
+    def refuse(message):
+        return None, Response({'status': 'error', 'message': message}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        sd = datetime.fromisoformat(d['start_date']).date()
+        ed = datetime.fromisoformat(d['end_date']).date()
+    except (KeyError, TypeError, ValueError):
+        return refuse('start_date and end_date are required (YYYY-MM-DD)')
+    if ed < sd:
+        return refuse('end_date must be on or after start_date')
+
+    from hr_agent.leave_helpers import working_days_between, resolve_approver_for_leave
+
+    # F2 — partial-day metadata. When set, the request represents less than
+    # a full working day on a single date; we derive days_requested from
+    # the period rather than the date span.
+    partial_period = (d.get('partial_day_period') or '').strip().lower()
+    valid_periods = {'', 'morning', 'afternoon', 'hours'}
+    if partial_period not in valid_periods:
+        return refuse(f"partial_day_period must be one of {sorted(valid_periods - {''})} or omitted for a full day.")
+    partial_hours_val = None
+    if partial_period:
+        if sd != ed:
+            return refuse('Partial-day requests must have start_date == end_date.')
+        if partial_period == 'hours':
+            try:
+                partial_hours_val = float(d.get('partial_hours'))
+            except (TypeError, ValueError):
+                return refuse('partial_hours is required (decimal hours, e.g. 2.5) when partial_day_period="hours".')
+            if not (0 < partial_hours_val < 8):
+                return refuse('partial_hours must be > 0 and < 8 (anything >= 8 should be a full day).')
+            days_requested = round(partial_hours_val / 8.0, 2)
+        else:  # morning / afternoon
+            days_requested = 0.5
+    else:
+        # Caller can override (e.g. legacy half-day requests); otherwise compute.
+        days_requested = d.get('days_requested')
+        if days_requested in (None, ''):
+            days_requested = working_days_between(sd, ed, company)
+        else:
+            try:
+                days_requested = float(days_requested)
+            except (TypeError, ValueError):
+                days_requested = working_days_between(sd, ed, company)
+
+    leave_type = d.get('leave_type') or 'vacation'
+    if leave_type not in dict(LeaveBalance.LEAVE_TYPE_CHOICES):
+        return refuse('Unknown leave type.')
+
+    approver = resolve_approver_for_leave(emp, company)
+    lr = LeaveRequest.objects.create(
+        employee=emp,
+        leave_type=leave_type,
+        start_date=sd, end_date=ed,
+        days_requested=days_requested,
+        partial_day_period=partial_period,
+        partial_hours=partial_hours_val,
+        reason=(d.get('reason') or '')[:2000],
+        status='pending',
+        approver=approver,
+    )
+    return lr, None
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2467,74 +2539,9 @@ def submit_leave_request(request):
         if not emp:
             return Response({'status': 'error', 'message': 'employee_id required + must belong to your company'},
                             status=status.HTTP_400_BAD_REQUEST)
-        try:
-            sd = datetime.fromisoformat(d['start_date']).date()
-            ed = datetime.fromisoformat(d['end_date']).date()
-        except (KeyError, ValueError):
-            return Response({'status': 'error', 'message': 'start_date and end_date are required (YYYY-MM-DD)'},
-                            status=status.HTTP_400_BAD_REQUEST)
-        if ed < sd:
-            return Response({'status': 'error', 'message': 'end_date must be on or after start_date'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        from hr_agent.leave_helpers import working_days_between, resolve_approver_for_leave
-
-        # F2 — partial-day metadata. When set, the request represents less than
-        # a full working day on a single date; we derive days_requested from
-        # the period rather than the date span.
-        partial_period = (d.get('partial_day_period') or '').strip().lower()
-        valid_periods = {'', 'morning', 'afternoon', 'hours'}
-        if partial_period not in valid_periods:
-            return Response({
-                'status': 'error',
-                'message': f"partial_day_period must be one of {sorted(valid_periods - {''})} or omitted for a full day.",
-            }, status=status.HTTP_400_BAD_REQUEST)
-        partial_hours_val = None
-        if partial_period:
-            if sd != ed:
-                return Response({
-                    'status': 'error',
-                    'message': 'Partial-day requests must have start_date == end_date.',
-                }, status=status.HTTP_400_BAD_REQUEST)
-            if partial_period == 'hours':
-                try:
-                    partial_hours_val = float(d.get('partial_hours'))
-                except (TypeError, ValueError):
-                    return Response({
-                        'status': 'error',
-                        'message': 'partial_hours is required (decimal hours, e.g. 2.5) when partial_day_period="hours".',
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                if not (0 < partial_hours_val < 8):
-                    return Response({
-                        'status': 'error',
-                        'message': 'partial_hours must be > 0 and < 8 (anything >= 8 should be a full day).',
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                days_requested = round(partial_hours_val / 8.0, 2)
-            else:  # morning / afternoon
-                days_requested = 0.5
-        else:
-            # Caller can override (e.g. legacy half-day requests); otherwise compute.
-            days_requested = d.get('days_requested')
-            if days_requested in (None, ''):
-                days_requested = working_days_between(sd, ed, company)
-            else:
-                try:
-                    days_requested = float(days_requested)
-                except (TypeError, ValueError):
-                    days_requested = working_days_between(sd, ed, company)
-
-        approver = resolve_approver_for_leave(emp, company)
-        lr = LeaveRequest.objects.create(
-            employee=emp,
-            leave_type=d.get('leave_type') or 'vacation',
-            start_date=sd, end_date=ed,
-            days_requested=days_requested,
-            partial_day_period=partial_period,
-            partial_hours=partial_hours_val,
-            reason=(d.get('reason') or '')[:2000],
-            status='pending',
-            approver=approver,
-        )
+        lr, refused = make_leave_request(emp, company, d)
+        if refused is not None:
+            return refused
         return Response({'status': 'success', 'data': {
             'id': lr.id, 'employee_id': emp.id, 'status': lr.status,
             'days_requested': float(lr.days_requested),

@@ -27,12 +27,14 @@ const execMeetingService = {
         pending_action_items: tasks.filter(t => t.status !== 'done').length,
         unread_notifications: notifs.filter(n => !n.is_read).length,
       };
-    } catch {
+    } catch (err) {
+      if (err?.status === 429) throw err;   // the screen says "too many requests" rather than showing zeros
       return { upcoming_meetings: 0, total_tasks: 0, overdue_tasks: 0, pending_action_items: 0, unread_notifications: 0 };
     }
   },
 
-  getDailyDigest: () => companyApi.post(`${BASE}/notifications/daily-digest`, {}),
+  // refresh: true asks the AI for a new digest; otherwise the one already made today comes back.
+  getDailyDigest: (refresh = false) => companyApi.post(`${BASE}/notifications/daily-digest`, { refresh }),
 
   // Meetings — returns raw response; callers do res.meetings || []
   getMeetings: (params = {}) => {

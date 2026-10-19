@@ -66,6 +66,7 @@ import HomeView from '@/pages/me/HomeView';
 import TasksView from '@/pages/me/TasksView';
 import MeetingsView from '@/pages/me/MeetingsView';
 import ProfileView from '@/pages/me/ProfileView';
+import HRView from '@/pages/me/HRView';
 import NotificationsView from '@/pages/me/NotificationsView';
 import WorkView from '@/pages/me/WorkView';
 import MyWorkPage from '@/pages/MyWorkPage';
@@ -158,6 +159,7 @@ import { useTranslation } from 'react-i18next';
               <Route path="/me/meetings" element={<MeetingsView />} />
               <Route path="/me/notifications" element={<NotificationsView />} />
               <Route path="/me/profile" element={<ProfileView />} />
+              <Route path="/me/hr" element={<HRView />} />
             </Route>
 
 

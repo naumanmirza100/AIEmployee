@@ -219,15 +219,20 @@ Rules:
 - Remove generic openers like "I hope this finds you well"
 - One specific CTA only
 - Sound human
+- You know only the four facts above about the prospect. Never say you have seen, read or noticed anything
+  about them or their company (news, launches, plans, growth), and never guess what they are working on
+- Add no fact, number, customer name or promise about our offer that is not in the original email
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
 
         try:
+            # It used to make up things it had "seen" about the prospect, in an email sent in the
+            # salesperson's name; the last two rules above are there for that.
             resp = self.groq_client.chat.completions.create(
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.4,
-                max_tokens=600,
+                max_tokens=2000,
             )
             from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
             record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
@@ -299,7 +304,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.5,
-                max_tokens=500,
+                max_tokens=2000,
             )
             from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
             record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))
@@ -347,7 +352,7 @@ Return ONLY JSON: {{"category": "...", "reason": "one sentence explanation"}}"""
                 model=self.model,
                 messages=[{'role': 'user', 'content': prompt}],
                 temperature=0.1,
-                max_tokens=120,
+                max_tokens=800,
             )
             from ai_sdr_agent.agents.sdr_key_resolver import record_sdr_usage
             record_sdr_usage(self._key_ctx, getattr(resp.usage, 'total_tokens', 0))

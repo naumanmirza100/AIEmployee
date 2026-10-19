@@ -97,6 +97,15 @@ SKILL_EQUIVALENCES = {
     "mysql": ["mariadb", "percona", "sql"],
     "redis": ["redis cache", "redis cluster", "cache"],
     "elasticsearch": ["elastic search", "elk stack", "logstash", "kibana"],
+
+    # Build and release
+    "ci/cd": ["ci", "cd", "continuous integration", "continuous delivery", "continuous deployment",
+              "github actions", "gitlab ci", "jenkins", "circleci", "bitrise", "codemagic", "azure devops"],
+    "continuous integration": ["ci/cd", "ci", "github actions", "gitlab ci", "jenkins", "circleci", "bitrise", "codemagic"],
+
+    # Mobile
+    "mobile app development": ["mobile development", "flutter", "react native", "swift", "kotlin", "android", "ios"],
+    "mobile development": ["mobile app development", "flutter", "react native", "swift", "kotlin", "android", "ios"],
 }
 
 # Database type categorization for matching databases of the same type
@@ -271,4 +280,36 @@ def is_related_match(skill_lower: str, keyword_lower: str) -> bool:
     # Database type matching: if both are databases of the same type (but not exact), they're related
     if databases_same_type(skill_lower, keyword_lower):
         return True
+    # A requirement written as a phrase and a skill that share a meaningful word
+    if shares_meaningful_word(skill_lower, keyword_lower):
+        return True
     return False
+
+
+# Words that say nothing about which skill is meant: "data protection" and "data entry" are not related.
+_GENERIC_WORDS = {
+    'with', 'from', 'into', 'using', 'experience', 'experienced', 'knowledge', 'understanding', 'skills', 'skill',
+    'strong', 'good', 'ability', 'practices', 'practice', 'development', 'developer', 'developing', 'design',
+    'designing', 'management', 'managing', 'engineering', 'engineer', 'systems', 'system', 'tools', 'tool',
+    'application', 'applications', 'based', 'working', 'work', 'team', 'teams', 'data', 'software', 'solutions',
+    'solution', 'services', 'service', 'mobile', 'apps', 'modern', 'scalable', 'high', 'quality', 'performance',
+    'best', 'writing', 'building', 'build', 'integrating', 'framework', 'frameworks', 'language', 'languages',
+    'technologies', 'technology', 'platform', 'platforms', 'environment', 'processes', 'process', 'methodologies',
+    'methodology', 'concepts', 'principles', 'proficiency', 'proficient', 'familiarity', 'hands', 'years', 'year',
+}
+
+
+def _meaningful_words(text: str) -> set:
+    import re
+    words = re.findall(r'[a-z][a-z0-9+#]*', text)
+    return {w[:-1] if w.endswith('s') and len(w) > 4 else w for w in words if len(w) >= 4 and w not in _GENERIC_WORDS}
+
+
+def shares_meaningful_word(skill_lower: str, keyword_lower: str) -> bool:
+    """A job requirement written as a phrase ("Integration with payment gateways", "Writing tests") and a skill
+    ("payment integrations", "unit tests") that share a word which names the skill. Keywords an AI drew from a
+    job's description are often phrases like these, and matched only word for word they never matched, so a
+    candidate with exactly those skills scored as missing them."""
+    if ' ' not in keyword_lower and ' ' not in skill_lower:
+        return False
+    return bool(_meaningful_words(skill_lower) & _meaningful_words(keyword_lower))

@@ -411,6 +411,8 @@ def process_cvs(request):
                         cv_record.qualification_priority = result['qualified'].get('priority') if isinstance(result.get('qualified'), dict) else None
                         cv_record.rank = idx + 1
                         cv_record.save()
+                        from recruitment_agent import application_status
+                        application_status.after_screening(cv_record)
                         if new_decision and new_decision != old_decision:
                             try:
                                 CVRecordDecisionLog.objects.create(
@@ -1339,6 +1341,9 @@ def update_interview(request, interview_id):
             added = set()
 
         interview.save()
+        if outcome_updated:
+            from recruitment_agent import application_status
+            application_status.after_interview_outcome(interview)
 
         # HR was handed this person as a new hire. It hears if that changes.
         if was_hired and interview.outcome != 'HIRED':
@@ -2162,6 +2167,7 @@ def bulk_update_cv_records(request):
         removed_interviews = 0
         cancel_emails_sent = 0
         reject_emails_sent = 0
+        told_rejected = set()        # cv ids whose rejection email went
         if decision in ('REJECT', 'HOLD') and remaining_ids:
             _agent = InterviewSchedulingAgent(log_service=LogService())
 
@@ -2177,6 +2183,7 @@ def bulk_update_cv_records(request):
                     try:
                         if _agent.send_rejection_email(r_name, r_email, job_title):
                             reject_emails_sent += 1
+                            told_rejected.add(cv.id)
                     except Exception as _re:
                         logger.warning(f"Rejection email failed for cv_record {cv.id}: {_re}")
 
@@ -2220,6 +2227,11 @@ def bulk_update_cv_records(request):
         ]
         if log_entries:
             CVRecordDecisionLog.objects.bulk_create(log_entries)
+
+        # The candidate's tracking page follows the decision.
+        from recruitment_agent import application_status
+        for cv in CVRecord.objects.filter(id__in=remaining_ids).select_related('job_application'):
+            application_status.after_decision(cv, decision, told_rejected=cv.id in told_rejected)
 
         # When changing to INTERVIEW: schedule interview and send invitation email for each
         # CV that doesn't already have an interview (so admin-override gets same email as processing).
