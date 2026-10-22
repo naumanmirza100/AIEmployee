@@ -64,6 +64,18 @@ RETENTION_DEFAULTS_DAYS = {
 }
 
 
+def hr_chunk_sizes():
+    """How long each searchable piece of an HR document is, and how much two pieces overlap.
+
+    1200/150, sized for bge-small-en-v1.5's 512-token limit; HR_CHUNK_SIZE / HR_CHUNK_OVERLAP change it. These
+    used to fall back to Frontline's settings, whose default is 4000: a short handbook then became one piece,
+    whose match with any one question was too weak, so HR said it had no answer for what was in its middle.
+    """
+    chunk_size = max(1, int(getattr(settings, 'HR_CHUNK_SIZE', 1200)))
+    overlap = int(getattr(settings, 'HR_CHUNK_OVERLAP', 150))
+    return chunk_size, max(0, min(overlap, chunk_size - 1))
+
+
 # --------------------------------------------------------------------------
 # process_hr_document — parse + chunk + embed an uploaded HRDocument
 # --------------------------------------------------------------------------
@@ -120,13 +132,7 @@ def process_hr_document(self, document_id):
         document.document_content = extracted_text
         document.file_hash = result.get('file_hash', document.file_hash)
 
-        # Default 1200/150 sized for bge-small-en-v1.5's 512-token limit.
-        # Bump via HR_CHUNK_SIZE if you switch to a long-context embedding model.
-        chunk_size = int(getattr(settings, 'HR_CHUNK_SIZE',
-                                 getattr(settings, 'FRONTLINE_CHUNK_SIZE', 1200)))
-        overlap = int(getattr(settings, 'HR_CHUNK_OVERLAP',
-                              getattr(settings, 'FRONTLINE_CHUNK_OVERLAP', 150)))
-        overlap = max(0, min(overlap, max(0, chunk_size - 1)))
+        chunk_size, overlap = hr_chunk_sizes()
 
         text_to_chunk = f"{document.title}\n{document.description}\n{extracted_text}".strip()
         # D-F1 — PDF page markers injected by Frontline's `_extract_pdf`

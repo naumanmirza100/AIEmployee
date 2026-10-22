@@ -76,6 +76,22 @@ def in_zone(value, tz_name):
     return dt
 
 
+def when_text(value, tz_name, *, year=True) -> str:
+    """A meeting's time for a person to read: in `tz_name`, the meeting's own zone, with the zone named.
+
+    Times are kept in UTC. Written out as kept, a 10:00 meeting in Lahore read "05:00 AM" in every invitation
+    and reply notice. 'TBD' when there is no time.
+    """
+    from zoneinfo import ZoneInfo
+    if value is None:
+        return 'TBD'
+    name = zone_name(tz_name)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo('UTC'))
+    pattern = '%A, %B %d, %Y at %I:%M %p' if year else '%A, %B %d at %I:%M %p'
+    return f'{value.astimezone(ZoneInfo(name)).strftime(pattern)} {name}'
+
+
 def zone_name(raw, default='UTC') -> str:
     """A valid IANA timezone name from untrusted input, else `default`."""
     from zoneinfo import ZoneInfo

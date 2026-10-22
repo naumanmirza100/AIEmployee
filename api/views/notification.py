@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 
 from core.models import Notification
-from core.scheduling import ScheduleConflict, booking_guard, ensure_free, people_for
+from core.scheduling import ScheduleConflict, booking_guard, ensure_free, people_for, when_text
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +242,7 @@ def meeting_respond(request, meeting_id):
         from core.notification_utils import notify_company_users
         organizer = meeting.organizer
         invitee_name = user.get_full_name() or user.username
-        time_display = meeting.proposed_time.strftime('%A, %B %d, %Y at %I:%M %p') if meeting.proposed_time else 'TBD'
+        time_display = when_text(meeting.proposed_time, meeting.timezone_name)
         reason_text = f' Reason: {reason}' if reason else ''
         if action == 'accepted':
             title, severity = f'Meeting Accepted: {meeting.title}', 'info'
@@ -253,7 +253,7 @@ def meeting_respond(request, meeting_id):
         else:
             title, severity = f'New Time Proposed: {meeting.title}', 'info'
             body = (f'{invitee_name} suggested a new time for "{meeting.title}": '
-                    f"{counter_time.strftime('%A, %B %d, %Y at %I:%M %p')}.{reason_text}")
+                    f"{when_text(counter_time, meeting.timezone_name)}.{reason_text}")
         notify_company_users([organizer], title=title, message=body, severity=severity,
                              link='/project-manager/dashboard?tab=meeting-scheduler', kind='pm_meeting_reply',
                              email=False, data={'meeting_id': meeting.id, 'type': f'meeting_{action}'})
@@ -816,7 +816,7 @@ def meeting_email_action(request, action, token):
     # essential here — they'll see status update next time they refresh.
     try:
         invitee_name = participant.user.get_full_name() or participant.user.username
-        time_display = meeting.proposed_time.strftime('%A, %B %d, %Y at %I:%M %p') if meeting.proposed_time else 'TBD'
+        time_display = when_text(meeting.proposed_time, meeting.timezone_name)
         from core.notification_utils import notify_company_users
         if action == 'accepted':
             title, severity = f'Meeting Accepted: {meeting.title}', 'info'

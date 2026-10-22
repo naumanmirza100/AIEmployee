@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { API_BASE_URL } from '@/config/apiConfig';
+import { withParentOrigin } from '@/utils/embedOrigin';
 import { Send, Loader2, MessageCircle } from 'lucide-react';
 
 /**
@@ -52,7 +53,7 @@ export default function FrontlineEmbedChatPage() {
   useEffect(() => {
     if (!widgetKey) return;
     let gone = false;
-    fetch(`${API_BASE_URL}/frontline/widget/public-config/?widget_key=${encodeURIComponent(widgetKey)}`)
+    fetch(withParentOrigin(`${API_BASE_URL}/frontline/widget/public-config/?widget_key=${encodeURIComponent(widgetKey)}`))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (!gone && data?.data) setConfig(data.data); })
       .catch(() => {});
@@ -81,7 +82,7 @@ export default function FrontlineEmbedChatPage() {
   const closed = config?.operating_hours?.enabled && config.operating_hours.is_open === false;
 
   const post = async (path, body) => {
-    const res = await fetch(`${API_BASE_URL}${path}`, {
+    const res = await fetch(withParentOrigin(`${API_BASE_URL}${path}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ widget_key: widgetKey, ...body }),
