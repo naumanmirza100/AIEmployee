@@ -74,6 +74,8 @@ services:
       USE_REDIS: "True"
     ports:
       - "8000:8000"
+    volumes:
+      - media:/app/media
     depends_on:
       redis:
         condition: service_healthy
@@ -89,6 +91,8 @@ services:
     # prefork + concurrency 4 come from settings on Linux; override here per
     # container size if needed.
     command: celery -A project_manager_ai worker -l info
+    volumes:
+      - media:/app/media
     depends_on:
       redis:
         condition: service_healthy
@@ -106,6 +110,8 @@ services:
       USE_REDIS: "True"
     # Exactly one beat process, ever — a second one double-fires every schedule.
     command: celery -A project_manager_ai beat -l info
+    volumes:
+      - media:/app/media
     depends_on:
       redis:
         condition: service_healthy
@@ -117,3 +123,8 @@ volumes:
   # Survives `docker compose down`. Removed only by `down -v` — which deletes
   # the database, so don't.
   dbdata:
+  # Files the web server writes and a worker reads back: uploaded HR and
+  # Frontline documents, Project Pilot specs, the search indexes (MEDIA_ROOT).
+  # Each container has a disk of its own, so without this the worker never saw
+  # an upload, and every deploy threw them all away.
+  media:
