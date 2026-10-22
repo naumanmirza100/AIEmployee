@@ -854,6 +854,15 @@ else:
     print("  EMAIL_HOST_PASSWORD=your-app-password")
     print("="*60 + "\n")
 
+# A demo company on the live site: mail to addresses under this domain goes to a practice mail server instead of out
+# through the account above (core/demo_mail.py). Unset, nothing changes.
+DEMO_MAIL_DOMAIN = os.getenv('DEMO_MAIL_DOMAIN', '').strip().lower()
+DEMO_MAIL_HOST = os.getenv('DEMO_MAIL_HOST', '').strip()
+DEMO_MAIL_PORT = int(os.getenv('DEMO_MAIL_PORT', '2525'))
+if DEMO_MAIL_DOMAIN and DEMO_MAIL_HOST:
+    DEMO_MAIL_REAL_BACKEND = EMAIL_BACKEND
+    EMAIL_BACKEND = 'core.demo_mail.DemoRoutingBackend'
+
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER if EMAIL_HOST_USER else 'noreply@example.com').strip()
 # Who is emailed when the live site breaks (comma-separated). Empty = nobody.
 # See core/error_alerts.py for what counts and how often.
