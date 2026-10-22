@@ -550,15 +550,18 @@ if USE_S3:
 
     DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
     MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/'
-    MEDIA_ROOT = ''
+    # Uploaded HR and Frontline documents, Project Pilot specs and the search indexes are written to MEDIA_ROOT on
+    # disk, not to S3, and a Celery worker reads them back. It used to be '' here, so they landed wherever the
+    # process stood: inside the web container, where the worker (a container of its own) never found them, and every
+    # such upload failed with "File does not exist". docker-compose.yml shares this folder between the containers.
+    MEDIA_ROOT = BASE_DIR / 'media'
 else:
     MEDIA_URL = '/media/'
     MEDIA_ROOT = BASE_DIR / 'media'
 
 # Stable on-disk base for local-only artifacts (uploaded docs, FAISS indexes)
-# that never go to S3. When S3 is on, MEDIA_ROOT is '' — using it directly would
-# scatter these into the project root, so pin them under BASE_DIR/media instead.
-LOCAL_STORAGE_ROOT = MEDIA_ROOT or (BASE_DIR / 'media')
+# that never go to S3. The same folder as MEDIA_ROOT, with or without S3.
+LOCAL_STORAGE_ROOT = MEDIA_ROOT
 
 
 # --------------------
