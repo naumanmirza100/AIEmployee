@@ -31,9 +31,11 @@ _LIST_VERB_THEN_ALL = re.compile(
     r"^\W*(?:\w+\W+){0,3}?(list|name|enumerate|give|show|tell|mention|provide)\b[^.?!\n]{0,40}?\b(all|every|each)\b",
     re.IGNORECASE)
 _NOT_A_LIST = re.compile(r"\b(if|whether)\b", re.IGNORECASE)
-# "Give me a complete list of ...", "what are all the ...".
+# "Give me a complete list of ...", "what are all the ...", "how many categories are there? name them".
 _FULL_LIST = re.compile(r"\b(complete|full|entire|whole|exhaustive)\s+(list|set|overview|breakdown|table)\b"
-                        r"|\b(what|which)\s+(are|were)\s+all\b", re.IGNORECASE)
+                        r"|\b(what|which)\s+(are|were)\s+all\b"
+                        r"|\b(list|name|enumerate)\s+(them|these|those)\b"
+                        r"|\bhow\s+many\b[^.?!\n]{0,60}?\b(are|were)\s+there\b", re.IGNORECASE)
 
 # How much each model can read at once, in tokens (prompt and answer together). A model not listed is not used.
 _CONTEXT_WINDOWS = (('gpt-4.1', 1_047_576), ('gpt-5', 400_000), ('gpt-4o', 128_000), ('o4-mini', 200_000),

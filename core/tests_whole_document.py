@@ -31,6 +31,9 @@ class WhichQuestionsTests(TestCase):
                          'Name all the departments and the subjects they teach.', 'Can you list every leave type?',
                          'Give me a complete list of the programmes', 'What are all the categories?',
                          'Show me each department and its courses',
+                         # Asked in the run-through on 23 Oct, and answered from three passages before this:
+                         'how many admission cetagories are there in uet, name them with their descriptions',
+                         'How many campuses are there?',
                          'Previous conversation:\nUser: hi\n\nCurrent question: list all the hostels'):
             self.assertTrue(whole_document.asks_for_everything(question), question)
 
