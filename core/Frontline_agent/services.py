@@ -525,9 +525,11 @@ class KnowledgeService:
                 # id in the tenant, on every question, which is precisely what
                 # the index exists to avoid (FL-PERF-2). Tenant, visibility
                 # and scope filtering is applied to the bounded fetch below
-                # instead, via `document_id__in=doc_ids`, so the result set is
-                # identical. `k` is raised because that filtering now happens
-                # after the search rather than inside it.
+                # instead, via `document_id__in=allowed_doc_ids`, so the result
+                # set is identical. `k` is raised because that filtering now
+                # happens after the search rather than inside it. (It read
+                # `doc_ids`, the caller's name, which does not exist here: every
+                # semantic search raised NameError and only keyword search ran.)
                 self.last_retrieval_timing['faiss_candidates'] = int((_time.time() - _t) * 1000)
                 _t = _time.time()
                 hits = store.search(query_embedding, k=200)
@@ -545,7 +547,7 @@ class KnowledgeService:
                     _t = _time.time()
                     from Frontline_agent.models import DocumentChunk as _DC
                     chunk_qs = (_DC.objects
-                                .filter(id__in=hit_ids, document_id__in=doc_ids)
+                                .filter(id__in=hit_ids, document_id__in=allowed_doc_ids)
                                 .select_related('document')
                                 .only('id', 'document_id', 'chunk_text',
                                       'chunk_index', 'page_number',
