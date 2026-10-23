@@ -2282,7 +2282,7 @@ PROVIDER_CHOICES = [
     ('grok', 'xAI Grok'),
 ]
 
-DEFAULT_FREE_TOKENS = 10_000
+DEFAULT_FREE_TOKENS = 100_000
 
 
 class CompanyAPIKey(models.Model):
