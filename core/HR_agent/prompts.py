@@ -44,6 +44,29 @@ _HR_SYSTEM_PROMPT_BODY = (
 HR_SYSTEM_PROMPT = _HR_SYSTEM_PROMPT_BODY + ANTI_INJECTION_SYSTEM_ADDENDUM
 
 
+def employee_context_block(employee_context: dict | None) -> str:
+    """The asker's own details (name, role, manager, leave balances) as an
+    <employee_context> block, or '' when there are none. Shared by the excerpt
+    prompt and the whole-document one (core/whole_document.py)."""
+    if not employee_context:
+        return ''
+    ctx_lines = []
+    if employee_context.get('full_name'):
+        ctx_lines.append(f"Name: {employee_context['full_name']}")
+    if employee_context.get('job_title'):
+        ctx_lines.append(f"Role: {employee_context['job_title']}")
+    if employee_context.get('department'):
+        ctx_lines.append(f"Department: {employee_context['department']}")
+    if employee_context.get('manager_name'):
+        ctx_lines.append(f"Manager: {employee_context['manager_name']}")
+    if employee_context.get('leave_balances'):
+        for b in employee_context['leave_balances']:
+            ctx_lines.append(f"{b['leave_type']} balance: {b['remaining']} days")
+    if not ctx_lines:
+        return ''
+    return "<employee_context>\n" + "\n".join(ctx_lines) + "\n</employee_context>\n\n"
+
+
 def get_knowledge_prompt(question: str, knowledge_results, employee_context: dict | None = None) -> str:
     """Compose the user-facing prompt for HR Knowledge Q&A.
 
@@ -68,21 +91,7 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
         "6. NO verbatim block-quotes of excerpt content — paraphrase in your own words. Short quotes (< 15 words) are fine when precision matters.\n",
         "7. Do NOT refuse just because excerpts look like headings, table-of-contents, or dot-leaders — synthesise from whatever substantive content exists.\n\n",
     ]
-    if employee_context:
-        ctx_lines = []
-        if employee_context.get('full_name'):
-            ctx_lines.append(f"Name: {employee_context['full_name']}")
-        if employee_context.get('job_title'):
-            ctx_lines.append(f"Role: {employee_context['job_title']}")
-        if employee_context.get('department'):
-            ctx_lines.append(f"Department: {employee_context['department']}")
-        if employee_context.get('manager_name'):
-            ctx_lines.append(f"Manager: {employee_context['manager_name']}")
-        if employee_context.get('leave_balances'):
-            for b in employee_context['leave_balances']:
-                ctx_lines.append(f"{b['leave_type']} balance: {b['remaining']} days")
-        if ctx_lines:
-            parts.append("<employee_context>\n" + "\n".join(ctx_lines) + "\n</employee_context>\n\n")
+    parts.append(employee_context_block(employee_context))
 
     if knowledge_results:
         # Cap per-excerpt body at 2000 chars (covers a full 1200-char chunk

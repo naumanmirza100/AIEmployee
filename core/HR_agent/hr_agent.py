@@ -14,9 +14,10 @@ from typing import Optional
 
 from django.conf import settings
 
+from core import whole_document
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 from .services import HRKnowledgeService, build_employee_context
-from .prompts import HR_SYSTEM_PROMPT, get_knowledge_prompt
+from .prompts import HR_SYSTEM_PROMPT, employee_context_block, get_knowledge_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,24 @@ class HRAgent(BaseAgent):
 
     # ---- Knowledge Q&A ----------------------------------------------------
 
+    @staticmethod
+    def _employee_context(asker_employee):
+        """The asker's own details for the prompt, or None (no employee, or they could not be read)."""
+        if not asker_employee:
+            return None
+        try:
+            return build_employee_context(asker_employee)
+        except Exception as exc:
+            logger.warning("HR employee context unavailable: %s", exc)
+            return None
+
+    def _plan_whole_document(self, question, knowledge_result, employee_context):
+        from hr_agent.models import HRDocument
+        return whole_document.plan(
+            question, knowledge_result.get('citations'), company_id=self.company_id,
+            agent_key_name=self.agent_key_name, document_model=HRDocument, citation_type='hr_document',
+            preamble=employee_context_block(employee_context))
+
     def answer_question(self, question: str, *, asker_role: str = 'employee',
                         # Bumped from 3 → 12 for OpenAI embeddings + larger
                         # chunks. See KnowledgeService.get_answer for full
@@ -147,9 +166,34 @@ class HRAgent(BaseAgent):
                 'timing_ms': timing_ms,
             }
 
+        # A question that asks for everything is answered from the documents whole (core/whole_document.py); if
+        # that is not possible or fails, from the excerpts below as before.
+        employee_context = self._employee_context(asker_employee)
+        whole = self._plan_whole_document(question, knowledge_result, employee_context)
+        if whole is not None:
+            _t_llm = time.time()
+            formatted = whole_document.answer(self, whole, system_prompt=self.system_prompt)
+            if formatted:
+                timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
+                timing_ms['total'] = int((time.time() - _t_overall) * 1000)
+                timing_ms['retrieval_path'] = (timing_ms.get('retrieval_path') or '') + whole.note
+                response = {
+                    'success': True,
+                    'answer': formatted,
+                    'has_verified_info': True,
+                    'confidence': knowledge_result.get('confidence'),
+                    'best_score': knowledge_result.get('best_score'),
+                    'threshold': knowledge_result.get('threshold'),
+                    'citations': whole.citations,
+                    'answer_mode': 'whole_document',
+                    'timing_ms': timing_ms,
+                }
+                if cache_key:
+                    _answer_cache_put(cache_key, response)
+                return response
+
         # Format with the LLM, grounded in the retrieved excerpts + (optional) employee context.
         try:
-            employee_context = build_employee_context(asker_employee) if asker_employee else None
             prompt = get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
                                           employee_context=employee_context)
             _t_llm = time.time()
@@ -280,49 +324,63 @@ class HRAgent(BaseAgent):
                    'cache_hit': False}
             return
 
-        # Emit meta first so UI can render citations before the first token.
-        yield {
-            'type': 'meta',
-            'has_verified_info': True,
-            'confidence': knowledge_result.get('confidence'),
-            'best_score': knowledge_result.get('best_score'),
-            'threshold': knowledge_result.get('threshold'),
-            'citations': knowledge_result.get('citations', []),
-            'cache_hit': False,
-        }
+        # Compose prompt + stream LLM tokens. A question that asks for everything is tried first on the documents
+        # whole (core/whole_document.py); when that fails before any text is out, the passages answer it.
+        employee_context = self._employee_context(asker_employee)
+        whole = self._plan_whole_document(question, knowledge_result, employee_context)
+        attempts = []
+        if whole is not None:
+            attempts.append((whole.prompt, 0, whole.max_tokens, whole.citations, whole.note))
+        attempts.append((get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
+                                              employee_context=employee_context),
+                         0.3, int(getattr(settings, 'HR_QA_MAX_TOKENS', 900)),
+                         knowledge_result.get('citations', []), ''))
 
-        # Compose prompt + stream LLM tokens.
-        employee_context = build_employee_context(asker_employee) if asker_employee else None
-        prompt = get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
-                                      employee_context=employee_context)
+        for attempt, (prompt, temperature, max_tokens, citations, path_note) in enumerate(attempts):
+            last_attempt = attempt == len(attempts) - 1
+            # Emit meta first so UI can render citations before the first token. A second meta, after a failed
+            # whole-document try, replaces the first: the screens keep the latest.
+            yield {
+                'type': 'meta',
+                'has_verified_info': True,
+                'confidence': knowledge_result.get('confidence'),
+                'best_score': knowledge_result.get('best_score'),
+                'threshold': knowledge_result.get('threshold'),
+                'citations': citations,
+                'cache_hit': False,
+            }
+            _t_llm = time.time()
+            collected = []
+            failure = None
+            try:
+                events = (self._call_llm_stream(prompt=prompt, system_prompt=self.system_prompt,
+                                                temperature=temperature, max_tokens=max_tokens)
+                          if last_attempt else whole_document.stream(self, whole, system_prompt=self.system_prompt))
+                for event in events:
+                    if event.get('type') == 'token':
+                        collected.append(event['value'])
+                        yield event
+                    elif event.get('type') == 'done':
+                        # Prefer accumulated over the base_agent's copy (both
+                        # should match, but ours is what we ship + cache).
+                        pass
+                    elif event.get('type') == 'error':
+                        failure = event
+                        break
+            except Exception as exc:
+                from core.api_key_service import KeyServiceError
+                if isinstance(exc, KeyServiceError):
+                    raise
+                logger.exception("HR streaming LLM error: %s", exc)
+                failure = {'type': 'error', 'message': str(exc)}
+            if failure is None:
+                break
+            if collected or last_attempt:
+                yield failure
+                return
 
-        _t_llm = time.time()
-        collected = []
-        try:
-            for event in self._call_llm_stream(
-                prompt=prompt,
-                system_prompt=self.system_prompt,
-                temperature=0.3,
-                max_tokens=int(getattr(settings, 'HR_QA_MAX_TOKENS', 900)),
-            ):
-                if event.get('type') == 'token':
-                    collected.append(event['value'])
-                    yield event
-                elif event.get('type') == 'done':
-                    # Prefer accumulated over the base_agent's copy (both
-                    # should match, but ours is what we ship + cache).
-                    pass
-                elif event.get('type') == 'error':
-                    yield event
-                    return
-        except Exception as exc:
-            from core.api_key_service import KeyServiceError
-            if isinstance(exc, KeyServiceError):
-                raise
-            logger.exception("HR streaming LLM error: %s", exc)
-            yield {'type': 'error', 'message': str(exc)}
-            return
-
+        if path_note:
+            timing_ms['retrieval_path'] = (timing_ms.get('retrieval_path') or '') + path_note
         full_answer = ''.join(collected).strip() or (knowledge_result.get('answer') or '')
         timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
         timing_ms['total'] = int((time.time() - _t_overall) * 1000)
@@ -336,7 +394,7 @@ class HRAgent(BaseAgent):
                 'confidence': knowledge_result.get('confidence'),
                 'best_score': knowledge_result.get('best_score'),
                 'threshold': knowledge_result.get('threshold'),
-                'citations': knowledge_result.get('citations', []),
+                'citations': citations,
                 'timing_ms': timing_ms,
             })
 
