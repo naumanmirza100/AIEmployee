@@ -227,6 +227,11 @@ class HRKnowledgeService:
         return {
             'success': True,
             'answer': content,
+            # The same excerpts one by one, for the prompt. Handed over as `answer`, one block, they
+            # met the prompt's 2000-character cap for a single excerpt, and everything after the
+            # first two were cut: HR said the learning budget was not in the excerpts, while it was
+            # in the fourth.
+            'excerpts': [{'title': r.get('title'), 'content': r.get('content')} for r in results],
             'has_verified_info': True,
             'confidence': 'high' if sem and sem >= max(threshold + 0.2, 0.5) else 'medium',
             'best_score': sem,
