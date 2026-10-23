@@ -1429,6 +1429,18 @@ def _is_app_origin(origin: str) -> bool:
     return strip(ours) == strip(theirs)
 
 
+def _json_body(request):
+    """A public widget request's JSON body, as a dict, read through DRF's parser.
+
+    Not `json.loads(request.body)`: FrontlineWidgetKeyThrottle reads `request.data` to find the widget key, which
+    consumes the body, and `request.body` then raises RawPostDataException. On the live site, where the throttles
+    run, every website-chat question got "I didn't quite catch that" and every widget form a 500. The test
+    settings switch throttles off, which is how it went unseen.
+    """
+    data = request.data
+    return data if isinstance(data, dict) else {}
+
+
 def _get_company_by_widget_key(request):
     """Resolve company from widget_key in body (POST) or query/header. Returns (company, error_response) or (company, None).
 
@@ -1436,9 +1448,9 @@ def _get_company_by_widget_key(request):
     request's Origin / Referer header. Empty allowlist = back-compat (any origin).
     """
     widget_key = None
-    if request.method == 'POST' and request.body:
+    if request.method == 'POST':
         try:
-            data = json.loads(request.body)
+            data = _json_body(request)
             widget_key = (data.get('widget_key') or data.get('key') or '').strip()
         except Exception:
             pass
@@ -1595,7 +1607,7 @@ def public_qa(request):
         company, err = _get_company_by_widget_key(request)
         if err:
             return err
-        data = json.loads(request.body) if request.body else {}
+        data = _json_body(request)
         gate = _check_widget_gates(request, company, data)
         if gate is not None:
             return gate
@@ -1822,7 +1834,7 @@ def public_handoff_contact(request):
         company, err = _get_company_by_widget_key(request)
         if err:
             return err
-        data = json.loads(request.body) if request.body else {}
+        data = _json_body(request)
         email = (data.get('email') or '').strip()[:254]
         name = (data.get('name') or '').strip()[:255]
         try:
@@ -1872,7 +1884,7 @@ def public_submit(request):
         if request.content_type and 'multipart' in request.content_type:
             data = dict(request.POST.items())
         else:
-            data = json.loads(request.body) if request.body else {}
+            data = _json_body(request)
         gate = _check_widget_gates(request, company, data)
         if gate is not None:
             return gate
@@ -7610,7 +7622,7 @@ def submit_satisfaction(request):
     the survey email is the only credential. Re-submits update the same row
     (recipient might fix a rating they fat-fingered)."""
     try:
-        d = json.loads(request.body) if request.body else {}
+        d = _json_body(request)
     except (TypeError, ValueError, json.JSONDecodeError):
         d = {}
     token = (d.get('token') or request.GET.get('token') or '').strip()
