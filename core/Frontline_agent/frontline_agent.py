@@ -14,6 +14,7 @@ from django.conf import settings
 from .logging_config import setup_frontline_logging
 setup_frontline_logging()
 
+from core import whole_document
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 from .services import KnowledgeService, TicketAutomationService
 from .prompts import (
@@ -244,6 +245,36 @@ class FrontlineAgent(BaseAgent):
                 'citations': [],
             }
         
+        # A question that asks for everything is answered from the documents whole (core/whole_document.py); if
+        # that is not possible or fails, from the retrieved chunks below as before.
+        whole = self._plan_whole_document(question, knowledge_result, search_company_id)
+        if whole is not None:
+            _t_llm = time.time()
+            formatted_answer = whole_document.answer(self, whole, system_prompt=self.system_prompt)
+            if formatted_answer:
+                timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
+                timing_ms['total'] = int((time.time() - _t_overall) * 1000)
+                timing_ms['retrieval_path'] = (timing_ms.get('retrieval_path') or '') + whole.note
+                response = {
+                    'success': True,
+                    'answer': formatted_answer,
+                    'has_verified_info': True,
+                    'confidence': knowledge_result.get('confidence'),
+                    'best_score': knowledge_result.get('best_score'),
+                    'threshold': knowledge_result.get('threshold'),
+                    'rewritten_query': knowledge_result.get('rewritten_query'),
+                    'source': knowledge_result.get('source', 'PayPerProject Database'),
+                    'type': knowledge_result.get('type', 'unknown'),
+                    'document_title': knowledge_result.get('document_title'),
+                    'document_id': knowledge_result.get('document_id'),
+                    'citations': whole.citations,
+                    'answer_mode': 'whole_document',
+                    'timing_ms': timing_ms,
+                }
+                if cache_key:
+                    _answer_cache_put(cache_key, response)
+                return response
+
         # Use LLM to format the answer nicely, but only using verified information
         try:
             # Log what we're passing to the prompt
@@ -448,47 +479,66 @@ class FrontlineAgent(BaseAgent):
             yield {'type': 'done', 'answer': fallback, 'timing_ms': timing_ms, 'cache_hit': False}
             return
 
-        # Meta first — carries citations so the UI can render "Sources" before
-        # the first token lands.
-        yield {
-            'type': 'meta',
-            'has_verified_info': True,
-            'confidence': knowledge_result.get('confidence'),
-            'best_score': knowledge_result.get('best_score'),
-            'threshold': knowledge_result.get('threshold'),
-            'source': knowledge_result.get('source', 'PayPerProject Database'),
-            'type_hint': knowledge_result.get('type', 'unknown'),
-            'document_title': knowledge_result.get('document_title'),
-            'document_id': knowledge_result.get('document_id'),
-            'citations': knowledge_result.get('citations', []),
-            'cache_hit': False,
-        }
+        # LLM streaming. A question that asks for everything is tried first on the documents whole
+        # (core/whole_document.py); when that fails before any text is out, the retrieved chunks answer it.
+        whole = self._plan_whole_document(question, knowledge_result, search_company_id)
+        attempts = []
+        if whole is not None:
+            attempts.append((whole.citations, whole.note))
+        attempts.append((knowledge_result.get('citations', []), ''))
 
-        # LLM streaming.
-        prompt = get_knowledge_prompt(question, [knowledge_result])
-        _t_llm = time.time()
-        collected = []
-        try:
-            for event in self._call_llm_stream(
-                prompt=prompt,
-                system_prompt=self.system_prompt,
-                temperature=0.3,
-                max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 900)),
-            ):
-                if event.get('type') == 'token':
-                    collected.append(event['value'])
-                    yield event
-                elif event.get('type') == 'error':
-                    yield event
-                    return
-        except Exception as exc:
-            from core.api_key_service import KeyServiceError
-            if isinstance(exc, KeyServiceError):
-                raise
-            logger.exception("Frontline streaming LLM error: %s", exc)
-            yield {'type': 'error', 'message': str(exc)}
-            return
+        for attempt, (citations, path_note) in enumerate(attempts):
+            last_attempt = attempt == len(attempts) - 1
+            # Meta first — carries citations so the UI can render "Sources" before
+            # the first token lands. A second meta, after a failed whole-document
+            # try, replaces the first: the screens keep the latest.
+            yield {
+                'type': 'meta',
+                'has_verified_info': True,
+                'confidence': knowledge_result.get('confidence'),
+                'best_score': knowledge_result.get('best_score'),
+                'threshold': knowledge_result.get('threshold'),
+                'source': knowledge_result.get('source', 'PayPerProject Database'),
+                'type_hint': knowledge_result.get('type', 'unknown'),
+                'document_title': knowledge_result.get('document_title'),
+                'document_id': knowledge_result.get('document_id'),
+                'citations': citations,
+                'cache_hit': False,
+            }
+            _t_llm = time.time()
+            collected = []
+            failure = None
+            try:
+                if last_attempt:
+                    events = self._call_llm_stream(
+                        prompt=get_knowledge_prompt(question, [knowledge_result]),
+                        system_prompt=self.system_prompt,
+                        temperature=0.3,
+                        max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 900)),
+                    )
+                else:
+                    events = whole_document.stream(self, whole, system_prompt=self.system_prompt)
+                for event in events:
+                    if event.get('type') == 'token':
+                        collected.append(event['value'])
+                        yield event
+                    elif event.get('type') == 'error':
+                        failure = event
+                        break
+            except Exception as exc:
+                from core.api_key_service import KeyServiceError
+                if isinstance(exc, KeyServiceError):
+                    raise
+                logger.exception("Frontline streaming LLM error: %s", exc)
+                failure = {'type': 'error', 'message': str(exc)}
+            if failure is None:
+                break
+            if collected or last_attempt:
+                yield failure
+                return
 
+        if path_note:
+            timing_ms['retrieval_path'] = (timing_ms.get('retrieval_path') or '') + path_note
         full_answer = ''.join(collected).strip() or (knowledge_result.get('answer') or '')
         timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
         timing_ms['total'] = int((time.time() - _t_overall) * 1000)
@@ -506,7 +556,7 @@ class FrontlineAgent(BaseAgent):
                 'type': knowledge_result.get('type', 'unknown'),
                 'document_title': knowledge_result.get('document_title'),
                 'document_id': knowledge_result.get('document_id'),
-                'citations': knowledge_result.get('citations', []),
+                'citations': citations,
                 'timing_ms': timing_ms,
             })
 
@@ -517,6 +567,12 @@ class FrontlineAgent(BaseAgent):
             'timing_ms': timing_ms,
             'cache_hit': False,
         }
+
+    def _plan_whole_document(self, question, knowledge_result, company_id):
+        from Frontline_agent.models import Document
+        return whole_document.plan(
+            question, knowledge_result.get('citations'), company_id=company_id or self.company_id,
+            agent_key_name=self.agent_key_name, document_model=Document, citation_type='document')
 
     def _contextualise_with_history(self, question: str,
                                     history: List[Dict]) -> Optional[str]:
