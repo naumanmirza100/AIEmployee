@@ -296,7 +296,16 @@ class SDRCampaign(models.Model):
             return _date.fromisoformat(self.start_date)
         return self.start_date
 
+    # The mailbox settings are typed or pasted in, and a space around one names a server that does not exist:
+    # 'srv1983265.hstgr.cloud ' passed the check (validate_mail_server strips before it looks) and was saved as it
+    # was, so the campaign sent nothing ("Name or service not known") and read no replies.
+    _TRIMMED_FIELDS = ('from_email', 'smtp_host', 'smtp_username', 'imap_host')
+
     def save(self, *args, **kwargs):
+        for name in self._TRIMMED_FIELDS:
+            value = getattr(self, name)
+            if isinstance(value, str):
+                setattr(self, name, value.strip())
         # Auto-derive end_date from start_date + longest step delay
         if self.start_date and self.pk:
             self.end_date = self.derive_end_date()
