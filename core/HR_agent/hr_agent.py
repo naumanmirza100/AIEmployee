@@ -150,7 +150,8 @@ class HRAgent(BaseAgent):
         # Format with the LLM, grounded in the retrieved excerpts + (optional) employee context.
         try:
             employee_context = build_employee_context(asker_employee) if asker_employee else None
-            prompt = get_knowledge_prompt(question, [knowledge_result], employee_context=employee_context)
+            prompt = get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
+                                          employee_context=employee_context)
             _t_llm = time.time()
             # HR answers legitimately need more room than Frontline (policy
             # detail, leave-balance breakdowns, benefit tiers). Default 400
@@ -292,7 +293,8 @@ class HRAgent(BaseAgent):
 
         # Compose prompt + stream LLM tokens.
         employee_context = build_employee_context(asker_employee) if asker_employee else None
-        prompt = get_knowledge_prompt(question, [knowledge_result], employee_context=employee_context)
+        prompt = get_knowledge_prompt(question, knowledge_result.get('excerpts') or [knowledge_result],
+                                      employee_context=employee_context)
 
         _t_llm = time.time()
         collected = []
