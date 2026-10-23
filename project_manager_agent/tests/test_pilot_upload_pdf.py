@@ -9,7 +9,7 @@ while text files, which need neither, worked.
 import io
 import os
 import tempfile
-from unittest import skipUnless
+from unittest import mock, skipUnless
 
 from django.test import SimpleTestCase
 
@@ -54,9 +54,24 @@ class UploadedPdfTests(SimpleTestCase):
         with open(path, 'rb') as handle:
             return pm_agent._extract_text_from_file(_DiskFileWrapper(handle, name, os.path.getsize(path)))
 
-    @skipUnless(pm_agent.PDF_AVAILABLE, 'PyPDF2 is not installed')
+    @skipUnless(pm_agent.PDF_AVAILABLE, 'no PDF library is installed')
     def test_the_job_reads_a_pdf(self):
         text = self.read_as_the_job_does('brief.pdf', a_pdf_saying('Ordering app for Zaiqa Foods'))
+        self.assertIn('Ordering app for Zaiqa Foods', text)
+
+    # The live server once had pdfplumber but not PyPDF2, which this view alone relied on, so every PDF spec
+    # was refused as "Unsupported file type: .pdf". It now reads PDFs as the other agents do: pdfplumber first,
+    # PyPDF2 when pdfplumber is missing or fails.
+    @skipUnless(pm_agent.pdfplumber, 'pdfplumber is not installed')
+    def test_pdfplumber_alone_reads_a_pdf(self):
+        with mock.patch.object(pm_agent, 'PyPDF2', None):
+            text = self.read_as_the_job_does('brief.pdf', a_pdf_saying('Ordering app for Zaiqa Foods'))
+        self.assertIn('Ordering app for Zaiqa Foods', text)
+
+    @skipUnless(pm_agent.pdfplumber and pm_agent.PyPDF2, 'pdfplumber or PyPDF2 is not installed')
+    def test_pypdf2_reads_a_pdf_that_pdfplumber_cannot(self):
+        with mock.patch.object(pm_agent.pdfplumber, 'open', side_effect=Exception('cannot read it')):
+            text = self.read_as_the_job_does('brief.pdf', a_pdf_saying('Ordering app for Zaiqa Foods'))
         self.assertIn('Ordering app for Zaiqa Foods', text)
 
     def test_the_job_still_reads_a_text_file(self):
@@ -69,7 +84,7 @@ class UploadedPdfTests(SimpleTestCase):
         wrapper.seek(2)
         self.assertEqual(wrapper.read(3), b'234')
 
-    @skipUnless(pm_agent.PDF_AVAILABLE, 'PyPDF2 is not installed')
+    @skipUnless(pm_agent.PDF_AVAILABLE, 'no PDF library is installed')
     def test_a_file_that_only_claims_to_be_a_pdf_is_still_refused(self):
         with self.assertRaisesMessage(ValueError, 'does not match .pdf format'):
             self.read_as_the_job_does('brief.pdf', b'just some words')

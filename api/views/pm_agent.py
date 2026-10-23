@@ -36,6 +36,7 @@ from api.permissions import IsCompanyUserOnly
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.decorators import throttle_classes
 
+import io
 import logging
 import json
 import re
@@ -64,13 +65,19 @@ from project_manager_agent.ai_agents.base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
-# Text extraction imports
+# Text extraction imports. PDFs are read with pdfplumber, as the HR, Frontline and
+# Operations agents read them, and with PyPDF2 when pdfplumber is missing or fails.
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 try:
     import PyPDF2
-    PDF_AVAILABLE = True
 except ImportError:
-    PDF_AVAILABLE = False
-    logger.warning("PyPDF2 not available. PDF extraction will not work.")
+    PyPDF2 = None
+PDF_AVAILABLE = pdfplumber is not None or PyPDF2 is not None
+if not PDF_AVAILABLE:
+    logger.warning("Neither pdfplumber nor PyPDF2 is available. PDF extraction will not work.")
 
 try:
     from docx import Document
@@ -2751,6 +2758,26 @@ def _sanitize_upload_filename(raw_name: str, fallback_ext: str) -> str:
     return name
 
 
+def _extract_pdf_text(file):
+    """Every page's text: pdfplumber first, then PyPDF2 if pdfplumber is missing or cannot read it.
+
+    Both read from an in-memory copy (the upload is at most 10MB), so it does not matter whether `file` is
+    an uploaded file or the background job's wrapper around one on disk.
+    """
+    file.seek(0)
+    data = file.read()
+    if pdfplumber is not None:
+        try:
+            with pdfplumber.open(io.BytesIO(data)) as pdf:
+                return "\n".join(page.extract_text() or '' for page in pdf.pages)
+        except Exception as e:
+            if PyPDF2 is None:
+                raise
+            logger.warning(f"pdfplumber could not read {file.name} ({e}); trying PyPDF2")
+    pdf_reader = PyPDF2.PdfReader(io.BytesIO(data))
+    return "\n".join(page.extract_text() or '' for page in pdf_reader.pages)
+
+
 def _extract_text_from_file(file):
     """
     Extract text from uploaded file.
@@ -2781,14 +2808,8 @@ def _extract_text_from_file(file):
             text = file.read().decode('utf-8', errors='ignore')
         
         elif file_extension == '.pdf' and PDF_AVAILABLE:
-            # Extract text from PDF
-            file.seek(0)
-            pdf_reader = PyPDF2.PdfReader(file)
-            text_parts = []
-            for page in pdf_reader.pages:
-                text_parts.append(page.extract_text())
-            text = "\n".join(text_parts)
-        
+            text = _extract_pdf_text(file)
+
         elif file_extension == '.docx' and DOCX_AVAILABLE:
             # Extract text from DOCX
             file.seek(0)
