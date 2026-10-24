@@ -5,6 +5,7 @@ and auto-classification for PDF, DOCX, Excel, PPT, CSV, and TXT files.
 """
 
 import os
+import re
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -12,6 +13,27 @@ from django.db import transaction
 from django.utils import timezone
 
 from marketing_agent.agents.marketing_base_agent import MarketingBaseAgent
+
+# A line that carries money or a figure: PKR 18,500,000 / Rs. 650,000 / $1,200 / 12.5%.
+_FIGURE_LINE = re.compile(r'(PKR|Rs\.?|USD|EUR|GBP|[$€£])\s?\d|\d[\d,.]*\s?(%|percent|million|lakh|crore)|\d{1,3}(,\d{3})+',
+                          re.IGNORECASE)
+
+
+def _entity_excerpt(text: str, head: int = 3000, extra: int = 2500) -> str:
+    """The start of the document, plus the lines further on that carry amounts.
+
+    Only the first 3,000 characters were read, and a contract's fees come after its definitions: the FinEdge
+    agreement's PKR 18,500,000 starts at character 3,183, so its entities had no amounts at all.
+    """
+    if len(text) <= head:
+        return text
+    lines, size = [], 0
+    for line in text[head:].splitlines():
+        line = line.strip()
+        if line and _FIGURE_LINE.search(line) and size + len(line) <= extra:
+            lines.append(line)
+            size += len(line) + 1
+    return text[:head] + ('\n...\n' + '\n'.join(lines) if lines else '')
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +191,7 @@ class DocumentProcessingAgent(MarketingBaseAgent):
         doc_type = self._classify_document(text=extracted_text[:3000])
 
         # 4. Extract entities via LLM
-        entities = self._extract_entities(text=extracted_text[:4000])
+        entities = self._extract_entities(text=extracted_text)
 
         # 4b. Generate summary & key insights via LLM
         summary_result = self._generate_summary(text=extracted_text[:5000])
@@ -594,7 +616,7 @@ Respond with ONLY the type name (one word, lowercase). Nothing else."""
 
 Document excerpt:
 \"\"\"
-{text[:3000]}
+{_entity_excerpt(text)}
 \"\"\"
 
 Return ONLY valid JSON. No explanation."""
