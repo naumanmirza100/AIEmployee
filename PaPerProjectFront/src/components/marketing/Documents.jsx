@@ -49,6 +49,8 @@ import {
   FolderOpen,
   BookOpen,
   PenTool,
+  Share2,
+  Megaphone,
   FileOutput,
   Sparkles
 } from 'lucide-react';
@@ -56,6 +58,7 @@ import marketingAgentService from '@/services/marketingAgentService';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import HoverTip from '@/components/common/HoverTip';
+import ChatMarkdown from '@/components/shared/ChatMarkdown';
 
 /**
  * Document Authoring sub-agent (PayPerProject).
@@ -67,6 +70,10 @@ const DOCUMENT_TYPES = [
   { value: 'proposal', label: 'Campaign Proposal', icon: Briefcase, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
   { value: 'report', label: 'Performance Report', icon: TrendingUp, color: 'text-amber-500', bgColor: 'bg-amber-500/10' },
   { value: 'brief', label: 'Campaign Brief', icon: PenTool, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+  { value: 'social_posts', label: 'Social Media Posts', icon: Share2, color: 'text-pink-500', bgColor: 'bg-pink-500/10',
+    notesHint: 'Which platforms, the tone, and what to promote (e.g. "LinkedIn only, friendly, our weekend offer")...' },
+  { value: 'ad_copy', label: 'Ad Copy', icon: Megaphone, color: 'text-orange-500', bgColor: 'bg-orange-500/10',
+    notesHint: 'Which platforms (Google, Facebook / Instagram, LinkedIn) and what the ad is for...' },
   // { value: 'presentation', label: 'Presentation Outline', icon: Presentation, color: 'text-rose-500', bgColor: 'bg-rose-500/10' },
 ];
 
@@ -76,6 +83,8 @@ const TYPE_BADGE_CLASS = {
   report: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border-amber-200 dark:border-amber-800',
   brief: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 border-purple-200 dark:border-purple-800',
   presentation: 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+  social_posts: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300 border-pink-200 dark:border-pink-800',
+  ad_copy: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 border-orange-200 dark:border-orange-800',
 };
 
 const CAMPAIGN_STATUS_BADGE = {
@@ -565,7 +574,7 @@ const Documents = () => {
                   <div className="space-y-2">
                     <Label className="text-sm font-medium">Notes & Key Points (optional)</Label>
                     <Textarea 
-                      placeholder="Add any specific requirements, context, or points to include..." 
+                      placeholder={DOCUMENT_TYPES.find((t) => t.value === documentType)?.notesHint || 'Add any specific requirements, context, or points to include...'}
                       value={notes} 
                       onChange={(e) => setNotes(e.target.value)} 
                       rows={4} 
@@ -1061,9 +1070,9 @@ const Documents = () => {
                 >
                   {detailDoc.content ? (
                     <div className="rounded-xl border bg-card p-6 space-y-4">
-                      <div className="whitespace-pre-wrap font-sans text-sm text-foreground leading-relaxed">
+                      <ChatMarkdown tables className="font-sans text-sm text-foreground">
                         {detailDoc.content}
-                      </div>
+                      </ChatMarkdown>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-center">

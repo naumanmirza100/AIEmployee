@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Chat-friendly styling map for ReactMarkdown. Kept minimal (~10 tags) so
 // assistant responses render with bold, lists, headings, and paragraph
@@ -25,10 +26,31 @@ const chatMarkdownComponents = {
   ),
 };
 
-export default function ChatMarkdown({ children, className = '' }) {
+// Documents also carry tables (Marketing's reports and briefs), which need the GFM plugin. Chat answers leave it off
+// so they render exactly as before.
+const GFM = [remarkGfm];
+const documentMarkdownComponents = {
+  ...chatMarkdownComponents,
+  h4: ({ children }) => <h4 className="text-sm font-semibold mt-2 mb-1">{children}</h4>,
+  hr: () => <hr className="my-4 border-border" />,
+  table: ({ children }) => (
+    <div className="my-3 overflow-x-auto">
+      <table className="w-full border-collapse text-sm">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => <th className="border border-border bg-muted px-3 py-1.5 text-left font-semibold">{children}</th>,
+  td: ({ children }) => <td className="border border-border px-3 py-1.5 align-top">{children}</td>,
+};
+
+export default function ChatMarkdown({ children, className = '', tables = false }) {
   return (
     <div className={`break-words ${className}`}>
-      <ReactMarkdown components={chatMarkdownComponents}>{children || ''}</ReactMarkdown>
+      <ReactMarkdown
+        components={tables ? documentMarkdownComponents : chatMarkdownComponents}
+        remarkPlugins={tables ? GFM : undefined}
+      >
+        {children || ''}
+      </ReactMarkdown>
     </div>
   );
 }
