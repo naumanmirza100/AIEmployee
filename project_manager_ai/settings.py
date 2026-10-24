@@ -1107,10 +1107,10 @@ CELERY_BEAT_SCHEDULE = {
     },
 
     # Recruitment: each recruiter's bell gets one item a day for what waits on them (candidates on hold, online
-    # interviews with no link, interviews with no outcome) - daily, 03:15 UTC (morning in Pakistan).
+    # interviews with no link, interviews with no outcome) - daily, 03:20 UTC (morning in Pakistan).
     'recruitment-pipeline-digest': {
         'task': 'recruitment_agent.tasks.send_pipeline_digests',
-        'schedule': _crontab(hour=3, minute=15),
+        'schedule': _crontab(hour=3, minute=20),
         'options': {'expires': 6 * 3600},
     },
 
