@@ -105,6 +105,8 @@ import { FrontlineNotificationsTab } from './FrontlineNotificationsTab';
 import { FrontlineWorkflowsTab } from './FrontlineWorkflowsTab';
 import { HandoffQueueTab } from './HandoffQueueTab';
 import { TicketAutomationCard } from './TicketAutomationCard';
+import { FrontlineMeetingsTab } from './FrontlineMeetingsTab';
+import { CalendarDays } from 'lucide-react';
 import { FrontlineAnalyticsTab } from './FrontlineAnalyticsTab';
 
 // Document types for Q&A scope (must match backend Document.DOCUMENT_TYPE_CHOICES)
@@ -145,6 +147,7 @@ const FRONTLINE_TAB_ITEMS = [
   { value: 'widget', label: 'Chat widget', icon: Monitor, hidden: true },
   { value: 'tickets', label: 'Tickets', icon: Ticket, hidden: true },
   { value: 'handoffs', label: 'Hand-offs', icon: Headphones, hidden: true },
+  { value: 'meetings', label: 'Meetings', icon: CalendarDays, hidden: true },
   { value: 'notifications', label: 'Notifications', icon: Bell, hidden: true },
   { value: 'workflows', label: 'Workflows', icon: GitBranch, hidden: true },
   { value: 'analytics', label: 'Analytics', icon: BarChart3, hidden: true },
@@ -227,6 +230,7 @@ const FrontlineDashboard = () => {
       subItems: [
         { value: 'handoffs', label: 'Hand-offs', icon: Headphones },
         { value: 'tickets',  label: 'Tickets',   icon: Ticket },
+        { value: 'meetings', label: 'Meetings',  icon: CalendarDays },
       ],
     },
     {
@@ -3152,6 +3156,11 @@ const FrontlineDashboard = () => {
             </CardContent>
           </Card>
           </ErrorBoundary>
+        </TabsContent>
+
+        {/* Meetings: calls with customers (FrontlineMeetingsTab) */}
+        <TabsContent value="meetings" className="space-y-4 mt-4">
+          <ErrorBoundary><FrontlineMeetingsTab /></ErrorBoundary>
         </TabsContent>
 
         {/* Hand-offs Tab */}
