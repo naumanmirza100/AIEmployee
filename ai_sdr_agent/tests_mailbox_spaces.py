@@ -24,6 +24,18 @@ class MailboxSpacesTests(SDRBase):
                          ('adeel@crestline.test', 'srv1983265.hstgr.cloud', 'adeel@crestline.test',
                           'srv1983265.hstgr.cloud'))
 
+    def test_a_campaign_made_on_the_screen_keeps_its_inbox_server(self):
+        # The form's IMAP host and port were dropped on create, so replies were read from a host guessed from SMTP.
+        request = APIRequestFactory().post('/api/sdr/campaigns', {
+            'name': 'Digital banking apps, Q4', 'smtp_host': 'mail.crestline.test', 'smtp_port': 2525,
+            'imap_host': 'inbox.crestline.test ', 'imap_port': 1993, 'generate_steps': False}, format='json')
+        force_authenticate(request, user=self.cu)
+        with mock.patch.object(views, '_validate_mail_settings', return_value=None):     # no DNS lookups in tests
+            response = views.sdr_campaigns_list(request)
+        self.assertEqual(response.status_code, 201, response.data)
+        campaign = SDRCampaign.objects.get(name='Digital banking apps, Q4')
+        self.assertEqual((campaign.imap_host, campaign.imap_port), ('inbox.crestline.test', 1993))
+
     def test_an_edit_through_the_screen_keeps_them_without_the_spaces_too(self):
         request = APIRequestFactory().put(f'/api/sdr/campaigns/{self.campaign.id}', {
             'smtp_host': 'smtp.gmail.com  ', 'imap_host': ' imap.gmail.com'}, format='json')

@@ -53,6 +53,10 @@ class ReplyAnswersTestCase(SDRBase):
             check_inbox_replies_impl()
         return sender
 
+    def their_thread(self):
+        """The answer goes out as a reply to the lead's email."""
+        return {'in_reply_to': SDRCampaignEnrollment.objects.get(pk=self.enrolment.pk).last_reply_message_id}
+
     def call(self, view, method='post', data=None, actor=None, **kwargs):
         request = getattr(APIRequestFactory(), method)('/x', data or {}, format='json')
         force_authenticate(request, user=actor or self.cu)
@@ -81,7 +85,8 @@ class HeldForAPersonTests(ReplyAnswersTestCase):
     def test_with_the_switch_off_it_is_sent_at_once_as_before(self):
         self.switch(False)
         sender = self.inbox(WANTS_MORE)
-        sender.send_email.assert_called_once_with(self.campaign, self.lead.email, 'More about Acme', 'Here is more.')
+        sender.send_email.assert_called_once_with(self.campaign, self.lead.email, 'More about Acme', 'Here is more.',
+                                                  **self.their_thread())
         self.assertFalse(SDRReplyDraft.objects.exists())
 
     def test_a_lead_who_says_stop_is_stopped_at_once_whatever_the_switch(self):
@@ -140,7 +145,7 @@ class SendingOrDiscardingTests(ReplyAnswersTestCase):
         response = self.decide('send')
         self.assertEqual(response.status_code, 200, response.data)
         self.sender.send_email.assert_called_once_with(self.campaign, 'bob@acme.com', 'More about Acme',
-                                                       'Here is more.')
+                                                       'Here is more.', **self.their_thread())
         self.draft.refresh_from_db()
         self.assertEqual((self.draft.status, self.draft.decided_by_id), ('sent', self.cu.id))
         self.assertEqual(self.waiting(), [])
@@ -164,7 +169,7 @@ class SendingOrDiscardingTests(ReplyAnswersTestCase):
     def test_sent_as_the_person_changed_it(self):
         self.decide('send', {'subject': 'About your question', 'body': 'A better answer.'})
         self.sender.send_email.assert_called_once_with(self.campaign, 'bob@acme.com', 'About your question',
-                                                       'A better answer.')
+                                                       'A better answer.', **self.their_thread())
         self.draft.refresh_from_db()
         self.assertEqual((self.draft.subject, self.draft.body), ('About your question', 'A better answer.'))
 
@@ -246,3 +251,30 @@ class WhatTheAIIsToldTests(ReplyAnswersTestCase):
         self.assertIn('nothing has been written down', prompt)
         self.assertIn('Does NOT describe the product', prompt)
         self.assertNotIn('key benefits', prompt)
+
+
+class AnswerInTheirConversationTests(ReplyAnswersTestCase):
+    """The answer is a reply: "Re:" the email the lead answered, with the headers that keep it in their thread.
+
+    It went out under the AI's own subject ("Quick overview of our mobile banking solutions") with no reply
+    headers, so it started a new conversation in the lead's inbox, away from their question.
+    """
+
+    def test_the_answer_is_titled_as_a_reply_to_the_email_they_answered(self):
+        from ai_sdr_agent.models import SDROutreachLog
+        SDROutreachLog.objects.create(enrollment=self.enrolment, action_type='email', status='sent',
+                                      subject_sent="Accelerate Acme's mobile banking")
+        self.inbox(WANTS_MORE)
+        self.assertEqual(SDRReplyDraft.objects.get().subject, "Re: Accelerate Acme's mobile banking")
+
+    def test_the_email_carries_the_reply_headers(self):
+        from ai_sdr_agent.agents.outreach_agent import OutreachAgent
+        with mock.patch('ai_sdr_agent.agents.outreach_agent.validate_mail_server', return_value=None), \
+                mock.patch('ai_sdr_agent.agents.outreach_agent.smtplib.SMTP') as smtp:
+            OutreachAgent._send_via_smtp(
+                OutreachAgent.__new__(OutreachAgent), host='smtp.acme.test', port=2525, username='sal@acme.test',
+                password='x', use_tls=False, from_addr='sal@acme.test', display_name='Sal', to_email='bob@acme.com',
+                subject='Re: Hello', body='Here is more.', in_reply_to='<bob-1@acme.com>')
+        sent = smtp.return_value.__enter__.return_value.sendmail.call_args.args[2]
+        self.assertIn('In-Reply-To: <bob-1@acme.com>', sent)
+        self.assertIn('References: <bob-1@acme.com>', sent)

@@ -1409,6 +1409,8 @@ def sdr_campaigns_list(request):
             smtp_username=d.get('smtp_username', ''),
             smtp_password=d.get('smtp_password', ''),
             smtp_use_tls=bool(d.get('smtp_use_tls', True)),
+            imap_host=d.get('imap_host') or '',
+            imap_port=int(d.get('imap_port') or 993),
             calendar_link=d.get('calendar_link', ''),
             start_date=start_date,
             auto_check_replies=bool(d.get('auto_check_replies', True)),
