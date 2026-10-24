@@ -75,6 +75,23 @@ get_agent_choices = _LazyAgentChoices()
 get_purchasable_agent_choices = _LazyAgentChoices(purchasable_only=True)
 
 
+class AgentSlugField(models.CharField):
+    """An agent's slug, offered from the Agent table, with the choices kept out of migrations.
+
+    Django's `Field.deconstruct()` turns any iterable `choices` into a plain list, so
+    the lazy choices above were frozen into each migration as the agents of that day,
+    and `__eq__` / `deconstruct` on the lazy object never came into play. One more
+    Agent row (CRM Sync on the live site, 24 Oct 2026) then looked like a model
+    change, and the deploy's `makemigrations --check` stopped every release. Choices
+    change no column, so they are left out and the field migrates as a CharField.
+    """
+
+    def deconstruct(self):
+        name, _path, args, kwargs = super().deconstruct()
+        kwargs.pop('choices', None)
+        return name, 'django.db.models.CharField', args, kwargs
+
+
 class Industry(models.Model):
     """Industry categories for projects"""
     name = models.CharField(max_length=255)
@@ -896,7 +913,7 @@ class CompanyModulePurchase(models.Model):
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='module_purchases')
-    module_name = models.CharField(max_length=50, choices=get_purchasable_agent_choices)
+    module_name = AgentSlugField(max_length=50, choices=get_purchasable_agent_choices)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     price_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Price paid at time of purchase")
     purchased_by = models.ForeignKey(CompanyUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchases_made')
@@ -2317,7 +2334,7 @@ class CompanyAPIKey(models.Model):
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='api_keys')
-    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
+    agent_name = AgentSlugField(max_length=50, choices=get_agent_choices)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
     mode = models.CharField(max_length=10, choices=MODE_CHOICES)
     encrypted_key = models.TextField(help_text='Fernet-encrypted provider key')
@@ -2394,7 +2411,7 @@ class AgentTokenQuota(models.Model):
     an admin approves a managed-key request.
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='agent_quotas')
-    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
+    agent_name = AgentSlugField(max_length=50, choices=get_agent_choices)
     # DB was renamed out-of-band to platform_* / managed_* variants. Model field
     # names kept stable for code compatibility; db_column maps to the actual column.
     included_tokens = models.BigIntegerField(default=DEFAULT_FREE_TOKENS, db_column='platform_included_tokens')
@@ -2513,7 +2530,7 @@ class WeeklyResetLog(models.Model):
     used that week, and the limit/next-reset it rolled into.
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='weekly_reset_logs')
-    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
+    agent_name = AgentSlugField(max_length=50, choices=get_agent_choices)
     # When the reset happened.
     reset_at = models.DateTimeField(default=timezone.now, db_index=True)
     # Managed tokens the company had used that week, captured just before the
@@ -2557,7 +2574,7 @@ class KeyEventLog(models.Model):
     ]
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_events')
-    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
+    agent_name = AgentSlugField(max_length=50, choices=get_agent_choices)
     # The key this event refers to. SET_NULL so history outlives key deletion.
     key = models.ForeignKey(
         'CompanyAPIKey', on_delete=models.SET_NULL, null=True, blank=True,
@@ -2629,7 +2646,7 @@ class KeyRequest(models.Model):
 
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='key_requests')
     requested_by = models.ForeignKey(CompanyUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='key_requests')
-    agent_name = models.CharField(max_length=50, choices=get_agent_choices)
+    agent_name = AgentSlugField(max_length=50, choices=get_agent_choices)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='openai')
     note = models.TextField(blank=True)
     # Company specifies how long they want the key (monthly / yearly).
@@ -2675,7 +2692,7 @@ class AdminPricingConfig(models.Model):
     Snapshot-style: pricing applies going forward; existing subscriptions
     should snapshot the numbers they were sold at.
     """
-    agent_name = models.CharField(max_length=50, choices=get_agent_choices, unique=True)
+    agent_name = AgentSlugField(max_length=50, choices=get_agent_choices, unique=True)
     # Pricing label shown on admin pricing page as "per month"
     monthly_flat_usd = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
@@ -2805,7 +2822,7 @@ class AgentPlan(models.Model):
     Admin manages these in the "Agent Plans" tab; companies see the active ones on
     the module card.
     """
-    agent_name = models.CharField(max_length=50, choices=get_agent_choices, db_index=True)
+    agent_name = AgentSlugField(max_length=50, choices=get_agent_choices, db_index=True)
     # Optional override for the auto-derived "Monthly"/"Yearly" label.
     label = models.CharField(max_length=80, blank=True, default='')
     # Legacy. Pre-subscription, this was the length of a one-time purchase and it
