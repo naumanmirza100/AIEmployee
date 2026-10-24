@@ -7,6 +7,7 @@ import { verifySession, getPurchasedModules } from '@/services/modulePurchaseSer
 
 const CACHE_KEY = 'company_purchased_modules';
 const REDIRECT_DELAY_MS = 2000;
+const AGENTS_PAGE = '/company/dashboard/ai-agents';
 
 const ModulePurchaseSuccessPage = () => {
   const navigate = useNavigate();
@@ -54,13 +55,14 @@ const ModulePurchaseSuccessPage = () => {
 
   const isCompanyUser = !!getCompanyUser();
 
-  // Show the success screen briefly, then take the user to the dashboard themselves.
+  // Show the success screen briefly, then take the user to their agents, where the one just bought shows
+  // "Open Agent". A bare /company/dashboard sends a company without Recruitment to an empty My work.
   // Only on a clean activation — on error they stay put so they can read what happened.
   const shouldAutoRedirect = !verifying && !error && isCompanyUser && (!sessionId || verified);
 
   useEffect(() => {
     if (!shouldAutoRedirect) return;
-    const timer = setTimeout(() => navigate('/company/dashboard'), REDIRECT_DELAY_MS);
+    const timer = setTimeout(() => navigate(AGENTS_PAGE), REDIRECT_DELAY_MS);
     return () => clearTimeout(timer);
   }, [shouldAutoRedirect, navigate]);
 
@@ -95,13 +97,13 @@ const ModulePurchaseSuccessPage = () => {
         {shouldAutoRedirect && (
           <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Taking you to your dashboard…
+            Taking you to your agents…
           </p>
         )}
         <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
           {isCompanyUser && (
             <Button
-              onClick={() => navigate('/company/dashboard')}
+              onClick={() => navigate(AGENTS_PAGE)}
               className="gap-2"
               size="lg"
             >

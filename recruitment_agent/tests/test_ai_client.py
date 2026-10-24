@@ -179,3 +179,17 @@ class UsageShownTests(TestCase):
         force_authenticate(request, user=admin)
         [row] = [a for a in list_agent_keys(request).data['agents'] if a['agent_name'] == 'recruitment_agent']
         self.assertEqual(row['usage_30d'], {'calls': 3, 'failed': 1, 'tokens': 200})
+
+    def test_an_agent_that_logs_no_calls_shows_no_call_count(self):
+        """Tokens it used are on its quota bar; "0 AI calls" beside them was wrong."""
+        from api.views.company_api_keys import list_agent_keys
+        Agent.objects.update_or_create(slug='marketing_agent', defaults={'name': 'Marketing'})
+        company = Company.objects.create(name='Acme', email='acme@test.local')
+        admin = CompanyUser.objects.create(company=company, email='a@test.local', full_name='A', role='admin',
+                                           password_hash='x', is_active=True)
+        CompanyModulePurchase.objects.create(company=company, module_name='marketing_agent', status='active',
+                                             is_complimentary=True)
+        request = APIRequestFactory().get('/')
+        force_authenticate(request, user=admin)
+        [row] = [a for a in list_agent_keys(request).data['agents'] if a['agent_name'] == 'marketing_agent']
+        self.assertIsNone(row['usage_30d'])

@@ -22,6 +22,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Seconds one LLM call may take. Writing a whole document (a campaign brief is about 3,000 tokens, ~27 s on
+# gpt-4o-mini) needs longer than a question; both stay under the 60 s the proxy in front of the API allows.
+QA_TIMEOUT = 30.0
+WRITING_TIMEOUT = 50.0
+
 
 class MarketingBaseAgent:
     """
@@ -89,7 +94,7 @@ class MarketingBaseAgent:
             return OpenAI(api_key=ctx.api_key, timeout=30.0, max_retries=0), ctx
         raise ValueError(f"Unsupported provider '{ctx.provider}' configured for company key")
     
-    def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
+    def _call_llm(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None, timeout=QA_TIMEOUT):
         """
         Make a call to the LLM API (Groq for Q&A, OpenAI for advanced tasks).
         
@@ -99,7 +104,8 @@ class MarketingBaseAgent:
             temperature (float): Sampling temperature (0-2)
             max_tokens (int): Maximum tokens in response
             model (str): Override model for this call
-            
+            timeout (float): Seconds the call may take
+
         Returns:
             str: LLM response text
         """
@@ -109,7 +115,7 @@ class MarketingBaseAgent:
         company_id = getattr(self, 'company_id', None)
         if not company_id and self.openai_client and model and 'gpt' in model.lower():
             return self._call_openai(prompt, system_prompt, temperature, max_tokens, model)
-        return self._call_groq_qa(prompt, system_prompt, temperature, max_tokens)
+        return self._call_groq_qa(prompt, system_prompt, temperature, max_tokens, timeout=timeout)
     
     def _call_openai(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2000, model=None):
         """
@@ -282,17 +288,18 @@ class MarketingBaseAgent:
         # Use Groq for Q&A
         return self._call_groq_qa(prompt, system_prompt, temperature, max_tokens)
     
-    def _call_groq_qa(self, prompt, system_prompt=None, temperature=0.3, max_tokens=2000):
+    def _call_groq_qa(self, prompt, system_prompt=None, temperature=0.3, max_tokens=2000, timeout=QA_TIMEOUT):
         """
         Call Groq API for Q&A tasks.
         Retries on 429 rate limit (wait then retry up to 2 times).
-        
+
         Args:
             prompt (str): User prompt/question
             system_prompt (str): System prompt for context
             temperature (float): Sampling temperature
             max_tokens (int): Maximum tokens in response
-            
+            timeout (float): Seconds the call may take
+
         Returns:
             str: LLM response text
         """
@@ -330,7 +337,7 @@ class MarketingBaseAgent:
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    timeout=30.0,
+                    timeout=timeout,
                 )
                 usage = getattr(response, 'usage', None)
                 content = response.choices[0].message.content
@@ -402,22 +409,23 @@ class MarketingBaseAgent:
             raise_if_auth_error(last_error, key_ctx)
             raise last_error
     
-    def _call_llm_for_writing(self, prompt, system_prompt=None, temperature=0.7, max_tokens=4000):
+    def _call_llm_for_writing(self, prompt, system_prompt=None, temperature=0.7, max_tokens=4000, timeout=WRITING_TIMEOUT):
         """
         Call LLM optimized for document writing tasks.
         Uses GPT-4 Turbo for better writing quality.
-        
+
         Args:
             prompt (str): Writing prompt
             system_prompt (str): System prompt for context
             temperature (float): Higher temperature for more creative writing
             max_tokens (int): Maximum tokens in response (higher for documents)
-            
+            timeout (float): Seconds the call may take
+
         Returns:
             str: LLM response text
         """
         writing_model = getattr(settings, 'OPENAI_WRITING_MODEL', 'gpt-4o-mini')
-        return self._call_llm(prompt, system_prompt, temperature, max_tokens, model=writing_model)
+        return self._call_llm(prompt, system_prompt, temperature, max_tokens, model=writing_model, timeout=timeout)
     
     def log_action(self, action, details=None):
         """

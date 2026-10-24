@@ -293,7 +293,9 @@ Write a reply that:
 - Opens warmly, acknowledges their interest
 {benefits}
 - Never states a fact, number, price, customer name or feature that is not given above
-- Ends with a single CTA to book a call {"at: " + calendar if calendar else "(ask to reply with availability)"}
+- Answers their question if the facts above answer it
+- Ends with ONE sentence asking them to {"book a call at: " + calendar if calendar else "reply with a time that suits them for a short call"}; never two
+- Signs off with "Best," and then {(campaign.sender_name or campaign.sender_company or 'the sender').split()[0]} on the next line
 - Under 120 words total
 - Conversational, not salesy
 

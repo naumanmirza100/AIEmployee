@@ -1209,19 +1209,23 @@ class ProactiveNotificationAgent(MarketingBaseAgent):
             # Check if there are leads that were contacted but haven't received follow-ups
             contacted_leads = EmailSendHistory.objects.filter(
                 campaign=campaign,
-                status__in=['delivered', 'opened', 'clicked']
+                status__in=['sent', 'delivered', 'opened', 'clicked']
             ).values('recipient_email').distinct().count()
-            
-            # Check if follow-up sequences exist but haven't been triggered
-            followup_sequences = sequences.filter(name__icontains='follow').count()
+
+            # A sequence follows up when it has more than one email, or answers replies. Its name says nothing:
+            # "Care plan: three emails" was reported as having no follow-ups.
+            followup_sequences = sequences.annotate(step_count=Count('steps')).filter(
+                Q(step_count__gt=1) | Q(is_sub_sequence=True) | Q(name__icontains='follow')
+            ).count()
             if followup_sequences == 0 and contacted_leads > 0:
+                leads_word = 'lead' if contacted_leads == 1 else 'leads'
                 notification = self._create_notification(
                     user=user,
                     campaign=campaign,
                     notification_type='engagement',
                     priority='medium',
                     title=f'🔄 Create Follow-up Email Sequences: {campaign.name}',
-                    message=f'Campaign "{campaign.name}" has contacted {contacted_leads} leads but no follow-up sequences! Create follow-up email sequences to nurture leads and improve conversion rates.',
+                    message=f'Campaign "{campaign.name}" has contacted {contacted_leads} {leads_word} but no follow-up sequences! Create follow-up email sequences to nurture leads and improve conversion rates.',
                     action_required=True,
                     action_url=f'/marketing/dashboard/campaign/{campaign.id}/sequences/',
                     metadata={

@@ -26,13 +26,14 @@ def answer_wanting_more(campaign, enrollment, lead, reply_text, *, email_agent, 
     from ai_sdr_agent.models import SDRReplyDraft
 
     answer = email_agent.generate_more_info_email(lead, campaign, reply_text)
+    subject = _reply_subject(enrollment, answer.get('subject') or '')
     if not campaign.review_ai_replies:
-        outreach_agent.send_email(campaign, lead.email, answer['subject'], answer['body'])
+        outreach_agent.send_email(campaign, lead.email, subject, answer['body'], **_in_their_thread(enrollment))
         return {'sent': True, 'held': False, 'draft_id': None}
 
     draft = SDRReplyDraft.objects.create(
         enrollment=enrollment, lead_reply=(reply_text or '')[:2000],
-        subject=(answer.get('subject') or '')[:500], body=answer.get('body') or '')
+        subject=subject[:500], body=answer.get('body') or '')
     try:
         from core.notification_utils import notify_company_users
         notify_company_users(
@@ -44,6 +45,23 @@ def answer_wanting_more(campaign, enrollment, lead, reply_text, *, email_agent, 
         logger.exception('Could not alert the owner of campaign %s about a held answer', campaign.pk)
     logger.info('SDR [MORE-INFO] answer to %s held for review (draft %s)', lead.email, draft.pk)
     return {'sent': False, 'held': True, 'draft_id': draft.pk}
+
+
+def _reply_subject(enrollment, written):
+    """'Re: <the email the lead answered>', so the answer reads as a reply; the AI's own subject started a new
+    conversation in the lead's inbox. Falls back to that subject when nothing was sent yet."""
+    last = (enrollment.logs.filter(status='sent', action_type='email').exclude(subject_sent='')
+            .order_by('-created_at').first())
+    if not last:
+        return written
+    subject = last.subject_sent.strip()
+    return subject if subject.lower().startswith('re:') else f'Re: {subject}'
+
+
+def _in_their_thread(enrollment):
+    """The reply headers for the lead's last email, when its Message-ID was kept (not a hash of it)."""
+    message_id = (enrollment.last_reply_message_id or '').strip()
+    return {'in_reply_to': message_id} if message_id.startswith('<') and message_id.endswith('>') else {}
 
 
 class NotSendable(Exception):
@@ -73,7 +91,7 @@ def send_draft(draft, by, *, outreach_agent, subject=None, body=None):
     if not claimed:
         raise NotSendable('This answer has already been sent or discarded.')
     try:
-        outreach_agent.send_email(campaign, lead.email, subject[:500], body)
+        outreach_agent.send_email(campaign, lead.email, subject[:500], body, **_in_their_thread(enrollment))
     except Exception as exc:
         SDRReplyDraft.objects.filter(pk=draft.pk).update(status='pending', error=str(exc)[:500])
         raise NotSendable(f'The mailbox would not send it: {exc}') from exc

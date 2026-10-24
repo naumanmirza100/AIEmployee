@@ -440,10 +440,17 @@ Reply only with the definition, no preamble."""
         "'research opportunities in fintech' -> full\n"
     )
 
+    # "Typical monthly prices for app maintenance plans in Pakistan, and what they include" was classed as a
+    # competitor study: three invented rival companies and a comparison table, and no price at all.
+    _PRICE_QUESTION = re.compile(r'\b(price|prices|pricing|cost|costs|how much|rates?|fees?)\b', re.IGNORECASE)
+    _REPORT_REQUEST = re.compile(r'\b(analy[sz]e|analysis|report|competitors?|swot|map out)\b', re.IGNORECASE)
+
     def _wants_brief_answer(self, topic: str) -> bool:
         """True when the question deserves a direct answer, not a full report."""
         if not topic or not isinstance(topic, str):
             return False
+        if self._PRICE_QUESTION.search(topic) and not self._REPORT_REQUEST.search(topic):
+            return True
         try:
             out = self._call_llm_for_reasoning(
                 'Question: "%s"' % topic.strip()[:300],
@@ -464,6 +471,9 @@ Rules:
   where you have them.
 - If the user asked "should I...", give a clear recommendation and the single
   biggest risk.
+- If the user asked about prices or costs, give typical ranges in the local
+  currency for each level or kind asked about, say they are estimates, and list
+  what is usually included. Name no company the user did not name.
 - NO section headings, NO tables, NO "Opportunities"/"Recommendations"/
   "Conclusion" sections. Under 150 words total.
 - Do not restate the question. End when the answer is complete."""

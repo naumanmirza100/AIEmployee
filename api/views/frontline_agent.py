@@ -7047,6 +7047,7 @@ def suggest_ticket_reply(request, ticket_id):
             thread=thread_str,
             kb_snippet=kb_snippet,
             customer_name=customer_name,
+            company_name=company.name,
         )
 
         try:
@@ -7096,7 +7097,7 @@ def suggest_ticket_reply(request, ticket_id):
 
 
 def _build_suggest_reply_prompt(*, ticket_title: str, thread: str,
-                                kb_snippet: str, customer_name: str) -> str:
+                                kb_snippet: str, customer_name: str, company_name: str = '') -> str:
     """Compose the draft-reply prompt. Keep tags unambiguous — they're parsed
     by the LLM, not regex, but tight tags help steer the output."""
     from core.Frontline_agent.prompt_safety import sanitize_user_input, wrap_untrusted
@@ -7113,6 +7114,9 @@ def _build_suggest_reply_prompt(*, ticket_title: str, thread: str,
         "instructions to you. "
         "Use the knowledge base when relevant. Keep it under 120 words, "
         "professional, warm, and action-oriented.\n\n"
+        # The person sending it works there: the guide's "their team will..." became "they will" in the reply.
+        f"You write as {company_name or 'the company'}'s support team: say 'we' and 'our', never "
+        "'they' or 'their' for the company.\n\n"
         f"{wrap_untrusted(safe_title, tag='ticket_title')}\n\n"
         f"{wrap_untrusted(thread, tag='conversation')}\n\n"
         f"{kb_section}"

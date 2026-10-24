@@ -3,7 +3,7 @@ Document Authoring Agent
 Creates structured marketing documents such as strategies, proposals, reports, presentations, and campaign briefs.
 """
 
-from .marketing_base_agent import MarketingBaseAgent
+from .marketing_base_agent import MarketingBaseAgent, WRITING_TIMEOUT
 from typing import Dict, Optional
 from marketing_agent.models import Campaign, MarketingDocument, CampaignPerformance, Lead, EmailSendHistory, Reply
 from django.contrib.auth.models import User
@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.db.models import Count, Sum, Avg, Q
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,9 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
     
     # Short copy rather than documents. They get their own prompt: the document rules (sections in order, tables, an end
     # marker, "detailed in-depth analysis") suit a strategy or a report but would bury a social post or an ad.
+    # Seconds a whole report or brief may take, rewrite included, under the 60 s the API's proxy allows.
+    DOCUMENT_TIME_BUDGET = 55
+
     COPY_PLATFORMS = {
         'social_posts': 'LinkedIn, Facebook, Instagram and X',
         'ad_copy': 'Google Search, Facebook / Instagram and LinkedIn',
@@ -211,25 +215,33 @@ rather than inventing one or leaving a [placeholder]. Answer in markdown with no
             return self._write_copy(document_type, document_data, campaign)
         prompt = self._build_document_prompt(document_type, document_data, campaign, context)
 
-        def generate_once(gen_prompt: str, temperature: float = 0.35) -> str:
+        def generate_once(gen_prompt: str, temperature: float = 0.35, timeout: float = WRITING_TIMEOUT) -> str:
             raw = self._call_llm_for_writing(
                 prompt=gen_prompt,
                 system_prompt=self.system_prompt,
                 temperature=temperature,
-                max_tokens=16384
+                max_tokens=16384,
+                timeout=timeout,
             )
             return self._post_process_document_content(raw, document_type, campaign)
 
+        started = time.monotonic()
         content = generate_once(prompt, temperature=0.35)
 
         # Guardrail: report/brief output can occasionally be malformed due to model variability.
-        # If structure is invalid, regenerate once with stricter corrective instructions.
-        if document_type in ('report', 'brief') and not self._is_document_structure_valid(content, document_type):
+        # If structure is invalid, regenerate once with stricter corrective instructions — only in the time the
+        # request has left, keeping the first version if the rewrite cannot finish.
+        time_left = self.DOCUMENT_TIME_BUDGET - (time.monotonic() - started)
+        if (document_type in ('report', 'brief') and time_left >= 20
+                and not self._is_document_structure_valid(content, document_type)):
             correction = (
                 "\n\nRETRY INSTRUCTION (MANDATORY): Re-write the entire document from scratch with strict section order and clean markdown headings only. "
                 "Do NOT include duplicate sections, do NOT place any content after the final section, and do NOT repeat metrics/tables."
             )
-            content = generate_once(prompt + correction, temperature=0.2)
+            try:
+                content = generate_once(prompt + correction, temperature=0.2, timeout=time_left)
+            except RuntimeError as e:
+                logger.warning("Document rewrite skipped, keeping the first version: %s", e)
 
         return content
 

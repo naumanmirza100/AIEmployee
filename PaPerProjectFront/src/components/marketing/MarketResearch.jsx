@@ -85,7 +85,23 @@ function markdownToHtml(markdown) {
       out.push(`<h3 class="text-base font-semibold mt-3 mb-1">${bold(escape(t.slice(4)))}</h3>`);
       continue;
     }
-    
+
+    // A table: a header row, a |---| row, then its rows. Tables used to show as raw pipes.
+    const sep = (lines[i + 1] || '').trim();
+    if (t.startsWith('|') && /^\|[\s:|-]+\|$/.test(sep) && sep.includes('-')) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      const cells = (row) => row.trim().replace(/^\||\|$/g, '').split('|').map((c) => bold(escape(c.trim())));
+      const head = cells(t);
+      const rows = [];
+      for (i += 2; i < lines.length && lines[i].trim().startsWith('|'); i++) rows.push(cells(lines[i]));
+      i--;
+      out.push('<div class="overflow-x-auto my-3"><table class="w-full text-sm border-collapse">'
+        + `<thead><tr>${head.map((h) => `<th class="text-left font-semibold border-b border-border/60 px-2 py-1.5">${h}</th>`).join('')}</tr></thead>`
+        + `<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td class="border-b border-border/30 px-2 py-1.5 align-top">${c}</td>`).join('')}</tr>`).join('')}</tbody>`
+        + '</table></div>');
+      continue;
+    }
+
     if (/^[\s]*(?:•|-|\*|\d+\.)\s+/.test(t)) {
       if (!inList) { 
         out.push('<ul class="list-disc pl-4 my-2 space-y-1.5">'); 

@@ -156,10 +156,12 @@ export default function ProjectsListView({ projects = [], loading, onProjectCrea
                         <ListTodo className="h-3 w-3" />
                         {taskCount} task{taskCount === 1 ? '' : 's'}
                       </span>
-                      {project.created_at && (
+                      {(project.deadline || project.created_at) && (
                         <span className="text-xs text-white/45 inline-flex items-center gap-1">
                           <Calendar className="h-3 w-3" />
-                          {new Date(project.created_at).toLocaleDateString()}
+                          {project.deadline
+                            ? `Due ${new Date(project.deadline).toLocaleDateString()}`
+                            : `Created ${new Date(project.created_at).toLocaleDateString()}`}
                         </span>
                       )}
                     </div>
