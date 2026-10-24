@@ -94,6 +94,53 @@ const SkillChip = ({ label, variant = 'default' }) => {
   );
 };
 
+// What the enrichment step worked out from the CV: role, seniority, experience band, depth signals and how complete
+// the CV is. It was saved with every CV and shown nowhere.
+const EnrichedProfile = ({ enriched }) => {
+  const e = enriched || {};
+  const seniority = e.seniority_level && e.seniority_level !== 'Unknown' ? e.seniority_level : null;
+  const experience = e.years_experience_bucket ? `${e.years_experience_bucket} years` : null;
+  const leadership = [...new Set((e.leadership_signals || []).filter((s) => s && s !== 'Leadership signal'))].slice(0, 4);
+  const depth = (e.technical_depth_signals || []).slice(0, 8);
+  const score = typeof e.profile_completeness_score === 'number' ? e.profile_completeness_score : null;
+  const missing = e.missing_critical_fields || [];
+  if (!e.primary_role && !seniority && !experience && score === null && !depth.length && !leadership.length) return null;
+  return (
+    <Block title="Profile" icon={<User className="h-4 w-4" />}>
+      <div className="space-y-2" data-testid="REC-candidate-profile">
+        <InfoPill icon={<Briefcase className="h-3.5 w-3.5" />} label="Role" value={e.primary_role} />
+        <InfoPill icon={<Star className="h-3.5 w-3.5" />} label="Seniority" value={seniority} />
+        <InfoPill icon={<Clock className="h-3.5 w-3.5" />} label="Experience" value={experience} />
+      </div>
+      {leadership.length > 0 && (
+        <div className="mt-4">
+          <p className="text-[10px] text-white/40 uppercase tracking-wider font-semibold mb-2">Leadership</p>
+          <div className="flex flex-wrap gap-1.5">{leadership.map((s) => <SkillChip key={s} label={s} />)}</div>
+        </div>
+      )}
+      {depth.length > 0 && (
+        <div className="mt-4">
+          <p className="text-[10px] text-white/40 uppercase tracking-wider font-semibold mb-2">Technical depth</p>
+          <div className="flex flex-wrap gap-1.5">{depth.map((s) => <SkillChip key={s} label={s} variant="related" />)}</div>
+        </div>
+      )}
+      {score !== null && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between text-[10px] uppercase tracking-wider font-semibold text-white/40 mb-1.5">
+            <span>CV completeness</span><span className="text-white/70">{score}%</span>
+          </div>
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'hsl(var(--surface-invert) / 0.08)' }}>
+            <div className="h-full rounded-full bg-violet-400" style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
+          </div>
+          {missing.length > 0 && (
+            <p className="mt-1.5 text-xs text-white/40">Not on the CV: {missing.join(', ')}</p>
+          )}
+        </div>
+      )}
+    </Block>
+  );
+};
+
 /* ── main page ── */
 const CandidateDetailPage = () => {
   const { id } = useParams();
@@ -429,6 +476,8 @@ const CandidateDetailPage = () => {
             </div>
 
             <div className="space-y-6">
+              <EnrichedProfile enriched={detail.enriched} />
+
               {(exactSkills.length > 0 || relatedSkills.length > 0 || missingSkills.length > 0) && (
                 <Block title="Skill Match">
                   {exactSkills.length > 0 && (
