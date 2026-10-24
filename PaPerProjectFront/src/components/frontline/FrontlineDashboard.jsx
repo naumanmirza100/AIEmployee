@@ -104,6 +104,7 @@ import { renderChart } from '@/components/common/ChartRenderer';
 import { FrontlineNotificationsTab } from './FrontlineNotificationsTab';
 import { FrontlineWorkflowsTab } from './FrontlineWorkflowsTab';
 import { HandoffQueueTab } from './HandoffQueueTab';
+import { TicketAutomationCard } from './TicketAutomationCard';
 import { FrontlineAnalyticsTab } from './FrontlineAnalyticsTab';
 
 // Document types for Q&A scope (must match backend Document.DOCUMENT_TYPE_CHOICES)
@@ -402,6 +403,8 @@ const FrontlineDashboard = () => {
     css_overrides: '',
   });
   const [themeSaving, setThemeSaving] = useState(false);
+  // The two "Ticket automation" switches; null until the widget config has loaded.
+  const [ticketAutomation, setTicketAutomation] = useState(null);
   
   // Ticket creation
   const [showTicketDialog, setShowTicketDialog] = useState(false);
@@ -536,6 +539,7 @@ const FrontlineDashboard = () => {
         if (cancelled || res?.status !== 'success') return;
         if (res?.data?.widget_key) setWidgetKey(res.data.widget_key);
         setAllowedOrigins(res?.data?.allowed_origins || '');
+        setTicketAutomation(res?.data?.config?.ticket_automation || {});
         const theme = res?.data?.config?.theme || {};
         setWidgetTheme({
           primary_color: theme.primary_color || '',
@@ -2857,6 +2861,7 @@ const FrontlineDashboard = () => {
               )}
             </CardContent>
           </Card>
+          <TicketAutomationCard value={ticketAutomation} onChange={setTicketAutomation} />
           </ErrorBoundary>
         </TabsContent>
 

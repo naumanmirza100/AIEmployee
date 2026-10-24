@@ -1712,6 +1712,8 @@ def public_qa(request):
                         'from_email': visitor_email,
                     },
                 )
+                from Frontline_agent import ticket_automation
+                ticket_automation.queue(ticket, 'chat')
                 result = dict(result)
                 result['handoff_requested'] = True
                 result['handoff_ticket_id'] = ticket.id
@@ -1928,6 +1930,8 @@ def public_submit(request):
         if contact:
             from Frontline_agent.contacts import recompute_contact_stats
             recompute_contact_stats(contact)
+        from Frontline_agent import ticket_automation
+        ticket_automation.queue(ticket, 'form')
 
         # Optional attachments — multi-file. Each file is independently
         # validated; one bad file in the batch doesn't poison the others.
@@ -3040,8 +3044,8 @@ def retriage_ticket(request, ticket_id):
         ticket, err = _get_company_ticket_or_404(request, ticket_id)
         if err:
             return err
-        valid_categories = {'technical', 'billing', 'account', 'feature_request', 'bug', 'other'}
-        valid_priorities = {'low', 'medium', 'high', 'urgent'}
+        from Frontline_agent.ticket_automation import VALID_CATEGORIES as valid_categories
+        from Frontline_agent.ticket_automation import VALID_PRIORITIES as valid_priorities
         data = request.data if isinstance(request.data, dict) else {}
         old_category, old_priority = ticket.category, ticket.priority
 
@@ -3071,22 +3075,16 @@ def retriage_ticket(request, ticket_id):
                 'last_triaged_at': ticket.last_triaged_at.isoformat(),
             }})
 
-        company = request.user.company
-        agent = FrontlineAgent(company_id=company.id)
-        llm_extraction = agent._extract_ticket_intent(ticket.title, ticket.description) or {}
-        classification = agent.ticket_service.classify_ticket(ticket.title, ticket.description)
-        suggested_cat = (llm_extraction.get('suggested_category')
-                         or classification.get('category') or '').lower()
-        suggested_pri = (llm_extraction.get('suggested_priority')
-                         or classification.get('priority') or '').lower()
+        from Frontline_agent.ticket_automation import suggest_triage
+        suggestion = suggest_triage(request.user.company.id, ticket.title, ticket.description)
         return Response({'status': 'success', 'data': {
             'id': ticket.id, 'applied': False,
             'old_category': old_category,
-            'new_category': suggested_cat if suggested_cat in valid_categories else old_category,
+            'new_category': suggestion['category'] or old_category,
             'old_priority': old_priority,
-            'new_priority': suggested_pri if suggested_pri in valid_priorities else old_priority,
-            'intent': llm_extraction.get('intent') or ticket.intent,
-            'entities': llm_extraction.get('entities') or ticket.entities,
+            'new_priority': suggestion['priority'] or old_priority,
+            'intent': suggestion['intent'] or ticket.intent,
+            'entities': suggestion['entities'] or ticket.entities,
         }})
     except KeyServiceError:
         raise
@@ -6296,8 +6294,7 @@ def reply_to_ticket(request, ticket_id):
     Body: {"body_text": "...", "body_html": "...", "to": ["x@y.com"], "cc": [...]}.
     If `to` is omitted, defaults to the from_address of the most recent inbound message.
     """
-    from django.core.mail import EmailMultiAlternatives
-    from Frontline_agent.inbound_email import sanitize_html, build_subject_tag
+    from Frontline_agent.inbound_email import sanitize_html
 
     try:
         ticket, err = _get_company_ticket_or_404(request, ticket_id)
@@ -6311,118 +6308,11 @@ def reply_to_ticket(request, ticket_id):
             return Response({'status': 'error', 'message': 'body_text or body_html is required'},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        to_addresses = data.get('to') or []
-        cc_addresses = data.get('cc') or []
-
-        # Default "to" = last inbound sender on the thread.
-        if not to_addresses:
-            last_inbound = (TicketMessage.objects
-                            .filter(ticket=ticket, direction='inbound')
-                            .order_by('-created_at').first())
-            if last_inbound and last_inbound.from_address:
-                to_addresses = [last_inbound.from_address]
-        # A ticket from the website chat or the web form has no email in its thread, only
-        # the customer's contact, so a reply to it always failed with "No recipient".
-        if not to_addresses and ticket.contact_id and ticket.contact.email:
-            to_addresses = [ticket.contact.email]
-        if not to_addresses:
-            return Response({'status': 'error', 'message': 'No recipient available'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        # Threading references: collect every prior message_id on the thread so
-        # the customer's client shows it as one conversation.
-        prior_ids = list(
-            TicketMessage.objects.filter(ticket=ticket)
-            .exclude(message_id='')
-            .order_by('created_at')
-            .values_list('message_id', flat=True)
-        )
-        last_msg_id = prior_ids[-1] if prior_ids else ''
-        references_header = ' '.join(f'<{mid}>' for mid in prior_ids) if prior_ids else ''
-
-        # Build subject with stable tag.
-        tag = build_subject_tag(ticket.id)
-        subject = ticket.title or '(no subject)'
-        # A widget hand-off's title starts "Hand-off:" for the staff's queue; the customer
-        # reading the reply sees their own question.
-        if subject.startswith('Hand-off: '):
-            subject = subject[len('Hand-off: '):]
-        if tag not in subject:
-            subject = f"Re: {subject} {tag}"
-
-        # Compose sender.
-        company = ticket.company
-        from_email = ((company.support_from_email or '').strip()
-                      if company else '') or getattr(settings, 'DEFAULT_FROM_EMAIL',
-                                                     'noreply@example.com')
-
-        # Stamp a Message-ID we control so the customer's reply threads back.
-        new_message_id = _message_id_for(ticket.id).strip('<>')
-
-        headers = {
-            'Message-ID': f'<{new_message_id}>',
-        }
-        if last_msg_id:
-            headers['In-Reply-To'] = f'<{last_msg_id}>'
-        if references_header:
-            headers['References'] = references_header
-
-        # Ensure replies land on the tenant's inbox. If slug is set, use
-        # support+<slug>@<domain>, otherwise fall back to support_from_email.
-        inbound_domain = getattr(settings, 'FRONTLINE_INBOUND_EMAIL_DOMAIN', '') or ''
-        reply_to = ''
-        if company and company.support_inbox_slug and inbound_domain:
-            reply_to = f"support+{company.support_inbox_slug}@{inbound_domain}"
-        elif company and company.support_from_email:
-            reply_to = company.support_from_email
-        if reply_to:
-            headers['Reply-To'] = reply_to
-
-        email = EmailMultiAlternatives(
-            subject=subject,
-            body=body_text or _html_to_text_fallback(body_html),
-            from_email=from_email,
-            to=to_addresses,
-            cc=cc_addresses,
-            headers=headers,
-        )
-        if body_html:
-            email.attach_alternative(body_html, 'text/html')
-
-        try:
-            email.send(fail_silently=False)
-        except Exception as exc:
-            logger.exception("reply_to_ticket: SMTP send failed")
-            return Response(
-                {'status': 'error', 'message': f'Email send failed: {exc}'},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        msg = TicketMessage.objects.create(
-            ticket=ticket,
-            direction='outbound',
-            channel='email',
-            from_address=from_email[:320],
-            to_addresses=to_addresses,
-            cc_addresses=cc_addresses,
-            subject=subject[:998],
-            body_text=body_text[:500000],
-            body_html=body_html[:500000],
-            # 255 is what the columns hold; [:998] overflowed them, and a
-            # truncated Message-ID breaks threading on the customer's reply
-            # (FL-DATA-9).
-            message_id=new_message_id[:255],
-            in_reply_to=last_msg_id[:255] if last_msg_id else '',
-            references=prior_ids,
-            raw_payload={'reply_to': reply_to},
-            author_company_user=request.user if hasattr(request.user, 'email') else None,
-        )
-
-        # Reply is "first response" → touch ticket so SLA reporting updates.
-        if ticket.status in ('new',):
-            ticket.status = 'open'
-        ticket.save(update_fields=['status', 'updated_at'])
-
+        msg, problem, code = send_ticket_reply(
+            ticket, body_text, body_html, to=data.get('to') or [], cc=data.get('cc') or [],
+            author=request.user if hasattr(request.user, 'email') else None)
+        if problem:
+            return Response({'status': 'error', 'message': problem}, status=code)
         return Response({'status': 'success', 'data': _serialize_ticket_message(msg)},
                         status=status.HTTP_201_CREATED)
 
@@ -6430,6 +6320,128 @@ def reply_to_ticket(request, ticket_id):
         logger.exception("reply_to_ticket failed")
         return Response({'status': 'error', 'message': 'Failed to send reply'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def send_ticket_reply(ticket, body_text, body_html='', *, to=None, cc=None, author=None):
+    """Email a reply on `ticket` to its customer and keep it on the thread.
+
+    Shared by a person's reply (`reply_to_ticket`) and a reply the knowledge
+    base sends by itself (Frontline_agent/ticket_automation.py), so both thread
+    the same way and the customer's answer comes back onto the ticket.
+
+    Returns (message, None, None) when sent, or (None, problem, http status).
+    """
+    from django.core.mail import EmailMultiAlternatives
+    from Frontline_agent.inbound_email import build_subject_tag
+
+    to_addresses = list(to or [])
+    cc_addresses = list(cc or [])
+
+    # Default "to" = last inbound sender on the thread.
+    if not to_addresses:
+        last_inbound = (TicketMessage.objects
+                        .filter(ticket=ticket, direction='inbound')
+                        .order_by('-created_at').first())
+        if last_inbound and last_inbound.from_address:
+            to_addresses = [last_inbound.from_address]
+    # A ticket from the website chat or the web form has no email in its thread, only
+    # the customer's contact, so a reply to it always failed with "No recipient".
+    if not to_addresses and ticket.contact_id and ticket.contact.email:
+        to_addresses = [ticket.contact.email]
+    if not to_addresses:
+        return None, 'No recipient available', status.HTTP_400_BAD_REQUEST
+
+    # Threading references: collect every prior message_id on the thread so
+    # the customer's client shows it as one conversation.
+    prior_ids = list(
+        TicketMessage.objects.filter(ticket=ticket)
+        .exclude(message_id='')
+        .order_by('created_at')
+        .values_list('message_id', flat=True)
+    )
+    last_msg_id = prior_ids[-1] if prior_ids else ''
+    references_header = ' '.join(f'<{mid}>' for mid in prior_ids) if prior_ids else ''
+
+    # Build subject with stable tag.
+    tag = build_subject_tag(ticket.id)
+    subject = ticket.title or '(no subject)'
+    # A widget hand-off's title starts "Hand-off:" for the staff's queue; the customer
+    # reading the reply sees their own question.
+    if subject.startswith('Hand-off: '):
+        subject = subject[len('Hand-off: '):]
+    if tag not in subject:
+        subject = f"Re: {subject} {tag}"
+
+    # Compose sender.
+    company = ticket.company
+    from_email = ((company.support_from_email or '').strip()
+                  if company else '') or getattr(settings, 'DEFAULT_FROM_EMAIL',
+                                                 'noreply@example.com')
+
+    # Stamp a Message-ID we control so the customer's reply threads back.
+    new_message_id = _message_id_for(ticket.id).strip('<>')
+
+    headers = {
+        'Message-ID': f'<{new_message_id}>',
+    }
+    if last_msg_id:
+        headers['In-Reply-To'] = f'<{last_msg_id}>'
+    if references_header:
+        headers['References'] = references_header
+
+    # Ensure replies land on the tenant's inbox. If slug is set, use
+    # support+<slug>@<domain>, otherwise fall back to support_from_email.
+    inbound_domain = getattr(settings, 'FRONTLINE_INBOUND_EMAIL_DOMAIN', '') or ''
+    reply_to = ''
+    if company and company.support_inbox_slug and inbound_domain:
+        reply_to = f"support+{company.support_inbox_slug}@{inbound_domain}"
+    elif company and company.support_from_email:
+        reply_to = company.support_from_email
+    if reply_to:
+        headers['Reply-To'] = reply_to
+
+    email = EmailMultiAlternatives(
+        subject=subject,
+        body=body_text or _html_to_text_fallback(body_html),
+        from_email=from_email,
+        to=to_addresses,
+        cc=cc_addresses,
+        headers=headers,
+    )
+    if body_html:
+        email.attach_alternative(body_html, 'text/html')
+
+    try:
+        email.send(fail_silently=False)
+    except Exception as exc:
+        logger.exception("send_ticket_reply: SMTP send failed")
+        return None, f'Email send failed: {exc}', status.HTTP_502_BAD_GATEWAY
+
+    msg = TicketMessage.objects.create(
+        ticket=ticket,
+        direction='outbound',
+        channel='email',
+        from_address=from_email[:320],
+        to_addresses=to_addresses,
+        cc_addresses=cc_addresses,
+        subject=subject[:998],
+        body_text=body_text[:500000],
+        body_html=body_html[:500000],
+        # 255 is what the columns hold; [:998] overflowed them, and a
+        # truncated Message-ID breaks threading on the customer's reply
+        # (FL-DATA-9).
+        message_id=new_message_id[:255],
+        in_reply_to=last_msg_id[:255] if last_msg_id else '',
+        references=prior_ids,
+        raw_payload={'reply_to': reply_to},
+        author_company_user=author,
+    )
+
+    # Reply is "first response" → touch ticket so SLA reporting updates.
+    if ticket.status in ('new',):
+        ticket.status = 'open'
+    ticket.save(update_fields=['status', 'updated_at'])
+    return msg, None, None
 
 
 def _html_to_text_fallback(html: str) -> str:
