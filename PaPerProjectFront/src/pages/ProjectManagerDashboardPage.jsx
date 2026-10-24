@@ -801,7 +801,13 @@ const ProjectManagerDashboardPage = () => {
 
                 <TabsContent value="ai-tools" className="mt-6">
                   <div className="flex justify-end mb-3"><TabTourButton tabKey="ai-tools" /></div>
-                  <ErrorBoundary><PMToolsHub onOpenPilot={openPilot} /></ErrorBoundary>
+                  <ErrorBoundary>
+                    <PMToolsHub
+                      onOpenPilot={openPilot}
+                      activeTool={activeSubTab}
+                      onToolChange={(tool) => setSubTab('ai-tools', tool)}
+                    />
+                  </ErrorBoundary>
                 </TabsContent>
               </Tabs>
           </div>

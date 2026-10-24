@@ -106,7 +106,11 @@ const AgentSidebar = ({
     const here = location.pathname.replace(/\/$/, '');
     const there = (child.path || '').replace(/\/$/, '');
     if (here !== there) return false;
-    if (child.tab != null) return (searchParams.get('tab') || defaultTabFor(child.path)) === child.tab;
+    if (child.tab != null) {
+      if ((searchParams.get('tab') || defaultTabFor(child.path)) !== child.tab) return false;
+      // A child that opens one view inside a tab (`sub`, e.g. Insights → Daily Standup).
+      return child.sub == null || searchParams.get('sub') === child.sub;
+    }
     return true;
   };
 
@@ -130,7 +134,8 @@ const AgentSidebar = ({
   };
 
   const goToChild = (child) => {
-    const url = child.tab != null ? `${child.path}?tab=${encodeURIComponent(child.tab)}` : child.path;
+    let url = child.tab != null ? `${child.path}?tab=${encodeURIComponent(child.tab)}` : child.path;
+    if (child.tab != null && child.sub != null) url += `&sub=${encodeURIComponent(child.sub)}`;
     navigate(url);
     onMobileClose?.();
   };
