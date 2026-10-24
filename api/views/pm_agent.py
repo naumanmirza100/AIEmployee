@@ -175,6 +175,20 @@ class PMLLMToolThrottle(PMLLMThrottle):
 _get_project_owner = pm_services.project_owner_for
 
 
+def _readable_activity_details(details):
+    """An activity entry's details for the Q&A prompt, without row ids.
+
+    A task's "created" entry keeps {'title': ..., 'project_id': 178}; given as it was, the answer spoke of
+    "bulk task creations for project 178", a number the user never sees.
+    """
+    if not details:
+        return None
+    if isinstance(details, dict):
+        kept = {k: v for k, v in details.items() if k != 'id' and not k.endswith('_id') and v not in (None, '')}
+        return ', '.join(f'{k}: {v}' for k, v in kept.items()) or None
+    return details
+
+
 def _validate_positive_number(value, field_name, max_val=999999999):
     """Validate a numeric field is positive and within bounds. Returns (cleaned_value, error_msg)."""
     if value is None:
@@ -1648,7 +1662,7 @@ def _knowledge_qa_inputs(request):
                 "new_value": log.new_value,
                 "user": log.user.get_full_name() or log.user.username if log.user else "System",
                 "timestamp": log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else None,
-                "details": log.details if hasattr(log, 'details') and log.details else None,
+                "details": _readable_activity_details(getattr(log, 'details', None)),
             }
             for log in activity_logs
         ]
