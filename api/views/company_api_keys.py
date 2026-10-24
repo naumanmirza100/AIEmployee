@@ -212,7 +212,9 @@ def list_agent_keys(request):
             # null = any provider; otherwise the only ones the key form offers.
             'supported_providers': list(supported_providers(agent_name) or []) or None,
             # AI calls in the last 30 days, from the per-call log.
-            'usage_30d': usage_by_agent.get(agent_name, {'calls': 0, 'failed': 0, 'tokens': 0}),
+            # None when the agent logs no calls: Marketing, Operations, AI SDR and Reply Draft count tokens
+            # but write no per-call rows, so the page said "0 AI calls" beside 30K tokens used.
+            'usage_30d': usage_by_agent.get(agent_name),
         })
 
     return Response({
