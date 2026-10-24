@@ -62,6 +62,12 @@ DEFAULT_WIDGET_CONFIG: Dict[str, Any] = {
     # site — so without this, anyone who views source can turn unanswered
     # questions into an unbounded stream of work items. 0 disables the cap.
     'auto_ticket_max_per_hour': 50,
+    # What Frontline does by itself with a ticket a customer opens; both off
+    # until an admin turns them on (Frontline_agent/ticket_automation.py).
+    'ticket_automation': {
+        'classify_incoming': False,
+        'resolve_from_knowledge': False,
+    },
     'allowed_attachment_mime': [
         'image/png', 'image/jpeg', 'image/gif', 'image/webp',
         'application/pdf', 'text/plain',
@@ -157,6 +163,16 @@ def validate_widget_config(payload):
             return payload, (
                 f'theme.launcher_text is too long (max {_MAX_LAUNCHER_TEXT_CHARS} chars).'
             )
+
+    automation = payload.get('ticket_automation')
+    if automation is not None:
+        if not isinstance(automation, dict):
+            return payload, 'ticket_automation must be an object of true/false switches.'
+        # Both switches are saved together, as true or false; nothing else is kept.
+        payload['ticket_automation'] = {
+            key: automation.get(key) is True
+            for key in DEFAULT_WIDGET_CONFIG['ticket_automation']
+        }
 
     return payload, None
 

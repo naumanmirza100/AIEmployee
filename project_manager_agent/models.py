@@ -597,3 +597,36 @@ class ProjectPilotJob(models.Model):
 
     def __str__(self):
         return f"ProjectPilotJob #{self.id} [{self.status}] {self.file_name}"
+
+
+class ProjectToolResult(models.Model):
+    """What a Project Manager AI tool produced for a project, kept so it can be opened again and acted on.
+
+    Workflow & SOP's phase checklists, Meeting Notes and Calendar & Schedule's plans were shown once and lost on the
+    next click. One table for the three, each row read back whole: a phase's checklist (key = the phase), a meeting's
+    notes (key = when they were saved) and the latest schedule plan (key = '').
+    """
+    KIND_CHOICES = [
+        ('phase_checklist', 'Phase checklist'),
+        ('meeting_notes', 'Meeting notes'),
+        ('schedule_plan', 'Schedule plan'),
+    ]
+
+    project = models.ForeignKey('core.Project', on_delete=models.CASCADE, related_name='tool_results')
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    key = models.CharField(max_length=60, blank=True, default='')
+    data = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'project_manager_agent'
+        db_table = 'ppp_pm_tool_result'
+        constraints = [
+            models.UniqueConstraint(fields=['project', 'kind', 'key'], name='pm_tool_result_one_per_key'),
+        ]
+
+    def __str__(self):
+        return f"{self.get_kind_display()} for project #{self.project_id} ({self.key or 'latest'})"

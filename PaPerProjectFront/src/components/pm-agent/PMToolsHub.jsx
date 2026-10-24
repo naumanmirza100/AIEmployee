@@ -109,8 +109,12 @@ const TOOLS = [
   },
 ];
 
-export default function PMToolsHub({ onOpenPilot }) {
-  const [activeTool, setActiveTool] = useState(null);
+// `activeTool` / `onToolChange` let the page keep the open tool in the URL (`?tab=ai-tools&sub=workflow`), so the
+// sidebar can open a tool directly; without them the hub keeps its own state.
+export default function PMToolsHub({ onOpenPilot, activeTool: shownTool, onToolChange }) {
+  const [localTool, setLocalTool] = useState(null);
+  const activeTool = onToolChange ? shownTool : localTool;
+  const setActiveTool = onToolChange || setLocalTool;
 
   const selected = TOOLS.find((t) => t.key === activeTool);
 

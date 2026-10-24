@@ -400,12 +400,18 @@ export default function HRNotificationsTab() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="email">Email</SelectItem>
-                      <SelectItem value="sms">SMS</SelectItem>
-                      <SelectItem value="in_app">In-app</SelectItem>
+                      <SelectItem value="in_app">In-app (the person's bell)</SelectItem>
                       <SelectItem value="slack">Slack (webhook)</SelectItem>
                       <SelectItem value="teams">MS Teams (webhook)</SelectItem>
                     </SelectContent>
                   </Select>
+                  {/* SMS was offered but never sent: there is no SMS provider. A template saved with it before
+                      shows why it isn't sent, and has to move to another channel to be saved again. */}
+                  {dialog.tpl.channel === 'sms' && (
+                    <div className="text-[10px] text-amber-300/90 mt-1">
+                      SMS can't be sent yet (there is no SMS provider), so this template isn't sent. Choose another channel.
+                    </div>
+                  )}
                   {(dialog.tpl.channel === 'slack' || dialog.tpl.channel === 'teams') && (
                     <div className="text-[10px] text-amber-300/90 mt-1">
                       Needs <code className="px-1 rounded bg-white/[0.06]">hr_{dialog.tpl.channel}_webhook_url</code> set on the Company.

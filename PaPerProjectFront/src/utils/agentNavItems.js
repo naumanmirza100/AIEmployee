@@ -42,6 +42,8 @@ import {
   LineChart,
   FolderKanban,
   CalendarPlus,
+  Activity,
+  Workflow,
   // Company dashboard sub-tabs
   ListTodo,
   KeyRound,
@@ -56,6 +58,7 @@ import {
  * under the active agent. Two link shapes:
  *   - path  : { label, icon, path: '/ai-sdr/leads' }
  *   - query : { label, icon, path: '/frontline/dashboard', tab: 'documents' }
+ *     add `sub` to open one view inside that tab: { ..., tab: 'insights', sub: 'standup' }
  *             → navigates to '/frontline/dashboard?tab=documents'
  * `basePath` is the URL prefix used to tell which agent is active.
  * Mirrors each dashboard's TAB_ITEMS (verified against the components).
@@ -89,8 +92,27 @@ const ALL_AGENTS = [
           { label: 'Timeline',   icon: Calendar, path: '/project-manager/dashboard', tab: 'timeline-gantt' },
         ],
       },
-      // Insights + Overview have no per-sub-item legacy tabs — leave flat.
-      { label: 'Insights', icon: LineChart,     path: '/project-manager/dashboard', tab: 'insights' },
+      // Insights' views and the AI tools open by `sub` within their tab; without
+      // these entries Daily Standup, Team Performance, Meeting Notes, Workflow &
+      // SOP and Calendar & Schedule could only be reached by typing the URL.
+      {
+        label: 'Insights', icon: LineChart, path: '/project-manager/dashboard', tab: 'insights',
+        basePathTab: 'insights',
+        children: [
+          { label: 'Project Health',   icon: Activity,  path: '/project-manager/dashboard', tab: 'insights', sub: 'health' },
+          { label: 'Daily Standup',    icon: Calendar,  path: '/project-manager/dashboard', tab: 'insights', sub: 'standup' },
+          { label: 'Team Performance', icon: Users,     path: '/project-manager/dashboard', tab: 'insights', sub: 'team' },
+        ],
+      },
+      {
+        label: 'Tools', icon: Workflow, path: '/project-manager/dashboard', tab: 'ai-tools',
+        basePathTab: 'ai-tools',
+        children: [
+          { label: 'Meeting Notes',       icon: FileText,     path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'meeting-notes' },
+          { label: 'Workflow & SOP',      icon: Workflow,     path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'workflow' },
+          { label: 'Calendar & Schedule', icon: CalendarDays, path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'calendar-schedule' },
+        ],
+      },
       { label: 'Overview', icon: BrainCircuit,  path: '/project-manager/dashboard', tab: 'overview' },
     ],
   },
@@ -147,6 +169,7 @@ const ALL_AGENTS = [
         children: [
           { label: 'Hand-offs', icon: Headphones, path: '/frontline/dashboard', tab: 'handoffs' },
           { label: 'Tickets',   icon: Ticket,     path: '/frontline/dashboard', tab: 'tickets' },
+          { label: 'Meetings',  icon: CalendarDays, path: '/frontline/dashboard', tab: 'meetings' },
         ],
       },
       {

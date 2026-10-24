@@ -29,6 +29,7 @@ from api.views import chatbot
 from api.views import white_label
 from api.views import company_jobs
 from api.views import pm_agent
+from api.views import pm_tool_results
 from api.views import pm_subtasks
 from api.views import pm_deletes
 from api.views import company_dashboard
@@ -293,6 +294,13 @@ urlpatterns = [
     re_path(r'^project-manager/ai/status-report/?$', pm_agent.project_status_report, name='pm_status_report'),
     re_path(r'^project-manager/ai/meeting-notes/?$', pm_agent.meeting_notes, name='pm_meeting_notes'),
     re_path(r'^project-manager/ai/workflow-suggest/?$', pm_agent.workflow_suggest, name='pm_workflow_suggest'),
+    # What the AI tools made for a project, kept: checklists, meeting notes, the schedule plan (pm_tool_results).
+    re_path(r'^project-manager/projects/(?P<project_id>\d+)/checklists/(?P<phase>[\w-]+)/?$', pm_tool_results.saved_checklist, name='pm_saved_checklist'),  # GET
+    re_path(r'^project-manager/tool-results/(?P<result_id>\d+)/items/(?P<index>\d+)/done/?$', pm_tool_results.tick_checklist_item, name='pm_tick_checklist_item'),  # POST
+    re_path(r'^project-manager/projects/(?P<project_id>\d+)/tasks/from-suggestions/?$', pm_tool_results.tasks_from_suggestions, name='pm_tasks_from_suggestions'),  # POST
+    re_path(r'^project-manager/projects/(?P<project_id>\d+)/meeting-notes/?$', pm_tool_results.saved_meeting_notes, name='pm_saved_meeting_notes'),  # GET
+    re_path(r'^project-manager/projects/(?P<project_id>\d+)/schedule-plan/?$', pm_tool_results.saved_schedule_plan, name='pm_saved_schedule_plan'),  # GET
+    re_path(r'^project-manager/projects/(?P<project_id>\d+)/schedule-plan/ics/?$', pm_tool_results.schedule_plan_ics, name='pm_schedule_plan_ics'),  # GET
     re_path(r'^project-manager/ai/calendar-schedule/?$', pm_agent.calendar_schedule, name='pm_calendar_schedule'),
     re_path(r'^project-manager/ai/notifications/scan/?$', pm_agent.scan_notifications, name='pm_scan_notifications'),
     re_path(r'^project-manager/ai/notifications/?$', pm_agent.list_notifications, name='pm_list_notifications'),
@@ -648,6 +656,7 @@ urlpatterns = [
     re_path(r'^operations/documents/?$', operations_agent.list_documents, name='operations_list_documents'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/?$', operations_agent.get_document, name='operations_get_document'),  # GET
     re_path(r'^operations/documents/(?P<document_id>\d+)/reprocess/?$', operations_agent.reprocess_document, name='operations_reprocess_document'),  # POST
+    re_path(r'^operations/documents/(?P<document_id>\d+)/figures/?$', operations_agent.extract_document_figures, name='operations_document_figures'),  # POST
     re_path(r'^operations/documents/(?P<document_id>\d+)/delete/?$', operations_agent.delete_document, name='operations_delete_document'),  # DELETE
     re_path(r'^operations/summaries/upload/?$', operations_agent.upload_and_summarize, name='operations_upload_and_summarize'),  # POST
     re_path(r'^operations/summaries/(?P<summary_id>\d+)/status/?$', operations_agent.get_summary_status, name='operations_summary_status'),  # GET
@@ -1018,6 +1027,7 @@ urlpatterns = [
     re_path(r'^exec-meeting/tasks/?$', exec_meeting_api.task_list, name='exec_task_list'),  # GET, POST
     re_path(r'^exec-meeting/tasks/ai/generate-description/?$', exec_meeting_api.generate_task_description, name='exec_generate_task_description'),  # POST
     re_path(r'^exec-meeting/tasks/ai/prioritize/?$', exec_meeting_api.task_prioritize_ai, name='exec_task_prioritize_ai'),  # POST
+    re_path(r'^exec-meeting/tasks/ai/prioritize/apply/?$', exec_meeting_api.task_prioritize_apply, name='exec_task_prioritize_apply'),  # POST
     re_path(r'^exec-meeting/tasks/ai/workload/?$', exec_meeting_api.task_workload_analysis, name='exec_task_workload'),  # POST
     re_path(r'^exec-meeting/tasks/(?P<task_id>\d+)/?$', exec_meeting_api.task_detail, name='exec_task_detail'),  # GET, PATCH, DELETE
 

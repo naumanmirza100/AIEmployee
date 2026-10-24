@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import * as operationsService from '@/services/operationsAgentService';
+import DocumentFiguresPanel from './DocumentFiguresPanel';
 
 // ─── Markdown components for the Content tab ─────────────────────────
 // Plain extracted text from PDFs / DOCX is converted into markdown by
@@ -366,6 +367,7 @@ const DocumentDetailPage = () => {
           {[
             { value: 'summary', label: 'Summary', icon: Sparkles },
             { value: 'entities', label: 'Entities', icon: Brain },
+            { value: 'figures', label: 'Figures', icon: Hash },
             { value: 'content', label: 'Content', icon: FileText },
           ].map((tab) => (
             <TabsTrigger
@@ -506,6 +508,14 @@ const DocumentDetailPage = () => {
               <p className="text-xs text-white/20 mt-1">Entity extraction works best with text-rich documents.</p>
             </div>
           )}
+        </TabsContent>
+
+        {/* Figures Tab */}
+        <TabsContent id="OPS-docdetail-tabpanel-figures" value="figures" className="mt-6 space-y-4">
+          <DocumentFiguresPanel
+            document={document}
+            onRead={(figures) => setDocument((d) => ({ ...d, metadata: { ...(d.metadata || {}), figures } }))}
+          />
         </TabsContent>
 
         {/* Content Tab */}

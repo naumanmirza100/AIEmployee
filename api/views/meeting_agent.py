@@ -2174,58 +2174,67 @@ def task_prioritize_ai(request):
 
     try:
         agent = _get_agent('task_prioritization', company_user)
-        result = agent.prioritize_tasks(tasks_data, context)
-
-        today = timezone.now().date()
-
-        def _sanitize_suggested_date(raw):
-            """AI dates can land in the past. Pull anything before today up to
-            today. Weekends are allowed, so they are left as-is."""
-            if not raw:
-                return None
-            try:
-                d = datetime.strptime(str(raw)[:10], '%Y-%m-%d').date()
-            except (ValueError, TypeError):
-                return None
-            if d < today:
-                d = today
-            return d
-
-        # Apply AI priorities back to DB. Priority is clamped to low/medium/high
-        # (a stray 'critical' becomes 'high'); suggested dates are sanitized so
-        # they never land in the past or on a weekend. Also fix up the returned
-        # `result` so the UI shows the same clean values.
-        updated = 0
-        for item in result:
-            # Normalise the priority the UI will display.
-            p = str(item.get('priority', '')).strip().lower()
-            if p == 'critical':
-                p = 'high'
-            item['priority'] = p if p in ('low', 'medium', 'high') else 'medium'
-            # Clean the suggested date for display regardless of whether it maps
-            # to a real task (never show a past/weekend date to the user).
-            clean_due = _sanitize_suggested_date(item.get('suggested_due_date'))
-            item['suggested_due_date'] = clean_due.isoformat() if clean_due else None
-            tid = item.get('id')
-            if tid:
-                try:
-                    t = ExecutiveTask.objects.get(id=tid, company_user=company_user)
-                    t.priority = item['priority']
-                    if item.get('ai_reasoning'):
-                        t.ai_reasoning = item['ai_reasoning']
-                    if clean_due and not t.due_date:
-                        t.due_date = clean_due
-                    t.save(update_fields=['priority', 'ai_reasoning', 'due_date'])
-                    updated += 1
-                except ExecutiveTask.DoesNotExist:
-                    pass
-
+        result = [_clean_priority_suggestion(item) for item in agent.prioritize_tasks(tasks_data, context)]
+        # `apply: false` only suggests: the Tasks screen shows the suggestions and applies the ones ticked
+        # (task_prioritize_apply). Without it the suggestions are applied at once, as before.
+        updated = _apply_priority_suggestions(company_user, result) if request.data.get('apply', True) else 0
         return Response({'status': 'success', 'prioritized': result, 'updated_count': updated})
     except KeyServiceError:
         raise
     except Exception as e:
         logger.error("task_prioritize_ai error: %s", e)
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def task_prioritize_apply(request):
+    """Apply the AI suggestions the user ticked: {'items': [{id, priority, ai_reasoning, suggested_due_date}]}."""
+    items = request.data.get('items')
+    if not isinstance(items, list) or not items:
+        return Response({'status': 'error', 'message': 'items must be a non-empty list.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    items = [_clean_priority_suggestion(dict(item)) for item in items if isinstance(item, dict)]
+    return Response({'status': 'success', 'updated_count': _apply_priority_suggestions(request.user, items)})
+
+
+def _clean_priority_suggestion(item):
+    """One AI suggestion made safe to show and to save. Priority is clamped to low/medium/high (a stray 'critical'
+    becomes 'high'), and a suggested date before today is pulled up to today. Weekends are allowed."""
+    p = str(item.get('priority', '')).strip().lower()
+    if p == 'critical':
+        p = 'high'
+    item['priority'] = p if p in ('low', 'medium', 'high') else 'medium'
+    due = None
+    raw = item.get('suggested_due_date')
+    if raw:
+        try:
+            due = max(datetime.strptime(str(raw)[:10], '%Y-%m-%d').date(), timezone.now().date())
+        except (ValueError, TypeError):
+            due = None
+    item['suggested_due_date'] = due.isoformat() if due else None
+    return item
+
+
+def _apply_priority_suggestions(company_user, items):
+    """Save cleaned suggestions onto the user's own tasks, in one read and one write. A suggested date only fills a
+    task that has none. Returns how many tasks changed."""
+    by_id = ExecutiveTask.objects.filter(company_user=company_user).in_bulk(
+        [item['id'] for item in items if str(item.get('id', '')).isdigit()])
+    changed = []
+    for item in items:
+        task = by_id.get(int(item['id'])) if str(item.get('id', '')).isdigit() else None
+        if task is None:
+            continue
+        task.priority = item['priority']
+        if item.get('ai_reasoning'):
+            task.ai_reasoning = item['ai_reasoning']
+        if item['suggested_due_date'] and not task.due_date:
+            task.due_date = item['suggested_due_date']
+        changed.append(task)
+    ExecutiveTask.objects.bulk_update(changed, ['priority', 'ai_reasoning', 'due_date'])
+    return len(changed)
 
 
 @api_view(['POST'])

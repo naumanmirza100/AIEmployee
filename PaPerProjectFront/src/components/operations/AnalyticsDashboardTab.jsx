@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import * as operationsService from '@/services/operationsAgentService';
+import { FiguresTable } from './DocumentFiguresPanel';
 
 // ──────────────────────────────────────────────
 // Theme (matches rest of Operations module — amber)
@@ -346,6 +347,15 @@ const AnalyticsDashboardTab = () => {
                 ))}
               </div>
             ) : <EmptyChart message="No deadlines extracted from summaries yet" />}
+          </ChartCard>
+
+          {/* Figures read from documents with "Figures" on a document's page */}
+          <ChartCard testId="OPS-analytics-chart-figures" title="Figures from documents" icon={Hash}>
+            {data.document_figures?.length ? (
+              <div className="max-h-80 overflow-y-auto">
+                <FiguresTable rows={data.document_figures} showDocument />
+              </div>
+            ) : <EmptyChart message='Open a document and choose "Figures" to pull out its amounts and KPIs' />}
           </ChartCard>
         </>
       )}

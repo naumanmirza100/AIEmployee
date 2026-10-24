@@ -39,6 +39,7 @@ import {
   AddTaskDialog, TaskEditDialog,
 } from './dialogs';
 import { CreateWithAIModal } from './CreateWithAIModal';
+import { PrioritizeWithAIModal } from './PrioritizeWithAIModal';
 import { TasksPanel } from './panels/TasksPanel';
 import { CalendarPanel } from './panels/CalendarPanel';
 import { DocumentsPanel } from './panels/DocumentsPanel';
@@ -86,6 +87,7 @@ const ExecMeetingDashboard = () => {
   // Themed hover tooltip for the tab bar. Handlers live on the TabsTrigger
   // itself (not a HoverTip wrapper) because wrapping a Radix TabsTrigger
   // breaks the tab grid + keyboard nav. { text, top, left } or null.
+  const [showPrioritize, setShowPrioritize] = useState(false);
   const [tabTip, setTabTip] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -1232,6 +1234,7 @@ const ExecMeetingDashboard = () => {
         loadTasks={loadTasks}
         setShowTaskDialog={setShowTaskDialog}
         onCreateWithAI={() => setAiCreateMode('task')}
+        onPrioritizeWithAI={() => setShowPrioritize(true)}
         setExpandedTaskId={setExpandedTaskId} setExpandedSubtasksId={setExpandedSubtasksId}
         setEditingTask={setEditingTask} setSubtaskParentTask={setSubtaskParentTask}
         setConfirmDeleteTaskId={setConfirmDeleteTaskId}
@@ -1382,6 +1385,12 @@ const ExecMeetingDashboard = () => {
       {/* "Create with AI" prompt modal (meeting or task). On parse it closes
           itself, stashes the draft, and opens the matching normal dialog
           pre-filled so the user reviews before saving. */}
+      <PrioritizeWithAIModal
+        open={showPrioritize}
+        tasks={tasks}
+        onClose={() => setShowPrioritize(false)}
+        onApplied={() => loadTasks()}
+      />
       <CreateWithAIModal
         open={!!aiCreateMode}
         mode={aiCreateMode || 'meeting'}

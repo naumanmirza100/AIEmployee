@@ -329,6 +329,8 @@ class MarketingDocument(models.Model):
         ('brief', 'Campaign Brief'),
         ('presentation', 'Presentation'),
         ('analysis', 'Market Analysis'),
+        ('social_posts', 'Social Media Posts'),
+        ('ad_copy', 'Ad Copy'),
     ]
     
     STATUS_CHOICES = [

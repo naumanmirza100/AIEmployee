@@ -6,7 +6,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
-  Loader2, ListChecks, Plus, Trash2, Pencil, RefreshCw, ChevronRight, Wand2,
+  Loader2, ListChecks, Plus, Trash2, Pencil, RefreshCw, ChevronRight, Wand2, Sparkles,
 } from 'lucide-react';
 import {
   CARD_STYLE, ROW_STYLE, priorityBadge, statusBadge, AssigneeAvatars, EmptyState,
@@ -30,7 +30,7 @@ const TASK_PRIORITY_OPTIONS = [
 export const TasksPanel = ({
   tasks, tasksLoading,
   expandedTaskId, expandedSubtasksId,
-  loadTasks, setShowTaskDialog, onCreateWithAI,
+  loadTasks, setShowTaskDialog, onCreateWithAI, onPrioritizeWithAI,
   setExpandedTaskId, setExpandedSubtasksId, setEditingTask,
   setSubtaskParentTask, setConfirmDeleteTaskId,
   selectedTaskIds, toggleSelected, setSelectedTaskIds, bulkDeleteTasks, bulkDeleting,
@@ -55,6 +55,13 @@ export const TasksPanel = ({
               <RefreshCw className={`h-3.5 w-3.5 ${tasksLoading ? 'animate-spin' : ''}`} />
             </Button>
           </HoverTip>
+          {onPrioritizeWithAI && (
+            <HoverTip tip="Let AI suggest priorities for your open tasks; you choose which to apply">
+              <Button size="sm" variant="outline" onClick={onPrioritizeWithAI} data-testid="EXEC-tasks-prioritize-ai-btn" className="border-sky-400/40 bg-sky-400/10 text-sky-200 hover:bg-sky-400/20 hover:text-sky-100">
+                <Sparkles className="h-4 w-4 mr-1" /> Prioritize with AI
+              </Button>
+            </HoverTip>
+          )}
           {onCreateWithAI && (
             <HoverTip tip="Describe a task in plain language and let AI draft it">
               <Button size="sm" variant="outline" onClick={onCreateWithAI} className="border-violet-400/40 bg-violet-400/10 text-violet-200 hover:bg-violet-400/20 hover:text-violet-100">

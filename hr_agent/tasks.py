@@ -620,14 +620,15 @@ def process_hr_scheduled_notifications():
                     fail_silently=False,
                 )
                 ok = True
-            elif channel in ('slack', 'teams'):
+            elif channel in ('slack', 'teams', 'in_app'):
                 from api.views.hr_agent import _dispatch_hr_notification
                 company = template.company
                 ok, _used = _dispatch_hr_notification(
                     template, recipient_email, subject, body, company,
                 )
                 if not ok:
-                    err = f"{channel} send returned False (check {channel}_webhook_url on company)"
+                    err = ("in-app: nobody in the company signs in with this address" if channel == 'in_app'
+                           else f"{channel} send returned False (check {channel}_webhook_url on company)")
             else:
                 err = f"Channel '{channel}' not implemented for hr_agent"
         except Exception as exc:

@@ -42,6 +42,7 @@ import {
   Users,
   AlertTriangle,
   X,
+  Sparkles,
 } from 'lucide-react';
 import {
   Chart as ChartJS,
@@ -61,6 +62,7 @@ import SequenceManagementPage from './SequenceManagementPage';
 import EmailSendingStatusPage from './EmailSendingStatusPage';
 import AddEmailAccountModal from './AddEmailAccountModal';
 import LeadsUploadFields from './LeadsUploadFields';
+import CampaignOptimizeDialog from './CampaignOptimizeDialog';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
@@ -230,6 +232,7 @@ const CampaignDetail = () => {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
+  const [optimizeOpen, setOptimizeOpen] = useState(false);
   const [launchOpen, setLaunchOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -857,6 +860,12 @@ const CampaignDetail = () => {
 
         <TabsContent value="overview" className="space-y-4">
           <div className="flex flex-wrap justify-end gap-2">
+            <HoverTip tip="Advice from this campaign's results on getting more replies. Nothing is changed.">
+              <Button size="sm" variant="outline" onClick={() => setOptimizeOpen(true)} data-testid="MKT-optimize">
+                <Sparkles className="mr-2 h-4 w-4" />
+                Optimize with AI
+              </Button>
+            </HoverTip>
             <HoverTip tip={campaign.email_account_email ? `Sending emails from ${campaign.email_account_email}, click to change` : 'Set the email account for this campaign'}>
               <Button
                 size="sm"
@@ -1290,6 +1299,8 @@ const CampaignDetail = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <CampaignOptimizeDialog open={optimizeOpen} onClose={() => setOptimizeOpen(false)} campaignId={campaign.id} />
 
       {/* Launch modal */}
       <Dialog open={launchOpen} onOpenChange={setLaunchOpen}>

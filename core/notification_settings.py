@@ -118,6 +118,10 @@ TOPICS = (
     Topic('interviews_booked', 'A candidate books an interview',
           'A candidate picks a time for an interview you run.', 'recruitment_agent',
           kinds=('recruitment_interview_booked',), email_default=True),
+    Topic('pipeline_digest', 'Daily recruitment reminders',
+          'Once a day: candidates on hold for over 3 days, online interviews in the next 24 hours with no meeting '
+          'link, and interviews done with no outcome recorded.', 'recruitment_agent',
+          kinds=('recruitment_pipeline_digest',)),
     Topic('exec_meetings', 'Executive meeting invitations and changes',
           'You are invited to an executive meeting, its time or details change, or you are taken off it.',
           'exec_meeting_agent', email_default=True, in_app=False),

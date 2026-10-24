@@ -1,6 +1,6 @@
 // Project Manager Agent Service
 
-import { companyApi } from './companyAuthService';
+import { companyApi, getCompanyToken } from './companyAuthService';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { streamAnswer } from '@/utils/ndjsonStream';
 
@@ -411,6 +411,45 @@ export const workflowSuggest = async (projectId, action = 'suggest', phase = 'de
   }
 };
 
+// ---------- What the AI tools made, kept (api/views/pm_tool_results.py) ----------
+
+/** A phase's saved checklist, or null. */
+export const getSavedChecklist = async (projectId, phase) =>
+  companyApi.get(`/project-manager/projects/${projectId}/checklists/${encodeURIComponent(phase)}`);
+
+/** Tick an item of a saved checklist off, or untick it. */
+export const tickChecklistItem = async (resultId, index, done) =>
+  companyApi.post(`/project-manager/tool-results/${resultId}/items/${index}/done`, { done });
+
+/** Create project tasks from suggestions: [{title, description?, priority?, assignee_name?, due?}]. */
+export const tasksFromSuggestions = async (projectId, items) =>
+  companyApi.post(`/project-manager/projects/${projectId}/tasks/from-suggestions`, { items });
+
+/** The project's saved meeting notes (newest first), or one with its text when `id` is given. */
+export const getSavedMeetingNotes = async (projectId, id = null) =>
+  companyApi.get(`/project-manager/projects/${projectId}/meeting-notes${id ? `?id=${id}` : ''}`);
+
+/** The project's latest schedule plan, or null. */
+export const getSavedSchedulePlan = async (projectId) =>
+  companyApi.get(`/project-manager/projects/${projectId}/schedule-plan`);
+
+/** Download the latest plan as an .ics: the person's own work, or the whole team's. */
+export const downloadSchedulePlanIcs = async (projectId, { everyone = false } = {}) => {
+  const url = `${API_BASE_URL}/project-manager/projects/${projectId}/schedule-plan/ics${everyone ? '?everyone=1' : ''}`;
+  const res = await fetch(url, { headers: { Authorization: `Token ${getCompanyToken()}` } });
+  if (!res.ok) {
+    let message = 'Download failed';
+    try { message = (await res.json()).message || message; } catch { /* not JSON */ }
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `plan-${projectId}${everyone ? '-team' : ''}.ics`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
 /**
  * Calendar Schedule
  */
@@ -692,6 +731,12 @@ export default {
   meetingNotes,
   workflowSuggest,
   calendarSchedule,
+  getSavedChecklist,
+  tickChecklistItem,
+  tasksFromSuggestions,
+  getSavedMeetingNotes,
+  getSavedSchedulePlan,
+  downloadSchedulePlanIcs,
   scanNotifications,
   listNotifications,
   markNotificationsRead,

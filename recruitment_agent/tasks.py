@@ -193,3 +193,21 @@ def check_and_send_followup_emails():
         logger.error(f"Error in check_and_send_followup_emails: {str(e)}", exc_info=True)
         return {'followups_sent': 0, 'reminders_sent': 0, 'errors': 1}
 
+try:
+    from celery import shared_task
+except Exception:  # pragma: no cover - celery optional in some envs
+    shared_task = None
+
+
+def _pipeline_digests_impl():
+    from .pipeline_digest import send_pipeline_digests
+    return send_pipeline_digests()
+
+
+if shared_task is not None:
+    @shared_task(name='recruitment_agent.tasks.send_pipeline_digests')
+    def send_pipeline_digests():
+        return _pipeline_digests_impl()
+else:  # pragma: no cover
+    def send_pipeline_digests():
+        return _pipeline_digests_impl()

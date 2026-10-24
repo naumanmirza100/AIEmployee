@@ -783,6 +783,8 @@ def process_inbound_email(self, payload: dict):
                     # Keep denormalized counters fresh after the insert.
                     link_ticket_to_contact(ticket, contact)
                 logger.info("Inbound email → new ticket %s for company %s", ticket.id, company.id)
+                from Frontline_agent import ticket_automation
+                ticket_automation.queue(ticket, 'email')
             else:
                 # Reply on an existing thread — re-open + resume SLA if needed.
                 #
@@ -1243,3 +1245,17 @@ def escalate_near_breach_tickets():
         logger.info("escalate_near_breach_tickets: escalated %d tickets (window=%dm)", escalated, window_minutes)
     return {'escalated': escalated, 'window_minutes': window_minutes,
             'deadline': deadline.isoformat()}
+
+
+@shared_task(name='Frontline_agent.tasks.handle_customer_ticket', bind=True, max_retries=1, default_retry_delay=60)
+def handle_customer_ticket(self, ticket_id: int, channel: str):
+    """Classify a new customer ticket and, where the company allows it, answer it from the knowledge base
+    (Frontline_agent/ticket_automation.py)."""
+    from core.api_key_service import KeyServiceError
+    from Frontline_agent import ticket_automation
+    try:
+        return ticket_automation.handle(ticket_id, channel)
+    except KeyServiceError as exc:
+        # No AI key or no tokens left: the ticket stays as it came in, for a person.
+        logger.info("Ticket automation skipped for ticket %s: %s", ticket_id, exc)
+        return {'classified': False, 'resolved': False, 'skipped': 'ai_unavailable'}

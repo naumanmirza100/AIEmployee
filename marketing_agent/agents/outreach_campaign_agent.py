@@ -1476,8 +1476,8 @@ Generate exactly {num_leads} leads in this JSON format. Ensure all data is reali
             if campaign.owner_id != user_id:
                 return {'success': False, 'error': 'Access denied'}
             
-            # Get performance data
-            performance = self._get_campaign_performance(campaign)
+            # Campaigns are email only: read what the emails did, not ad impressions and clicks
+            performance = self._email_performance(campaign)
             
             # Generate optimization recommendations
             optimization_plan = self._generate_optimization_plan(campaign, performance, context)
@@ -1932,28 +1932,110 @@ Assess:
             'is_on_schedule': len(timing_issues) == 0
         }
     
+    # What counts as sent and as opened, as on the campaign page
+    _SENT_STATUSES = ('sent', 'delivered', 'opened', 'clicked')
+    _OPENED_STATUSES = ('opened', 'clicked')
+
+    def _email_performance(self, campaign: Campaign) -> Dict:
+        """What the campaign's emails have done so far, overall and for each email in the sequence.
+
+        A few grouped queries whatever the size of the campaign: the sends by email, the replies by email and kind,
+        the templates, and two counts for the leads.
+        """
+        from django.db.models import Count, Q
+        from django.utils.html import strip_tags
+
+        sends = EmailSendHistory.objects.filter(campaign=campaign, email_template__isnull=False)
+        by_email = {row['email_template_id']: row for row in sends.order_by().values('email_template_id').annotate(
+            sent=Count('id', filter=Q(status__in=self._SENT_STATUSES)),
+            opened=Count('id', filter=Q(status__in=self._OPENED_STATUSES)),
+            clicked=Count('id', filter=Q(status='clicked')),
+            bounced=Count('id', filter=Q(status='bounced')),
+            failed=Count('id', filter=Q(status='failed')))}
+
+        replies_by_email, reply_kinds = {}, {}
+        for row in (Reply.objects.filter(campaign=campaign).order_by()
+                    .values('triggering_email__email_template_id', 'interest_level').annotate(n=Count('id'))):
+            template_id = row['triggering_email__email_template_id']
+            replies_by_email[template_id] = replies_by_email.get(template_id, 0) + row['n']
+            kind = row['interest_level'] or 'not_analyzed'
+            reply_kinds[kind] = reply_kinds.get(kind, 0) + row['n']
+
+        emails = []
+        for template in campaign.email_templates.filter(is_active=True).only(
+                'id', 'campaign_id', 'subject', 'text_content', 'html_content', 'followup_sequence_number',
+                'followup_delay_days'):
+            stats = by_email.get(template.id, {})
+            words = (template.text_content or strip_tags(template.html_content or '')).split()
+            emails.append({
+                'subject': template.subject, 'step': template.followup_sequence_number,
+                'wait_days': template.followup_delay_days, 'body_start': ' '.join(words[:90]),
+                'sent': stats.get('sent', 0), 'opened': stats.get('opened', 0), 'clicked': stats.get('clicked', 0),
+                'replies': replies_by_email.get(template.id, 0),
+            })
+
+        def total(key):
+            return sum(row[key] for row in by_email.values())
+
+        sent, opened, clicked = total('sent'), total('opened'), total('clicked')
+        replies = sum(reply_kinds.values())
+        leads = campaign.leads.count()
+        return {
+            'leads': leads,
+            'leads_not_emailed': max(leads - sends.values('lead_id').distinct().count(), 0),
+            'sent': sent, 'opened': opened, 'clicked': clicked,
+            'bounced': total('bounced'), 'failed': total('failed'),
+            'replies': replies, 'reply_kinds': reply_kinds,
+            'open_rate': round(opened / sent * 100, 1) if sent else 0,
+            'click_rate': round(clicked / sent * 100, 1) if sent else 0,
+            'reply_rate': round(replies / sent * 100, 1) if sent else 0,
+            'emails': emails,
+        }
+
+    @staticmethod
+    def _describe_email(number: int, email: Dict) -> str:
+        if email['step']:
+            when = 'follow-up %d, sent %d days after the previous one' % (email['step'], email['wait_days'])
+        else:
+            when = 'first email'
+        return ('%d. "%s" (%s): sent %d, opened %d, clicked %d, replies %d\n   Starts: %s' % (
+            number, email['subject'], when, email['sent'], email['opened'], email['clicked'], email['replies'],
+            email['body_start'] or '(empty)'))
+
     def _generate_optimization_plan(self, campaign: Campaign, performance: Dict,
                                     context: Optional[Dict]) -> Dict:
-        """Generate optimization recommendations"""
-        prompt = f"""Optimize this campaign based on current performance:
+        """Advice on getting more replies, from what the campaign's emails have done. Nothing is changed."""
+        p = performance
+        kinds = p.get('reply_kinds') or {}
+        targeting = ', '.join('%s: %s' % (label, value) for label, value in (
+            ('industry', campaign.industry), ('location', campaign.location), ('company size', campaign.company_size))
+            if value) or 'not set'
+        emails = '\n'.join(self._describe_email(i, e) for i, e in enumerate(p.get('emails') or [], 1))
+        prompt = f"""Advise the owner of this email outreach campaign how to get more positive replies.
 
 Campaign: {campaign.name}
-Channels: {', '.join(campaign.channels) if campaign.channels else 'Multi-channel'}
-Current Performance:
-- Impressions: {performance.get('total_impressions', 0):,.0f}
-- Clicks: {performance.get('total_clicks', 0):,.0f}
-- Conversions: {performance.get('total_conversions', 0):,.0f}
-- CTR: {performance.get('ctr', 0):.2f}%
-- Conversion Rate: {performance.get('conversion_rate', 0):.2f}%
+Goal: {campaign.description or 'not given'}
+Targeting: {targeting}
+Leads: {p.get('leads', 0)} ({p.get('leads_not_emailed', 0)} not emailed yet); goal {campaign.target_leads or 'not set'} leads and {campaign.target_conversions or 'not set'} positive replies
 
-Provide optimization recommendations:
-1. Performance improvements by channel
-2. Targeting optimizations
-3. Creative and messaging improvements
-4. Timing and scheduling optimizations
-5. A/B testing opportunities
-6. Priority actions with expected impact"""
-        
+Results so far:
+- Emails sent: {p.get('sent', 0)} (failed {p.get('failed', 0)}, bounced {p.get('bounced', 0)})
+- Opened: {p.get('opened', 0)} ({p.get('open_rate', 0)}%). Opens are approximate: many mail apps block the tracking image.
+- Clicked a link: {p.get('clicked', 0)} ({p.get('click_rate', 0)}%)
+- Replies: {p.get('replies', 0)} ({p.get('reply_rate', 0)}% of sent): interested {kinds.get('positive', 0)}, asked for information {kinds.get('requested_info', 0)}, neutral {kinds.get('neutral', 0)}, objection {kinds.get('objection', 0)}, not interested {kinds.get('negative', 0)}, unsubscribed {kinds.get('unsubscribe', 0)}
+
+The emails in the sequence:
+{emails or 'No emails written yet.'}
+
+Only suggest changes the owner can make in this tool: rewrite an email's subject or text, change how long to wait before a follow-up, add or remove a follow-up, change the targeting, add leads, or pause the campaign. It is email only: do not suggest ads, social media, landing pages or A/B tests.
+If fewer than 20 emails have been sent, say the numbers are too few to judge and advise on the emails themselves instead.
+
+Answer in markdown, under 350 words, with these sections:
+## What the numbers say
+## Changes to make
+(numbered, most impact first; name the email each change is for, and give a rewritten subject line where you suggest one)
+## What to watch next"""
+
         try:
             optimization_text = self._call_llm_for_reasoning(
                 prompt,

@@ -93,6 +93,60 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             logger.error(f"Error in DocumentAuthoringAgent.process: {str(e)}", exc_info=True)
             return {'success': False, 'error': str(e)}
     
+    # Short copy rather than documents. They get their own prompt: the document rules (sections in order, tables, an end
+    # marker, "detailed in-depth analysis") suit a strategy or a report but would bury a social post or an ad.
+    COPY_PLATFORMS = {
+        'social_posts': 'LinkedIn, Facebook, Instagram and X',
+        'ad_copy': 'Google Search, Facebook / Instagram and LinkedIn',
+    }
+    COPY_TITLES = {'social_posts': 'Social media posts', 'ad_copy': 'Ad copy'}
+    COPY_INSTRUCTIONS = {
+        'social_posts': """For each platform, a "## <platform>" heading, then 3 numbered posts that fit it: LinkedIn up to 1,300
+characters and professional; Facebook up to 500; Instagram up to 2,200 with a hook in the first line; X up to 280
+characters including hashtags. End each post with 2 to 4 relevant hashtags and then, on its own line in italics, an idea
+for the image to post with it.""",
+        'ad_copy': """For each platform, a "## <platform>" heading and a markdown table of the variants:
+- Google Search: 5 headlines of at most 30 characters, then 3 descriptions of at most 90 characters.
+- Facebook / Instagram: 3 variants, each with primary text (at most 125 characters), a headline (at most 40) and a
+  call-to-action button (Learn more, Sign up, Book now, Contact us or Get offer).
+- LinkedIn: 2 variants, each with intro text (at most 150 characters) and a headline (at most 70).
+Keep strictly to the character limits.""",
+    }
+    COPY_SYSTEM_PROMPT = """You are a marketing copywriter. You write short, specific copy that sounds like a real business,
+not like an AI: no hype words (revolutionary, game-changing, unlock, elevate), no invented facts, prices, statistics,
+awards or customer names."""
+
+    def _write_copy(self, document_type: str, document_data: Dict, campaign: Optional[Campaign]) -> str:
+        """Social media posts or ad copy, for the campaign if one is chosen, steered by the user's notes."""
+        notes = (document_data.get('requirements') or document_data.get('notes') or '').strip()
+        facts = []
+        if campaign:
+            for label, value in (('Campaign', campaign.name), ('About', campaign.description),
+                                 ('Goals', campaign.goals), ('Audience', campaign.target_audience),
+                                 ('Industry', campaign.industry), ('Location', campaign.location),
+                                 ('Age range', campaign.age_range), ('Interests', campaign.interests)):
+                if value:
+                    facts.append('%s: %s' % (label, value))
+        kind = 'social media posts' if document_type == 'social_posts' else 'ad copy'
+        language = (campaign.language if campaign else '') or 'English'
+        what = '\n'.join(facts) or 'No campaign chosen: use the notes.'
+        prompt = f"""Write {kind} titled "{document_data.get('title') or kind.capitalize()}".
+
+What to promote:
+{what}
+Notes from the user: {notes or 'none'}
+
+Platforms: the ones the notes name; if they name none, {self.COPY_PLATFORMS[document_type]}.
+Language: {language}.
+
+{self.COPY_INSTRUCTIONS[document_type]}
+
+Only use facts given above. Where a detail such as a price, date or link is not given, write the copy without it
+rather than inventing one or leaving a [placeholder]. Answer in markdown with no introduction and no closing remarks."""
+        raw = self._call_llm_for_writing(prompt=prompt, system_prompt=self.COPY_SYSTEM_PROMPT, temperature=0.7,
+                                         max_tokens=3000)
+        return self._clean_markdown_headings(raw)
+
     def _create_or_generate_document(self, action: str, user_id: int, document_type: str, document_data: Dict, campaign_id: Optional[int], context: Dict) -> Dict:
         """Create or generate a document"""
         try:
@@ -116,6 +170,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             except Campaign.DoesNotExist:
                 return {'success': False, 'error': 'Campaign not found'}
         
+        title = document_data.get('title', self.COPY_TITLES.get(document_type, f'{document_type.title()} Document'))
+
         # Generate document content
         content = self._generate_document_content(document_type, document_data, campaign, context)
         
@@ -123,14 +179,13 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
         if action == 'generate':
             return {
                 'success': True,
-                'title': document_data.get('title', f'{document_type.title()} Document'),
+                'title': title,
                 'document_type': document_type,
                 'content': content,
                 'message': 'Document generated successfully (preview only, not saved)'
             }
         
         # If action is 'create', save to database
-        title = document_data.get('title', f'{document_type.title()} Document')
         
         document = MarketingDocument.objects.create(
             document_type=document_type,
@@ -152,6 +207,8 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
     
     def _generate_document_content(self, document_type: str, document_data: Dict, campaign: Optional[Campaign], context: Dict) -> str:
         """Generate document content using AI"""
+        if document_type in self.COPY_INSTRUCTIONS:
+            return self._write_copy(document_type, document_data, campaign)
         prompt = self._build_document_prompt(document_type, document_data, campaign, context)
 
         def generate_once(gen_prompt: str, temperature: float = 0.35) -> str:

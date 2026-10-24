@@ -146,6 +146,10 @@ export const deleteDocument = async (documentId) => {
 };
 
 /** Re-run indexing for a failed/stuck document (from its stored text). */
+/** Pull the document's key figures into a table kept on it. Returns { figures: {items, extracted_at}, count }. */
+export const extractDocumentFigures = async (documentId) =>
+  companyApi.post(`/operations/documents/${documentId}/figures`, {});
+
 export const reprocessDocument = async (documentId) => {
   try {
     return await companyApi.post(`/operations/documents/${documentId}/reprocess`, {});
