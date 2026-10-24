@@ -1106,6 +1106,14 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 6 * 3600},
     },
 
+    # Recruitment: each recruiter's bell gets one item a day for what waits on them (candidates on hold, online
+    # interviews with no link, interviews with no outcome) - daily, 03:15 UTC (morning in Pakistan).
+    'recruitment-pipeline-digest': {
+        'task': 'recruitment_agent.tasks.send_pipeline_digests',
+        'schedule': _crontab(hour=3, minute=15),
+        'options': {'expires': 6 * 3600},
+    },
+
     # Auto-pause expired campaigns - daily, at 00:05 UTC
     'auto-pause-expired-campaigns': {
         'task': 'marketing_agent.tasks.auto_pause_expired_campaigns_task',
