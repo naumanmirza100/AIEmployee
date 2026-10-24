@@ -422,6 +422,36 @@ def reprocess_document(request, document_id):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def extract_document_figures(request, document_id):
+    """Pull the document's key figures (amounts, KPIs, periods) out into a table kept on it (operations_agent/figures.py)."""
+    try:
+        from operations_agent import figures
+        from operations_agent.agents.document_processing_agent import DocumentProcessingAgent
+
+        company = request.user.company
+        doc = OperationsDocument.objects.filter(company=company, pk=document_id).first()
+        if not doc:
+            return Response({'status': 'error', 'message': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not (doc.parsed_text or '').strip():
+            return Response({'status': 'error', 'message': 'This document has no text to read figures from.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        agent = DocumentProcessingAgent()
+        agent.company_id = company.id
+        agent.agent_key_name = 'operations_agent'
+        items = figures.extract(doc, agent)
+        return Response({'status': 'success', 'figures': doc.metadata.get(figures.KEY), 'count': len(items)})
+    except KeyServiceError:
+        raise
+    except Exception as e:
+        logger.error(f'Extract figures error: {e}', exc_info=True)
+        return Response({'status': 'error', 'message': 'Could not read the figures. Try again.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ──────────────────────────────────────────────
 # Summarization Endpoints
 # ──────────────────────────────────────────────
@@ -1964,10 +1994,15 @@ def operations_analytics(request):
                 'tokens': data['tokens'],
             })
 
+        # Figures pulled out of documents with "Figures" (operations_agent/figures.py); not limited to the range.
+        from operations_agent.figures import recent_figures
+        document_figures = recent_figures(company)
+
         # ── Compose response ──────────────────────
         return Response({
             'status': 'success',
             'range': rng,
+            'document_figures': document_figures,
             'kpis': {
                 'total_documents': total_docs,
                 'processed_documents': processed_docs,
