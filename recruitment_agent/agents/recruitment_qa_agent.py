@@ -873,7 +873,13 @@ FORMATTING:
             # an older table the apply form no longer writes to, so the answer was nearly always 0.
             job_applications = JobApplication.objects.filter(job=job)
             job_app_counts = dict(job_applications.order_by().values_list('status').annotate(cnt=Count('id')))
-            job_apps_this_week = job_applications.filter(applied_at__gte=timezone.now() - timedelta(days=7)).count()
+            week_ago = timezone.now() - timedelta(days=7)
+            job_apps_this_week = job_applications.filter(applied_at__gte=week_ago).count()
+            # Everyone who reached the job in the last 7 days: CVs added (an analysed application has one) plus
+            # applications still waiting for analysis. "How many applications this week?" was answered with
+            # all-time counts, as no date was in the prompt.
+            job_received_7d = (CVRecord.objects.filter(job_description=job, created_at__gte=week_ago).count()
+                               + job_applications.filter(cv_records__isnull=True, applied_at__gte=week_ago).count())
             job_app_details = []
             for app in job_applications.order_by('-applied_at')[:20]:
                 job_app_details.append({
@@ -936,6 +942,7 @@ FORMATTING:
                 "career_app_counts": job_app_counts,
                 "career_app_details": job_app_details,
                 "applications_this_week": job_apps_this_week,
+                "received_last_7_days": job_received_7d,
                 "time_slots": job_time_slots,
                 "interview_setting": {
                     "start_time": str(job_interview_setting.start_time) if job_interview_setting else "",
@@ -1036,8 +1043,13 @@ FORMATTING:
         interview_outcomes = data.get("interview_outcome_counts", {})
         app_counts = data.get("career_application_counts", {})
 
+        today = timezone.localdate()
         lines = [
             "=== DIRECT FACTS (use these EXACT numbers when answering) ===",
+            f"TODAY: {today.isoformat()} ({today.strftime('%A')})",
+            f"CANDIDATES_RECEIVED_LAST_7_DAYS: {sum(j.get('received_last_7_days', 0) for j in jobs)} "
+            "(CVs added and applications, all jobs; use this and each job's 'Received in the last 7 days' "
+            "for 'this week' questions)",
             f"TOTAL_JOBS: {total_jobs}",
             f"ACTIVE_JOBS: {active_jobs}",
             f"INACTIVE_JOBS: {inactive_jobs}",
@@ -1096,6 +1108,7 @@ FORMATTING:
                 f"awaiting AI analysis: {j.get('pending_count', 0)}) | "
                 f"Interviews: {interv} | Scores: avg={ss.get('avg',0)} max={ss.get('max',0)} min={ss.get('min',0)}"
             )
+            lines.append(f"Received in the last 7 days: {j.get('received_last_7_days', 0)}")
             lines.append(f"Decisions: INTERVIEW={jqc.get('INTERVIEW',0)} HOLD={jqc.get('HOLD',0)} REJECT={jqc.get('REJECT',0)}")
             if desc:
                 lines.append(f"Description: {desc}")
@@ -1644,6 +1657,22 @@ FORMATTING:
                     f"Decision: {top.get('qualification_decision', 'N/A')})."
                 )
             return "No candidates found in the system."
+
+        # ════════════════════════════════════════════════════════════
+        # GLOBAL: What came in this week, per job
+        # ════════════════════════════════════════════════════════════
+        # Before the job lists below: "How many applications did we get this week, and for which jobs?"
+        # matched "which ... job" and was answered with every job and its all-time count.
+        if (any(x in q for x in ("this week", "last 7 days", "past 7 days", "past week"))
+                and any(x in q for x in ("application", "applied", "applicant", "candidate", "cv"))):
+            received = sorted(((j.get("title"), j.get("received_last_7_days", 0)) for j in jobs
+                               if j.get("received_last_7_days")), key=lambda tn: -tn[1])
+            if not received:
+                return "No applications or CVs came in during the last 7 days."
+            total = sum(n for _, n in received)
+            listed = '\n'.join(f"- **{t}**: {n}" for t, n in received)
+            return (f"In the last 7 days **{total}** application(s) and CV(s) came in, for "
+                    f"{len(received)} job(s):\n{listed}")
 
         # ════════════════════════════════════════════════════════════
         # GLOBAL: Job counts

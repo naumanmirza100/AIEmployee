@@ -3,6 +3,7 @@ AI Graph Generator Agent for Recruitment Dashboard
 Uses LLM to interpret natural language prompts and generate appropriate visualizations
 """
 import json
+import re
 import logging
 from typing import Any, Dict, List, Optional
 from datetime import timedelta
@@ -314,11 +315,17 @@ class GraphGeneratorAgent:
         except Exception as e:
             logger.warning(f"Error fetching interview settings: {e}")
         
-        # Candidates by job
+        # Candidates by job, and by job and decision
+        data["candidates"]["by_job_and_decision"] = {}
         for job in jobs[:20]:
             count = cv_records.filter(job_description=job).count()
             if count > 0:
                 data["candidates"]["by_job"][job.title[:40]] = count
+                decisions = dict(cv_records.filter(job_description=job).exclude(qualification_decision__isnull=True)
+                                 .exclude(qualification_decision='').order_by()
+                                 .values_list('qualification_decision').annotate(n=Count('id')))
+                if decisions:
+                    data["candidates"]["by_job_and_decision"][job.title[:40]] = decisions
         
         # Time series data - Daily (last 30 days)
         # For SQL Server compatibility, we clear ordering and use values() before annotate()
@@ -430,7 +437,10 @@ class GraphGeneratorAgent:
         """
         # Fetch current data
         recruitment_data = self._fetch_recruitment_data()
-        
+        per_job = self._decisions_per_job_chart(prompt, recruitment_data)
+        if per_job:
+            return per_job
+
         # Build system prompt for LLM
         system_prompt = """You are an AI assistant that generates chart configurations for a recruitment dashboard.
 Your task is to interpret the user's natural language request and return a JSON configuration for a chart.
@@ -585,6 +595,38 @@ INTERVIEW SETTINGS (Time Slots Configuration):
             logger.error(f"Error generating graph: {e}")
             return self._generate_fallback_chart(prompt, recruitment_data)
     
+    def _decisions_per_job_chart(self, prompt: str, data: Dict) -> Optional[Dict[str, Any]]:
+        """"Candidates per job by decision": one bar per job and decision, built here rather than by the AI.
+
+        A chart holds one series, and the AI was given decision totals and job totals apart, so it drew three
+        bars (Interview, Hold, Reject) for all jobs together. Bars are labelled "<job> · <decision>", a job's
+        bars side by side.
+        """
+        p = prompt.lower()
+        if not (re.search(r'\b(per|by|for each|each)\s+job', p) and re.search(r'decision|interview.*hold|hold.*reject', p)):
+            return None
+        per_job = data["candidates"].get("by_job_and_decision") or {}
+        if not per_job:
+            return None
+        order = ['INTERVIEW', 'HOLD', 'REJECT']
+        chart_data = {}
+        for job, decisions in sorted(per_job.items(), key=lambda kv: -sum(kv[1].values())):
+            for decision in sorted(decisions, key=lambda d: order.index(d) if d in order else len(order)):
+                if decisions[decision]:
+                    chart_data[f'{job} · {decision.title()}'] = decisions[decision]
+        busiest = max(per_job.items(), key=lambda kv: sum(kv[1].values()))
+        chart_type = 'pie' if 'pie' in p else 'bar'
+        chart = {'type': chart_type, 'title': 'Candidates per job by decision', 'data': chart_data,
+                 'colors': ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899'], 'color': '#10b981'}
+        if chart_type == 'bar':
+            chart['orientation'] = 'vertical' if re.search(r'vertical|column|histogram', p) else 'horizontal'
+        return {
+            'chart': chart,
+            'insights': (f'{busiest[0]} has the most candidates ({sum(busiest[1].values())}): '
+                         + ', '.join(f'{n} {d.title()}' for d, n in busiest[1].items()) + '.'),
+            'raw_data': data,
+        }
+
     def _generate_fallback_chart(self, prompt: str, data: Dict) -> Dict[str, Any]:
         """Generate a fallback chart when LLM fails."""
         prompt_lower = prompt.lower()

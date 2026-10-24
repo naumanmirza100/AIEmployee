@@ -61,3 +61,16 @@ class ApplicationCountTests(TestCase):
         answer = self.answer('Show the applications for the Flutter Developer job')
         self.assertIn('Person1 Khan', answer)
         self.assertNotIn('No applications', answer)
+
+    def test_this_week_across_jobs_names_each_job_and_its_count(self):
+        # "for which jobs" used to match the job list, which gave every job's all-time count.
+        answer = self.answer('How many applications did we get this week, and for which jobs?')
+        self.assertIn('**3** application(s) and CV(s) came in, for 2 job(s)', answer)
+        self.assertIn('**Flutter Developer**: 2', answer)
+        self.assertIn('**QA Automation Engineer**: 1', answer)
+
+    def test_the_ai_is_given_today_and_the_weeks_counts(self):
+        context = self.agent._build_context(self.data)
+        self.assertIn(f'TODAY: {timezone.localdate().isoformat()}', context)
+        self.assertIn('CANDIDATES_RECEIVED_LAST_7_DAYS: 3', context)
+        self.assertIn('Received in the last 7 days: 2', context)
