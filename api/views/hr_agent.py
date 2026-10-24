@@ -1830,6 +1830,8 @@ def create_hr_notification_template(request):
                     f"Recognised events: {', '.join(sorted(_HR_NOTIFICATION_KNOWN_EVENTS))}."
                 ),
             }, status=status.HTTP_400_BAD_REQUEST)
+    if (d.get('channel') or 'email') not in _HR_SENDABLE_CHANNELS:
+        return Response({'status': 'error', 'message': _HR_SMS_REFUSED}, status=status.HTTP_400_BAD_REQUEST)
     t = HRNotificationTemplate.objects.create(
         company=company, name=name, body=body,
         subject=d.get('subject') or '',
@@ -1899,7 +1901,10 @@ def update_hr_notification_template(request, template_id):
         t.subject = str(d.get('subject') or '')[:500]
         dirty.append('subject')
     if 'channel' in d:
-        t.channel = str(d.get('channel') or 'email').strip()[:20]
+        channel = str(d.get('channel') or 'email').strip()[:20]
+        if channel not in _HR_SENDABLE_CHANNELS:
+            return Response({'status': 'error', 'message': _HR_SMS_REFUSED}, status=status.HTTP_400_BAD_REQUEST)
+        t.channel = channel
         dirty.append('channel')
     if 'notification_type' in d:
         t.notification_type = str(d.get('notification_type') or 'system').strip()[:50]
@@ -7197,6 +7202,38 @@ def _send_hr_notification_teams(company, subject, body):
         return False
 
 
+# The channels an HR notification can go out on. 'sms' is a model choice, but there is no SMS provider: the screen
+# offered it and the server dropped every notification sent on it, so a template can no longer be saved with it.
+_HR_SENDABLE_CHANNELS = ('email', 'in_app', 'slack', 'teams')
+_HR_SMS_REFUSED = "SMS can't be sent yet: there is no SMS provider. Choose Email, In-app, Slack or Teams."
+
+
+def _send_hr_notification_in_app(company, recipient_email, subject, body):
+    """'In-app' means the recipient's bell: My Space's for a member of staff, the dashboard's for a dashboard login.
+
+    The person is found by their work email (the HR record links both kinds of login) and by the login's own
+    address. False when nobody in the company signs in with it. This channel used to be dropped silently.
+    """
+    from django.contrib.auth.models import User
+    from core.notification_utils import notify_company_users, notify_employees
+    email = (recipient_email or '').strip()
+    if not email:
+        return False
+    staff = {u.pk: u for u in User.objects.filter(email__iexact=email, profile__company=company)}
+    logins = {cu.pk: cu for cu in CompanyUser.objects.filter(company=company, email__iexact=email)}
+    for employee in Employee.objects.filter(company=company, work_email__iexact=email).select_related(
+            'user', 'company_user'):
+        if employee.user_id:
+            staff[employee.user_id] = employee.user
+        if employee.company_user_id:
+            logins[employee.company_user_id] = employee.company_user
+    title = subject or 'HR notification'
+    told = notify_employees(staff.values(), title=title, message=body, link='/me/hr', kind='hr_notification')
+    told += notify_company_users(logins.values(), title=title, message=body, link='/hr/dashboard',
+                                 kind='hr_notification', email=False)
+    return told > 0
+
+
 def _dispatch_hr_notification(template, recipient_email, subject, body, company):
     """Route a rendered HR notification to the right channel adapter. Returns
     ``(ok, channel_used)``. Defaults to email for empty/unknown channels so a
@@ -7206,9 +7243,11 @@ def _dispatch_hr_notification(template, recipient_email, subject, body, company)
         return _send_hr_notification_slack(company, subject, body), 'slack'
     if channel == 'teams':
         return _send_hr_notification_teams(company, subject, body), 'teams'
-    if channel in ('sms', 'in_app'):
-        logger.warning("HR channel %r not implemented yet — notification dropped (template=%s)",
-                       channel, getattr(template, 'id', '?'))
+    if channel == 'in_app':
+        return _send_hr_notification_in_app(company, recipient_email, subject, body), 'in_app'
+    if channel == 'sms':
+        logger.warning("HR channel 'sms' has no SMS provider; notification not sent (template=%s)",
+                       getattr(template, 'id', '?'))
         return False, channel
     # Default to email (back-compat). Use the existing per-template email
     # helpers / Celery sender for retries; here just send synchronously.
