@@ -247,7 +247,7 @@ const AgentSidebar = ({
                     const cActive = hasGrand ? groupActive : isChildActive(child);
                     const CIcon = child.icon;
                     return (
-                      <div key={child.path + (child.tab || '')}>
+                      <div key={child.path + (child.tab || '') + (child.sub || '')}>
                         <button
                           onClick={() => goToChild(child)}
                           className={`w-full flex items-center gap-2.5 rounded-md h-9 px-2.5 text-[13px] transition-colors ${
@@ -269,7 +269,7 @@ const AgentSidebar = ({
                               const GIcon = gc.icon;
                               return (
                                 <button
-                                  key={gc.path + (gc.tab || '')}
+                                  key={gc.path + (gc.tab || '') + (gc.sub || '')}
                                   onClick={() => goToChild(gc)}
                                   className={`w-full flex items-center gap-2 rounded-md h-8 px-2.5 text-[12.5px] transition-colors ${
                                     gActive
