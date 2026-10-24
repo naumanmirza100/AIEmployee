@@ -1098,6 +1098,14 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 3600}
     },
     
+    # Operations: a deadline found in a document gets an alert when it comes within a week - daily, 03:30 UTC
+    # (morning in Pakistan). Deadlines further out used to get no alert at all.
+    'operations-deadline-alerts': {
+        'task': 'operations_agent.tasks.alert_operations_deadlines',
+        'schedule': _crontab(hour=3, minute=30),
+        'options': {'expires': 6 * 3600},
+    },
+
     # Auto-pause expired campaigns - daily, at 00:05 UTC
     'auto-pause-expired-campaigns': {
         'task': 'marketing_agent.tasks.auto_pause_expired_campaigns_task',

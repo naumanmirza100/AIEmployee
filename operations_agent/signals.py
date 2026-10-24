@@ -4,7 +4,8 @@ Operations Agent — Signal Handlers
 Auto-generate OperationsNotification records when interesting things happen:
 
   • A summary is saved with `importance_level = critical`  → anomaly_detected (critical)
-  • A summary contains upcoming deadlines (next 7 days)   → threshold_breach (warning)
+  • A summary contains upcoming deadlines (next 7 days)   → threshold_breach (warning),
+    when the summary is ready and again each morning (tasks.alert_operations_deadlines)
   • A summary extracts 2+ risks                            → anomaly_detected (warning)
   • A summary extracts 2+ opportunities                    → metric_change (info)
   • A document fails to process                            → document_update (critical)
@@ -15,6 +16,7 @@ re-saving a summary doesn't flood the inbox.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -80,6 +82,69 @@ def _create_once(company, notification_type: str, severity: str, title: str,
     )
 
 
+DEADLINE_HORIZON_DAYS = 7
+
+
+def upcoming_deadlines(summary, today: date) -> list:
+    """The summary's deadlines that fall between today and a week from now, soonest first."""
+    horizon = today + timedelta(days=DEADLINE_HORIZON_DAYS)
+    upcoming = []
+    for d in summary.deadlines or []:
+        if isinstance(d, dict):
+            parsed = _parse_deadline_date(d.get('date') or d.get('deadline'))
+            desc = (d.get('description') or d.get('title') or d.get('text') or '').strip()
+        else:
+            continue            # a deadline written as plain text has no date to count down to
+        if parsed and today <= parsed <= horizon:
+            upcoming.append({'date': parsed.isoformat(), 'description': desc or 'Deadline',
+                             'days_left': (parsed - today).days})
+    return sorted(upcoming, key=lambda x: x['days_left'])
+
+
+def _deadline_key(item) -> str:
+    return f"{item.get('date')}:{(item.get('description') or '').strip().lower()[:80]}"
+
+
+def alert_upcoming_deadlines(summary, today: Optional[date] = None) -> Optional[OperationsNotification]:
+    """One alert for this summary's deadlines that are within the next week and have had no alert yet.
+
+    Called when the summary is ready and every morning by `tasks.alert_operations_deadlines`: a deadline further
+    out than a week used to get no alert at all, and now gets one when it comes within the week. A deadline is
+    alerted once, whichever of the two finds it first.
+    """
+    today = today or timezone.now().date()
+    upcoming = upcoming_deadlines(summary, today)
+    if not upcoming:
+        return None
+    alerted = {
+        _deadline_key(d)
+        for data in OperationsNotification.objects.filter(
+            company_id=summary.company_id, notification_type='threshold_breach', data__summary_id=summary.id,
+        ).values_list('data', flat=True)
+        for d in ((data or {}).get('deadlines') or []) if isinstance(d, dict)
+    }
+    fresh = [d for d in upcoming if _deadline_key(d) not in alerted]
+    if not fresh:
+        return None
+    filename = summary.original_filename or 'Untitled document'
+    soonest = fresh[0]
+    days = soonest['days_left']
+    when = 'today' if days == 0 else f'in {days} day{"s" if days != 1 else ""}'
+    title = f'Deadline {when}' if len(fresh) == 1 else f'{len(fresh)} upcoming deadlines in {filename}'
+    message = (f'{soonest["description"]} — {soonest["date"]} ({filename})' if len(fresh) == 1
+               else 'Review the summary for the full list of deadlines.')
+    keys = ','.join(sorted(_deadline_key(d) for d in fresh))
+    return _create_once(
+        company=summary.company,
+        notification_type='threshold_breach',
+        severity='warning',
+        title=title,
+        message=message,
+        data={'summary_id': summary.id, 'source': 'summary', 'filename': filename, 'deadlines': fresh},
+        dedupe_key=f'summary:{summary.id}:deadlines:{hashlib.sha1(keys.encode()).hexdigest()[:12]}',
+    )
+
+
 # ──────────────────────────────────────────────
 # Summary signals
 # ──────────────────────────────────────────────
@@ -87,8 +152,12 @@ def _create_once(company, notification_type: str, severity: str, title: str,
 @receiver(post_save, sender=OperationsDocumentSummary)
 def notifications_for_summary(sender, instance: OperationsDocumentSummary,
                               created: bool, **kwargs):
-    """Fire on each summary save. Deduped via `dedupe_key` so edits don't spam."""
-    if not created:
+    """Fire when a summary is ready. Deduped via `dedupe_key`, so later saves add nothing.
+
+    It used to run only when the row was created, and the row is created empty and filled in by the AI afterwards,
+    so none of these alerts ever fired (CO-173). It now waits until the summary is ready.
+    """
+    if instance.processing_status != 'ready':
         return
 
     try:
@@ -112,54 +181,7 @@ def notifications_for_summary(sender, instance: OperationsDocumentSummary,
             )
 
         # 2) Upcoming deadlines (≤ 7 days)
-        today = timezone.now().date()
-        horizon = today + timedelta(days=7)
-        deadlines = instance.deadlines or []
-        upcoming = []
-        for d in deadlines:
-            if isinstance(d, dict):
-                parsed = _parse_deadline_date(d.get('date') or d.get('deadline'))
-                desc = (d.get('description') or d.get('title')
-                        or d.get('text') or '').strip()
-            elif isinstance(d, str):
-                parsed = None
-                desc = d.strip()
-            else:
-                continue
-            if parsed and today <= parsed <= horizon:
-                days_left = (parsed - today).days
-                upcoming.append({
-                    'date': parsed.isoformat(),
-                    'description': desc or 'Deadline',
-                    'days_left': days_left,
-                })
-
-        if upcoming:
-            soonest = min(upcoming, key=lambda x: x['days_left'])
-            count = len(upcoming)
-            title = (
-                f'Deadline in {soonest["days_left"]} day{"s" if soonest["days_left"] != 1 else ""}'
-                if count == 1 else
-                f'{count} upcoming deadlines in {filename}'
-            )
-            msg = (
-                f'{soonest["description"]} — {soonest["date"]}' if count == 1 else
-                'Review the summary for the full list of deadlines.'
-            )
-            _create_once(
-                company=instance.company,
-                notification_type='threshold_breach',
-                severity='warning',
-                title=title,
-                message=msg,
-                data={
-                    'summary_id': instance.id,
-                    'source': 'summary',
-                    'filename': filename,
-                    'deadlines': upcoming,
-                },
-                dedupe_key=f'summary:{instance.id}:deadlines',
-            )
+        alert_upcoming_deadlines(instance)
 
         # 3) Risks detected (2 or more)
         risks = [r for r in (instance.risks or []) if r]

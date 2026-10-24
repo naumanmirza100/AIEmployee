@@ -218,3 +218,33 @@ if shared_task is not None:
 else:  # pragma: no cover
     def reindex_operations_document(document_id):
         return _reindex_impl(document_id)
+
+
+def _alert_deadlines_impl(today=None):
+    """Every morning: deadlines in ready summaries that have come within a week get their alert.
+
+    Summaries are read without their full text, and only those that list deadlines are looked at."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from .models import OperationsDocumentSummary
+    from .signals import alert_upcoming_deadlines
+    today = today or timezone.now().date()
+    summaries = (OperationsDocumentSummary.objects
+                 .filter(processing_status='ready', created_at__gte=timezone.now() - timedelta(days=400))
+                 .exclude(deadlines=[])
+                 .select_related('company')
+                 .defer('rich_summary', 'parsed_text', 'entities', 'key_findings'))
+    alerts = 0
+    for summary in summaries.iterator(chunk_size=200):
+        if summary.deadlines and alert_upcoming_deadlines(summary, today):
+            alerts += 1
+    return alerts
+
+
+if shared_task is not None:
+    @shared_task(name='operations_agent.tasks.alert_operations_deadlines')
+    def alert_operations_deadlines():
+        return _alert_deadlines_impl()
+else:  # pragma: no cover
+    def alert_operations_deadlines():
+        return _alert_deadlines_impl()
