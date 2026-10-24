@@ -6,7 +6,7 @@ import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
-import { Loader2, CalendarDays, AlertTriangle, Clock, User } from 'lucide-react';
+import { Loader2, CalendarDays, AlertTriangle, Clock, User, Download } from 'lucide-react';
 import PMEmptyState from './EmptyState';
 
 function markdownToHtml(markdown) {
@@ -40,6 +40,29 @@ export default function CalendarScheduleView({ onOpenPilot }) {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [schedule, setSchedule] = useState(null);
+  const [downloading, setDownloading] = useState(null);
+
+  // The project's latest plan is kept (project_manager_agent/tool_results.py), so it opens again.
+  useEffect(() => {
+    if (!selectedProject) return undefined;
+    let cancelled = false;
+    setSchedule(null);
+    pmAgentService.getSavedSchedulePlan(selectedProject)
+      .then((res) => { if (!cancelled && res?.data) setSchedule(res.data); })
+      .catch(() => { /* no plan yet */ });
+    return () => { cancelled = true; };
+  }, [selectedProject]);
+
+  const download = async (everyone) => {
+    setDownloading(everyone ? 'team' : 'mine');
+    try {
+      await pmAgentService.downloadSchedulePlanIcs(selectedProject, { everyone });
+    } catch (e) {
+      toast({ title: 'Nothing to download', description: e?.message || '', variant: 'destructive' });
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -119,23 +142,42 @@ export default function CalendarScheduleView({ onOpenPilot }) {
       {/* Results */}
       {!loading && schedule && (
         <div className="space-y-4">
+          {schedule.schedule?.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-white/45">
+                {schedule.saved_at ? `Plan made ${new Date(schedule.saved_at).toLocaleString()}` : ''}
+              </span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={!!downloading} onClick={() => download(false)}
+                  title="Your own planned work, for your calendar. It does not block meetings.">
+                  {downloading === 'mine' ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Download className="w-4 h-4 mr-1" />}
+                  My work (.ics)
+                </Button>
+                <Button size="sm" variant="ghost" disabled={!!downloading} onClick={() => download(true)}>
+                  {downloading === 'team' ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Download className="w-4 h-4 mr-1" />}
+                  Whole team (.ics)
+                </Button>
+              </div>
+            </div>
+          )}
           {/* Day-by-Day Schedule */}
           {schedule.schedule?.length > 0 && (
             <div className="space-y-3">
               {schedule.schedule.map((day, i) => (
                 <Card key={i} className="bg-white/[0.02] border-white/[0.06]">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm text-violet-300">{day.date || day.day || `Day ${i + 1}`}</CardTitle>
+                    <CardTitle className="text-sm text-violet-300">{[day.day_name, day.date].filter(Boolean).join(' · ') || day.day || `Day ${i + 1}`}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    {(day.tasks || day.items || []).map((task, j) => (
+                    {(day.assignments || day.tasks || day.items || []).map((task, j) => (
                       <div key={j} className={`bg-black/30 rounded p-2 text-sm border-l-2 ${priorityColors[task.priority] || 'border-l-gray-600'}`}>
                         <div className="flex items-center justify-between">
-                          <span className="font-medium text-white">{task.title || task.task || task.name}</span>
+                          <span className="font-medium text-white">{task.task_title || task.title || task.task || task.name}</span>
                           {task.time && <span className="text-xs text-white/55 flex items-center gap-1"><Clock className="w-3 h-3" />{task.time}</span>}
                         </div>
                         <div className="flex items-center gap-3 mt-1 text-xs text-white/55">
-                          {task.assignee && <span className="flex items-center gap-1"><User className="w-3 h-3" />{task.assignee}</span>}
+                          {(task.member_name || task.assignee) && <span className="flex items-center gap-1"><User className="w-3 h-3" />{task.member_name || task.assignee}</span>}
+                          {task.note && <span>{task.note}</span>}
                           {task.duration && <span>{task.duration}</span>}
                           {task.priority && <span className={`px-1.5 py-0.5 rounded ${task.priority === 'high' ? 'bg-red-900/50 text-red-300' : task.priority === 'medium' ? 'bg-amber-900/50 text-amber-300' : 'bg-white/[0.05] text-white/65'}`}>{task.priority}</span>}
                         </div>

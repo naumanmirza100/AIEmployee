@@ -8,7 +8,7 @@ import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
 import {
   Loader2, Workflow, CheckSquare, Square, ArrowRight, Lightbulb,
-  AlertTriangle, ChevronDown, ChevronUp, Shield, Clock, ListChecks
+  AlertTriangle, ChevronDown, ChevronUp, Shield, Clock, ListChecks, ListPlus
 } from 'lucide-react';
 import PMEmptyState from './EmptyState';
 
@@ -35,6 +35,46 @@ export default function WorkflowSuggestionsView({ onOpenPilot }) {
   const [validation, setValidation] = useState(null);
   const [checkedItems, setCheckedItems] = useState(new Set());
   const [expandedPhase, setExpandedPhase] = useState(null);
+  const [creatingTasks, setCreatingTasks] = useState(false);
+
+  // A checklist is kept per project and phase, with its ticks (project_manager_agent/tool_results.py).
+  const showChecklist = (saved) => {
+    setChecklist({ checklist: saved.items || [], tips: saved.tips || [], saved });
+    setCheckedItems(new Set((saved.items || []).map((it, i) => (it.done ? i : -1)).filter((i) => i >= 0)));
+  };
+
+  useEffect(() => {
+    if (!selectedProject) return undefined;
+    let cancelled = false;
+    setChecklist(null);
+    setCheckedItems(new Set());
+    pmAgentService.getSavedChecklist(selectedProject, phase)
+      .then((res) => { if (!cancelled && res?.data) showChecklist(res.data); })
+      .catch(() => { /* nothing saved yet, or not reachable: the tool still works */ });
+    return () => { cancelled = true; };
+  }, [selectedProject, phase]);
+
+  const createTasks = async (items, from) => {
+    if (!items.length) return;
+    setCreatingTasks(true);
+    try {
+      const res = await pmAgentService.tasksFromSuggestions(selectedProject, items.map((it) => ({
+        title: typeof it === 'string' ? it : (it.text || it.item || ''),
+        priority: typeof it === 'object' ? it.priority : undefined,
+        description: from,
+      })));
+      const made = res?.data?.created?.length || 0;
+      const problems = res?.data?.problems || [];
+      toast({
+        title: `${made} task${made === 1 ? '' : 's'} added to the project`,
+        description: problems.length ? `${problems.length} could not be added: ${problems[0].message}` : undefined,
+      });
+    } catch (e) {
+      toast({ title: 'Could not create tasks', description: apiErrorMessage(e, ''), variant: 'destructive' });
+    } finally {
+      setCreatingTasks(false);
+    }
+  };
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -80,7 +120,8 @@ export default function WorkflowSuggestionsView({ onOpenPilot }) {
     try {
       const res = await pmAgentService.workflowSuggest(selectedProject, 'checklist', phase);
       const data = res?.data?.data || res?.data || {};
-      setChecklist(data);
+      if (data.saved) showChecklist(data.saved);
+      else setChecklist(data);
     } catch (e) {
       toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to generate checklist'), variant: 'destructive' });
     } finally {
@@ -107,11 +148,19 @@ export default function WorkflowSuggestionsView({ onOpenPilot }) {
   };
 
   const toggleCheck = (idx) => {
-    setCheckedItems(prev => {
+    const done = !checkedItems.has(idx);
+    const flip = (prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx);
       else next.add(idx);
       return next;
+    };
+    setCheckedItems(flip);
+    const savedId = checklist?.saved?.id;
+    if (!savedId) return;
+    pmAgentService.tickChecklistItem(savedId, idx, done).catch((e) => {
+      setCheckedItems(flip);
+      toast({ title: 'Could not save the tick', description: apiErrorMessage(e, ''), variant: 'destructive' });
     });
   };
 
@@ -301,6 +350,14 @@ export default function WorkflowSuggestionsView({ onOpenPilot }) {
                                   <span>{typeof item === 'string' ? item : item.item || item.text || JSON.stringify(item)}</span>
                                 </div>
                               ))}
+                              <Button
+                                size="sm" variant="outline" className="mt-2 h-7 text-xs"
+                                disabled={creatingTasks}
+                                onClick={() => createTasks(phaseChecklist, `From the suggested workflow, ${phaseName} phase`)}
+                              >
+                                {creatingTasks ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ListPlus className="w-3 h-3 mr-1" />}
+                                Create tasks from this phase
+                              </Button>
                             </div>
                           )}
                         </div>
@@ -371,6 +428,16 @@ export default function WorkflowSuggestionsView({ onOpenPilot }) {
               </CardTitle>
               {totalChecklistItems > 0 && (
                 <div className="flex items-center gap-2">
+                  {checkedCount < totalChecklistItems && (
+                    <Button
+                      size="sm" variant="outline" className="h-7 text-xs"
+                      disabled={creatingTasks}
+                      onClick={() => createTasks(checklistItems.filter((_, i) => !checkedItems.has(i)), `From the ${phase} checklist`)}
+                    >
+                      {creatingTasks ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ListPlus className="w-3 h-3 mr-1" />}
+                      Create tasks from open items
+                    </Button>
+                  )}
                   <span className="text-xs text-white/55">{checkedCount}/{totalChecklistItems}</span>
                   <div className="w-20 h-1.5 bg-white/[0.05] rounded-full overflow-hidden">
                     <div

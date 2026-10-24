@@ -164,3 +164,39 @@ def _weekday_abbr(dt) -> str:
     """Get iCal weekday abbreviation for a datetime."""
     days = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
     return days[dt.weekday()]
+
+
+def generate_plan_ics(project, assignments) -> str:
+    """An .ics of a schedule plan's work, one all-day event per task per day.
+
+    `assignments` are (date, assignment) pairs (project_manager_agent.tool_results.assignments_for). The events
+    are marked free (TRANSP:TRANSPARENT): planned work is a reminder, not a booking that blocks the calendar.
+    """
+    stamp = _format_dt(timezone.now())
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//AIEmployee//Project Plan//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+    ]
+    for n, (day, a) in enumerate(assignments):
+        title = str(a.get('task_title') or a.get('title') or a.get('task') or 'Task')
+        details = [f"Project: {project.name}"]
+        if a.get('member_name'):
+            details.append(f"Who: {a['member_name']}")
+        if a.get('note'):
+            details.append(str(a['note']))
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:plan-{project.id}-{day:%Y%m%d}-{a.get('task_id') or n}-{a.get('member_id') or 'team'}@aiemployee.app",
+            f"DTSTAMP:{stamp}",
+            f"DTSTART;VALUE=DATE:{day:%Y%m%d}",
+            f"DTEND;VALUE=DATE:{day + timedelta(days=1):%Y%m%d}",
+            f"SUMMARY:{_escape(title)}",
+            f"DESCRIPTION:{_escape(chr(10).join(details))}",
+            "TRANSP:TRANSPARENT",
+            "END:VEVENT",
+        ]
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"

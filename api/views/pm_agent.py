@@ -3294,6 +3294,7 @@ def meeting_notes(request):
         }
 
         project_context = None
+        project = None
         if project_id:
             try:
                 project = projects_for_company_user(company_user).get(id=project_id)
@@ -3322,6 +3323,10 @@ def meeting_notes(request):
             meeting_info=meeting_info,
             project_context=project_context,
         )
+        if project is not None and isinstance(result, dict) and result.get("success") is not False:
+            from project_manager_agent import tool_results
+            saved = tool_results.save_meeting_notes(project, meeting_text, meeting_info, result, company_user)
+            result = {**result, "saved_id": saved.id}
 
         return Response({
             "status": "success",
@@ -3379,13 +3384,19 @@ def workflow_suggest(request):
         agent = AgentRegistry.get_agent("workflow_sop")
         agent.company_id = getattr(company_user, 'company_id', None)
         agent.agent_key_name = 'project_manager_agent'
+        phase = request.data.get("phase", "development")
         result = agent.process(
             action=action,
             project_info=project_info,
             tasks=tasks_data,
-            phase=request.data.get("phase", "development"),
+            phase=phase,
             project_type=project.project_type or "software_development",
         )
+        if action == "checklist" and isinstance(result, dict) and result.get("success") is not False:
+            from project_manager_agent import tool_results
+            saved = tool_results.save_checklist(project, str(phase), result, company_user)
+            if saved:
+                result = {**result, "saved": tool_results.checklist_payload(saved)}
 
         return Response({
             "status": "success",
@@ -3448,6 +3459,11 @@ def calendar_schedule(request):
             start_date=request.data.get("start_date"),
             end_date=request.data.get("end_date"),
         )
+        if action == "schedule" and isinstance(result, dict) and result.get("success") is not False:
+            from project_manager_agent import tool_results
+            saved = tool_results.save_schedule_plan(project, result, company_user)
+            if saved:
+                result = {**result, "saved_at": saved.updated_at.isoformat()}
 
         return Response({
             "status": "success",

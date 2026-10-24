@@ -7,7 +7,7 @@ import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
-import { Loader2, FileText, CheckSquare, AlertTriangle, Users, Lightbulb } from 'lucide-react';
+import { Loader2, FileText, CheckSquare, AlertTriangle, Users, Lightbulb, ListPlus, History } from 'lucide-react';
 
 export default function MeetingNotesAgent() {
   const { toast } = useToast();
@@ -16,6 +16,50 @@ export default function MeetingNotesAgent() {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [result, setResult] = useState(null);
+  // Notes analysed against a project are kept on it (project_manager_agent/tool_results.py).
+  const [savedNotes, setSavedNotes] = useState([]);
+  const [ticked, setTicked] = useState(new Set());
+  const [creatingTasks, setCreatingTasks] = useState(false);
+
+  const loadSaved = (projectId) => {
+    if (!projectId) { setSavedNotes([]); return; }
+    pmAgentService.getSavedMeetingNotes(projectId)
+      .then((res) => setSavedNotes(Array.isArray(res?.data) ? res.data : []))
+      .catch(() => setSavedNotes([]));
+  };
+
+  useEffect(() => { loadSaved(selectedProject); }, [selectedProject]);
+
+  const show = (data) => {
+    setResult(data);
+    setTicked(new Set((data?.action_items || []).map((_, i) => i)));
+  };
+
+  const createTasks = async () => {
+    const items = (result?.action_items || []).filter((_, i) => ticked.has(i));
+    if (!items.length || !selectedProject) return;
+    setCreatingTasks(true);
+    try {
+      const res = await pmAgentService.tasksFromSuggestions(selectedProject, items.map((it) => ({
+        title: it.action, priority: it.priority, assignee_name: it.owner, due: it.deadline,
+        description: 'From meeting notes',
+      })));
+      const made = res?.data?.created || [];
+      const owned = made.filter((t) => t.assignee_id).length;
+      const problems = res?.data?.problems || [];
+      toast({
+        title: `${made.length} task${made.length === 1 ? '' : 's'} added to the project`,
+        description: [
+          made.length ? `${owned} with an owner matched by name.` : '',
+          problems.length ? `${problems.length} could not be added: ${problems[0].message}` : '',
+        ].filter(Boolean).join(' ') || undefined,
+      });
+    } catch (e) {
+      toast({ title: 'Could not create tasks', description: apiErrorMessage(e, ''), variant: 'destructive' });
+    } finally {
+      setCreatingTasks(false);
+    }
+  };
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -38,7 +82,8 @@ export default function MeetingNotesAgent() {
     try {
       const res = await pmAgentService.meetingNotes(meetingText, selectedProject, 'summarize');
       const data = res?.data?.data || res?.data || {};
-      setResult(data);
+      show(data);
+      if (data.saved_id) loadSaved(selectedProject);
     } catch (e) {
       toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to process notes'), variant: 'destructive' });
     } finally {
@@ -79,6 +124,24 @@ export default function MeetingNotesAgent() {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Earlier meetings kept on this project */}
+      {savedNotes.length > 0 && (
+        <Card className="bg-white/[0.02] border-white/[0.06]">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-white/70 flex items-center gap-1">
+              <History className="w-4 h-4" /> Earlier meetings on this project
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {savedNotes.slice(0, 12).map((n) => (
+              <Button key={n.id} size="sm" variant="outline" className="h-7 text-xs" onClick={() => show(n.result)}>
+                {n.topic || 'Meeting'} · {n.date || n.saved_at?.slice(0, 10)}
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Loading */}
       {loading && (
@@ -150,9 +213,27 @@ export default function MeetingNotesAgent() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
+                {selectedProject && (
+                  <div className="flex justify-end">
+                    <Button size="sm" variant="outline" className="h-7 text-xs" disabled={creatingTasks || !ticked.size} onClick={createTasks}>
+                      {creatingTasks ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ListPlus className="w-3 h-3 mr-1" />}
+                      Create {ticked.size} task{ticked.size === 1 ? '' : 's'} in the project
+                    </Button>
+                  </div>
+                )}
                 {result.action_items.map((item, i) => (
                   <div key={i} className="bg-black/30 rounded p-3 text-sm">
-                    <div className="font-medium text-white">{item.action}</div>
+                    <div className="font-medium text-white flex items-start gap-2">
+                      {selectedProject && (
+                        <input
+                          type="checkbox" className="mt-1 h-3.5 w-3.5 accent-violet-500"
+                          checked={ticked.has(i)}
+                          onChange={() => setTicked((prev) => { const next = new Set(prev); if (next.has(i)) next.delete(i); else next.add(i); return next; })}
+                          aria-label={`Make "${item.action}" a task`}
+                        />
+                      )}
+                      <span>{item.action}</span>
+                    </div>
                     <div className="flex items-center gap-3 mt-1 text-xs text-white/55">
                       <span>Owner: <span className="text-violet-300">{item.owner || 'TBD'}</span></span>
                       <span>Due: <span className="text-amber-300">{item.deadline || 'TBD'}</span></span>
