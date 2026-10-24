@@ -2,6 +2,23 @@ from django.db import models
 from django.utils import timezone
 
 
+def priority_rank():
+    """A task's or action item's priority as a number to sort by, most urgent first.
+
+    The priority is stored as a word, and ordering by the word ('-priority') gave medium, low, high: high-priority
+    work came last, on the last page, and was the first left out wherever a list was cut short (the week plan, the
+    overdue and due-today alerts; CO-165).
+    """
+    return models.Case(
+        models.When(priority='critical', then=models.Value(0)),
+        models.When(priority='high', then=models.Value(1)),
+        models.When(priority='medium', then=models.Value(2)),
+        models.When(priority='low', then=models.Value(3)),
+        default=models.Value(4),
+        output_field=models.IntegerField(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Executive Meeting
 # ---------------------------------------------------------------------------
@@ -161,7 +178,7 @@ class MeetingActionItem(models.Model):
 
     class Meta:
         app_label = 'meeting_agent'
-        ordering = ['-priority', 'due_date']
+        ordering = [priority_rank().asc(), 'due_date']
 
     def __str__(self):
         return f"{self.title} ({self.status})"
@@ -233,7 +250,7 @@ class ExecutiveTask(models.Model):
 
     class Meta:
         app_label = 'meeting_agent'
-        ordering = ['-priority', 'due_date']
+        ordering = [priority_rank().asc(), 'due_date']
         indexes = [
             models.Index(fields=['company_user', 'status']),
             models.Index(fields=['company_user', '-priority']),

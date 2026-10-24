@@ -77,7 +77,9 @@ const execMeetingService = {
   createTask:     (payload)     => companyApi.post(`${BASE}/tasks`, payload),
   updateTask:     (id, payload) => companyApi.patch(`${BASE}/tasks/${id}`, payload),
   deleteTask:     (id)          => companyApi.delete(`${BASE}/tasks/${id}`),
-  prioritizeTasks: ()           => companyApi.post(`${BASE}/tasks/ai/prioritize`, {}),
+  // { apply: false } only suggests; applyPriorities saves the suggestions the user ticked.
+  prioritizeTasks: (opts = {})  => companyApi.post(`${BASE}/tasks/ai/prioritize`, opts),
+  applyPriorities: (items)      => companyApi.post(`${BASE}/tasks/ai/prioritize/apply`, { items }),
   generateTaskDescription: (title, points) => companyApi.post(`${BASE}/tasks/ai/generate-description`, { title, points }),
 
   // Calendar
