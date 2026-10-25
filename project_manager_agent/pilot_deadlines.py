@@ -37,7 +37,17 @@ _CUE_BEFORE = re.compile(
     r'wrap(ped)?\s+up|timeline|duration|end)\b', re.I)
 _CUE_AFTER = re.compile(r'^\s*(from\s+(now|today)|deadline|timeline|at\s+(the\s+)?max(imum)?|at\s+most|max(imum)?\b)', re.I)
 _IN_BEFORE = re.compile(r'\b(in|within)\s*$', re.I)
-_RELATIVE = re.compile(r'\b(more|extra|additional|longer|shorter|less|fewer|earlier|later|before|after)\b', re.I)
+_RELATIVE = re.compile(r'\b(more|extra|additional|longer|shorter|less|fewer|earlier|later|before|after|back|'
+                       r'forward|sooner)\b', re.I)
+# "push the deadline back a week", "extend it by 5 days", "2 days earlier": a move of the current deadline, not
+# a date counted from today ("a week" alone would have meant a week from now).
+_SHIFT_AFTER = re.compile(r'\b' + _N + r'[\s-]*(day|week|month)s?\s+(later|more|extra|longer|back|earlier|sooner)\b',
+                          re.I)
+_SHIFT_MORE = re.compile(r'\b' + _N + r'\s+(more|extra|additional)\s+(day|week|month)s?\b', re.I)
+# "back a week", "by 5 days", "forward by a week" — a shift only with a verb that moves something.
+_SHIFT_BEFORE = re.compile(r'\b(back|forward|by)\s+' + _N + r'[\s-]*(day|week|month)s?\b', re.I)
+_MOVE_VERB = re.compile(r'\b(extend|delay|postpone|push|move|shift|bring|pull)\w*', re.I)
+_EARLIER = re.compile(r'\b(earlier|sooner|forward|pull|bring)\b', re.I)
 # "change the deadline from 10 days to 20 days": the first is the date being replaced.
 _FROM_BEFORE = re.compile(r'\bfrom\s+(the\s+|next\s+|current\s+|old\s+)?$', re.I)
 
@@ -75,9 +85,32 @@ def _add_workdays(d, n):
     return d
 
 
+def _shift_matches(text):
+    text = text or ''
+    patterns = (_SHIFT_AFTER, _SHIFT_MORE) + ((_SHIFT_BEFORE,) if _MOVE_VERB.search(text) else ())
+    return [m for pattern in patterns for m in pattern.finditer(text)]
+
+
+def relative_shift(text):
+    """Days to move the current deadline by ("push it back a week" = 7, "2 days earlier" = -2), or None."""
+    for match in _shift_matches(text):
+        groups = [g for g in match.groups() if g]
+        number = next((_count(g) for g in groups if _count(g)), None)
+        unit = next((g.lower() for g in groups if g.lower() in ('day', 'week', 'month')), None)
+        if number and unit:
+            days = number * {'day': 1, 'week': 7, 'month': 30}[unit]
+            # "bring the deadline forward by a week": the direction can come before the span.
+            around = text[max(0, match.start() - 40):match.end()]
+            return -days if _EARLIER.search(around) else days
+    return None
+
+
 def _span_deadlines(text, today, loose=False):
     found = []
+    shifts = [(m.start(), m.end()) for m in _shift_matches(text)]
     for match in _SPAN.finditer(text):
+        if any(start <= match.start() < end for start, end in shifts):
+            continue    # "back a week" moves the deadline it has; it isn't a week from now
         before = text[max(0, match.start() - 45):match.start()]
         old = bool(_FROM_BEFORE.search(before))
         after = text[match.end():match.end() + 25]
@@ -278,15 +311,26 @@ def deadline_change_request(text, projects, *, selected=None, history=None, toda
         return None
     today = today or date.today()
     deadline = stated_deadline(text, today)
-    if deadline is None:
+    shift = relative_shift(text)
+    if deadline is None and shift is None:
         return None
     # Read only now: every typed request passes through here, and few are about a deadline.
     project = project_meant(text, list(projects), selected=selected, history=history)
     if project is None:
         return None, WHICH_PROJECT
+    if deadline is None:
+        current = _to_date(project.effective_deadline)
+        if current is None:
+            return None     # nothing to move it from: the AI's turn
+        deadline = current + timedelta(days=shift)
+    return deadline_move(project, deadline, today=today, move_tasks=bool(_TASKS_TOO.search(text)))
+
+
+def deadline_move(project, deadline, *, today=None, move_tasks=True):
+    """The review card's actions and sentence for giving `project` the new `deadline`, as (actions, answer)."""
     from core.models import Task
     tasks = list(Task.objects.filter(project=project).only('id', 'title', 'status', 'due_date'))
-    actions = move_deadline(project, tasks, deadline, today=today, move_tasks=bool(_TASKS_TOO.search(text)))
+    actions = move_deadline(project, tasks, deadline, today=today, move_tasks=move_tasks)
     moved = len(actions) - 1
     when = deadline.strftime('%d %b %Y').lstrip('0')
     # Markdown, as the chat shows it: the project and the date stand out.

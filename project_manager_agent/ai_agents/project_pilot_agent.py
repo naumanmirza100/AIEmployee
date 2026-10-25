@@ -63,7 +63,7 @@ class ProjectPilotAgent(BaseAgent):
         You extract action details from user requests and return structured JSON, but ONLY when the intent is clear.
         If ambiguous, ask for clarification with helpful questions."""
     
-    def handle_action_request(self, question: str, context: Optional[Dict] = None, available_users: Optional[List[Dict]] = None, chat_history: Optional[List[Dict]] = None) -> Dict:
+    def handle_action_request(self, question: str, context: Optional[Dict] = None, available_users: Optional[List[Dict]] = None, chat_history: Optional[List[Dict]] = None, intent: Optional[Dict] = None) -> Dict:
         """
         Handle action requests like creating projects and tasks.
         
@@ -241,6 +241,32 @@ class ProjectPilotAgent(BaseAgent):
             cannot_do = True
             cannot_do_item = 'team members directly'
         
+        # The AI's reading of the message (project_manager_agent/pilot_intent.py), when there is one, decides
+        # the route; the word lists above stay for when there isn't. They missed typos, other phrasings and
+        # Roman Urdu, and a missed word sent a request down the wrong path.
+        route = (intent or {}).get('intent')
+        intent_tasks = (intent or {}).get('tasks') or []
+        if route:
+            is_creation_request = route in ('create_project', 'add_tasks')
+            has_explicit_creation = is_creation_request
+            is_deletion_request = route == 'delete'
+            is_update_request = route in ('update_tasks', 'update_project', 'move_deadline', 'assign')
+            has_explicit_update_context = is_update_request
+            # The round-robin prompt hands EVERY task out in turn: only for "share all the tasks among …".
+            # "Give the design tasks to Sara" is an ordinary task change.
+            is_assignment_request = (route == 'assign' and intent_tasks == ['*']
+                                     and len((intent or {}).get('people') or []) != 1)
+            is_sprint_planning = is_sprint_planning and route in ('update_tasks', 'assign')
+            if route == 'not_supported':
+                cannot_do = True
+                cannot_do_item = cannot_do_item or 'that'
+            is_action_request = (is_creation_request or is_deletion_request or is_update_request
+                                 or route == 'not_supported')
+            if (intent or {}).get('english') and intent['english'].strip().lower() not in question_lower:
+                # The request in plain English helps every prompt below, a Roman Urdu one most.
+                question = f"{question}\n(In plain English: {intent['english'].strip()})"
+                question_lower = question.lower()
+
         # Build context string (optionally start with conversation history for this chat)
         context_str = ""
         if chat_history:
@@ -519,7 +545,11 @@ RULES:
                 
                 wants_to_delete_projects = any(keyword in question_lower for keyword in project_deletion_keywords) or ('delete' in question_lower and 'project' in question_lower)
                 wants_to_delete_tasks = any(keyword in question_lower for keyword in task_deletion_keywords) or ('delete' in question_lower and 'task' in question_lower and 'project' not in question_lower)
-                
+                # "afar wala project khatam karo": the reading says what is to go.
+                if route == 'delete' and (intent or {}).get('target') in ('project', 'task'):
+                    wants_to_delete_projects = intent['target'] == 'project'
+                    wants_to_delete_tasks = intent['target'] == 'task'
+
                 if wants_to_delete_projects:
                     # User wants to delete projects
                     # Check for patterns like "delete all but X" or "delete X project"
@@ -633,7 +663,12 @@ Do NOT return JSON. Do NOT delete anything."""
                 # Also detect when update keywords + project mentioned but NOT task
                 if is_project_update and not is_task_update and not is_assignment_request:
                     is_project_level_update = True
-                
+                # The reading says which: the project itself, or its tasks.
+                if route in ('update_project', 'move_deadline'):
+                    is_project_level_update = True
+                elif route in ('update_tasks', 'assign'):
+                    is_project_level_update = False
+
                 # --- PROJECT-LEVEL UPDATE ---
                 if is_project_level_update:
                     # Determine which project(s) to update
@@ -723,6 +758,9 @@ RULES:
                             has_specific_task_reference = True
                             break
 
+                    # The reading named the tasks ("menu pages wala task"), in words the titles don't match.
+                    if intent_tasks:
+                        has_specific_task_reference = True
                     # If user wants to update but doesn't specify which tasks, ask for clarification
                     # Skip clarification for bulk operations (mark all, set all, etc.)
                     if is_task_update and not has_specific_task_reference and not is_bulk_operation and not ('all' in question_lower and 'task' in question_lower):
@@ -788,6 +826,8 @@ Do NOT return JSON. Do NOT update anything yet."""
 {users_str}
 
 User Request: {question}
+
+TODAY'S DATE: {current_date_str} — work out "tomorrow", "kal", "Friday", "next week" from it.
 
 The user wants to UPDATE existing tasks. You MUST:
 1. Identify which tasks to update (by title or all tasks in project)
@@ -977,7 +1017,14 @@ Return ONLY text - NO JSON, NO actions."""
                     wants_new_project = True
                     existing_project_mentioned = False
                     project_id_to_use = None
-                
+                # The reading says whether it is a new project or tasks for one that exists.
+                if route == 'create_project':
+                    wants_new_project, existing_project_mentioned, project_id_to_use = True, False, None
+                elif route == 'add_tasks':
+                    target_id = (intent or {}).get('project_id') or (context.get('project') or {}).get('id')
+                    if target_id:
+                        wants_new_project, existing_project_mentioned, project_id_to_use = False, True, target_id
+
                 if wants_new_project:
                     # Determine assignment intent from the user's words (no hardcoded keyword lists for "all").
                     # First, try to find specific users mentioned by name/username (partial match: "hamza" matches "Ameer Hamza").
@@ -1581,5 +1628,6 @@ Due dates must fall on or before the project's deadline."""
         context = kwargs.get('context', {})
         available_users = kwargs.get('available_users', [])
         chat_history = kwargs.get('chat_history') or []
-        return self.handle_action_request(question, context, available_users, chat_history=chat_history)
+        return self.handle_action_request(question, context, available_users, chat_history=chat_history,
+                                          intent=kwargs.get('intent'))
 

@@ -606,6 +606,10 @@ GROQ_FALLBACK_MODEL = os.getenv('GROQ_FALLBACK_MODEL', 'openai/gpt-oss-120b')
 
 # Per-agent LLM configuration overrides
 # Keys: agent class name (lowercase), Values: { model, temperature, max_tokens }
+# Project Pilot reads each message with one small AI call before routing it (project_manager_agent/pilot_intent.py).
+# PM_PILOT_AI_INTENT=false in .env goes back to routing by word lists only.
+PM_PILOT_AI_INTENT = os.getenv('PM_PILOT_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
+
 PM_AGENT_LLM_CONFIG = {
     'defaults': {
         'model': GROQ_MODEL,

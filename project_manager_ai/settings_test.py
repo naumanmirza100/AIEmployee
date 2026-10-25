@@ -48,6 +48,8 @@ EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
 # have, so there the links were empty and three tests failed.
 FRONTEND_URL = 'http://localhost:3000'
 CELERY_TASK_ALWAYS_EAGER = True
+# No real AI call to read Pilot messages; the tests that check it turn it on.
+PM_PILOT_AI_INTENT = False
 CELERY_TASK_EAGER_PROPAGATES = True
 WHITENOISE_AUTOREFRESH = True
 
