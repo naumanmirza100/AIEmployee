@@ -638,7 +638,10 @@ Return JSON:
                         'title': task.get('title', 'Unknown')
                     })
             
-            # Generate combined reasoning for each task
+            # One reasoning per task, all written in a single AI call. It was one call per task: 13
+            # tasks cost 13 calls (~10K tokens) on top of the plan, and the client test ran a company's
+            # free allowance out (25 Oct 2026).
+            briefs, ordered = [], []
             for task in tasks:
                 task_id = str(task.get('id', ''))
                 if task_id in order_map:
@@ -648,69 +651,66 @@ Return JSON:
                     task['milestone_phase'] = order_data.get('milestone_phase')
                     task['resource_conflicts'] = order_data.get('resource_conflicts', [])
                     task['buffer_recommended'] = order_data.get('buffer_recommended', 0)
-                    
+
                     # Get tasks that depend on this task
                     dependent_tasks = dependency_map.get(task_id, [])
-                    dependent_count = len(dependent_tasks)
                     dependent_titles = [dt['title'] for dt in dependent_tasks[:3]]  # Show first 3
-                    
+
                     # Get task dependencies
                     task_dependencies = task.get('dependencies', [])
                     dependency_titles = [task_title_map.get(str(dep_id), 'Unknown') for dep_id in task_dependencies[:3]]
-                    
-                    # Generate enhanced combined reasoning
-                    combined_reasoning_prompt = f"""Generate a comprehensive, project-focused reasoning for this task in the execution order:
 
-Task: {task.get('title', 'Unknown')}
-Task ID: {task_id}
-Execution Order: {order_data.get('execution_order', 999)}
-Priority: {task.get('ai_priority', 'medium')}
-Business Value: {task.get('business_value', 'medium')}
-Risk Level: {task.get('risk_level', 'medium')}
-Parallel Group: {order_data.get('parallel_group', 'N/A')}
-Milestone Phase: {order_data.get('milestone_phase', 'N/A')}
+                    briefs.append(f"""Task ID {task_id}: {task.get('title', 'Unknown')}
+  Execution order {order_data.get('execution_order', 999)}; priority {task.get('ai_priority', 'medium')}; business value {task.get('business_value', 'medium')}; risk {task.get('risk_level', 'medium')}; parallel group {order_data.get('parallel_group', 'N/A')}; phase {order_data.get('milestone_phase', 'N/A')}
+  Depends on: {', '.join(dependency_titles) if dependency_titles else 'None'}. Needed by ({len(dependent_tasks)}): {', '.join(dependent_titles) if dependent_titles else 'None'}
+  Priority reasoning so far: {task.get('ai_reasoning', '')[:200]}
+  Order reasoning so far: {order_data.get('reasoning', '')[:200]}""")
+                    ordered.append((task, order_data, len(dependent_tasks)))
 
-Dependencies (tasks this depends on): {', '.join(dependency_titles) if dependency_titles else 'None'}
-Tasks that depend on this task ({dependent_count} total): {', '.join(dependent_titles) if dependent_titles else 'None'}
+            written = {}
+            if briefs:
+                combined_reasoning_prompt = f"""Write a project-focused reasoning for each task below, in its place in the execution order.
 
-Current Priority Reasoning: {task.get('ai_reasoning', '')[:200]}
-Current Order Reasoning: {order_data.get('reasoning', '')[:200]}
+{chr(10).join(briefs)}
 
-Generate a SINGLE, comprehensive reasoning (6-8 sentences) that:
-1. Explains WHY this task should be done at this position in the execution order
-2. Mentions SPECIFIC dependency information: "This task should be done before [X tasks] because [Y tasks] depend on it" or "This task must be done after [X tasks] because it depends on them"
-3. Explains HOW this position optimizes the project timeline and workflow
-4. Mentions parallelization opportunities if applicable (parallel group)
-5. Explains the strategic importance considering priority, business value, and risk
-6. Provides project context about how this task fits into the overall execution plan
+For each task write 4-6 sentences that:
+1. Explain WHY the task is done at this position in the execution order
+2. Name the dependencies: "This should be done before [X] because [Y] depends on it" or "This must come after [X] because it depends on it"
+3. Explain how this position helps the timeline, and any chance to run it in parallel (parallel group)
+4. Explain its importance from priority, business value and risk
 
-Return ONLY the reasoning text (no prefixes, no labels, just the reasoning). Make it natural and project-focused."""
-                    
-                    try:
-                        combined_reasoning = self._call_llm(combined_reasoning_prompt, self.system_prompt, temperature=0.3, max_tokens=300)
-                        # Clean up the response
-                        combined_reasoning = combined_reasoning.strip()
-                        # Remove any prefixes if AI added them
-                        for prefix in ["[Reasoning]", "Reasoning:", "Reasoning"]:
-                            if combined_reasoning.startswith(prefix):
-                                combined_reasoning = combined_reasoning[len(prefix):].strip()
-                        task['ai_reasoning'] = combined_reasoning
-                    except Exception as e:
-                        from core.api_key_service import KeyServiceError
-                        if isinstance(e, KeyServiceError):
-                            raise
-                        self.log_action("Combined reasoning generation failed", {"error": str(e), "task_id": task_id})
-                        # Fallback: combine existing reasoning
-                        priority_reasoning = task.get('ai_reasoning', '')
-                        order_reasoning = order_data.get('reasoning', '')
-                        if priority_reasoning and order_reasoning:
-                            # Merge intelligently
-                            if dependent_count > 0:
-                                task['ai_reasoning'] = f"{priority_reasoning} This task should be completed at position {order_data.get('execution_order', 999)} because {dependent_count} task(s) depend on it. {order_reasoning}"
-                            else:
-                                task['ai_reasoning'] = f"{priority_reasoning} {order_reasoning}"
-                        else:
-                            task['ai_reasoning'] = priority_reasoning or order_reasoning or "Task reasoning not available."
+Return ONLY a JSON object mapping each Task ID to its reasoning text, e.g. {{"12": "This task ...", "15": "..."}}. No prefixes or labels inside the texts."""
+                try:
+                    response = self._call_llm(combined_reasoning_prompt, self.system_prompt, temperature=0.3,
+                                              max_tokens=min(6000, 260 * len(briefs) + 200))
+                    parsed = _extract_json_object(response) or {}
+                    written = {str(k): str(v).strip() for k, v in parsed.items() if isinstance(v, str) and v.strip()}
+                except Exception as e:
+                    from core.api_key_service import KeyServiceError
+                    if isinstance(e, KeyServiceError):
+                        raise
+                    self.log_action("Combined reasoning generation failed", {"error": str(e), "tasks": len(briefs)})
+
+            for task, order_data, dependent_count in ordered:
+                combined_reasoning = written.get(str(task.get('id', '')))
+                if combined_reasoning:
+                    # Remove any prefixes if AI added them
+                    for prefix in ["[Reasoning]", "Reasoning:", "Reasoning"]:
+                        if combined_reasoning.startswith(prefix):
+                            combined_reasoning = combined_reasoning[len(prefix):].strip()
+                    task['ai_reasoning'] = combined_reasoning
+                    continue
+                # Fallback: combine existing reasoning
+                priority_reasoning = task.get('ai_reasoning', '')
+                order_reasoning = order_data.get('reasoning', '')
+                if priority_reasoning and order_reasoning:
+                    # Merge intelligently
+                    if dependent_count > 0:
+                        task['ai_reasoning'] = f"{priority_reasoning} This task should be completed at position {order_data.get('execution_order', 999)} because {dependent_count} task(s) depend on it. {order_reasoning}"
+                    else:
+                        task['ai_reasoning'] = f"{priority_reasoning} {order_reasoning}"
+                else:
+                    task['ai_reasoning'] = priority_reasoning or order_reasoning or "Task reasoning not available."
             
             # Sort tasks by suggested order
             sorted_tasks = sorted(tasks, key=lambda t: order_map.get(str(t.get('id', '')), {}).get('execution_order', 999))

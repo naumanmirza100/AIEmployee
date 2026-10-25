@@ -109,9 +109,21 @@ class KeyServiceError(Exception):
 class QuotaExhausted(KeyServiceError):
     reason = "quota_exhausted"
     user_message = (
-        "Free platform tokens for this agent are exhausted. "
-        "Add your own API key (BYOK) or request a managed key from the admin."
+        "This agent has used all of its free AI allowance. To carry on, add your own "
+        "OpenAI or Groq key in Settings → API Keys, or ask us for more."
     )
+
+    def __init__(self, agent_name=None, included_tokens=None):
+        # The client saw "Free platform tokens for this agent are exhausted ... (BYOK)" in red and
+        # took it for a crash (25 Oct 2026). Name the agent and the allowance, in plain words.
+        super().__init__()
+        if agent_name:
+            label = dict(AGENT_CHOICES).get(agent_name, agent_name)
+            allowance = f" ({included_tokens:,} tokens)" if included_tokens else ''
+            self.user_message = (
+                f"Your {label} has used all of its free AI allowance{allowance}. To carry on, add your "
+                "own OpenAI or Groq key in Settings → API Keys, or ask us for more."
+            )
 
 
 class ManagedQuotaExhausted(KeyServiceError):
@@ -587,7 +599,7 @@ def resolve_for_call(company, agent_name: str) -> CallContext:
     if quota is None:
         quota = _ensure_quota(company, agent_name)
     if quota.is_exhausted:
-        raise QuotaExhausted()
+        raise QuotaExhausted(agent_name, quota.included_tokens)
 
     # Step 4 — platform default key (the "free tokens" path)
     # Try the agent's default provider first, then fall back to any other active

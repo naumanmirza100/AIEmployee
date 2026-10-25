@@ -3098,6 +3098,8 @@ def project_pilot_job_status(request, job_id):
     # What the document proposes, as a review card — as `project_pilot`
     # returns with status 'needs_input'. Confirmed via `project_pilot_confirm`.
     draft = timing.pop('_draft', None)
+    # Set when the AI was refused (allowance used up, no key): the chat says so in amber, with API Keys.
+    error_code = timing.pop('_error_code', None)
     return Response({
         "status": "success",
         "data": {
@@ -3110,6 +3112,7 @@ def project_pilot_job_status(request, job_id):
             "confirmation_required": confirmation_required,
             "draft": draft,
             "error": job.error_message or "",
+            "error_code": error_code,
             "timing_ms": timing,
             "created_at": job.created_at.isoformat() if job.created_at else None,
             "completed_at": job.completed_at.isoformat() if job.completed_at else None,

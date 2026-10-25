@@ -437,7 +437,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
           // Server-side failure that the poll loop captured.
           if (data.processing_status === 'failed') {
             toast({
-              title: 'Processing failed',
+              // The AI was refused (allowance used up, no key): not a crash. The message says what to do.
+              title: data.error_code === 'quota_exhausted' ? 'Free AI allowance used up'
+                : data.error_code ? 'The AI is not available' : 'Processing failed',
               description: data.error || 'The document could not be processed.',
               variant: 'destructive',
             });

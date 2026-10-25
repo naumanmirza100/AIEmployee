@@ -209,6 +209,8 @@ def notify_company_quota(company, agent_label: str, pct: int, actual_pct: float 
                 severity=severity,
                 title=title,
                 message=message,
+                # The bell opens the page where a key is added or the cap changed.
+                data={'link': '/company/settings/api-keys', 'kind': 'token_quota'},
             )
     except Exception as exc:
         logger.warning("Failed to send quota notification: %s", exc)

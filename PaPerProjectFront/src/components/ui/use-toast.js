@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { withSeverity } from "@/utils/messageSeverity"
+import { ToastAction } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
 
@@ -35,9 +36,29 @@ const toastStore = {
   }
 }
 
+const API_KEYS_PAGE = '/company/settings/api-keys'
+
+// "Add your own key in Settings → API Keys": a company login gets a button that goes there. The message
+// that an agent's free AI allowance is used up gets a title that says so, not "Error".
+function withKeysLink(props) {
+  const text = typeof props.description === 'string' ? props.description : ''
+  if (!/API Keys/i.test(text)) return props
+  let isCompanyLogin = false
+  try { isCompanyLogin = !!localStorage.getItem('company_auth_token') && !localStorage.getItem('auth_token') } catch { /* no storage */ }
+  const title = /free AI allowance/i.test(text) && /^\s*(error|warning|oops)[!.]?\s*$/i.test(String(props.title || ''))
+    ? 'Free AI allowance used up' : props.title
+  if (!isCompanyLogin || props.action || window.location.pathname.startsWith(API_KEYS_PAGE)) return { ...props, title }
+  const action = React.createElement(ToastAction, {
+    altText: 'Open API Keys',
+    'data-testid': 'toast-open-api-keys',
+    onClick: () => window.location.assign(API_KEYS_PAGE),
+  }, 'Open API Keys')
+  return { ...props, title, action, duration: Math.max(props.duration || 0, 10000) }
+}
+
 export const toast = ({ ...given }) => {
   // Red only for real errors; a warning or refusal is shown in amber (see messageSeverity).
-  const props = withSeverity(given)
+  const props = withKeysLink(withSeverity(given))
   const id = generateId()
 
   const update = (props) =>
