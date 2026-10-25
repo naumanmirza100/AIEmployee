@@ -37,6 +37,8 @@ _CUE_BEFORE = re.compile(
     r'wrap(ped)?\s+up|timeline|duration|end)\b', re.I)
 _CUE_AFTER = re.compile(r'^\s*(from\s+(now|today)|deadline|timeline|at\s+(the\s+)?max(imum)?|at\s+most|max(imum)?\b)', re.I)
 _IN_BEFORE = re.compile(r'\b(in|within)\s*$', re.I)
+# "change the deadline from 10 days to 20 days": the first is the date being replaced.
+_FROM_BEFORE = re.compile(r'\bfrom\s+(the\s+|next\s+|current\s+|old\s+)?$', re.I)
 
 _MONTH = r'(' + '|'.join(sorted(MONTHS, key=len, reverse=True)) + r')\.?'
 _DATES = [
@@ -76,6 +78,7 @@ def _span_deadlines(text, today):
     found = []
     for match in _SPAN.finditer(text):
         before = text[max(0, match.start() - 45):match.start()]
+        old = bool(_FROM_BEFORE.search(before))
         after = text[match.end():match.end() + 25]
         if not (_CUE_BEFORE.search(before) or _CUE_AFTER.search(after) or _IN_BEFORE.search(before)):
             continue
@@ -84,11 +87,11 @@ def _span_deadlines(text, today):
             continue
         unit = match.group(3).lower()
         if unit == 'month':
-            found.append(_add_months(today, n))
+            found.append((_add_months(today, n), old))
         elif unit == 'week':
-            found.append(today + timedelta(weeks=n))
+            found.append((today + timedelta(weeks=n), old))
         else:
-            found.append(_add_workdays(today, n) if match.group(2) else today + timedelta(days=n))
+            found.append((_add_workdays(today, n) if match.group(2) else today + timedelta(days=n), old))
     return found
 
 
@@ -107,7 +110,7 @@ def _date_deadlines(text, today):
                 continue
             if not parts.get('y') and when < today:
                 when = date(year + 1, month, when.day)
-            found.append(when)
+            found.append((when, bool(_FROM_BEFORE.search(text[max(0, match.start() - 20):match.start()]))))
     return found
 
 
@@ -117,12 +120,15 @@ def stated_deadline(text, today=None):
     Reads "10 days from now", "in 2 weeks", "within 10 working days",
     "deadline of one month", "by 15 Nov", "deadline 2026-11-04". Counted from
     today: 25 Oct + 10 days is 4 Nov. With several ("first demo in 2 weeks,
-    launch in 3 months") the project ends at the latest. Pass only the user's
-    own words, never an attached document, whose dates are its own business."""
+    launch in 3 months") the project ends at the latest; one said after "from"
+    is the date being replaced ("from 10 days to 20 days"). Pass only the
+    user's own words, never an attached document, whose dates are its own."""
     if not text:
         return None
     today = today or date.today()
-    return max(_date_deadlines(text, today) + _span_deadlines(text, today), default=None)
+    found = _date_deadlines(text, today) + _span_deadlines(text, today)
+    wanted = [d for d, old in found if not old] or [d for d, _ in found]
+    return max(wanted, default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +183,6 @@ _MOVE = re.compile(
     r'\b(change|changing|update|move|set|make|extend|shorten|reduce|bring|push|postpone|pull|cut|adjust|'
     r'reschedule|shift|keep)\b[^.?!\n]{0,60}\b(deadline|due\s+date|end\s+date|finish\s+date|timeline)', re.I)
 _TASKS_TOO = re.compile(r'\b(tasks?|accordingly|everything|all\s+(the\s+)?dates|their\s+(dates|deadlines))\b', re.I)
-_THIS_PROJECT = re.compile(r'\b(this|the|that|my|our|same)\s+project\b|\bproject\'?s\b|\bits\s+deadline\b', re.I)
 _GENERIC_NAME_WORDS = {'project', 'the', 'and', 'for', 'new', 'app', 'system', 'platform', 'website', 'web',
                        'online', 'digital', 'mobile', 'portal', 'management', 'development', 'brief', 'pdf',
                        'docx', 'txt', 'attached', 'uploaded', 'file'}
@@ -200,8 +205,7 @@ def project_meant(text, projects, selected=None, history=None):
         return named[0]
     if named:
         return max(named, key=lambda p: len(p.name))
-    if not _THIS_PROJECT.search(text):
-        return None
+    # "this project", "the project", or none named at all: the one this chat is about.
     for message in reversed(list(history or [])):
         content = str((message or {}).get('content') or '').lower()
         hits = [p for p in projects if p.name and p.name.strip().lower() in content]

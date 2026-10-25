@@ -18,7 +18,7 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
-from project_manager_agent import drafts, pilot_deadlines, pilot_review
+from project_manager_agent import drafts, pilot_deadlines, pilot_duplicates, pilot_review
 from project_manager_agent.models import (
     PMKnowledgeQAChat,
     PMKnowledgeQAChatMessage,
@@ -569,7 +569,7 @@ def _with_request_confirmed(question, chat_history):
     return f"{earlier[-1]}\n\n{question}"
 
 
-def _pilot_review_response(actions, answer, project, available_users, company_user, request):
+def _pilot_review_response(actions, answer, project, available_users, company_user, request, duplicate=None):
     """Show a Pilot proposal as a review card, or make it at once when the company auto-confirms.
 
     Pilot used to apply its actions the moment they arrived, unless a new task was missing an
@@ -577,14 +577,17 @@ def _pilot_review_response(actions, answer, project, available_users, company_us
     all projects except Website"). Now any proposal that would change something comes back as a
     review card: creates as an editable form (drafts), updates and deletes described against what is
     stored now (pilot_review). Nothing is written here unless the company switched auto-confirm on;
-    `project_pilot_confirm` makes exactly what the user confirmed, through the service layer."""
+    `project_pilot_confirm` makes exactly what the user confirmed, through the service layer.
+
+    `duplicate` (pilot_duplicates.check) says the new project already exists: the card says so, and it is
+    shown even when the company auto-confirms."""
     # The project the tasks belong to: the one chosen in the picker, or the one they all name.
     review_project = project
     if review_project is None and drafts.only_project_id(actions):
         review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
     gaps = drafts.inspect(actions, available_users, today=timezone.localdate(), project=review_project)
     actor = pm_services.DashboardActor(company_user, request)
-    if pilot_review.auto_confirms(company_user.company, actions):
+    if not duplicate and pilot_review.auto_confirms(company_user.company, actions):
         # The company makes new work without the review card (Company profile → PM chat).
         action_results, created_project_id = pilot_review.make_as_suggested(actions, gaps['rows'], actor)
         return Response({"status": "success",
@@ -604,6 +607,7 @@ def _pilot_review_response(actions, answer, project, available_users, company_us
                 "project_id": project.id if project else None,
                 **gaps,
                 "changes": pilot_review.changes(actions, actor),
+                "duplicate": duplicate,
                 "review": True,
             },
         },
@@ -953,8 +957,10 @@ def project_pilot(request):
             logger.info("project_pilot: project deadline set to the stated %s", stated)
 
         if pilot_review.proposes_changes(actions):
+            # The same description again, or a project by that name, is offered as a numbered copy.
+            duplicate = pilot_duplicates.check(actions, projects_for_company_user(company_user), question)
             return _pilot_review_response(actions, result.get("answer"), project, available_users,
-                                          company_user, request)
+                                          company_user, request, duplicate=duplicate)
 
         # Nothing to change: the agent answered a question or declined.
         answer_text = (result.get("answer") or "").strip()
@@ -2502,6 +2508,51 @@ def delete_knowledge_qa_chat(request, chat_id):
 
 # ---------- PM Project Pilot Chats ----------
 
+def _pilot_message(msg, company_user=None):
+    """A Pilot chat message as the chat screen reads it. With `company_user`, a review card confirmed before
+    outcomes were kept is recognised (see `_resolved_before`)."""
+    if company_user is not None:
+        _resolved_before(msg, company_user)
+    out = {'id': msg.id, 'role': msg.role, 'content': msg.content}
+    if msg.response_data:
+        out['responseData'] = msg.response_data
+    return out
+
+
+def _resolve_card(company_user, chat_id, message_id, outcome, **details):
+    """Keep a review card's outcome on its chat message. Confirm and Cancel used to come back after a reload,
+    because which cards were done lived only in the open page, and a second Confirm made the project again."""
+    try:
+        msg = PMProjectPilotChatMessage.objects.filter(
+            pk=int(message_id), chat_id=int(chat_id), chat__company_user=company_user, role='assistant').first()
+    except (TypeError, ValueError):
+        return None
+    if msg is None:
+        return None
+    data = dict(msg.response_data or {})
+    data['resolved'] = {'status': outcome, 'at': timezone.now().isoformat(), **details}
+    msg.response_data = data
+    msg.save(update_fields=['response_data'])
+    return msg
+
+
+def _resolved_before(msg, company_user):
+    """A card confirmed before outcomes were kept: the project it proposed exists, made after the card."""
+    data = msg.response_data if isinstance(msg.response_data, dict) else {}
+    if msg.role != 'assistant' or not data.get('needs_input') or data.get('resolved'):
+        return
+    name = next((r.get('title') for r in data.get('rows') or []
+                 if isinstance(r, dict) and r.get('action') == 'create_project' and r.get('title')), None)
+    if not name:
+        return
+    made = (projects_for_company_user(company_user)
+            .filter(name__iexact=name, created_at__gte=msg.created_at).order_by('created_at').first())
+    if made is not None:
+        _resolve_card(company_user, msg.chat_id, msg.id, 'confirmed', answer=f'Created project “{made.name}”.',
+                      created_project_id=made.id)
+        msg.refresh_from_db(fields=['response_data'])
+
+
 @api_view(["GET"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2516,10 +2567,7 @@ def list_project_pilot_chats(request):
         for chat in chats:
             messages = []
             for msg in chat.messages.order_by('created_at'):
-                m = {'role': msg.role, 'content': msg.content}
-                if msg.response_data:
-                    m['responseData'] = msg.response_data
-                messages.append(m)
+                messages.append(_pilot_message(msg, company_user))
             result.append({
                 'id': str(chat.id),
                 'title': chat.title or 'Chat',
@@ -2556,10 +2604,7 @@ def create_project_pilot_chat(request):
         chat.refresh_from_db()
         messages = []
         for msg in chat.messages.order_by('created_at'):
-            msg_dict = {'role': msg.role, 'content': msg.content}
-            if msg.response_data:
-                msg_dict['responseData'] = msg.response_data
-            messages.append(msg_dict)
+            messages.append(_pilot_message(msg))
         return Response({
             'status': 'success',
             'data': {
@@ -2603,10 +2648,7 @@ def update_project_pilot_chat(request, chat_id):
         chat.refresh_from_db()
         messages = []
         for msg in chat.messages.order_by('created_at'):
-            msg_dict = {'role': msg.role, 'content': msg.content}
-            if msg.response_data:
-                msg_dict['responseData'] = msg.response_data
-            messages.append(msg_dict)
+            messages.append(_pilot_message(msg))
         return Response({
             'status': 'success',
             'data': {
@@ -2945,6 +2987,8 @@ def project_pilot_confirm(request):
         actions  list    the proposal exactly as it was handed out
         answers  object  {action_index: {field: value}} from the form
         skip     list    indexes of actions the user unticked
+        chat_id, message_id  optional: the chat message holding the card, which keeps the outcome so the
+                             card stays done after a reload, and is not made twice
     """
     company_user = request.user
 
@@ -2958,9 +3002,28 @@ def project_pilot_confirm(request):
     if not isinstance(skip, list):
         skip = []
 
+    chat_id, message_id = request.data.get("chat_id"), request.data.get("message_id")
+    if chat_id and message_id:
+        card = PMProjectPilotChatMessage.objects.filter(
+            pk=message_id, chat_id=chat_id, chat__company_user=company_user).only('response_data').first()
+        done = ((card.response_data or {}).get('resolved') or {}) if card else {}
+        if done.get('status'):
+            return Response({"status": "error", "code": "already_resolved", "resolved": done,
+                             "message": "This was already " + ("confirmed." if done['status'] == 'confirmed'
+                                                               else "cancelled.")},
+                            status=status.HTTP_409_CONFLICT)
+
     actions = drafts.apply_answers(proposed, request.data.get("answers"))
     actor = pm_services.DashboardActor(company_user, request)
     action_results, created_project_id = pilot_review.apply(actions, actor, skip=skip)
+
+    resolved = None
+    if chat_id and message_id and any(r.get('success') for r in action_results):
+        # Nothing made (every change refused) leaves the card open to fix and try again.
+        card = _resolve_card(company_user, chat_id, message_id, 'confirmed',
+                             answer=pilot_review.summary(action_results), created_project_id=created_project_id,
+                             failed=sum(1 for r in action_results if not r.get('success')))
+        resolved = (card.response_data or {}).get('resolved') if card else None
 
     return Response(
         {
@@ -2969,10 +3032,27 @@ def project_pilot_confirm(request):
                 "answer": pilot_review.summary(action_results),
                 "action_results": action_results,
                 "created_project_id": created_project_id,
+                "resolved": resolved,
             },
         },
         status=status.HTTP_200_OK,
     )
+
+
+@api_view(["POST"])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def project_pilot_cancel_card(request, chat_id, message_id):
+    """Cancel a review card: nothing is made, and the card stays cancelled after a reload."""
+    card = PMProjectPilotChatMessage.objects.filter(
+        pk=message_id, chat_id=chat_id, chat__company_user=request.user, role='assistant').first()
+    if card is None:
+        return Response({"status": "error", "message": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+    done = (card.response_data or {}).get('resolved') or {}
+    if done.get('status'):
+        return Response({"status": "success", "data": {"resolved": done}})
+    card = _resolve_card(request.user, chat_id, message_id, 'cancelled')
+    return Response({"status": "success", "data": {"resolved": card.response_data['resolved']}})
 
 
 @api_view(["POST"])

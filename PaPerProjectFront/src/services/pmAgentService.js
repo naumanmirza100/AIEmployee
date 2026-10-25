@@ -41,19 +41,27 @@ export const projectPilot = async (question, projectId = null, chatHistory = nul
  * @param {Array}  actions  the proposal, exactly as it was received
  * @param {object} answers  {actionIndex: {field: value}} from the form
  * @param {Array}  skip     indexes of actions the user unticked
+ * @param {object} card     {chatId, messageId} of the chat message holding the card: the server keeps the
+ *                          outcome there, so the card stays done after a reload and can't be confirmed twice
  */
-export const projectPilotConfirm = async (actions, answers = {}, skip = []) => {
+export const projectPilotConfirm = async (actions, answers = {}, skip = [], card = {}) => {
   try {
     return await companyApi.post('/project-manager/ai/project-pilot/confirm', {
       actions,
       answers,
       skip,
+      chat_id: card.chatId || null,
+      message_id: card.messageId || null,
     });
   } catch (error) {
     console.error('Project Pilot confirm error:', error);
     throw error;
   }
 };
+
+/** Cancel a review card; it stays cancelled after a reload. */
+export const cancelProjectPilotCard = async (chatId, messageId) =>
+  companyApi.post(`/project-manager/ai/project-pilot/chats/${chatId}/messages/${messageId}/cancel`, {});
 
 /**
  * Task Prioritization Agent
@@ -715,6 +723,7 @@ export default {
   knowledgeQAStream,
   projectPilot,
   projectPilotConfirm,
+  cancelProjectPilotCard,
   projectPilotFromFile,
   getProjectPilotJobStatus,
   taskPrioritization,

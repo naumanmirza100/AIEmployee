@@ -30,6 +30,7 @@ import { Button } from '@/components/ui/button';
  *   onCancel   optional; the user dismissed the proposal
  *   busy       disables the form while the confirm request is in flight
  *   done       set once applied; the card stops being interactive
+ *   doneText   optional; what was made ("Created 1 project and 12 tasks."), kept with the chat
  *   cancelled  set once dismissed
  *   compact    one column, for narrow chats
  */
@@ -79,7 +80,7 @@ const SuggestedTag = () => (
 );
 
 const PilotGapForm = ({
-  data, onConfirm, onCancel, busy = false, done = false, cancelled = false, compact = false,
+  data, onConfirm, onCancel, busy = false, done = false, doneText = '', cancelled = false, compact = false,
 }) => {
   const rows = data?.rows?.length ? data.rows : legacyRows(data);
   const changes = data?.changes || [];
@@ -204,6 +205,21 @@ const PilotGapForm = ({
           </p>
         </div>
       </div>
+
+      {data?.duplicate && !done && !cancelled && (
+        // The same document or description again, or a project by that name: say so, and make a copy only
+        // under a numbered name, on Confirm (project_manager_agent/pilot_duplicates.py).
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm"
+             data-testid="pilot-duplicate">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-foreground">
+            <span className="font-semibold">This project already exists:</span> “{data.duplicate.existing_name}”
+            {data.duplicate.tasks ? ` (${data.duplicate.tasks} task${data.duplicate.tasks === 1 ? '' : 's'})` : ''}
+            {data.duplicate.reason === 'same_source' ? ', made from the same document' : ''}.
+            {' '}Confirm to make another one named <span className="font-semibold">“{data.duplicate.new_name}”</span>, or Cancel.
+          </p>
+        </div>
+      )}
 
       {noUsers && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
@@ -379,7 +395,7 @@ const PilotGapForm = ({
 
       {done ? (
         <p className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-          <Check className="h-4 w-4" /> Done.
+          <Check className="h-4 w-4" /> {doneText || 'Done.'}
         </p>
       ) : cancelled ? (
         <p className="flex items-center gap-1.5 text-sm text-muted-foreground">

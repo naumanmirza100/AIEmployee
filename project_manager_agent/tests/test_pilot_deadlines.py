@@ -40,7 +40,12 @@ class StatedDeadlineTests(PMTestCase):
                  'due by November 3rd': date(2026, 11, 3),
                  'deadline 04/11/2026': date(2026, 11, 4),          # day first, as the card shows dates
                  'it must be ready by 5 jan': date(2027, 1, 5),     # no year: the next 5 January
-                 'first demo in 2 weeks, launch in 3 months': date(2027, 1, 25)}   # the project ends at the last
+                 'first demo in 2 weeks, launch in 3 months': date(2027, 1, 25),   # the project ends at the last
+                 # From the live chat: the date after "from" is the one being replaced.
+                 'now change the deadlines from next 10 days, to extended 20 days, now the dead line of project '
+                 'is upto next 20 days': date(2026, 11, 14),
+                 'change the deadline from 20 days to 10 days': date(2026, 11, 4),
+                 'move the deadline from 15 Nov to 30 Nov': date(2026, 11, 30)}
         for text, expected in cases.items():
             self.assertEqual(pilot_deadlines.stated_deadline(text, TODAY), expected, text)
 
@@ -185,6 +190,13 @@ class MovingAProjectDeadlineTests(PMTestCase):
             self.assertLessEqual(task.due_date.date(), deadline)
         self.finished.refresh_from_db()
         self.assertEqual(self.finished.due_date.date(), (timezone.now() + timedelta(days=30)).date())
+
+    def test_the_chats_project_is_meant_even_without_saying_this_project(self):
+        code, body = self.ask('okay now change the deadlines from next 10 days to extended 20 days, so change the '
+                              'deadline of all tasks accordingly')
+        self.assertEqual(body['status'], 'needs_input', body)
+        deadline = (timezone.localdate() + timedelta(days=20)).isoformat()
+        self.assertEqual(body['data']['actions'][0]['updates'], {'deadline': deadline})
 
     def test_the_project_picked_in_the_box_needs_no_history(self):
         code, body = self.ask('change the project deadline to 15 Nov', history=[], project_id=self.project.id)

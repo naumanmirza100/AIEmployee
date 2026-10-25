@@ -96,6 +96,10 @@ def _check_needs_confirmation(user_prompt, actions, existing_projects):
 
     reasons = []
     is_explicit = _has_explicit_intent(user_prompt or '')
+    if is_explicit:
+        # A project that already exists is now said on the review card itself, with a numbered name to make a
+        # copy under (pilot_duplicates); this card only asks when there was no instruction at all.
+        return None
     if not is_explicit:
         reasons.append({
             'type': 'implicit_intent',
@@ -486,6 +490,10 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
     if _stated and pilot_deadlines.fit_new_project(actions, _stated, timezone.localdate()):
         logger.info("Project Pilot pipeline: project deadline set to the stated %s", _stated)
 
+    # The same document again (or a project by the proposed name) is offered as a numbered copy on the card.
+    from project_manager_agent import pilot_duplicates
+    duplicate = pilot_duplicates.check(actions, all_projects, extracted_text)
+
     # ---- Confirmation gate --------------------------------------------
     # If the caller hasn't explicitly opted out (e.g. this is the follow-up
     # after the user picked an option), check whether we should ASK before
@@ -554,7 +562,7 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
         if review_project is None and drafts.only_project_id(actions):
             review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
         gaps = drafts.inspect(actions, available_users, today=timezone.localdate(), project=review_project)
-        if pilot_review.auto_confirms(company_user.company, actions):
+        if not duplicate and pilot_review.auto_confirms(company_user.company, actions):
             # The company makes new work without the review card (Company profile → PM chat).
             action_results, _created = pilot_review.make_as_suggested(actions, gaps['rows'],
                                                                       DashboardActor(company_user))
@@ -568,6 +576,7 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
             "project_id": project.id if project else None,
             **gaps,
             "changes": pilot_review.changes(actions, DashboardActor(company_user)),
+            "duplicate": duplicate,
             "review": True,
         }
         logger.info("Project Pilot pipeline: %d proposed actions sent for review", len(actions))

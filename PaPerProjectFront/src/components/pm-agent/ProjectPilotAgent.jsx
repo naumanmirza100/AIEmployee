@@ -138,23 +138,38 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   // through the normal chat path; the LLM sees the previous confirmation
   // card (which lists the proposed tasks) in chat history and regenerates
   // actions accordingly.
-  // Apply a proposal the user filled in and confirmed. Tracks which message's
-  // card is in flight / finished so the chat can disable just that one rather
-  // than the whole conversation.
-  const [confirmingIndex, setConfirmingIndex] = useState(null);
-  const [confirmedIndexes, setConfirmedIndexes] = useState(() => new Set());
-  const [cancelledIndexes, setCancelledIndexes] = useState(() => new Set());
+  // Apply a proposal the user filled in and confirmed. The outcome is kept on
+  // the chat message by the server (`responseData.resolved`), so a confirmed or
+  // cancelled card stays that way after a reload; it used to live only in this
+  // page, keyed by the message's position, and came back with its Confirm
+  // button (and the next chat's card at that position looked done).
+  const [confirmingKey, setConfirmingKey] = useState(null);
+  const cardKey = (msg, i) => `${selectedChatId}:${msg.id ?? i}`;
 
-  const confirmPilotDraft = async (messageIndex, draft, answers, skip = []) => {
+  const markResolved = (chatId, messageId, resolved) => {
+    if (!chatId || !messageId || !resolved) return;
+    setChats((prev) => prev.map((c) => (c.id !== chatId ? c : {
+      ...c,
+      messages: c.messages.map((m) => (m.id !== messageId ? m : {
+        ...m, responseData: { ...(m.responseData || {}), resolved },
+      })),
+    })));
+  };
+
+  const confirmPilotDraft = async (msg, i, answers, skip = []) => {
+    const draft = msg.responseData || {};
+    const chatId = selectedChatId;
     try {
-      setConfirmingIndex(messageIndex);
-      const response = await pmAgentService.projectPilotConfirm(draft.actions || [], answers, skip);
+      setConfirmingKey(cardKey(msg, i));
+      const response = await pmAgentService.projectPilotConfirm(draft.actions || [], answers, skip,
+        { chatId, messageId: msg.id });
       if (response.status !== 'success') {
         throw new Error(response.message || 'Failed to create');
       }
       const results = response.data?.action_results || [];
       const failed = results.filter((r) => !r.success);
-      setConfirmedIndexes((prev) => new Set(prev).add(messageIndex));
+      markResolved(chatId, msg.id, response.data?.resolved
+        || (results.some((r) => r.success) ? { status: 'confirmed', answer: response.data?.answer } : null));
       toast({
         title: failed.length ? 'Done, with problems' : 'Done',
         description: response.data?.answer || 'Done.',
@@ -162,14 +177,30 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       });
       if (results.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
     } catch (error) {
+      if (error?.data?.code === 'already_resolved') {
+        markResolved(chatId, msg.id, error.data.resolved);
+        toast({ title: 'Already done', description: error.data.message });
+        return;
+      }
       toast({
         title: 'Error',
         description: apiErrorMessage(error, 'Failed to create'),
         variant: 'destructive',
       });
     } finally {
-      setConfirmingIndex(null);
+      setConfirmingKey(null);
     }
+  };
+
+  const cancelPilotDraft = async (msg) => {
+    const chatId = selectedChatId;
+    try {
+      const res = await pmAgentService.cancelProjectPilotCard(chatId, msg.id);
+      markResolved(chatId, msg.id, res?.data?.resolved || { status: 'cancelled' });
+    } catch {
+      markResolved(chatId, msg.id, { status: 'cancelled' });
+    }
+    toast({ title: 'Cancelled', description: 'Nothing was created or changed.' });
   };
 
   const submitPilotChat = async (followUpText, extraContent = '') => {
@@ -973,12 +1004,16 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           proceed via clickable options. */}
                       {msg.responseData?.needs_input && (
                         <PilotGapForm
+                          // One card per chat and message: the form keeps its dates in state, and
+                          // without a key it kept the previous chat's after switching (E4).
+                          key={cardKey(msg, i)}
                           data={msg.responseData}
-                          busy={confirmingIndex === i}
-                          done={confirmedIndexes.has(i)}
-                          cancelled={cancelledIndexes.has(i)}
-                          onConfirm={(answers, skip) => confirmPilotDraft(i, msg.responseData, answers, skip)}
-                          onCancel={() => setCancelledIndexes((prev) => new Set(prev).add(i))}
+                          busy={confirmingKey === cardKey(msg, i)}
+                          done={msg.responseData.resolved?.status === 'confirmed'}
+                          doneText={msg.responseData.resolved?.answer}
+                          cancelled={msg.responseData.resolved?.status === 'cancelled'}
+                          onConfirm={(answers, skip) => confirmPilotDraft(msg, i, answers, skip)}
+                          onCancel={() => cancelPilotDraft(msg)}
                         />
                       )}
                       {msg.responseData?.confirmation_required && (() => {
