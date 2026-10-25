@@ -7,7 +7,11 @@ from django.db import transaction
 from core.models import Industry, Project, Subtask, Task
 
 from . import parsing
+from .history import moved as _moved, snapshot as _snapshot
 from .errors import ServiceError, forbidden
+
+#: Kept from and to in the audit entry of an edit, for the project record.
+PROJECT_TRACKED = ('deadline', 'start_date', 'status', 'priority', 'name')
 
 PROJECT_CHOICE_FIELDS = (
     ('status', Project.STATUS_CHOICES),
@@ -81,6 +85,7 @@ def create_project(actor, data):
 def update_project(actor, project_id, data):
     """Apply the fields present in `data`. Returns (project, changed_field_names)."""
     project = actor.project_for_edit(project_id)
+    before = _snapshot(project, PROJECT_TRACKED)
     changed = []
 
     if 'name' in data:
@@ -126,7 +131,8 @@ def update_project(actor, project_id, data):
 
     with transaction.atomic():
         project.save()
-    actor.audit('project_updated', 'Project', project.id, project.name, {'fields': changed})
+    actor.audit('project_updated', 'Project', project.id, project.name,
+                {'fields': changed, **_moved(before, project, PROJECT_TRACKED)})
     return project, changed
 
 
