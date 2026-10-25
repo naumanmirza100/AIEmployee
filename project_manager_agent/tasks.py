@@ -18,6 +18,8 @@ def send_meeting_reminders():
     Runs every 5 minutes. Sends:
     - 1-hour reminder (55-65 min before meeting)
     - 15-minute reminder (10-20 min before meeting)
+    - 5-minute reminder with the link to join (2-8 min before), once everyone has accepted
+      (project_manager_agent.meeting_links)
     """
     from project_manager_agent.models import ScheduledMeeting, MeetingParticipant
     from core.models import Notification
@@ -71,8 +73,16 @@ def send_meeting_reminders():
         elif 10 <= minutes_until <= 20:
             reminder_type = '15min'
             reminder_text = f"in 15 minutes (at {time_display})"
+        elif 2 <= minutes_until <= 8 and meeting.status == 'accepted' and meeting.meeting_link:
+            reminder_type = '5min'
+            reminder_text = f"in {round(minutes_until)} minutes (at {time_display})"
         else:
             continue
+
+        join_note = ''
+        if meeting.meeting_link and meeting.status == 'accepted':
+            join_note = (f' Join now: {meeting.meeting_link}' if reminder_type == '5min'
+                         else f' Please join 5 minutes early: {meeting.meeting_link}')
 
         # Check if we already sent this reminder (use meeting.description as a simple flag)
         # We'll use a JSONField-safe approach by checking existing notifications
@@ -81,7 +91,7 @@ def send_meeting_reminders():
         # Notify organizer (CompanyUser)
         already_notified_organizer = PMNotification.objects.filter(
             company_user=meeting.organizer,
-            data__contains={'reminder_key': reminder_key},
+            data__reminder_key=reminder_key,     # a key lookup: `contains` is MySQL-only
         ).exists()
 
         if not already_notified_organizer:
@@ -92,7 +102,7 @@ def send_meeting_reminders():
                 notification_type='custom',
                 severity='info',
                 title=f"Meeting Reminder: {meeting.title}",
-                message=f'Your meeting "{meeting.title}" starts {reminder_text}.',
+                message=f'Your meeting "{meeting.title}" starts {reminder_text}.{join_note}',
                 data={'meeting_id': meeting.id, 'type': 'meeting_reminder', 'reminder_key': reminder_key},
                 context={
                     'meeting_title': meeting.title,
@@ -120,7 +130,7 @@ def send_meeting_reminders():
                     type='meeting_reminder',
                     notification_type='meeting_request',
                     title=f"Meeting Reminder: {meeting.title}",
-                    message=f'Meeting "{meeting.title}" starts {reminder_text}.',
+                    message=f'Meeting "{meeting.title}" starts {reminder_text}.{join_note}',
                     link=reminder_key,
                 )
                 # Email participant
@@ -128,7 +138,7 @@ def send_meeting_reminders():
                     try:
                         send_mail(
                             subject=f"Reminder: {meeting.title} starts {reminder_text}",
-                            message=f'Meeting "{meeting.title}" starts {reminder_text}.',
+                            message=f'Meeting "{meeting.title}" starts {reminder_text}.{join_note}',
                             from_email=from_email,
                             recipient_list=[participant.user.email],
                             fail_silently=True,
@@ -176,7 +186,7 @@ def check_stale_meetings():
         # Check if we already sent this reminder
         already_sent = PMNotification.objects.filter(
             company_user=meeting.organizer,
-            data__contains={'reminder_key': reminder_key},
+            data__reminder_key=reminder_key,     # a key lookup: `contains` is MySQL-only
         ).exists()
         if already_sent:
             continue

@@ -4202,6 +4202,7 @@ def _serialize_meeting(meeting):
         'proposed_time': meeting.proposed_time.isoformat(),
         'duration_minutes': meeting.duration_minutes,
         'status': meeting.status,
+        'meeting_link': meeting.meeting_link,
         'participants': participants,
         'created_at': meeting.created_at.isoformat(),
         'recurrence': meeting.recurrence or 'none',
@@ -4709,6 +4710,7 @@ def meeting_respond(request):
         # had declined revives it; either way the time must be free for everyone
         # it occupies — across the PM, HR and Frontline calendars.
         makes_busy = action == 'counter_proposed' or (action == 'accepted' and meeting.status == 'rejected')
+        was_final = meeting.status == 'accepted'
         people = people_for('pm', meeting) if makes_busy else []
         try:
             with booking_guard(people):
@@ -4740,6 +4742,10 @@ def meeting_respond(request):
         except ScheduleConflict as clash:
             return clash.response()
         _audit_log(company_user, f'meeting_{action}', 'ScheduledMeeting', meeting.id, meeting.title)
+        if action == 'accepted' and not was_final:
+            # The organiser took the time someone suggested: the meeting is final, so it gets its link.
+            from project_manager_agent import meeting_links
+            meeting_links.on_final(meeting)
 
         # Notify the invitee (project User) via in-app notification + email
         from core.models import Notification as UserNotification

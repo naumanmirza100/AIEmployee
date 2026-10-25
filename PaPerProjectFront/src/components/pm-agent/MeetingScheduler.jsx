@@ -8,7 +8,7 @@ import pmAgentService from '@/services/pmAgentService';
 import {
   Loader2, Send, CalendarPlus, CheckCircle, XCircle, Clock,
   ArrowRightLeft, Trash2, Calendar, MessageCircle, RefreshCw,
-  Plus, ChevronsLeft, ChevronsRight, Bot, Download
+  Plus, ChevronsLeft, ChevronsRight, Bot, Download, Video
 } from 'lucide-react';
 import Skeleton from '@/components/common/Skeleton';
 import InfoHint from '../frontline/InfoHint';
@@ -799,6 +799,17 @@ export default function MeetingScheduler() {
                               </Button>
                             </>
                           )}
+                        </div>
+                      )}
+
+                      {/* The place to meet: made once everyone invited has accepted, and sent to them all. */}
+                      {m.status === 'accepted' && m.meeting_link && new Date(m.proposed_time).getTime() + m.duration_minutes * 60000 > Date.now() && (
+                        <div data-testid="pm-meeting-link" className="flex flex-wrap items-center gap-2 pt-1">
+                          <a href={m.meeting_link} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 px-3 h-7 text-xs font-medium text-white">
+                            <Video className="h-3.5 w-3.5" /> Join meeting
+                          </a>
+                          <span className="text-[11px] text-white/55">Everyone has accepted. Join 5 minutes before the start.</span>
                         </div>
                       )}
 

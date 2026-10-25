@@ -455,7 +455,7 @@ Return ONLY a single JSON object, nothing else (no markdown, no explanation, no 
                 f"{recurrence_line}{end_line}{agenda_line}\n"
                 f"{'Notifications have' if count > 1 else 'A notification has'} been sent to {invitee_str}. "
                 f"{'Each participant can' if count > 1 else 'They can'} accept or reject from their dashboard. "
-                f"You'll be notified of their response."
+                f"You'll be notified of their response. Once everyone has accepted, you all get a link to join."
             )
 
         elif action == "user_not_found":
