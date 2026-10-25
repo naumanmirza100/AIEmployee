@@ -27,7 +27,11 @@ from datetime import datetime
 # ── Django Setup ─────────────────────────────────────────────────────────────
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'project_manager_ai.settings')
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-django.setup()
+from django.apps import apps
+if not apps.ready:
+    # Not again when the test runner imports this file: a second setup re-applied the test logging settings,
+    # which switch off every logger already made (core.tests_logins then heard no warning).
+    django.setup()
 
 # ── Imports ──────────────────────────────────────────────────────────────────
 from core.models import Company
@@ -35,9 +39,11 @@ from crm_sync_agent.models import CRMIntegration, CRMSyncQueue, CRMSyncLog, CRMC
 from crm_sync_agent.agents.crm_sync_agent import CRMSyncAgent
 
 # ── Argument Parser ──────────────────────────────────────────────────────────
+# Read in MAIN below, not here: the test runner imports this file (its name starts with "test"), and reading the
+# runner's own arguments here failed every full test run.
 parser = argparse.ArgumentParser()
 parser.add_argument('--company', type=int, help='Company ID to test with')
-args = parser.parse_args()
+args = None
 
 # ── Colors for terminal output ────────────────────────────────────────────────
 GREEN  = "\033[92m"
@@ -358,6 +364,7 @@ def test_retry_failed(company):
 #  MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
+    args = parser.parse_args()
     print(f"\n{BOLD}{CYAN}CRM SYNC TEST SCRIPT{RESET}")
     print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'─'*60}")
