@@ -115,6 +115,8 @@ def _meetings(project):
         out.append({
             'day': _day(row.data.get('date')) or _day(row.created_at),
             'topic': row.data.get('topic') or 'Meeting',
+            # Notes saved without a topic read "Meeting", not 'Meeting "Meeting"'.
+            'label': f'Meeting “{row.data["topic"]}”' if row.data.get('topic') else 'Meeting',
             'decisions': [str(d.get('decision') if isinstance(d, dict) else d) for d in result.get('key_decisions') or []
                           if (d.get('decision') if isinstance(d, dict) else d)],
             'actions': [a for a in result.get('action_items') or [] if isinstance(a, dict) and a.get('action')],
@@ -253,9 +255,9 @@ def _timeline_and_decisions(project, tasks, entries, meetings, risks):
             bits.append(_plural(len(m['actions']), 'action item'))
         if m['risks']:
             bits.append(_plural(len(m['risks']), 'risk') + ' raised')
-        days[m['day']].items.append(('meeting', f'Meeting “{m["topic"]}”' + (': ' + ', '.join(bits) if bits else '')))
+        days[m['day']].items.append(('meeting', m['label'] + (': ' + ', '.join(bits) if bits else '')))
         for text in m['decisions']:
-            decisions.append({'date': m['day'].isoformat(), 'text': text, 'source': f'Meeting “{m["topic"]}”'})
+            decisions.append({'date': m['day'].isoformat(), 'text': text, 'source': m['label']})
 
     for risk in risks:
         days[_day(risk.identified_at)].items.append(('risk', f'Risk logged: {risk.title} ({risk.get_severity_display()})'))
@@ -327,7 +329,7 @@ def build(project, today=None):
             text = r.get('risk') if isinstance(r, dict) else str(r)
             if text:
                 risk_list.append({'text': text, 'severity': (r.get('severity') if isinstance(r, dict) else None) or 'medium',
-                                  'source': f'Meeting “{m["topic"]}”'})
+                                  'source': m['label']})
     if late:
         risk_list.insert(0, {'text': f'{_plural(len(late), "task")} past due: {_names([t.title for t in late])}',
                              'severity': 'high', 'source': 'Due dates'})

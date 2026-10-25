@@ -15,6 +15,20 @@ import re
 logger = logging.getLogger(__name__)
 
 
+def _without_task_ids(text, titles):
+    """The reasoning as people read it: "Task 873, 'Schema'," and "the database schema (873)" were what the AI wrote,
+    though nobody sees task ids (PM demo rehearsal, 25 Oct 2026). `titles` maps id (str) to title."""
+    if not text:
+        return text
+    for task_id, title in titles.items():
+        if str(title).strip().lower() == f'task {task_id}':     # the title itself is "Task 3": nothing to swap
+            continue
+        text = re.sub(rf"\bTask (?:ID )?{re.escape(task_id)}\b,?\s*(?=['\"“‘])", '', text)
+        text = re.sub(rf"\bTask (?:ID )?{re.escape(task_id)}\b", f'"{title}"', text)
+        text = re.sub(rf"\s*\((?:task |Task |ID )?{re.escape(task_id)}\)", '', text)
+    return text[:1].upper() + text[1:]
+
+
 def _extract_json_object(raw: str):
     """Permissively extract a JSON object from an LLM response.
 
@@ -678,6 +692,7 @@ For each task write 4-6 sentences that:
 2. Name the dependencies: "This should be done before [X] because [Y] depends on it" or "This must come after [X] because it depends on it"
 3. Explain how this position helps the timeline, and any chance to run it in parallel (parallel group)
 4. Explain its importance from priority, business value and risk
+5. Refer to every task by its title in quotes, never by its Task ID number: the reader never sees the IDs
 
 Return ONLY a JSON object mapping each Task ID to its reasoning text, e.g. {{"12": "This task ...", "15": "..."}}. No prefixes or labels inside the texts."""
                 try:
@@ -692,7 +707,7 @@ Return ONLY a JSON object mapping each Task ID to its reasoning text, e.g. {{"12
                     self.log_action("Combined reasoning generation failed", {"error": str(e), "tasks": len(briefs)})
 
             for task, order_data, dependent_count in ordered:
-                combined_reasoning = written.get(str(task.get('id', '')))
+                combined_reasoning = _without_task_ids(written.get(str(task.get('id', ''))), task_title_map)
                 if combined_reasoning:
                     # Remove any prefixes if AI added them
                     for prefix in ["[Reasoning]", "Reasoning:", "Reasoning"]:

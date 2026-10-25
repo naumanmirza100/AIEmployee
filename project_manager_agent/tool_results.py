@@ -135,11 +135,26 @@ def match_member(members, name):
     return found[0].id if len(found) == 1 else None
 
 
+_MONTHS = {m: i for i, m in enumerate(
+    ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'], start=1)}
+
+
 def _due(raw):
-    """A due date the suggestion gives as a real date (2026-10-30); "Friday" or "TBD" are left out."""
+    """A due date the suggestion gives as a real date: 2026-10-30, "Friday 30 October 2026" or "October 30, 2026".
+    "Friday" or "TBD" alone are left out. Meeting notes give the written kind: the tasks made from them had no dates
+    (PM demo rehearsal, 25 Oct 2026)."""
     text = str(raw or '').strip()
     try:
-        return datetime.fromisoformat(text[:10]).date().isoformat() if re.match(r'^\d{4}-\d{2}-\d{2}', text) else None
+        if re.match(r'^\d{4}-\d{2}-\d{2}', text):
+            return datetime.fromisoformat(text[:10]).date().isoformat()
+        written = (re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b', text)
+                   or re.search(r'\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b', text))
+        if not written:
+            return None
+        parts = written.groups()
+        day, month, year = (parts[0], parts[1], parts[2]) if parts[0].isdigit() else (parts[1], parts[0], parts[2])
+        number = _MONTHS.get(month[:3].lower())
+        return date(int(year), number, int(day)).isoformat() if number else None
     except ValueError:
         return None
 

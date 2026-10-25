@@ -187,3 +187,25 @@ class CutOffScheduleTests(PMTestCase):
                                   'error': 'The plan came back incomplete. Press Generate Schedule again.'})
         self.assertTrue(call.call_args.kwargs['json_mode'])
         self.assertFalse(ProjectToolResult.objects.exists())
+
+
+class SuggestionDatesTests(PMTestCase):
+    """Meeting notes give dates in words: the tasks made from them had none (PM demo rehearsal, 25 Oct 2026)."""
+
+    def test_written_dates_with_a_year_are_read_and_bare_days_are_not(self):
+        from project_manager_agent.tool_results import _due
+        self.assertEqual([_due(t) for t in ('Friday 30 October 2026', 'Monday 2 November 2026', 'October 30, 2026',
+                                            '2026-11-04', '3rd Nov 2026')],
+                         ['2026-10-30', '2026-11-02', '2026-10-30', '2026-11-04', '2026-11-03'])
+        self.assertEqual([_due(t) for t in ('Friday', 'TBD', '31 February 2026', '')], [None] * 4)
+
+
+class EmptyPlanDaysTests(PMTestCase):
+
+    def test_a_day_with_no_one_working_is_left_out(self):
+        from project_manager_agent.ai_agents.calendar_planner_agent import CalendarPlannerAgent
+        reply = ('{"schedule": [{"date": "2026-10-25", "day_name": "Sunday", "assignments": []}, '
+                 '{"date": "2026-10-26", "day_name": "Monday", "assignments": [{"task_title": "Cart"}]}]}')
+        with mock.patch.object(CalendarPlannerAgent, '_call_llm', return_value=reply):
+            result = CalendarPlannerAgent().generate_schedule([{'id': 1, 'title': 'Cart'}], [])
+        self.assertEqual([day['day_name'] for day in result['schedule']], ['Monday'])

@@ -111,6 +111,10 @@ Return ONLY the JSON."""
                     cleaned = cleaned.split("```")[1].split("```")[0].strip()
 
                 schedule_data = json.loads(cleaned)
+                # A day with no one working (a weekend) is left out: the plan began with an empty Sunday card.
+                if isinstance(schedule_data.get('schedule'), list):
+                    schedule_data['schedule'] = [day for day in schedule_data['schedule']
+                                                 if isinstance(day, dict) and day.get('assignments')]
                 return {
                     "success": True,
                     **schedule_data,

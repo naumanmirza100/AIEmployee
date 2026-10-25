@@ -85,3 +85,15 @@ class ProjectRecordTests(PMTestCase):
         code, body = self.call(pm_tool_results.project_record, self.rival_dash, method='get',
                                project_id=self.project.id)
         self.assertEqual(code, 404)
+
+
+class UntitledMeetingTests(PMTestCase):
+
+    def test_notes_with_no_topic_are_a_meeting_not_meeting_meeting(self):
+        ProjectToolResult.objects.create(project=self.project, kind='meeting_notes', key='2', data={
+            'topic': '', 'date': timezone.localdate().isoformat(),
+            'result': {'key_decisions': [{'decision': 'Cash on delivery at launch'}]}})
+        record = project_record.build(self.project)
+        lines = [item['text'] for day in record['timeline'] for item in day['items']]
+        self.assertTrue(any(line.startswith('Meeting: decided Cash on delivery at launch') for line in lines), lines)
+        self.assertEqual(record['decisions'][-1]['source'], 'Meeting')
