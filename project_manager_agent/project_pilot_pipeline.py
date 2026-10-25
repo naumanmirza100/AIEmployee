@@ -479,6 +479,13 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
             action_data["assignee_id"] = _allowed_ids_file[i % len(_allowed_ids_file)]
         logger.info(f"Backend enforcement (from_file): restricted to only {len(_allowed_ids_file)} users")
 
+    # A deadline typed with the file wins over the document's dates and the model's own estimate
+    # (gpt-4o-mini planned "10 days from now" to 7 December). Read from the typed words only.
+    from project_manager_agent import pilot_deadlines
+    _stated = pilot_deadlines.stated_deadline(user_prompt, timezone.localdate())
+    if _stated and pilot_deadlines.fit_new_project(actions, _stated, timezone.localdate()):
+        logger.info("Project Pilot pipeline: project deadline set to the stated %s", _stated)
+
     # ---- Confirmation gate --------------------------------------------
     # If the caller hasn't explicitly opted out (e.g. this is the follow-up
     # after the user picked an option), check whether we should ASK before
