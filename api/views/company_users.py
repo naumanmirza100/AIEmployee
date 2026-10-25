@@ -183,32 +183,9 @@ def _new_login(company_user, data):
             'message': 'Enter a valid email address (e.g., user@example.com).'
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    # Password strength validation: min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char
-    if len(password) < 8:
-        return Response({
-            'status': 'error',
-            'message': 'Password must be at least 8 characters long.'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    if not re.search(r'[A-Z]', password):
-        return Response({
-            'status': 'error',
-            'message': 'Password must contain at least one uppercase letter.'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    if not re.search(r'[a-z]', password):
-        return Response({
-            'status': 'error',
-            'message': 'Password must contain at least one lowercase letter.'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    if not re.search(r'[0-9]', password):
-        return Response({
-            'status': 'error',
-            'message': 'Password must contain at least one digit.'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    if not re.search(r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]', password):
-        return Response({
-            'status': 'error',
-            'message': 'Password must contain at least one special character (!@#$%^&* etc.).'
-        }, status=status.HTTP_400_BAD_REQUEST)
+    problem = _password_problem(password)
+    if problem:
+        return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
 
     # Location validation (if provided)
     location = (data.get('location') or '').strip()
@@ -518,6 +495,22 @@ def get_user(request, userId):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _password_problem(password):
+    """What is wrong with a password a company sets for one of its people: at least 8 characters, an uppercase
+    and a lowercase letter, a digit and a special character. None when it is fine."""
+    if len(password) < 8:
+        return 'Password must be at least 8 characters long.'
+    if not re.search(r'[A-Z]', password):
+        return 'Password must contain at least one uppercase letter.'
+    if not re.search(r'[a-z]', password):
+        return 'Password must contain at least one lowercase letter.'
+    if not re.search(r'[0-9]', password):
+        return 'Password must contain at least one digit.'
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]', password):
+        return 'Password must contain at least one special character (!@#$%^&* etc.).'
+    return None
+
+
 @api_view(['PUT', 'PATCH'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -569,8 +562,13 @@ def update_user(request, userId):
             user.first_name = name_parts[0] if len(name_parts) > 0 else ''
             user.last_name = name_parts[1] if len(name_parts) > 1 else ''
         
-        if 'password' in data:
-            user.set_password(data['password'])
+        # The edit form sends an empty password when it is left as it is; setting that locked the person out.
+        new_password = data.get('password') or ''
+        if new_password:
+            problem = _password_problem(new_password)
+            if problem:
+                return Response({'status': 'error', 'message': problem}, status=status.HTTP_400_BAD_REQUEST)
+            user.set_password(new_password)
         
         user.save()
         

@@ -165,16 +165,20 @@ class MeetingRepliesTests(SettingsTestCase):
                                    meeting_id=self.meeting.id)
         self.assertEqual(code, 200, body)
 
+    def organiser_emails(self):
+        # Ali's own "meeting confirmed" email, with the link to join, is not the organiser's.
+        return [m for m in mail.outbox if m.to == [self.member.email]]
+
     def test_the_organiser_hears_with_a_link_and_by_email(self):
         self.reply()
         [row] = self.bell()
         self.assertEqual(row.data['link'], '/project-manager/dashboard?tab=meeting-scheduler')
-        self.assertEqual([m.to for m in mail.outbox], [[self.member.email]])       # one email, not two
+        self.assertEqual(len(self.organiser_emails()), 1)       # one email, not two
 
     def test_and_can_turn_the_email_off(self):
         self.change({'topic': 'meeting_replies', 'email': False})
         self.reply()
-        self.assertEqual((self.bell().count(), len(mail.outbox)), (1, 0))
+        self.assertEqual((self.bell().count(), len(self.organiser_emails())), (1, 0))
 
 
 class FrontlineMergedTests(SettingsTestCase):

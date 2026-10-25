@@ -290,6 +290,10 @@ class ScheduledMeeting(models.Model):
         help_text='IANA timezone the proposed_time was set in. Reminders + emails render local time using this.',
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    meeting_link = models.URLField(
+        blank=True, default='',
+        help_text='Where to join: made once everyone invited has accepted (project_manager_agent.meeting_links).',
+    )
     # Recurrence fields
     recurrence = models.CharField(max_length=20, choices=RECURRENCE_CHOICES, default='none')
     recurrence_end_date = models.DateField(null=True, blank=True, help_text='Stop recurring after this date')
@@ -331,6 +335,7 @@ class ScheduledMeeting(models.Model):
         if not participants.exists():
             return
         statuses = list(participants.values_list('status', flat=True))
+        was = self.status
         if all(s == 'accepted' for s in statuses):
             self.status = 'accepted'
         elif any(s == 'counter_proposed' for s in statuses):
@@ -342,6 +347,9 @@ class ScheduledMeeting(models.Model):
         else:
             self.status = 'pending'
         self.save(update_fields=['status', 'updated_at'])
+        if self.status == 'accepted' and was != 'accepted':
+            from project_manager_agent import meeting_links
+            meeting_links.on_final(self)
 
 
 class MeetingParticipant(models.Model):

@@ -85,7 +85,7 @@ Return a JSON object with this structure:
                     "task_title": "title",
                     "task_id": id,
                     "priority": "high/medium/low",
-                    "note": "brief note"
+                    "note": "at most eight words"
                 }}
             ]
         }}
@@ -99,7 +99,9 @@ Return a JSON object with this structure:
 Return ONLY the JSON."""
 
         try:
-            response = self._call_llm(prompt, self.system_prompt, temperature=0.5, max_tokens=2000)
+            # Two weeks for a team of six is well over 2,000 tokens: the reply was cut off mid-JSON and the raw
+            # text was shown as the plan (PM demo rehearsal, 25 Oct 2026).
+            response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=8000, json_mode=True)
             try:
                 # Parse the JSON response
                 cleaned = response.strip()
@@ -115,11 +117,8 @@ Return ONLY the JSON."""
                     "period": {"start": start, "end": end}
                 }
             except (json.JSONDecodeError, IndexError):
-                return {
-                    "success": True,
-                    "answer": response,
-                    "period": {"start": start, "end": end}
-                }
+                self.log_action("Schedule reply was not complete JSON", {"length": len(response or '')})
+                return {"success": False, "error": "The plan came back incomplete. Press Generate Schedule again."}
         except Exception as e:
             from core.api_key_service import KeyServiceError
             if isinstance(e, KeyServiceError):

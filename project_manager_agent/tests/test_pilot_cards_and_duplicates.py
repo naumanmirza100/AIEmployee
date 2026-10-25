@@ -155,3 +155,26 @@ class SameProjectAgainTests(PMTestCase):
         self.assertEqual(pilot_duplicates.fingerprint('create a project'), '')
         self.assertEqual(pilot_duplicates.fingerprint('Afar  is a WORD puzzle game, for Bempoh Games: drag letters!'),
                          pilot_duplicates.fingerprint('afar is a word puzzle game for bempoh games drag letters'))
+
+
+class NothingToChangeTests(PMTestCase):
+    """"Sana ko design wale tasks de do" on the live site (25 Oct 2026, night): the task picked was Sana's already,
+    and the card showed it unticked with "Nothing would change" and a Confirm that could not be pressed."""
+
+    def test_a_change_that_is_already_so_is_said_in_words(self):
+        task = self.task(title='Admin panel', assignee=self.dev)
+        with mock.patch.object(ProjectPilotAgent, 'process', return_value={'answer': '', 'actions': [
+                {'action': 'update_task', 'task_id': task.id, 'updates': {'assignee_id': self.dev.id}}]}):
+            code, body = self.call(pm_agent.project_pilot, self.dash, {'question': 'give the admin panel to dev'})
+        self.assertEqual(body['status'], 'success', body)
+        self.assertEqual(body['data']['answer'], 'Nothing to change: “Admin panel” is already set that way. '
+                                                 "Say what should be different, and I'll propose it.")
+
+    def test_a_real_change_beside_it_still_gets_the_card(self):
+        task = self.task(title='Admin panel', assignee=self.dev)
+        other = self.task(title='Cart', assignee=self.dev)
+        with mock.patch.object(ProjectPilotAgent, 'process', return_value={'answer': '', 'actions': [
+                {'action': 'update_task', 'task_id': task.id, 'updates': {'assignee_id': self.dev.id}},
+                {'action': 'update_task', 'task_id': other.id, 'updates': {'assignee_id': self.pm.id}}]}):
+            code, body = self.call(pm_agent.project_pilot, self.dash, {'question': 'give both to pat'})
+        self.assertEqual(body['status'], 'needs_input', body)

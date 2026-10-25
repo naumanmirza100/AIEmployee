@@ -9,6 +9,7 @@ import logging
 
 from core.models import Notification
 from core.scheduling import ScheduleConflict, booking_guard, ensure_free, people_for, when_text
+from project_manager_agent import meeting_links
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,11 @@ def _email_organizer_reply(meeting, organizer, invitee_name, action):
         from django.core.mail import EmailMultiAlternatives
         from_email = getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
         email_body = f'<p><strong>{invitee_name}</strong> has {action.replace("_", " ")} the meeting <strong>"{meeting.title}"</strong>.</p>'
+        if action == 'accepted' and meeting.status == 'accepted' and meeting.meeting_link:
+            # That reply made the meeting final: the link to join (project_manager_agent.meeting_links).
+            email_body += (f'<p>Everyone has accepted. <a href="{meeting.meeting_link}">Join the meeting</a> '
+                           f'— please join 5 minutes before the start.</p>'
+                           f'<p style="color:#6b7280;font-size:12px;">{meeting.meeting_link}</p>')
         email_msg = EmailMultiAlternatives(
             subject=f'Meeting Update: {meeting.title}',
             body='',
@@ -246,7 +252,8 @@ def meeting_respond(request, meeting_id):
         reason_text = f' Reason: {reason}' if reason else ''
         if action == 'accepted':
             title, severity = f'Meeting Accepted: {meeting.title}', 'info'
-            body = f'{invitee_name} accepted the meeting "{meeting.title}" scheduled for {time_display}.'
+            body = (f'{invitee_name} accepted the meeting "{meeting.title}" scheduled for {time_display}.'
+                    + meeting_links.organiser_note(meeting))
         elif action == 'rejected':
             title, severity = f'Meeting Rejected: {meeting.title}', 'warning'
             body = f'{invitee_name} rejected the meeting "{meeting.title}".{reason_text}'
@@ -256,7 +263,8 @@ def meeting_respond(request, meeting_id):
                     f"{when_text(counter_time, meeting.timezone_name)}.{reason_text}")
         notify_company_users([organizer], title=title, message=body, severity=severity,
                              link='/project-manager/dashboard?tab=meeting-scheduler', kind='pm_meeting_reply',
-                             email=False, data={'meeting_id': meeting.id, 'type': f'meeting_{action}'})
+                             email=False, data={'meeting_id': meeting.id, 'type': f'meeting_{action}',
+                                                'meeting_link': meeting.meeting_link})
 
         # And their email, with the calendar file when someone accepts — unless
         # they've turned it off.
@@ -343,7 +351,7 @@ def _pm_meeting_items(user):
             'participants': participants,
             'created_at': m.created_at.isoformat(),
             'responses': responses,
-            'meeting_link': None,
+            'meeting_link': m.meeting_link or None,     # once everyone has accepted
             'location': '',
             'can_respond': can_respond,
             'can_suggest_time': can_respond,
@@ -820,7 +828,8 @@ def meeting_email_action(request, action, token):
         from core.notification_utils import notify_company_users
         if action == 'accepted':
             title, severity = f'Meeting Accepted: {meeting.title}', 'info'
-            body = f'{invitee_name} accepted via email — "{meeting.title}" scheduled for {time_display}.'
+            body = (f'{invitee_name} accepted via email — "{meeting.title}" scheduled for {time_display}.'
+                    + meeting_links.organiser_note(meeting))
         else:
             title, severity = f'Meeting Rejected: {meeting.title}', 'warning'
             body = f'{invitee_name} rejected "{meeting.title}" via email.'

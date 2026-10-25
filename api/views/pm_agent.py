@@ -631,6 +631,12 @@ def _pilot_review_response(actions, answer, project, available_users, company_us
                                   "created_project_id": created_project_id,
                                   "auto_confirmed": True}},
                         status=status.HTTP_200_OK)
+    changes = pilot_review.changes(actions, actor)
+    already = pilot_review.nothing_to_do(changes, gaps['rows'])
+    if already:
+        # "Sana ko design wale tasks de do" when they are Sana's: a card with nothing to confirm looked broken.
+        return Response({"status": "success", "data": {"answer": already, "action_results": []}},
+                        status=status.HTTP_200_OK)
     return Response(
         {
             "status": "needs_input",
@@ -641,7 +647,7 @@ def _pilot_review_response(actions, answer, project, available_users, company_us
                 "actions": actions,
                 "project_id": project.id if project else None,
                 **gaps,
-                "changes": pilot_review.changes(actions, actor),
+                "changes": changes,
                 "duplicate": duplicate,
                 "review": True,
             },
@@ -2115,25 +2121,16 @@ def _pm_build_analytics_data(company_user, project_id=None):
     projects_qs = projects_qs.order_by()
     tasks_qs = tasks_qs.order_by()
 
-    projects_by_status = {}
-    for item in projects_qs.values('status').annotate(count=Count('id')):
-        if item.get('status'):
-            projects_by_status[str(item['status'])] = item['count']
+    def counted(qs, field):
+        # Keyed by the words people see ("To Do", not "todo"): the keys become the chart's labels.
+        labels = dict(qs.model._meta.get_field(field).choices or [])
+        return {str(labels.get(item[field], item[field])): item['count']
+                for item in qs.values(field).annotate(count=Count('id')) if item.get(field)}
 
-    projects_by_priority = {}
-    for item in projects_qs.values('priority').annotate(count=Count('id')):
-        if item.get('priority'):
-            projects_by_priority[str(item['priority'])] = item['count']
-
-    tasks_by_status = {}
-    for item in tasks_qs.values('status').annotate(count=Count('id')):
-        if item.get('status'):
-            tasks_by_status[str(item['status'])] = item['count']
-
-    tasks_by_priority = {}
-    for item in tasks_qs.values('priority').annotate(count=Count('id')):
-        if item.get('priority'):
-            tasks_by_priority[str(item['priority'])] = item['count']
+    projects_by_status = counted(projects_qs, 'status')
+    projects_by_priority = counted(projects_qs, 'priority')
+    tasks_by_status = counted(tasks_qs, 'status')
+    tasks_by_priority = counted(tasks_qs, 'priority')
 
     tasks_by_project = {}
     for item in tasks_qs.values('project__name').annotate(count=Count('id')):
@@ -3411,6 +3408,7 @@ def daily_standup(request):
                 "title": t.title,
                 "status": t.status,
                 "priority": t.priority,
+                "assignee_id": t.assignee_id,
                 "assignee_username": t.assignee.username if t.assignee else None,
                 "assignee_name": (t.assignee.get_full_name() or t.assignee.username) if t.assignee else None,
                 "due_date": t.due_date.isoformat() if t.due_date else None,
@@ -4204,6 +4202,7 @@ def _serialize_meeting(meeting):
         'proposed_time': meeting.proposed_time.isoformat(),
         'duration_minutes': meeting.duration_minutes,
         'status': meeting.status,
+        'meeting_link': meeting.meeting_link,
         'participants': participants,
         'created_at': meeting.created_at.isoformat(),
         'recurrence': meeting.recurrence or 'none',
@@ -4711,6 +4710,7 @@ def meeting_respond(request):
         # had declined revives it; either way the time must be free for everyone
         # it occupies — across the PM, HR and Frontline calendars.
         makes_busy = action == 'counter_proposed' or (action == 'accepted' and meeting.status == 'rejected')
+        was_final = meeting.status == 'accepted'
         people = people_for('pm', meeting) if makes_busy else []
         try:
             with booking_guard(people):
@@ -4742,6 +4742,10 @@ def meeting_respond(request):
         except ScheduleConflict as clash:
             return clash.response()
         _audit_log(company_user, f'meeting_{action}', 'ScheduledMeeting', meeting.id, meeting.title)
+        if action == 'accepted' and not was_final:
+            # The organiser took the time someone suggested: the meeting is final, so it gets its link.
+            from project_manager_agent import meeting_links
+            meeting_links.on_final(meeting)
 
         # Notify the invitee (project User) via in-app notification + email
         from core.models import Notification as UserNotification

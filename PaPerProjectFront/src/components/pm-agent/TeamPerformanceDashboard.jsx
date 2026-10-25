@@ -164,10 +164,11 @@ export default function TeamPerformanceDashboard({ onOpenPilot }) {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className={`text-2xl font-bold ${member.score >= 80 ? 'text-emerald-400' : member.score >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
-                            {member.score ?? 0}
+                          {/* No score until something is done, late or blocked: not a red 0 on a new project. */}
+                          <div className={`text-2xl font-bold ${member.score == null ? 'text-white/40' : member.score >= 80 ? 'text-emerald-400' : member.score >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {member.score ?? '—'}
                           </div>
-                          <div className="text-[10px] text-white/40">SCORE</div>
+                          <div className="text-[10px] text-white/40">{member.score == null ? 'NOTHING DUE YET' : 'SCORE'}</div>
                         </div>
                       </div>
 

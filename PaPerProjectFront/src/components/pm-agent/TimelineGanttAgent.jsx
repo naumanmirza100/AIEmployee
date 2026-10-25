@@ -28,7 +28,39 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 
-const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
+// The tooltip box is white in both themes; without a set label colour the dark theme wrote white on white.
+const TOOLTIP_STYLE = { contentStyle: { borderRadius: 8 }, labelStyle: { color: '#111827' } };
+// The default hover band on bars is a bright grey block in the dark theme.
+const BAR_TOOLTIP_STYLE = { ...TOOLTIP_STYLE, cursor: { fill: 'rgba(148, 163, 184, 0.15)' } };
+
+// Empty slices are left out: their labels piled up on one spot and their edges drew a stray line.
+const SharePie = ({ data }) => {
+  const slices = (data || []).filter((entry) => entry.value > 0);
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <PieChart>
+        <Pie
+          data={slices}
+          cx="50%"
+          cy="50%"
+          labelLine={false}
+          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+          outerRadius={80}
+          stroke={slices.length > 1 ? '#fff' : 'none'}
+          dataKey="value"
+        >
+          {slices.map((entry) => (
+            <Cell key={entry.name} fill={entry.color} />
+          ))}
+        </Pie>
+        <Tooltip {...TOOLTIP_STYLE} />
+        <Legend />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+};
+
+const TimelineGanttAgent =({ projects = [], onOpenPilot }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [action, setAction] = useState('create_timeline');
   const [daysAhead, setDaysAhead] = useState(7);
@@ -234,26 +266,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                     <CardTitle className="text-lg">{charts.status_distribution.title}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={charts.status_distribution.data}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {charts.status_distribution.data.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <SharePie data={charts.status_distribution.data} />
                   </CardContent>
                 </Card>
               )}
@@ -269,10 +282,9 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                       <BarChart data={charts.priority_distribution.data}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="value" fill="#8884d8">
+                        <YAxis allowDecimals={false} />
+                        <Tooltip {...BAR_TOOLTIP_STYLE} />
+                        <Bar dataKey="value" name="Tasks" fill="#8884d8">
                           {charts.priority_distribution.data.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
@@ -294,12 +306,12 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                       <LineChart data={charts.burndown.data}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="week" />
-                        <YAxis />
-                        <Tooltip />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip {...TOOLTIP_STYLE} />
                         <Legend />
-                        <Line type="monotone" dataKey="completed" stroke="#10b981" name="Completed" />
-                        <Line type="monotone" dataKey="total" stroke="#3b82f6" name="Total" />
-                        <Line type="monotone" dataKey="remaining" stroke="#ef4444" name="Remaining" />
+                        <Line type="linear" dataKey="planned" stroke="#9ca3af" strokeDasharray="5 4" name="Planned" />
+                        <Line type="linear" dataKey="remaining" stroke="#ef4444" name="Remaining" />
+                        <Line type="linear" dataKey="completed" stroke="#10b981" name="Completed" />
                       </LineChart>
                     </ResponsiveContainer>
                   </CardContent>
@@ -314,16 +326,28 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={charts.resource_utilization.data}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis yAxisId="left" />
-                        <YAxis yAxisId="right" orientation="right" />
-                        <Tooltip />
-                        <Legend />
-                        <Bar yAxisId="left" dataKey="hours" fill="#3b82f6" name="Hours" />
-                        <Bar yAxisId="right" dataKey="tasks" fill="#10b981" name="Tasks" />
-                      </BarChart>
+                      {/* Hours only when some task has an estimate; otherwise the chart had an empty axis. */}
+                      {charts.resource_utilization.data.some((row) => row.hours > 0) ? (
+                        <BarChart data={charts.resource_utilization.data}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" />
+                          <YAxis yAxisId="left" />
+                          <YAxis yAxisId="right" orientation="right" allowDecimals={false} />
+                          <Tooltip {...BAR_TOOLTIP_STYLE} />
+                          <Legend />
+                          <Bar yAxisId="left" dataKey="hours" fill="#3b82f6" name="Hours" />
+                          <Bar yAxisId="right" dataKey="tasks" fill="#10b981" name="Tasks" />
+                        </BarChart>
+                      ) : (
+                        <BarChart data={charts.resource_utilization.data}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" />
+                          <YAxis allowDecimals={false} />
+                          <Tooltip {...BAR_TOOLTIP_STYLE} />
+                          <Legend />
+                          <Bar dataKey="tasks" fill="#10b981" name="Tasks" />
+                        </BarChart>
+                      )}
                     </ResponsiveContainer>
                   </CardContent>
                 </Card>
@@ -377,26 +401,7 @@ const TimelineGanttAgent = ({ projects = [], onOpenPilot }) => {
                     <CardTitle className="text-lg">{charts.milestone_status.title}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={charts.milestone_status.data}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {charts.milestone_status.data.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <SharePie data={charts.milestone_status.data} />
                   </CardContent>
                 </Card>
               )}
