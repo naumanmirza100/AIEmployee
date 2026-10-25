@@ -82,21 +82,25 @@ const ALL_AGENTS = [
         ],
       },
       { label: 'Projects', icon: FolderKanban, path: '/project-manager/dashboard', tab: 'projects' },
+      // Named as the client's feature list names them (client test, 25 Oct 2026), one entry each, so the
+      // list can be ticked off item by item. Calendar Auto-planner and Meeting Notetaker were one level
+      // down under "Tools", and the client did not find them.
       {
-        label: 'Tasks', icon: CheckSquare, path: '/project-manager/dashboard', tab: 'tasks',
+        label: 'Task & Prioritization', icon: CheckSquare, path: '/project-manager/dashboard', tab: 'tasks',
         basePathTab: 'tasks',
         // 'List' has no legacy hidden tab (it's the default inline sub-tab of
-        // TasksListView), so only Prioritize + Timeline appear as grandchildren.
+        // TasksListView), so only Prioritize appears as a grandchild.
         children: [
-          { label: 'Prioritize', icon: Target,   path: '/project-manager/dashboard', tab: 'task-prioritization' },
-          { label: 'Timeline',   icon: Calendar, path: '/project-manager/dashboard', tab: 'timeline-gantt' },
+          { label: 'Prioritize', icon: Target, path: '/project-manager/dashboard', tab: 'task-prioritization' },
         ],
       },
-      // Insights' views and the AI tools open by `sub` within their tab; without
-      // these entries Daily Standup, Team Performance, Meeting Notes, Workflow &
-      // SOP and Calendar & Schedule could only be reached by typing the URL.
+      { label: 'Project Timeline / Gantt', icon: Calendar,     path: '/project-manager/dashboard', tab: 'timeline-gantt' },
+      { label: 'Calendar Auto-planner',    icon: CalendarDays, path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'calendar-schedule' },
+      { label: 'Meeting Notetaker',        icon: FileText,     path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'meeting-notes' },
+      // Insights' views open by `sub` within their tab; without these entries Daily Standup and Team
+      // Performance could only be reached by typing the URL.
       {
-        label: 'Insights', icon: LineChart, path: '/project-manager/dashboard', tab: 'insights',
+        label: 'Analytics & Dashboard', icon: LineChart, path: '/project-manager/dashboard', tab: 'insights',
         basePathTab: 'insights',
         children: [
           { label: 'Project Health',   icon: Activity,  path: '/project-manager/dashboard', tab: 'insights', sub: 'health' },
@@ -104,15 +108,7 @@ const ALL_AGENTS = [
           { label: 'Team Performance', icon: Users,     path: '/project-manager/dashboard', tab: 'insights', sub: 'team' },
         ],
       },
-      {
-        label: 'Tools', icon: Workflow, path: '/project-manager/dashboard', tab: 'ai-tools',
-        basePathTab: 'ai-tools',
-        children: [
-          { label: 'Meeting Notes',       icon: FileText,     path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'meeting-notes' },
-          { label: 'Workflow & SOP',      icon: Workflow,     path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'workflow' },
-          { label: 'Calendar & Schedule', icon: CalendarDays, path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'calendar-schedule' },
-        ],
-      },
+      { label: 'Workflow / SOP Runner', icon: Workflow, path: '/project-manager/dashboard', tab: 'ai-tools', sub: 'workflow' },
       { label: 'Overview', icon: BrainCircuit,  path: '/project-manager/dashboard', tab: 'overview' },
     ],
   },

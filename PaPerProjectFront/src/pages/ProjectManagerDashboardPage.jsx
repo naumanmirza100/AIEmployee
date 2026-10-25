@@ -85,8 +85,8 @@ const PM_TAB_ITEMS = [
   // Visible — the new 5-tab shape
   { value: 'project-pilot', label: 'Ask (Pilot)', icon: Target },
   { value: 'projects', label: 'Projects', icon: FolderKanban },
-  { value: 'tasks', label: 'Tasks', icon: CheckSquare },
-  { value: 'insights', label: 'Insights', icon: LineChart },
+  { value: 'tasks', label: 'Task & Prioritization', icon: CheckSquare },
+  { value: 'insights', label: 'Analytics & Dashboard', icon: LineChart },
   { value: 'overview', label: 'Overview', icon: BrainCircuit },
 
   // Hidden — kept for URL/deep-link compatibility, content still renders when
@@ -96,7 +96,7 @@ const PM_TAB_ITEMS = [
   { value: 'create-task', label: 'Create Task', icon: Plus, hidden: true },
   { value: 'task-prioritization', label: 'Task Prioritization', icon: ListChecks, hidden: true },
   { value: 'knowledge-qa', label: 'Knowledge Q&A', icon: MessageSquare, hidden: true },
-  { value: 'timeline-gantt', label: 'Timeline & Gantt', icon: Calendar, hidden: true },
+  { value: 'timeline-gantt', label: 'Project Timeline / Gantt', icon: Calendar, hidden: true },
   { value: 'meeting-scheduler', label: 'Meeting Scheduler', icon: CalendarPlus, hidden: true },
   { value: 'ai-tools', label: 'AI Tools', icon: Workflow, hidden: true },
 ];
@@ -680,7 +680,7 @@ const ProjectManagerDashboardPage = () => {
                         borderHover: 'rgba(96,165,250,0.4)',
                       },
                       {
-                        title: 'Timeline & Gantt',
+                        title: 'Project Timeline / Gantt',
                         desc: 'Create timelines, generate Gantt charts, and manage project schedules',
                         icon: Calendar,
                         tab: 'timeline-gantt',

@@ -175,7 +175,7 @@ export default function WorkflowSuggestionsView({ onOpenPilot }) {
     return (
       <PMEmptyState
         title="Create a project first"
-        subtitle="Workflow & SOP suggests phase-by-phase checklists, best practices, and validations for a project. Start one in Pilot to unlock this tool."
+        subtitle="Workflow / SOP Runner suggests phase-by-phase checklists, best practices, and validations for a project. Start one in Pilot to unlock this tool."
         onOpenPilot={onOpenPilot}
       />
     );
@@ -187,7 +187,7 @@ export default function WorkflowSuggestionsView({ onOpenPilot }) {
       <Card className="bg-black/30 border-white/[0.06]">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg text-violet-300 flex items-center gap-2">
-            <Workflow className="w-5 h-5" /> Workflow & SOP
+            <Workflow className="w-5 h-5" /> Workflow / SOP Runner
           </CardTitle>
           <CardDescription className="text-white/55">
             Get AI-powered workflow suggestions, phase checklists, and process validation
