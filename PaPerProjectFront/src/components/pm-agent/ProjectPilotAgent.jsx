@@ -12,7 +12,7 @@ import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager';
-import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle, ChevronsLeft, ChevronsRight, Bot } from 'lucide-react';
+import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle, ChevronsLeft, ChevronsRight, Bot, Lock } from 'lucide-react';
 import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 import { trackPMRecentlyViewed } from './pmLocalStore';
@@ -95,6 +95,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
 
   const selectedChat = chats.find((c) => c.id === selectedChatId);
   const currentMessages = selectedChat?.messages ?? [];
+  // Once a conversation has started its project is fixed (the server keeps it): the one picked at the start,
+  // or the one it settled on later. Before that, the project box decides.
+  const chatLocked = !!selectedChat && currentMessages.length > 0;
+  const activeProjectId = chatLocked
+    ? (selectedChat.projectId || null)
+    : (selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null);
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
   const getProjectTitle = (projectId) => {
@@ -117,7 +123,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
           setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
         } else throw new Error(updRes.message || 'Failed to save chat');
       } else {
-        const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+        const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg], project_id: activeProjectId });
         if (createRes.status === 'success' && createRes.data) {
           const newChatData = normalizeChat(createRes.data);
           setChats((prev) => [newChatData, ...prev]);
@@ -125,7 +131,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
         } else throw new Error(createRes.message || 'Failed to create chat');
       }
     } else {
-      const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+      const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg], project_id: activeProjectId });
       if (createRes.status === 'success' && createRes.data) {
         const newChatData = normalizeChat(createRes.data);
         setChats((prev) => [newChatData, ...prev]);
@@ -176,6 +182,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       const failed = results.filter((r) => !r.success);
       markResolved(chatId, msg.id, response.data?.resolved
         || (results.some((r) => r.success) ? { status: 'confirmed', answer: response.data?.answer } : null));
+      // The conversation made a project: it is about that project from now on (the server fixed it).
+      const made = response.data?.chat_project;
+      if (made) {
+        setChats((prev) => prev.map((c) => (c.id !== chatId ? c
+          : { ...c, projectId: String(made.id), projectName: made.name })));
+      }
       toast({
         title: failed.length ? 'Done, with problems' : 'Done',
         description: response.data?.answer || 'Done.',
@@ -226,12 +238,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     if (!followUpText || !followUpText.trim()) return;
     const q = followUpText.trim();
     const projectId = opts.projectId
-      || (selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null);
+      || activeProjectId;
     const projectTitle = getProjectTitle(projectId);
     try {
       setLoading(true);
       const response = await pmAgentService.projectPilot(q, projectId, currentMessages,
-        opts.reviseOf ? { revise_of: opts.reviseOf } : {});
+        { chat_id: selectedChatId || undefined, ...(opts.reviseOf ? { revise_of: opts.reviseOf } : {}) });
       // The proposal is missing details we ask about. Show it as a form
       // instead of applying it; PilotGapForm posts it back once confirmed.
       if (response.status === 'needs_input') {
@@ -330,12 +342,13 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       return;
     }
     const q = question.trim();
-    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectId = activeProjectId;
     const projectTitle = getProjectTitle(projectId);
 
     try {
       setLoading(true);
-      const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      const response = await pmAgentService.projectPilot(q, projectId, currentMessages,
+        { chat_id: selectedChatId || undefined });
       // The proposal is missing details we ask about. Show it as a form
       // instead of applying it; PilotGapForm posts it back once confirmed.
       if (response.status === 'needs_input') {
@@ -432,7 +445,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       }
     }
     // Fall through: create a new chat (chat was deleted, or snapshot was null).
-    const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+    const createRes = await pmAgentService.createProjectPilotChat({
+      title, messages: [userMsg, assistantMsg], project_id: userMsg.responseData?.project_id || null,
+    });
     if (createRes.status === 'success' && createRes.data) {
       const newChatData = normalizeChat(createRes.data);
       setChats((prev) => [newChatData, ...prev]);
@@ -456,7 +471,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     // Snapshot every input at enqueue time — user may change any of these
     // while the background job is running.
     const file = selectedFile;
-    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectId = activeProjectId;
     const projectTitle = getProjectTitle(projectId);
     const userPrompt = (question || '').trim();
     const historySnapshot = currentMessages;
@@ -471,7 +486,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       title: file.name,
       agent: 'project-pilot',
       upload: (onProgress) => pmAgentService.projectPilotFromFile(
-        file, projectId, historySnapshot, userPrompt || null, { onProgress },
+        file, projectId, historySnapshot, userPrompt || null, { onProgress, chatId: chatIdSnapshot },
       ),
       // Tier 2: the endpoint returns 202 with a job_id and the Celery
       // worker runs the pipeline. The manager polls this endpoint until
@@ -1142,10 +1157,24 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             <div className="flex items-center gap-2 mb-2">
               <div data-tour-pm-pp="project-select" className="flex items-center gap-1.5 flex-1 min-w-0">
                 <InfoHint {...PM_HINTS.pmPpProjectSelect} />
-                {/* EXEC-BUG-03: freeze the project selector while the AI is
+                {/* A conversation's project is fixed once it has started: the box gives way to the
+                    project's name. Switching project half-way mixed up which tasks were meant;
+                    another project takes a new conversation. */}
+                {chatLocked ? (
+                  <div className="flex items-center gap-1.5 h-8 flex-1 min-w-0 rounded-md border border-input px-2 text-xs bg-muted/40"
+                       data-testid="pilot-fixed-project"
+                       title="This conversation is about this project. To work on another one, start a new conversation.">
+                    <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{selectedChat?.projectName || 'All projects'}</span>
+                    <button type="button" onClick={newChat} className="ml-auto shrink-0 text-[11px] text-primary hover:underline">
+                      New conversation
+                    </button>
+                  </div>
+                ) : (
+                /* EXEC-BUG-03: freeze the project selector while the AI is
                     generating. Changing the target project mid-flight
                     detaches the response from the tasks the user asked
-                    about. */}
+                    about. */
                 <Select
                   value={selectedProjectId || 'all'}
                   disabled={loading}
@@ -1173,6 +1202,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                   )}
                 </SelectContent>
               </Select>
+                )}
               </div>
 
               <input

@@ -65,6 +65,11 @@ class PMProjectPilotChat(models.Model):
         help_text='Company user who owns this chat',
     )
     title = models.CharField(max_length=255, default='Chat', help_text='Chat title (e.g. first request snippet)')
+    # The project the conversation is about, fixed once set: picked when it starts, or the first time it
+    # becomes clear (a "Which project?" button, or the project the conversation makes). Changing project
+    # half-way through mixed up which tasks were meant; another project takes a new conversation.
+    project = models.ForeignKey('core.Project', on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name='+')
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

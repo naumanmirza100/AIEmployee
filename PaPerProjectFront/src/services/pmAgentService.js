@@ -278,6 +278,10 @@ export const projectPilotFromFile = (file, projectId = null, chatHistory = null,
   if (projectId) {
     formData.append('project_id', projectId);
   }
+  // A conversation with a project: the server reads the file for that project, whatever else is sent.
+  if (options.chatId) {
+    formData.append('chat_id', options.chatId);
+  }
   if (Array.isArray(chatHistory) && chatHistory.length > 0) {
     formData.append('chat_history', JSON.stringify(chatHistory.map((m) => ({ role: m.role, content: m.content || '' }))));
   }

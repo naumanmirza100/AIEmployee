@@ -672,7 +672,8 @@ def project_pilot(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        project_id = request.data.get("project_id")
+        # The conversation's project, once it has one, whatever the request says (see _pilot_chat_project).
+        project_id = _pilot_chat_project(company_user, request.data.get("chat_id"), request.data.get("project_id"))
         project = None
 
         # Filter projects created by this company user
@@ -680,7 +681,12 @@ def project_pilot(request):
         all_tasks = Task.objects.filter(project__in=projects_for_company_user(company_user)).select_related("project")
 
         if project_id:
-            project = get_object_or_404(projects_for_company_user(company_user), id=project_id)
+            # Not get_object_or_404: the catch-all below turned its 404 into "Project pilot failed" (500).
+            project = projects_for_company_user(company_user).filter(pk=project_id).first() \
+                if str(project_id).isdigit() else None
+            if project is None:
+                return Response({"status": "error", "message": "Project not found."},
+                                status=status.HTTP_404_NOT_FOUND)
             tasks = Task.objects.filter(project=project).select_related("assignee").prefetch_related("subtasks")
             context = {
                 "project": {
@@ -2562,6 +2568,56 @@ def _pilot_message(msg, company_user=None):
     return out
 
 
+def _pilot_chat_project(company_user, chat_id, requested=None):
+    """The project a Pilot request is about. A conversation's project is fixed once set: its own wins over
+    whatever the request names. A conversation without one takes the project the request names (a "Which
+    project?" button), and keeps it. Without a conversation, the request's project, as before."""
+    chat = None
+    if chat_id:
+        try:
+            chat = PMProjectPilotChat.objects.filter(pk=int(chat_id), company_user=company_user).first()
+        except (TypeError, ValueError):
+            chat = None
+    if chat is not None and chat.project_id:
+        return chat.project_id
+    if chat is not None and requested:
+        project = projects_for_company_user(company_user).filter(pk=requested).first()
+        if project is not None:
+            PMProjectPilotChat.objects.filter(pk=chat.pk, project__isnull=True).update(project=project)
+            return project.id
+    return requested
+
+
+def _settle_chat_project(chat, company_user):
+    """A conversation from before projects were fixed: take the project its latest messages were about (the
+    one picked for them, or the one a confirmed card made), once."""
+    if chat.project_id:
+        return
+    for msg in chat.messages.order_by('-created_at'):
+        data = msg.response_data if isinstance(msg.response_data, dict) else {}
+        candidate = data.get('project_id') or (data.get('resolved') or {}).get('created_project_id')
+        if candidate:
+            fixed = _pilot_chat_project(company_user, chat.id, candidate)
+            if fixed:
+                chat.refresh_from_db(fields=['project'])
+            return
+
+
+def _pilot_chat_data(chat, messages):
+    """A Pilot chat as the chat screen reads it."""
+    project = chat.project if chat.project_id else None
+    return {
+        'id': str(chat.id),
+        'title': chat.title or 'Chat',
+        'messages': messages,
+        # Fixed once set: the screen shows the name in place of the project box.
+        'projectId': str(project.id) if project else None,
+        'projectName': project.name if project else None,
+        'updatedAt': chat.updated_at.isoformat(),
+        'timestamp': chat.updated_at.isoformat(),
+    }
+
+
 def _resolve_card(company_user, chat_id, message_id, outcome, **details):
     """Keep a review card's outcome on its chat message. Confirm and Cancel used to come back after a reload,
     because which cards were done lived only in the open page, and a second Confirm made the project again."""
@@ -2605,19 +2661,15 @@ def list_project_pilot_chats(request):
         company_user = request.user
         limit = min(int(request.GET.get('limit', 50)), 100)
         offset = max(int(request.GET.get('offset', 0)), 0)
-        chats = PMProjectPilotChat.objects.filter(company_user=company_user).prefetch_related('messages').order_by('-updated_at')[offset:offset + limit]
+        chats = (PMProjectPilotChat.objects.filter(company_user=company_user).select_related('project')
+                 .prefetch_related('messages').order_by('-updated_at')[offset:offset + limit])
         result = []
         for chat in chats:
             messages = []
             for msg in chat.messages.order_by('created_at'):
                 messages.append(_pilot_message(msg, company_user))
-            result.append({
-                'id': str(chat.id),
-                'title': chat.title or 'Chat',
-                'messages': messages,
-                'updatedAt': chat.updated_at.isoformat(),
-                'timestamp': chat.updated_at.isoformat(),
-            })
+            _settle_chat_project(chat, company_user)
+            result.append(_pilot_chat_data(chat, messages))
         return Response({'status': 'success', 'data': result})
     except KeyServiceError:
         raise
@@ -2630,13 +2682,16 @@ def list_project_pilot_chats(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def create_project_pilot_chat(request):
-    """Create a new Project Pilot chat with optional initial messages."""
+    """Create a new Project Pilot chat with optional initial messages. `project_id`: the project picked when
+    the conversation started; it is the conversation's from then on."""
     try:
         company_user = request.user
         data = request.data if isinstance(request.data, dict) else {}
         title = (data.get('title') or 'Chat')[:255]
         messages_data = data.get('messages') or []
-        chat = PMProjectPilotChat.objects.create(company_user=company_user, title=title)
+        project = (projects_for_company_user(company_user).filter(pk=data['project_id']).first()
+                   if str(data.get('project_id') or '').isdigit() else None)
+        chat = PMProjectPilotChat.objects.create(company_user=company_user, title=title, project=project)
         for m in messages_data:
             PMProjectPilotChatMessage.objects.create(
                 chat=chat,
@@ -2648,16 +2703,7 @@ def create_project_pilot_chat(request):
         messages = []
         for msg in chat.messages.order_by('created_at'):
             messages.append(_pilot_message(msg))
-        return Response({
-            'status': 'success',
-            'data': {
-                'id': str(chat.id),
-                'title': chat.title,
-                'messages': messages,
-                'updatedAt': chat.updated_at.isoformat(),
-                'timestamp': chat.updated_at.isoformat(),
-            },
-        })
+        return Response({'status': 'success', 'data': _pilot_chat_data(chat, messages)})
     except KeyServiceError:
         raise
     except Exception as e:
@@ -2692,16 +2738,7 @@ def update_project_pilot_chat(request, chat_id):
         messages = []
         for msg in chat.messages.order_by('created_at'):
             messages.append(_pilot_message(msg))
-        return Response({
-            'status': 'success',
-            'data': {
-                'id': str(chat.id),
-                'title': chat.title,
-                'messages': messages,
-                'updatedAt': chat.updated_at.isoformat(),
-                'timestamp': chat.updated_at.isoformat(),
-            },
-        })
+        return Response({'status': 'success', 'data': _pilot_chat_data(chat, messages)})
     except KeyServiceError:
         raise
     except Exception as e:
@@ -3060,7 +3097,11 @@ def project_pilot_confirm(request):
     actor = pm_services.DashboardActor(company_user, request)
     action_results, created_project_id = pilot_review.apply(actions, actor, skip=skip)
 
-    resolved = None
+    resolved, chat_project = None, None
+    if chat_id and created_project_id:
+        # A conversation that made a project is about it from now on ("change the deadline of this project").
+        fixed = _pilot_chat_project(company_user, chat_id, created_project_id)
+        chat_project = projects_for_company_user(company_user).filter(pk=fixed).values('id', 'name').first()
     if chat_id and message_id and any(r.get('success') for r in action_results):
         # Nothing made (every change refused) leaves the card open to fix and try again.
         card = _resolve_card(company_user, chat_id, message_id, 'confirmed',
@@ -3076,6 +3117,8 @@ def project_pilot_confirm(request):
                 "action_results": action_results,
                 "created_project_id": created_project_id,
                 "resolved": resolved,
+                # The conversation's project, when this made one and fixed it there.
+                "chat_project": chat_project,
             },
         },
         status=status.HTTP_200_OK,
@@ -3189,6 +3232,8 @@ def project_pilot_from_file(request):
             project_id_int = int(project_id_raw) if project_id_raw else None
         except (TypeError, ValueError):
             project_id_int = None
+        # A file sent in a conversation with a project is about that project.
+        project_id_int = _pilot_chat_project(company_user, chat_id, project_id_int)
 
         # chat_history comes in as JSON - reuse the existing helper.
         try:
