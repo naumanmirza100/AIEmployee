@@ -66,18 +66,17 @@ def send_meeting_reminders():
         except Exception:
             time_display = meeting.proposed_time.strftime('%I:%M %p')
 
-        # Determine reminder type
+        # Determine reminder type. The text gives the real minutes left: the job runs every 5 minutes, so the
+        # "15-minute" reminder goes out 10 to 20 minutes ahead and said "in 15 minutes" with 11 left (seen live).
         if 55 <= minutes_until <= 65:
             reminder_type = '1hr'
-            reminder_text = f"in 1 hour (at {time_display})"
         elif 10 <= minutes_until <= 20:
             reminder_type = '15min'
-            reminder_text = f"in 15 minutes (at {time_display})"
         elif 2 <= minutes_until <= 8 and meeting.status == 'accepted' and meeting.meeting_link:
             reminder_type = '5min'
-            reminder_text = f"in {round(minutes_until)} minutes (at {time_display})"
         else:
             continue
+        reminder_text = f"in {round(minutes_until)} minutes (at {time_display})"
 
         join_note = ''
         if meeting.meeting_link and meeting.status == 'accepted':
