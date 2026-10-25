@@ -11,8 +11,9 @@ import { browserTimeZone } from '@/utils/timeZones';
 import {
   Loader2, ArrowLeft, Pencil, X, Check, Lock,
   Building2, Phone, Globe, Factory, Users2, MapPin, FileText, Mail, ShieldCheck, CalendarDays,
-  User as UserIcon, Plug, CalendarCheck, CheckCircle2, ExternalLink, Clock,
+  User as UserIcon, Plug, CalendarCheck, CheckCircle2, ExternalLink, Clock, Zap,
 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 
 const ACCENT = 'hsl(var(--brand-accent))';
 
@@ -97,6 +98,27 @@ const CompanyProfilePage = () => {
     setEditing(true);
   };
   const cancelEdit = () => { setForm(profile.company); setEditing(false); };
+
+  // Whether the PM chat makes projects, tasks and meetings at once or shows them for review first. Saved as
+  // soon as it is switched; an owner or admin decides it for the whole company.
+  const [savingAuto, setSavingAuto] = useState(false);
+  const setAutoConfirm = async (on) => {
+    try {
+      setSavingAuto(true);
+      const res = await companyAuthService.updateCompanyProfile({ pmAutoConfirm: on });
+      if (res.status === 'success') {
+        setProfile(res.data);
+        if (!editing) setForm(res.data.company);
+        toast({ title: on ? 'Auto-confirm is on' : 'Auto-confirm is off',
+                description: on ? 'The PM chat now makes projects, tasks and meetings without asking.'
+                                : 'The PM chat shows new projects, tasks and meetings for review first.' });
+      }
+    } catch (e) {
+      toast({ title: 'Not saved', description: e.message || 'Failed to save', variant: 'destructive' });
+    } finally {
+      setSavingAuto(false);
+    }
+  };
 
   const save = async () => {
     if (!form.name || form.name.trim().length < 2) {
@@ -276,6 +298,30 @@ const CompanyProfilePage = () => {
                 </div>
                 <div className="sm:col-span-2">
                   <Field icon={FileText} label="Description" name="description" value={form.description} editing={editing} onChange={setField} placeholder="What your company does" textarea />
+                </div>
+              </div>
+
+              <div className="mt-7 border-t border-white/[0.08] pt-6" data-testid="pm-auto-confirm">
+                <div className="flex items-start justify-between gap-6">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35">
+                      <Zap className="h-3.5 w-3.5" />
+                      Project Manager chat: auto-confirm
+                      {!mayChangeZone && <Lock className="h-3 w-3 text-white/25" title="Only an owner or admin can change this" />}
+                    </div>
+                    <p className="mt-1.5 text-[15px] text-white">{c.pmAutoConfirm ? 'On: made at once' : 'Off: shown for review first'}</p>
+                    <p className="mt-1 text-xs text-white/40">
+                      On: projects, tasks and meetings asked for in the PM chat are made straight away, with the
+                      suggested deadlines and people. Off: the chat shows them first and waits for Confirm. Changes
+                      to existing projects and tasks, and deletions, are always shown for review.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={!!c.pmAutoConfirm}
+                    disabled={!mayChangeZone || savingAuto}
+                    onCheckedChange={setAutoConfirm}
+                    aria-label="Auto-confirm projects, tasks and meetings in the PM chat"
+                  />
                 </div>
               </div>
             </div>

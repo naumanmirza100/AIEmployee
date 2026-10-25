@@ -780,6 +780,11 @@ class Company(models.Model):
     inbound_email_config = models.JSONField(default=dict, blank=True,
                                             help_text='Per-tenant inbound/outbound email config: {"reply_to": "...", "signature_html": "..."}.')
 
+    # Projects, tasks and meetings asked for in the PM chat are made at once, without the review card. Changes
+    # and deletions are still reviewed. Set by an owner or admin on the Company profile page.
+    pm_auto_confirm = models.BooleanField(
+        default=False, help_text='Make projects, tasks and meetings asked for in the PM chat without asking to confirm.')
+
     # HubSpot CRM integration (Phase 3 §3.3).
     # Shape: {"enabled": true, "access_token": "<private-app-token>", "portal_id": "<optional>", "last_error": ""}
     # Access token is stored in the clear — tenant-owned Private App token that the tenant can revoke

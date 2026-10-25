@@ -422,6 +422,8 @@ def _company_profile_payload(company, company_user):
             'description': company.description or '',
             # '' until an admin sets it; leave is read in UTC until then.
             'timezoneName': company.timezone_name or '',
+            # PM chat makes projects, tasks and meetings without the review card.
+            'pmAutoConfirm': company.pm_auto_confirm,
             'createdAt': company.created_at.isoformat() if company.created_at else None,
         },
         'user': {
@@ -506,6 +508,19 @@ def update_company_profile(request):
                                  'message': f"{wanted[:64]!r} is not a time zone. Use a name such as Asia/Karachi."},
                                 status=status.HTTP_400_BAD_REQUEST)
             new_zone = wanted
+
+    # Whether the PM chat makes new work without asking to confirm: for an owner or admin, like the time zone.
+    auto_key = next((k for k in ('pmAutoConfirm', 'pm_auto_confirm') if k in data), None)
+    if auto_key:
+        wanted = str(data.get(auto_key)).strip().lower() in ('1', 'true', 'yes', 'on')
+        if wanted != company.pm_auto_confirm:
+            from api.permissions import IsCompanyAdmin
+            if company_user.role not in IsCompanyAdmin.ADMIN_ROLES:
+                return Response({'status': 'error',
+                                 'message': 'Only an owner or admin can change how the PM chat confirms.'},
+                                status=status.HTTP_403_FORBIDDEN)
+            company.pm_auto_confirm = wanted
+            updated_fields.append('pm_auto_confirm')
 
     try:
         if updated_fields:

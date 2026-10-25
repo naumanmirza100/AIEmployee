@@ -879,7 +879,17 @@ def project_pilot(request):
                 review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
             gaps = drafts.inspect(actions, available_users,
                                   today=timezone.localdate(), project=review_project)
-            changes = pilot_review.changes(actions, pm_services.DashboardActor(company_user, request))
+            actor = pm_services.DashboardActor(company_user, request)
+            if pilot_review.auto_confirms(company_user.company, actions):
+                # The company makes new work without the review card (Company profile → PM chat).
+                action_results, created_project_id = pilot_review.make_as_suggested(actions, gaps['rows'], actor)
+                return Response({"status": "success",
+                                 "data": {"answer": pilot_review.summary(action_results),
+                                          "action_results": action_results,
+                                          "created_project_id": created_project_id,
+                                          "auto_confirmed": True}},
+                                status=status.HTTP_200_OK)
+            changes = pilot_review.changes(actions, actor)
             return Response(
                 {
                     "status": "needs_input",
@@ -4088,7 +4098,9 @@ def meeting_schedule(request):
             old_time = when_text(meeting.proposed_time, meeting.timezone_name or tz_name, year=False) if meeting.proposed_time else "unknown"
             people = people_for('pm', meeting)
 
-            if not result.get("confirmed"):
+            # A company that switched on auto-confirm (Company profile → PM chat) moves it at once; the reply
+            # still names the meeting and both times.
+            if not result.get("confirmed") and not company_user.company.pm_auto_confirm:
                 # Moving a meeting emails everyone invited, so show which
                 # meeting and when before doing it. A clash is said now.
                 try:

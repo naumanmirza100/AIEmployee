@@ -547,6 +547,13 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
         if review_project is None and drafts.only_project_id(actions):
             review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
         gaps = drafts.inspect(actions, available_users, today=timezone.localdate(), project=review_project)
+        if pilot_review.auto_confirms(company_user.company, actions):
+            # The company makes new work without the review card (Company profile → PM chat).
+            action_results, _created = pilot_review.make_as_suggested(actions, gaps['rows'],
+                                                                      DashboardActor(company_user))
+            logger.info("Project Pilot pipeline: %d proposed actions made at once (auto-confirm)", len(actions))
+            return {"answer": pilot_review.summary(action_results), "action_results": action_results,
+                    "cannot_do": "", "extracted_text_preview": preview}
         answer = drafts.chat_text(actions, result.get("answer"), gaps)
         draft = {
             "answer": answer,
