@@ -18,7 +18,7 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
-from project_manager_agent import drafts, pilot_deadlines, pilot_duplicates, pilot_review
+from project_manager_agent import drafts, pilot_deadlines, pilot_duplicates, pilot_review, pilot_revise
 from project_manager_agent.models import (
     PMKnowledgeQAChat,
     PMKnowledgeQAChatMessage,
@@ -556,10 +556,14 @@ def _with_request_confirmed(question, chat_history):
     "Change the deadline of this project ..." used to get a plain-text "shall I?" back; "yes it is
     confirmed" was then read on its own, matched nothing, and Pilot said it would make the change
     without making it. The earlier request is put back in front of the reply so it is acted on (as a
-    review card). Changes are confirmed on the card; this only covers the times Pilot asks anyway."""
-    if not _CONFIRMED_IN_WORDS.match(question or '') or len(question) > 300:
-        return question
+    review card). Changes are confirmed on the card; this only covers the times Pilot asks anyway.
+
+    Any answer to Pilot's own "Which project's deadline should I move?" is joined the same way: "i have
+    selected it" (with the project picked in the box) was read on its own and got a paragraph back."""
     last_reply = next((m for m in reversed(chat_history) if (m or {}).get('role') == 'assistant'), None)
+    asked_which = bool(last_reply) and str(last_reply.get('content') or '').startswith(pilot_deadlines.WHICH_PROJECT[:30])
+    if not asked_which and (not _CONFIRMED_IN_WORDS.match(question or '') or len(question) > 300):
+        return question
     if not last_reply or '?' not in str(last_reply.get('content') or ''):
         return question
     earlier = [str(m.get('content') or '').strip() for m in chat_history
@@ -567,6 +571,37 @@ def _with_request_confirmed(question, chat_history):
     if not earlier or _CONFIRMED_IN_WORDS.match(earlier[-1]):
         return question
     return f"{earlier[-1]}\n\n{question}"
+
+
+def _revise_rejected_card(request, company_user, available_users, today):
+    """`revise_of` names a review card the user rejected with a reason ("make it 15 days"): Pilot proposes it
+    again with that change, as a new card. None when the request is not a revision."""
+    data = request.data if isinstance(request.data, dict) else {}
+    if not data.get('revise_of'):
+        return None
+    card = PMProjectPilotChatMessage.objects.filter(
+        pk=data['revise_of'], chat__company_user=company_user, role='assistant').first()
+    saved = (card.response_data or {}) if card else {}
+    reason = str((saved.get('resolved') or {}).get('reason') or data.get('question') or '').strip()
+    if not saved.get('actions'):
+        return Response({"status": "success", "data": {
+            "answer": "That card is no longer there to revise. Say what you'd like instead.", "action_results": []}})
+    actions, answer = pilot_revise.revise(saved, reason, company_user=company_user,
+                                          available_users=available_users, today=today)
+    if actions is None:
+        return Response({"status": "success", "data": {"answer": answer, "action_results": []}})
+    # The model chose the people: someone outside the company becomes "unassigned", as for any proposal.
+    co, cu = scope_for_company_user(company_user)
+    for action in actions:
+        if action.get('action') == 'create_task' and action.get('assignee_id'):
+            try:
+                resolve_member(action['assignee_id'], company=co, company_user=cu)
+            except AssigneeNotAllowed:
+                action['assignee_id'] = None
+    project = (projects_for_company_user(company_user).filter(pk=saved['project_id']).first()
+               if saved.get('project_id') else None)
+    return _pilot_review_response(actions, answer, project, available_users, company_user, request,
+                                  duplicate=saved.get('duplicate'))
 
 
 def _pilot_review_response(actions, answer, project, available_users, company_user, request, duplicate=None):
@@ -725,6 +760,11 @@ def project_pilot(request):
         question = _with_request_confirmed(question, chat_history)
         today = timezone.localdate()
 
+        # A review card rejected with a reason: propose it again with that change (pilot_revise).
+        revised = _revise_rejected_card(request, company_user, available_users, today)
+        if revised is not None:
+            return revised
+
         # "Change the deadline of this project to 10 days, and the tasks accordingly" is arithmetic:
         # answered here, as a review card, without the AI (which asked in words and changed nothing).
         moved = pilot_deadlines.deadline_change_request(
@@ -733,7 +773,10 @@ def project_pilot(request):
         if moved is not None:
             actions, answer = moved
             if actions is None:
-                return Response({"status": "success", "data": {"answer": answer, "action_results": []}},
+                # Which project? The chat shows the latest ones as buttons; one sends the request again with it.
+                choices = [{"id": p.id, "name": p.name} for p in all_projects.order_by('-created_at')[:6]]
+                return Response({"status": "success", "data": {"answer": answer, "action_results": [],
+                                                               "choices": choices, "retry": question}},
                                 status=status.HTTP_200_OK)
             return _pilot_review_response(actions, answer, project, available_users, company_user, request)
 
@@ -3010,7 +3053,7 @@ def project_pilot_confirm(request):
         if done.get('status'):
             return Response({"status": "error", "code": "already_resolved", "resolved": done,
                              "message": "This was already " + ("confirmed." if done['status'] == 'confirmed'
-                                                               else "cancelled.")},
+                                                               else "rejected.")},
                             status=status.HTTP_409_CONFLICT)
 
     actions = drafts.apply_answers(proposed, request.data.get("answers"))
@@ -3043,7 +3086,8 @@ def project_pilot_confirm(request):
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def project_pilot_cancel_card(request, chat_id, message_id):
-    """Cancel a review card: nothing is made, and the card stays cancelled after a reload."""
+    """Reject a review card: nothing is made, and the card stays rejected after a reload. Body: `reason`
+    (optional) — kept on the card; the chat can then ask Pilot to revise with it (`revise_of`)."""
     card = PMProjectPilotChatMessage.objects.filter(
         pk=message_id, chat_id=chat_id, chat__company_user=request.user, role='assistant').first()
     if card is None:
@@ -3051,7 +3095,9 @@ def project_pilot_cancel_card(request, chat_id, message_id):
     done = (card.response_data or {}).get('resolved') or {}
     if done.get('status'):
         return Response({"status": "success", "data": {"resolved": done}})
-    card = _resolve_card(request.user, chat_id, message_id, 'cancelled')
+    reason = str((request.data or {}).get('reason') or '').strip()[:500] if isinstance(request.data, dict) else ''
+    card = _resolve_card(request.user, chat_id, message_id, 'rejected' if reason else 'cancelled',
+                         **({'reason': reason} if reason else {}))
     return Response({"status": "success", "data": {"resolved": card.response_data['resolved']}})
 
 

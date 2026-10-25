@@ -28,6 +28,9 @@ import { Button } from '@/components/ui/button';
  *   onConfirm  (answers, skip) => void, answers = { actionIndex: { field: value } },
  *              skip = [actionIndex] the user unticked
  *   onCancel   optional; the user dismissed the proposal
+ *   onReject   optional, instead of onCancel: (reason, revise) — rejected with a reason, and whether Pilot
+ *              should propose again with it
+ *   rejectReason  the reason it was rejected with, shown once it is
  *   busy       disables the form while the confirm request is in flight
  *   done       set once applied; the card stops being interactive
  *   doneText   optional; what was made ("Created 1 project and 12 tasks."), kept with the chat
@@ -80,8 +83,12 @@ const SuggestedTag = () => (
 );
 
 const PilotGapForm = ({
-  data, onConfirm, onCancel, busy = false, done = false, doneText = '', cancelled = false, compact = false,
+  data, onConfirm, onCancel, onReject, busy = false, done = false, doneText = '', cancelled = false,
+  rejectReason = '', compact = false,
 }) => {
+  // "Reject…" opens a reason box; "Revise with this" has Pilot propose again with the change.
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
   const rows = data?.rows?.length ? data.rows : legacyRows(data);
   const changes = data?.changes || [];
   // Unticked tasks and changes; a change that can't be made starts unticked.
@@ -398,9 +405,30 @@ const PilotGapForm = ({
           <Check className="h-4 w-4" /> {doneText || 'Done.'}
         </p>
       ) : cancelled ? (
-        <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <X className="h-4 w-4" /> Cancelled — nothing was changed.
+        <p className="flex items-start gap-1.5 text-sm text-muted-foreground" data-testid="pilot-card-rejected">
+          <X className="h-4 w-4 mt-0.5 shrink-0" />
+          {rejectReason ? <span>Rejected — nothing was changed. Reason: “{rejectReason}”</span>
+            : <span>Cancelled — nothing was changed.</span>}
         </p>
+      ) : rejecting ? (
+        <div className="space-y-2" data-testid="pilot-reject-box">
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Why? What should be different — e.g. “make it 15 days”, “give the design tasks to Sara” (optional)"
+            rows={2}
+            className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={busy || !reason.trim()} onClick={() => onReject(reason.trim(), true)}>
+              Revise with this
+            </Button>
+            <Button size="sm" variant="destructive" disabled={busy} onClick={() => onReject(reason.trim(), false)}>
+              Reject
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setRejecting(false)}>Back</Button>
+          </div>
+        </div>
       ) : (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <Button
@@ -411,7 +439,9 @@ const PilotGapForm = ({
           >
             {busy ? 'Working…' : deletes ? `Confirm, including ${deletes} delete${deletes === 1 ? '' : 's'}` : 'Confirm'}
           </Button>
-          {onCancel && (
+          {onReject ? (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setRejecting(true)}>Reject…</Button>
+          ) : onCancel && (
             <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
           )}
           {rows.length > 0 && (

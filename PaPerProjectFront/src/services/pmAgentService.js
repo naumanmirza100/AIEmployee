@@ -10,12 +10,14 @@ import { streamAnswer } from '@/utils/ndjsonStream';
  * @param {string} question
  * @param {number|null} projectId
  * @param {Array<{role: string, content: string}>} chatHistory - Optional conversation history for this chat
+ * @param {object} [extra] - e.g. { revise_of: messageId }: a review card rejected with a reason, to propose again
  */
-export const projectPilot = async (question, projectId = null, chatHistory = null) => {
+export const projectPilot = async (question, projectId = null, chatHistory = null, extra = {}) => {
   try {
     const body = {
       question: question.trim(),
       project_id: projectId || null,
+      ...extra,
     };
     if (Array.isArray(chatHistory) && chatHistory.length > 0) {
       body.chat_history = chatHistory.map((m) => ({ role: m.role, content: m.content || '' }));
@@ -59,9 +61,9 @@ export const projectPilotConfirm = async (actions, answers = {}, skip = [], card
   }
 };
 
-/** Cancel a review card; it stays cancelled after a reload. */
-export const cancelProjectPilotCard = async (chatId, messageId) =>
-  companyApi.post(`/project-manager/ai/project-pilot/chats/${chatId}/messages/${messageId}/cancel`, {});
+/** Reject a review card, with an optional reason; it stays rejected after a reload. */
+export const cancelProjectPilotCard = async (chatId, messageId, reason = '') =>
+  companyApi.post(`/project-manager/ai/project-pilot/chats/${chatId}/messages/${messageId}/cancel`, { reason });
 
 /**
  * Task Prioritization Agent

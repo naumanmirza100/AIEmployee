@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import PilotGapForm from './PilotGapForm';
+import PilotQuickReplies from './PilotQuickReplies';
+import ChatMarkdown from '@/components/shared/ChatMarkdown';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +17,10 @@ import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 import { trackPMRecentlyViewed } from './pmLocalStore';
 import { isRealError } from '@/utils/messageSeverity';
+
+// A reply asking for a yes or no ("Shall I update the deadline?") gets Confirm and Reject buttons; a reply
+// asking for details does not.
+const ASKS_TO_CONFIRM = /\b(shall i|should i|do you want|would you like|want me to|can i go ahead|is (that|this) (ok|okay|right|correct|fine)|please confirm|confirm)\b[^?]{0,200}\?/i;
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   const { toast } = useToast();
@@ -192,31 +198,46 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     }
   };
 
-  const cancelPilotDraft = async (msg) => {
+  // Reject a card, with a reason or without. With `revise`, Pilot proposes it again with that change.
+  const rejectPilotDraft = async (msg, reason = '', revise = false) => {
     const chatId = selectedChatId;
+    const fallback = reason ? { status: 'rejected', reason } : { status: 'cancelled' };
     try {
-      const res = await pmAgentService.cancelProjectPilotCard(chatId, msg.id);
-      markResolved(chatId, msg.id, res?.data?.resolved || { status: 'cancelled' });
+      const res = await pmAgentService.cancelProjectPilotCard(chatId, msg.id, reason);
+      markResolved(chatId, msg.id, res?.data?.resolved || fallback);
     } catch {
-      markResolved(chatId, msg.id, { status: 'cancelled' });
+      markResolved(chatId, msg.id, fallback);
     }
-    toast({ title: 'Cancelled', description: 'Nothing was created or changed.' });
+    if (revise && reason) {
+      await submitPilotChat(reason, '', { reviseOf: msg.id, shown: `Revise: ${reason}` });
+    } else {
+      toast({ title: 'Rejected', description: 'Nothing was created or changed.' });
+    }
   };
 
-  const submitPilotChat = async (followUpText, extraContent = '') => {
+  // A question Pilot asked in words, answered with a button: yes goes back with the request it asked about
+  // (the server joins them); no carries the reason, if one was given.
+  const answerPilotQuestion = (yes, reason = '') => submitPilotChat(
+    yes ? 'Yes, go ahead.' : `No.${reason ? ` ${reason}` : ''}`);
+
+  // `opts`: projectId — a project chosen on a "Which project?" button; reviseOf — the card rejected with
+  // this reason, for Pilot to propose again; shown — what the chat shows as the user's message.
+  const submitPilotChat = async (followUpText, extraContent = '', opts = {}) => {
     if (!followUpText || !followUpText.trim()) return;
     const q = followUpText.trim();
-    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectId = opts.projectId
+      || (selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null);
     const projectTitle = getProjectTitle(projectId);
     try {
       setLoading(true);
-      const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      const response = await pmAgentService.projectPilot(q, projectId, currentMessages,
+        opts.reviseOf ? { revise_of: opts.reviseOf } : {});
       // The proposal is missing details we ask about. Show it as a form
       // instead of applying it; PilotGapForm posts it back once confirmed.
       if (response.status === 'needs_input') {
         const data = response.data || {};
         await addMessagePairToChat(
-          { role: 'user', content: q },
+          { role: 'user', content: opts.shown || q },
           {
             role: 'assistant',
             content: data.answer || 'I need a few more details before I create this.',
@@ -233,7 +254,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
         const cannotDo = data.cannot_do || response.cannot_do;
         const userMsg = {
           role: 'user',
-          content: extraContent ? `${q}\n\n${extraContent}` : q,
+          content: opts.shown || (extraContent ? `${q}\n\n${extraContent}` : q),
           responseData: projectTitle ? { project_id: projectId, project_title: projectTitle } : undefined,
         };
         const assistantMsg = {
@@ -247,6 +268,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             cannot_do: cannotDo,
             project_id: projectId,
             project_title: projectTitle,
+            // "Which project?": the projects to pick from, and the request to send again with one.
+            choices: data.choices || undefined,
+            retry: data.retry || undefined,
           },
         };
         await addMessagePairToChat(userMsg, assistantMsg, q);
@@ -348,6 +372,8 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             cannot_do: cannotDo,
             project_id: projectId,
             project_title: projectTitle,
+            choices: data.choices || undefined,
+            retry: data.retry || undefined,
           },
         };
         await addMessagePairToChat(userMsg, assistantMsg, q);
@@ -896,14 +922,29 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                         const a = msg.responseData.answer;
                         const looksLikeJson = typeof a === 'string' && (a.trim().startsWith('{') || a.trim().startsWith('['));
                         if (looksLikeJson) return null;
-                        return <p className="text-sm whitespace-pre-wrap">{a}</p>;
+                        // Markdown: replies come as a sentence and a few bullets, not one paragraph.
+                        return <ChatMarkdown className="text-sm">{a}</ChatMarkdown>;
                       })()}
                       {/* Fallback to the raw message text — but never for a draft awaiting
                           details: its content can be the agent's JSON, and the gap form
                           below already explains itself. Also covers drafts saved in chat
                           history before the backend started sending a readable sentence. */}
                       {!msg.responseData?.needs_input && !(msg.responseData?.answer && typeof msg.responseData.answer === 'string' && !msg.responseData.answer.trim().startsWith('[') && !msg.responseData.answer.trim().startsWith('{')) && !(msg.responseData?.action_results?.length > 0) && msg.content && (
-                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                        <ChatMarkdown className="text-sm">{msg.content}</ChatMarkdown>
+                      )}
+                      {/* The last reply asks something: answer it with a click. "Which project?" offers
+                          the projects; any other question gets Confirm and Reject (with a reason). */}
+                      {i === currentMessages.length - 1 && !msg.responseData?.needs_input
+                        && !msg.responseData?.confirmation_required && !(msg.responseData?.action_results?.length > 0) && (
+                        <PilotQuickReplies
+                          choices={msg.responseData?.retry ? (msg.responseData.choices || []) : []}
+                          onChoose={(c) => submitPilotChat(msg.responseData.retry, '', {
+                            projectId: String(c.id), shown: `Project: ${c.name}`,
+                          })}
+                          question={ASKS_TO_CONFIRM.test(String(msg.responseData?.answer || msg.content || ''))}
+                          onAnswer={answerPilotQuestion}
+                          disabled={loading}
+                        />
                       )}
                       {(msg.responseData?.action_results?.length > 0) && (
                         <div className="space-y-2 mt-2">
@@ -1011,9 +1052,10 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           busy={confirmingKey === cardKey(msg, i)}
                           done={msg.responseData.resolved?.status === 'confirmed'}
                           doneText={msg.responseData.resolved?.answer}
-                          cancelled={msg.responseData.resolved?.status === 'cancelled'}
+                          cancelled={['cancelled', 'rejected'].includes(msg.responseData.resolved?.status)}
+                          rejectReason={msg.responseData.resolved?.reason}
                           onConfirm={(answers, skip) => confirmPilotDraft(msg, i, answers, skip)}
-                          onCancel={() => cancelPilotDraft(msg)}
+                          onReject={(reason, revise) => rejectPilotDraft(msg, reason, revise)}
                         />
                       )}
                       {msg.responseData?.confirmation_required && (() => {

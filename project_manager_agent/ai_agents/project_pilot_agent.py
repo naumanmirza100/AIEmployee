@@ -21,6 +21,15 @@ _ASSIGNMENT_NAME_STOPWORDS = frozenset({
 })
 
 
+TEXT_REPLY_FORMAT = """
+
+FORMAT OF YOUR REPLY (it is shown as markdown in a chat):
+- Start with one short sentence that answers or says what is needed.
+- Then at most 4 bullet points ("- "), one line each; put the key word of each in **bold**.
+- If you show an example of what to type, put it on its own bullet in quotes.
+- No more than 80 words in all. No headings, no closing pleasantries."""
+
+
 class ProjectPilotAgent(BaseAgent):
     """
     Agent responsible for:
@@ -1413,7 +1422,11 @@ This reply cannot change anything. Never say you have made, or will make, a chan
             # past 3000 tokens and the response gets cut mid-JSON, which fails to
             # parse and the client sees "no project created" even though the
             # intent was correct. 12000 is comfortably under gpt-4o's 16k output cap.
-            max_tokens = 12000 if ((is_action_request or is_deletion_request) and not is_text_response) else (200 if is_text_response else 800)
+            if is_text_response:
+                # A reply in words was one long paragraph in the chat (client test, 25 Oct 2026). The chat
+                # shows markdown, so ask for a short, scannable shape.
+                prompt += TEXT_REPLY_FORMAT
+            max_tokens = 12000 if ((is_action_request or is_deletion_request) and not is_text_response) else (300 if is_text_response else 800)
             response = self._call_llm(prompt, self.system_prompt, temperature=0.7, max_tokens=max_tokens)
             
             # If this is a text-only response, return it directly without parsing JSON
@@ -1530,6 +1543,28 @@ This reply cannot change anything. Never say you have made, or will make, a chan
                 "answer": "I'm sorry, I encountered an error while processing your request. Please try again."
             }
     
+    def revise_actions(self, actions: List[Dict], reason: str, available_users: Optional[List[Dict]] = None,
+                       today=None) -> List[Dict]:
+        """The proposal `actions`, changed as the user asked when rejecting it (project_manager_agent/pilot_revise.py).
+        One call; returns the complete revised list, or [] when the answer can't be read."""
+        from datetime import date
+        from project_manager_agent.pilot_revise import parse_actions
+        users = ''.join(f"- ID {u.get('id')}: {u.get('name') or u.get('username')}\n" for u in available_users or [])
+        prompt = f"""You proposed these project-management actions (JSON):
+{json.dumps(actions, indent=1, default=str)[:20000]}
+
+The user rejected the proposal and said: "{reason}"
+
+TODAY: {(today or date.today()).isoformat()}
+People work can be given to (use only these numeric ids for assignee_id):
+{users or '- nobody yet: leave assignee_id null'}
+
+Return ONLY the complete revised JSON array of actions, in exactly the same format: every action, with the
+user's change made and everything else kept as it was. Keep project_id, task_id and every other id unchanged.
+Due dates must fall on or before the project's deadline."""
+        response = self._call_llm(prompt, self.system_prompt, temperature=0.3, max_tokens=12000)
+        return parse_actions(response)
+
     def process(self, question: str, **kwargs) -> Dict:
         """
         Main processing method for Project Pilot agent.

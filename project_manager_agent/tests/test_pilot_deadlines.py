@@ -169,7 +169,7 @@ class MovingAProjectDeadlineTests(PMTestCase):
         self.assertEqual(moved[self.last.id] <= deadline, True)
         self.assertLessEqual(moved[self.first.id], moved[self.second.id])
         self.assertLessEqual(moved[self.second.id], moved[self.last.id])
-        self.assertIn('"Website rebuild" finishes on', data['answer'])
+        self.assertIn('**Website rebuild** finishes on', data['answer'])
         rows = {r['title']: r for r in data['changes']}
         self.assertEqual(rows['Website rebuild']['lines'][0]['label'], 'Deadline')
         self.assertEqual(rows['Launch']['lines'][0]['after'], moved[self.last.id])
