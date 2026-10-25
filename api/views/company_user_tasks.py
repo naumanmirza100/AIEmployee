@@ -27,24 +27,21 @@ def get_all_users_tasks(request):
     try:
         # request.user is a CompanyUser instance when authenticated via CompanyUserTokenAuthentication
         company_user = request.user
-        
+        company = getattr(company_user, 'company', None)
+
         # The company's employees. It used to be only the ones this login had
         # created, so a second dashboard login saw an empty list.
         created_user_ids = list(
-            members_of(getattr(company_user, 'company', None), company_user=company_user)
+            members_of(company, company_user=company_user)
             .values_list('id', flat=True))
-        
-        # If no users created, return empty list
-        if not created_user_ids:
-            return Response({
-                'status': 'success',
-                'data': []
-            }, status=status.HTTP_200_OK)
-        
-        # Get all tasks assigned to these users
-        tasks = Task.objects.filter(
-            assignee_id__in=created_user_ids
-        ).select_related('project', 'assignee').order_by('-created_at')
+
+        # The tasks given to them, and the tasks on the company's projects that nobody has yet:
+        # a task made without a person, or from meeting notes naming someone outside the team,
+        # was in no list, though it is the one a manager most needs to find.
+        whose = Q(assignee_id__in=created_user_ids)
+        if company is not None:
+            whose |= Q(assignee__isnull=True, project__company=company)
+        tasks = Task.objects.filter(whose).select_related('project', 'assignee').order_by('-created_at')
         
         # Filter by status if provided
         status_filter = request.GET.get('status')

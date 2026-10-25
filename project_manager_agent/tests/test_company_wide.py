@@ -144,6 +144,16 @@ class CompanyWideTests(PMTestCase):
         self.assertEqual(code, 200, body)
         self.assertEqual(sorted(t['title'] for t in body['data']), ["Colleague's", 'Mine', "Pat's"])
 
+    def test_and_the_tasks_nobody_has_yet(self):
+        self.task(title='Nobody yet')
+        self.task(title='Nobody yet, theirs', project=self.rival_project)
+        self.task(title='Nobody yet, old upload', project=self.orphan)
+        _, body = self.call(company_user_tasks.get_all_users_tasks, self.dash_colleague, method='get')
+        self.assertEqual(sorted(t['title'] for t in body['data']), ["Colleague's", 'Mine', 'Nobody yet', "Pat's"])
+        self.assertIsNone(next(t for t in body['data'] if t['title'] == 'Nobody yet')['assignee_name'])
+        _, body = self.call(company_user_tasks.get_all_users_tasks, self.rival_dash, method='get')
+        self.assertEqual(sorted(t['title'] for t in body['data']), ['Nobody yet, theirs', 'Theirs'])
+
     # ---- and it stays that way ---------------------------------------------------------
 
     def test_no_screen_filters_projects_by_the_login_that_made_them(self):
