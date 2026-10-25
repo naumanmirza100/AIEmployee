@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { companyAuthService } from '@/services';
 import { takeReturnTo } from '@/utils/returnTo';
 import { Building2, Loader2, LogIn, Eye, EyeOff, KeyRound, ArrowLeft, MailCheck, Check, AlertCircle } from 'lucide-react';
+import LoginSwitch from '@/components/auth/LoginSwitch';
 
 const SESSION_NOTICES = {
   expired: 'You were signed out because this account was logged out somewhere else. Please log in again.',
@@ -183,6 +184,7 @@ const CompanyLoginPage = () => {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        <LoginSwitch active="company" />
         {sessionNotice && (
           <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
