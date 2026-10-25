@@ -18,7 +18,8 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
-from project_manager_agent import drafts, pilot_deadlines, pilot_duplicates, pilot_intent, pilot_review, pilot_revise
+from project_manager_agent import (drafts, pilot_deadlines, pilot_duplicates, pilot_intent, pilot_review, pilot_revise,
+                                   pilot_roles)
 from project_manager_agent.models import (
     PMKnowledgeQAChat,
     PMKnowledgeQAChatMessage,
@@ -617,6 +618,8 @@ def _pilot_review_response(actions, answer, project, available_users, company_us
 
     `duplicate` (pilot_duplicates.check) says the new project already exists: the card says so, and it is
     shown even when the company auto-confirms."""
+    # "only the developers": a task the AI still gave to someone else goes to one of them (pilot_roles).
+    actions = pilot_roles.keep_to(actions, question, available_users)
     # The project the tasks belong to: the one chosen in the picker, or the one they all name.
     review_project = project
     if review_project is None and drafts.only_project_id(actions):
@@ -832,13 +835,21 @@ def project_pilot(request):
                 return _pilot_review_response(actions, answer, project, available_users, company_user, request,
                                               question=question)
 
+        # "only the developers", "to all team members": the AI is offered only the people with that role
+        # (pilot_roles); the review card keeps everyone, for the manager to change.
+        no_one = pilot_roles.nobody(available_users, question)
+        if no_one:
+            return Response({"status": "success", "data": {"answer": no_one, "action_results": []}},
+                            status=status.HTTP_200_OK)
+        ai_people = pilot_roles.limit(available_users, question)
+
         agent = AgentRegistry.get_agent("project_pilot")
         # Route LLM call through the company key/quota resolver. Resolver will
         # raise QuotaExhausted (402) or NoKeyAvailable (403) on hard-block —
         # core/drf_exceptions converts those to clean JSON responses.
         agent.company_id = getattr(company_user, 'company_id', None)
         agent.agent_key_name = 'project_manager_agent'
-        result = agent.process(question=question, context=context, available_users=available_users,
+        result = agent.process(question=question, context=context, available_users=ai_people,
                                chat_history=chat_history, intent=intent)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
@@ -1005,11 +1016,11 @@ def project_pilot(request):
             "all developers", "all users", "assign the tasks to all",
         ]
         _wants_assign_to_all = any(p in _q_lower for p in _assign_to_all_phrases)
-        if _wants_assign_to_all and not _only_n_users and available_users:
+        if _wants_assign_to_all and not _only_n_users and ai_people:
             _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
             _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
             if _unassigned:
-                _user_ids = [u["id"] for u in available_users]
+                _user_ids = [u["id"] for u in ai_people]
                 for i, action_data in enumerate(_unassigned):
                     action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
                 logger.info(f"Backend fallback: assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
