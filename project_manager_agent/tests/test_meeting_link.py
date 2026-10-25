@@ -98,6 +98,15 @@ class MeetingLinkTests(MeetingCase):
             reminder = Notification.objects.filter(user=self.dev, type='meeting_reminder').latest('id')
             self.assertTrue(reminder.message.endswith(said), reminder.message)
 
+    def test_a_reminder_gives_the_real_minutes_left(self):
+        # The job runs every 5 minutes, so the "15-minute" reminder can go out with 12 left.
+        for minutes in (12, 58):
+            ScheduledMeeting.objects.filter(pk=self.meeting.pk).update(
+                proposed_time=timezone.now() + timedelta(minutes=minutes, seconds=20))
+            tasks.send_meeting_reminders()
+            reminder = Notification.objects.filter(user=self.dev, type='meeting_reminder').latest('id')
+            self.assertIn(f'starts in {minutes} minutes (at ', reminder.message)
+
     def test_no_link_in_a_reminder_before_everyone_has_accepted(self):
         self.accept(self.dev)
         ScheduledMeeting.objects.filter(pk=self.meeting.pk).update(proposed_time=timezone.now() + timedelta(minutes=5))
