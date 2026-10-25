@@ -18,7 +18,7 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
-from project_manager_agent import drafts, pilot_deadlines, pilot_duplicates, pilot_review, pilot_revise
+from project_manager_agent import drafts, pilot_deadlines, pilot_duplicates, pilot_intent, pilot_review, pilot_revise
 from project_manager_agent.models import (
     PMKnowledgeQAChat,
     PMKnowledgeQAChatMessage,
@@ -650,6 +650,81 @@ def _pilot_review_response(actions, answer, project, available_users, company_us
     )
 
 
+def _pilot_context(company_user, project, all_projects, all_tasks):
+    """What Pilot is shown, as (context, available_users): the project and its tasks when there is one, or
+    every project and a few tasks when there isn't."""
+    projects = [
+        {
+            "id": p.id,
+            "name": p.name,
+            "status": p.status,
+            "priority": p.priority,
+            "tasks_count": p.tasks.count(),
+            "description": p.description[:100] if p.description else "",
+        }
+        for p in all_projects
+    ]
+    if project is not None:
+        tasks = Task.objects.filter(project=project).select_related("assignee").prefetch_related("subtasks")
+        context = {
+            "project": {
+                "id": project.id,
+                "name": project.name,
+                "description": project.description,
+                "status": project.status,
+                "priority": project.priority,
+                "tasks": [
+                    {
+                        "id": t.id,
+                        "title": t.title,
+                        "status": t.status,
+                        "priority": t.priority,
+                        "description": t.description,
+                        "due_date": t.due_date.date().isoformat() if t.due_date else None,
+                        "assignee_id": t.assignee.id if t.assignee else None,
+                        "assignee_username": t.assignee.username if t.assignee else None,
+                        "subtasks": [
+                            {"id": st.id, "title": st.title, "status": st.status, "order": st.order}
+                            for st in t.subtasks.all()
+                        ],
+                    }
+                    for t in tasks
+                ],
+            },
+            "all_projects": projects,
+        }
+    else:
+        context = {
+            "all_projects": projects,
+            "tasks": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "priority": t.priority,
+                    "description": t.description,
+                    "due_date": t.due_date.date().isoformat() if t.due_date else None,
+                    "project_name": t.project.name,
+                }
+                for t in all_tasks[:10]
+            ],
+        }
+    project_id = project.id if project is not None else None
+    available_users = _build_available_users(project_id=project_id, project=project, company_user=company_user)
+    context["user_assignments"] = _build_user_assignments(
+        available_users, project_id=project_id, all_tasks=all_tasks, owner=None
+    )
+    return context, available_users
+
+
+def _which_project(answer, all_projects, question):
+    """Pilot can't tell which project: the latest ones as buttons, each sending the request again with it."""
+    choices = [{"id": p.id, "name": p.name} for p in all_projects.order_by('-created_at')[:6]]
+    return Response({"status": "success", "data": {"answer": answer, "action_results": [],
+                                                   "choices": choices, "retry": question}},
+                    status=status.HTTP_200_OK)
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -687,80 +762,7 @@ def project_pilot(request):
             if project is None:
                 return Response({"status": "error", "message": "Project not found."},
                                 status=status.HTTP_404_NOT_FOUND)
-            tasks = Task.objects.filter(project=project).select_related("assignee").prefetch_related("subtasks")
-            context = {
-                "project": {
-                    "id": project.id,
-                    "name": project.name,
-                    "description": project.description,
-                    "status": project.status,
-                    "priority": project.priority,
-                "tasks": [
-                    {
-                        "id": t.id,
-                        "title": t.title,
-                        "status": t.status,
-                        "priority": t.priority,
-                        "description": t.description,
-                        "due_date": t.due_date.date().isoformat() if t.due_date else None,
-                        "assignee_id": t.assignee.id if t.assignee else None,
-                        "assignee_username": t.assignee.username if t.assignee else None,
-                        "subtasks": [
-                            {
-                                "id": st.id,
-                                "title": st.title,
-                                "status": st.status,
-                                "order": st.order,
-                            }
-                            for st in t.subtasks.all()
-                        ],
-                    }
-                    for t in tasks
-                ],
-                },
-                "all_projects": [
-                    {
-                        "id": p.id,
-                        "name": p.name,
-                        "status": p.status,
-                        "priority": p.priority,
-                        "tasks_count": p.tasks.count(),
-                        "description": p.description[:100] if p.description else "",
-                    }
-                    for p in all_projects
-                ],
-            }
-        else:
-            context = {
-                "all_projects": [
-                    {
-                        "id": p.id,
-                        "name": p.name,
-                        "status": p.status,
-                        "priority": p.priority,
-                        "tasks_count": p.tasks.count(),
-                        "description": p.description[:100] if p.description else "",
-                    }
-                    for p in all_projects
-                ],
-                "tasks": [
-                    {
-                        "id": t.id,
-                        "title": t.title,
-                        "status": t.status,
-                        "priority": t.priority,
-                        "description": t.description,
-                        "due_date": t.due_date.date().isoformat() if t.due_date else None,
-                        "project_name": t.project.name,
-                    }
-                    for t in all_tasks[:10]
-                ],
-            }
-
-        available_users = _build_available_users(project_id=project_id, project=project, company_user=company_user)
-        context["user_assignments"] = _build_user_assignments(
-            available_users, project_id=project_id, all_tasks=all_tasks, owner=None
-        )
+        context, available_users = _pilot_context(company_user, project, all_projects, all_tasks)
 
         chat_history = _get_chat_history(request)
         question = _with_request_confirmed(question, chat_history)
@@ -780,11 +782,41 @@ def project_pilot(request):
             actions, answer = moved
             if actions is None:
                 # Which project? The chat shows the latest ones as buttons; one sends the request again with it.
-                choices = [{"id": p.id, "name": p.name} for p in all_projects.order_by('-created_at')[:6]]
-                return Response({"status": "success", "data": {"answer": answer, "action_results": [],
-                                                               "choices": choices, "retry": question}},
-                                status=status.HTTP_200_OK)
+                return _which_project(answer, all_projects, question)
             return _pilot_review_response(actions, answer, project, available_users, company_user, request)
+
+        # What the message asks for, read by one small AI call (pilot_intent); without a reading the word lists
+        # in the agent route it, as before.
+        intent = pilot_intent.read(question, company_user=company_user, projects=all_projects.order_by('-created_at'),
+                                   fixed_project=project, history=chat_history, today=today)
+        kind = (intent or {}).get('intent')
+        if kind == 'move_deadline' and (intent.get('target') == 'task'
+                                        or (intent.get('tasks') and intent['tasks'] != ['*'])):
+            # "testing and launch ki due date 2 din pehle kar do": a named task's date, not the project's.
+            kind = intent['intent'] = 'update_tasks'
+        if kind in pilot_intent.ACTION_INTENTS and kind != 'create_project':
+            named = intent.get('named_project_id')
+            if project is not None and named and named != project.id:
+                # The conversation is fixed to its project; another one takes a new conversation.
+                other = all_projects.filter(pk=named).values_list('name', flat=True).first()
+                return Response({"status": "success", "data": {"action_results": [], "answer": (
+                    f"This conversation is about **{project.name}**. To work on **{other}**, start a new "
+                    "conversation and pick it there.")}}, status=status.HTTP_200_OK)
+            if project is None and named:
+                # The message is about one project: work on it, and the conversation keeps it.
+                project = all_projects.filter(pk=_pilot_chat_project(company_user, request.data.get("chat_id"), named)).first()
+                if project is not None:
+                    context, available_users = _pilot_context(company_user, project, all_projects, all_tasks)
+        if kind == 'move_deadline':
+            # A deadline move the word lists missed ("push it back a week", "isko 10 din aage kar do"):
+            # the same review card, worked out in code.
+            if project is None:
+                return _which_project(pilot_deadlines.WHICH_PROJECT, all_projects, question)
+            when = pilot_intent.new_deadline(intent, project, today)
+            if when:
+                actions, answer = pilot_deadlines.deadline_move(project, when, today=today,
+                                                                move_tasks=bool(intent.get('move_tasks_too')))
+                return _pilot_review_response(actions, answer, project, available_users, company_user, request)
 
         agent = AgentRegistry.get_agent("project_pilot")
         # Route LLM call through the company key/quota resolver. Resolver will
@@ -792,7 +824,8 @@ def project_pilot(request):
         # core/drf_exceptions converts those to clean JSON responses.
         agent.company_id = getattr(company_user, 'company_id', None)
         agent.agent_key_name = 'project_manager_agent'
-        result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
+        result = agent.process(question=question, context=context, available_users=available_users,
+                               chat_history=chat_history, intent=intent)
         if result.get("cannot_do"):
             return Response({"status": "success", "data": result}, status=status.HTTP_200_OK)
 
@@ -1002,6 +1035,9 @@ def project_pilot(request):
         # A deadline the user stated wins over the model's estimate: gpt-4o-mini planned "10 days from
         # now" to 7 December (client test, 25 Oct 2026). The tasks are fitted inside it.
         stated = pilot_deadlines.stated_deadline(question, today)
+        if not stated and (intent or {}).get('deadline'):
+            # "deadline 2 hafte": the reading gives it in English ("in 2 weeks").
+            stated = pilot_deadlines.stated_deadline(str(intent['deadline']), today, loose=True)
         if stated and pilot_deadlines.fit_new_project(actions, stated, today):
             logger.info("project_pilot: project deadline set to the stated %s", stated)
 

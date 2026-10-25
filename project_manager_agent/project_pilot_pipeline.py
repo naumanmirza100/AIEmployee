@@ -322,7 +322,13 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
     # core/drf_exceptions converts those to clean JSON responses.
     agent.company_id = getattr(company_user, 'company_id', None)
     agent.agent_key_name = 'project_manager_agent'
-    result = agent.process(question=question, context=context, available_users=available_users, chat_history=chat_history)
+    # What the typed words ask for (pilot_intent) — never the document's, which could try to steer it.
+    from project_manager_agent import pilot_intent
+    intent = pilot_intent.read(user_prompt, company_user=company_user, projects=all_projects.order_by('-created_at'),
+                               fixed_project=project, history=chat_history,
+                               today=timezone.localdate()) if user_prompt else None
+    result = agent.process(question=question, context=context, available_users=available_users,
+                           chat_history=chat_history, intent=intent)
     if result.get("cannot_do"):
         return {
             "answer": result.get("answer", ""),
@@ -487,6 +493,9 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
     # (gpt-4o-mini planned "10 days from now" to 7 December). Read from the typed words only.
     from project_manager_agent import pilot_deadlines
     _stated = pilot_deadlines.stated_deadline(user_prompt, timezone.localdate())
+    if not _stated and (intent or {}).get('deadline'):
+        # "deadline 2 hafte": the reading gives it in English ("in 2 weeks").
+        _stated = pilot_deadlines.stated_deadline(str(intent['deadline']), timezone.localdate(), loose=True)
     if _stated and pilot_deadlines.fit_new_project(actions, _stated, timezone.localdate()):
         logger.info("Project Pilot pipeline: project deadline set to the stated %s", _stated)
 
