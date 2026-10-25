@@ -95,3 +95,22 @@ class UsersTabScopeTests(HRTestCase):
             self.assertEqual(self.call(view, self.admin, data, method=method, userId=self.rivals.id)[0], 404)
         rob = User.objects.get(pk=self.rivals.pk)
         self.assertEqual((rob.email, rob.is_active), ('rob@test.local', True))
+
+    # ---- passwords -----------------------------------------------------------
+
+    def test_saving_the_edit_form_with_the_password_left_blank_keeps_it(self):
+        # The form sends password '' when it is left as it is; that used to become the person's password.
+        code, body = self.call(views.update_user, self.admin, {'fullName': 'Mel Tester', 'password': ''},
+                               method='put', userId=self.by_member.id)
+        self.assertEqual(code, 200, body)
+        self.assertTrue(User.objects.get(pk=self.by_member.pk).check_password('x'))
+
+    def test_a_new_password_is_set_when_it_is_strong_enough(self):
+        code, body = self.call(views.update_user, self.admin, {'password': 'short'}, method='put',
+                               userId=self.by_member.id)
+        self.assertEqual((code, body['message']), (400, 'Password must be at least 8 characters long.'))
+        self.assertTrue(User.objects.get(pk=self.by_member.pk).check_password('x'))
+        code, body = self.call(views.update_user, self.admin, {'password': 'Bakery-2026'}, method='put',
+                               userId=self.by_member.id)
+        self.assertEqual(code, 200, body)
+        self.assertTrue(User.objects.get(pk=self.by_member.pk).check_password('Bakery-2026'))

@@ -85,7 +85,11 @@ export default function CalendarScheduleView({ onOpenPilot }) {
     try {
       const res = await pmAgentService.calendarSchedule(selectedProject);
       const data = res?.data?.data || res?.data || {};
-      setSchedule(data);
+      if (data.success === false) {
+        toast({ title: 'No plan this time', description: data.error || 'Press Generate Schedule again.', variant: 'destructive' });
+      } else {
+        setSchedule(data);
+      }
     } catch (e) {
       toast({ title: 'Error', description: apiErrorMessage(e, 'Failed to generate schedule'), variant: 'destructive' });
     } finally {

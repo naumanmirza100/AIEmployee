@@ -172,3 +172,18 @@ class SchedulePlanTests(PMTestCase):
     def test_no_plan_for_another_company(self):
         code, _ = self.call(saved.saved_schedule_plan, self.rival_dash, method='get', project_id=self.project.id)
         self.assertEqual(code, 404)
+
+
+class CutOffScheduleTests(PMTestCase):
+    """Two weeks for six people ran past the reply's length: the JSON was cut off and shown raw as the plan
+    (PM demo rehearsal, 25 Oct 2026)."""
+
+    def test_a_plan_cut_off_mid_json_is_an_error_not_raw_text(self):
+        from project_manager_agent.ai_agents.calendar_planner_agent import CalendarPlannerAgent
+        cut_off = '{"schedule": [{"date": "2026-10-26", "day_name": "Monday", "assignments": [{"member_na'
+        with mock.patch.object(CalendarPlannerAgent, '_call_llm', return_value=cut_off) as call:
+            result = CalendarPlannerAgent().generate_schedule([{'id': 1, 'title': 'Cart'}], [])
+        self.assertEqual(result, {'success': False,
+                                  'error': 'The plan came back incomplete. Press Generate Schedule again.'})
+        self.assertTrue(call.call_args.kwargs['json_mode'])
+        self.assertFalse(ProjectToolResult.objects.exists())

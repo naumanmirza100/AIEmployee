@@ -332,8 +332,10 @@ Rules:
 - If task has estimated_hours, duration = max(1, ceil(estimated_hours / 8)) days
 - If no estimated_hours, estimate based on task complexity (default: 3 days for medium, 5 for high priority, 2 for low)
 - end_date = start_date + duration - 1 (inclusive)
-- If task has a deadline (due_date), respect it as a hard constraint but ensure it's after start_date
+- If task has a deadline (due_date), respect it as a hard constraint but ensure it's after start_date: end_date is never after the due_date
 - Add 10-20% buffer for high-priority or complex tasks
+- In the reasoning, name other tasks by their titles, never by their ids
+- Any date the reasoning gives for this task must be exactly the start_date or end_date you return
 
 Return JSON array with optimized dates:
 [
@@ -395,6 +397,10 @@ Return JSON array with optimized dates:
                     task_start = datetime.strptime(opt['start_date'], '%Y-%m-%d').date()
                     task_end = datetime.strptime(opt['end_date'], '%Y-%m-%d').date()
                     ai_reasoning = opt.get('reasoning', '')
+                    # The due date is a hard limit: the AI has ended a task a day after it while its reasoning said otherwise.
+                    due = task.due_date.date() if task.due_date else None
+                    if due and task_start <= due < task_end:
+                        task_end = due
                 except (ValueError, KeyError):
                     # Fallback to manual calculation
                     task_start, task_end, ai_reasoning = self._calculate_task_dates(task, project_start)
@@ -2151,41 +2157,42 @@ Return JSON:
             ]
         }
         
-        # 3. Progress Over Time (Line Chart) - Burndown
+        # 3. Progress Over Time (Line Chart) - Burndown: tasks left at the end of each week, beside the plan
+        # (tasks whose planned end is still ahead). Counting tasks by their start week made the line climb.
         if gantt_data.get('tasks'):
-            # Group tasks by week
-            from collections import defaultdict
-            weekly_progress = defaultdict(lambda: {'completed': 0, 'total': 0})
-            
-            for task in gantt_data['tasks']:
-                start_date = datetime.strptime(task['start_date'], '%Y-%m-%d').date()
-                # Get week number
-                week_key = f"{start_date.isocalendar()[0]}-W{start_date.isocalendar()[1]:02d}"
-                weekly_progress[week_key]['total'] += 1
-                if task.get('status') == 'done':
-                    weekly_progress[week_key]['completed'] += 1
-            
+            tasks = gantt_data['tasks']
+            total = len(tasks)
+            ends = [datetime.strptime(task['end_date'], '%Y-%m-%d').date() for task in tasks]
+            first = min(datetime.strptime(task['start_date'], '%Y-%m-%d').date() for task in tasks)
+            done_on = [(task.completed_at or task.updated_at).date() for task in tasks_queryset if task.status == 'done']
+            today = timezone.localdate()
+            week = first - timedelta(days=first.weekday())
+            weeks = []
+            while week <= max(ends):
+                week_end = week + timedelta(days=6)
+                row = {'week': f"{week.day} {week.strftime('%b')}", 'total': total,
+                       'planned': sum(1 for end in ends if end > week_end)}
+                if week <= today:
+                    completed = sum(1 for day in done_on if day <= week_end)
+                    row.update(completed=completed, remaining=total - completed)
+                weeks.append(row)
+                week += timedelta(days=7)
+
             charts['burndown'] = {
                 'type': 'line',
                 'title': 'Project Burndown Chart',
-                'xAxis': 'Week',
+                'xAxis': 'Week starting',
                 'yAxis': 'Tasks',
-                'data': [
-                    {
-                        'week': week,
-                        'completed': data['completed'],
-                        'total': data['total'],
-                        'remaining': data['total'] - data['completed']
-                    }
-                    for week, data in sorted(weekly_progress.items())
-                ]
+                'data': weeks,
             }
-        
-        # 4. Resource Utilization (Bar Chart)
+
+        # 4. Resource Utilization (Bar Chart), by people's names rather than their logins
+        people = {task.id: task.assignee for task in tasks_queryset}
         assignee_counts = {}
         assignee_hours = {}
         for task in gantt_data.get('tasks', []):
-            assignee = task.get('assignee', 'Unassigned')
+            person = people.get(task['id'])
+            assignee = (person.get_full_name() or person.username) if person else 'Unassigned'
             assignee_counts[assignee] = assignee_counts.get(assignee, 0) + 1
             hours = task.get('estimated_hours', 0) or 0
             assignee_hours[assignee] = assignee_hours.get(assignee, 0) + hours

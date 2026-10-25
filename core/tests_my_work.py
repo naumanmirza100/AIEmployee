@@ -4,7 +4,7 @@ A person's work was spread over the agents: PM tasks in My Space, leave waiting
 for a decision in HR, tickets in Frontline, feedback owed on interviews in
 Recruitment, suggested meeting times in each scheduler. Nothing put it together.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -217,6 +217,15 @@ class EmployeeLoginTests(MyWorkTestCase):
         self.assertEqual([(i['agent'], i['kind']) for i in items],
                          [('pm', 'invite'), ('pm', 'task'), ('hr', 'invite')])
         self.assertEqual({i['link'] for i in items}, {'/me/meetings', '/me/tasks'})
+
+    def test_a_task_due_on_a_day_shows_the_day_and_one_due_at_a_time_keeps_it(self):
+        # Pilot keeps a day as midnight UTC, which read "05:00" in Karachi (PM demo rehearsal, 25 Oct 2026).
+        day = datetime(2030, 10, 30, tzinfo=dt_timezone.utc)
+        for title, due_date in (('Day', day), ('Timed', day + timedelta(days=1, hours=9, minutes=30))):
+            Task.objects.create(project=self.project, title=title, assignee=self.ali.user, due_date=due_date)
+        due = {i['title']: (i['due'], i['all_day']) for i in self.employee_items(self.ali.user)}
+        self.assertEqual(due['Day'], ('2030-10-30', True))
+        self.assertEqual(due['Timed'], ('2030-10-31T09:30:00+00:00', False))
 
     def test_a_dashboard_token_is_turned_away_with_a_reason(self):
         code, body = self.send(self.http(self.admin), 'get', '/api/user/my-work')

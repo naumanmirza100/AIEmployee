@@ -78,7 +78,10 @@ Reply with ONLY "yes" or "no". Answer "yes" if the text contains any of: discuss
                 raise
             pass  # If validation fails, proceed with analysis anyway
 
-        # Validate mentioned people against project team members (only if a project is selected)
+        # Validate mentioned people against project team members (only if a project is selected).
+        # Notes naming no one on the project are likely for another project and are refused; notes that also name
+        # the client or someone not yet on a task are analysed, with those people listed as a warning.
+        outsiders = []
         if project_context and project_context.get('team_members') is not None:
             team = project_context.get('team_members', [])
             team_lower = [m.lower() for m in team]
@@ -114,8 +117,8 @@ If no names found, return: []"""
                         if not matched:
                             unrecognized.append(person)
 
-                    if unrecognized:
-                        team_display = ', '.join(team) if team else 'No members assigned yet'
+                    if unrecognized and team and len(unrecognized) == len(detected_names):
+                        team_display = ', '.join(team)
                         return {
                             "success": False,
                             "error": f"The following people are not part of project \"{project_context.get('name', '')}\":",
@@ -127,6 +130,7 @@ If no names found, return: []"""
                                 f"or select a different project that these members belong to."
                             )
                         }
+                    outsiders = unrecognized
             except (json.JSONDecodeError, Exception) as e:
                 from core.api_key_service import KeyServiceError
                 if isinstance(e, KeyServiceError):
@@ -203,6 +207,10 @@ Return ONLY the JSON."""
                     cleaned = cleaned.split("```")[1].split("```")[0].strip()
 
                 result = json.loads(cleaned)
+                if outsiders:
+                    result['warnings'] = [f"Not on this project yet: {', '.join(outsiders)}. "
+                                          "Tasks made from their action items will have no one assigned "
+                                          "unless they are in your team."]
                 return {"success": True, **result}
             except (json.JSONDecodeError, IndexError):
                 return {"success": True, "answer": response}

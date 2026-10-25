@@ -88,7 +88,9 @@ Always back up your analysis with data and provide specific recommendations."""
                 assignee_workload[assignee]["active"] += 1
 
         completion_rate = (completed / total * 100) if total > 0 else 0
-        health_score = self._calculate_health_score_from_metrics(completion_rate, overdue, blocked, total)
+        time_elapsed = self._time_elapsed_percent(project)
+        health_score = self._calculate_health_score_from_metrics(completion_rate, overdue, blocked, total,
+                                                                 time_elapsed)
 
         return {
             "success": True,
@@ -104,6 +106,7 @@ Always back up your analysis with data and provide specific recommendations."""
                 "review_tasks": review,
                 "overdue_tasks": overdue,
                 "completion_rate": round(completion_rate, 1),
+                "time_elapsed_percent": None if time_elapsed is None else round(time_elapsed, 1),
                 "health_score": health_score,
                 "priority_breakdown": {
                     "high": high_priority,
@@ -159,7 +162,7 @@ Always back up your analysis with data and provide specific recommendations."""
                 'overdue_tasks': overdue,
                 'completion_rate': round(completion_rate, 2),
                 'health_score': self._calculate_health_score_from_metrics(
-                    completion_rate, overdue, blocked, total
+                    completion_rate, overdue, blocked, total, self._time_elapsed_percent(project)
                 )
             },
             'charts': charts,
@@ -278,6 +281,8 @@ Always back up your analysis with data and provide specific recommendations."""
             overdue_penalty = min(stats["overdue"] * 10, 30)
             blocked_penalty = min(stats["blocked"] * 5, 15)
             score = max(0, min(100, round(completion_rate - overdue_penalty - blocked_penalty)))
+            if not (stats["completed"] or stats["overdue"] or stats["blocked"]):
+                score = None     # nothing due yet: a red 0 for everyone on a new project said they had failed
 
             # Workload assessment
             if stats["total"] > avg_tasks * 1.5:
@@ -304,7 +309,7 @@ Always back up your analysis with data and provide specific recommendations."""
             })
 
         # Sort by score descending
-        members.sort(key=lambda m: m["score"], reverse=True)
+        members.sort(key=lambda m: -1 if m["score"] is None else m["score"], reverse=True)
 
         # Generate insights
         insights = []
@@ -331,7 +336,7 @@ Always back up your analysis with data and provide specific recommendations."""
             insights.append(f"⚖️ {', '.join(overloaded)} may be overloaded — consider redistributing some tasks")
 
         # Top performer
-        if members and members[0]["score"] > 0:
+        if members and (members[0]["score"] or 0) > 0:
             top = members[0]
             insights.append(f"🏆 Top performer: {top['name']} with {top['completion_rate']}% completion rate")
 
@@ -501,11 +506,10 @@ Use markdown formatting. Keep it concise."""
             return {"success": True, "health_score": 0, "breakdown": {}, "message": "No tasks to evaluate"}
 
         completion_score = m.get('completion_rate', 0)
-        overdue_penalty = min(30, (m.get('overdue_tasks', 0) / total) * 100) if total > 0 else 0
-        blocked_penalty = min(20, (m.get('blocked_tasks', 0) / total) * 100) if total > 0 else 0
-        unassigned = sum(1 for v in m.get('assignee_workload', {}).get('Unassigned', {}).values() if isinstance(v, int))
-
-        health = max(0, min(100, completion_score - overdue_penalty - blocked_penalty))
+        behind_penalty = max(0, (m.get('time_elapsed_percent') or 0) - completion_score)
+        overdue_penalty = (m.get('overdue_tasks', 0) / total) * 100 * 0.5
+        blocked_penalty = (m.get('blocked_tasks', 0) / total) * 100 * 0.3
+        health = m.get('health_score', 0)
 
         return {
             "success": True,
@@ -514,6 +518,7 @@ Use markdown formatting. Keep it concise."""
             "grade": "A" if health >= 80 else "B" if health >= 60 else "C" if health >= 40 else "D" if health >= 20 else "F",
             "breakdown": {
                 "completion_rate": round(completion_score, 1),
+                "behind_schedule_penalty": round(behind_penalty, 1),
                 "overdue_penalty": round(overdue_penalty, 1),
                 "blocked_penalty": round(blocked_penalty, 1),
             },
@@ -521,13 +526,23 @@ Use markdown formatting. Keep it concise."""
         }
 
     def _calculate_health_score_from_metrics(self, completion_rate: float, overdue: int,
-                                             blocked: int, total_tasks: int) -> float:
-        """Calculate health score from raw metrics."""
-        score = completion_rate
+                                             blocked: int, total_tasks: int, time_elapsed=None) -> float:
+        """Health out of 100: how far the work is behind the time gone, less a share for overdue and blocked
+        tasks. Scoring the completion rate alone put every new project at 0, "Critical"."""
+        score = 100 - max(0, (time_elapsed or 0) - completion_rate)
         if total_tasks > 0:
             score -= (overdue / total_tasks) * 100 * 0.5
             score -= (blocked / total_tasks) * 100 * 0.3
         return max(0, min(100, round(score, 2)))
+
+    @staticmethod
+    def _time_elapsed_percent(project):
+        """How much of the time from the project's start to its deadline has gone (0-100); None without both."""
+        deadline = project.effective_deadline
+        start = project.start_date or (project.created_at.date() if project.created_at else None)
+        if not deadline or not start or deadline <= start:
+            return None
+        return max(0.0, min(100.0, (timezone.localdate() - start).days / (deadline - start).days * 100))
 
     def _tasks_to_data(self, tasks_qs) -> List[Dict]:
         """Convert queryset to list of dicts."""

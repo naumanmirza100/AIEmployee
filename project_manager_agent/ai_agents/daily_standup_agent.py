@@ -57,14 +57,16 @@ Be concise, factual, and highlight anything that needs attention."""
                 "recent_activity": [],
             }
 
-        # Map tasks to members
+        # Map tasks to members: by id first. Matching the login ("bilal.ahmed") against the name ("Bilal Ahmed")
+        # failed, so everyone was listed twice, once with no tasks (PM demo rehearsal, 25 Oct 2026).
+        by_id = {data['id']: name for name, data in member_summaries.items() if data['id'] is not None}
         for task in tasks:
-            assignee = task.get('assignee_username') or task.get('assignee_name')
+            assignee = task.get('assignee_name') or task.get('assignee_username')
             if not assignee:
                 continue
             # Find matching member
-            matched_member = None
-            for name in member_summaries:
+            matched_member = by_id.get(task.get('assignee_id'))
+            for name in ([] if matched_member else member_summaries):
                 if assignee.lower() in name.lower() or name.lower() in assignee.lower():
                     matched_member = name
                     break
@@ -136,6 +138,11 @@ Be concise, factual, and highlight anything that needs attention."""
                         standup_context += f" ({act['old_value']} → {act['new_value']})"
                     standup_context += "\n"
 
+        active_members = [
+            name for name, data in member_summaries.items()
+            if data['tasks_in_progress'] or data['tasks_completed_recently'] or data['recent_activity']
+        ]
+
         # Detect members with no activity
         inactive_members = [
             name for name, data in member_summaries.items()
@@ -172,7 +179,8 @@ Generate a standup report with this structure:
 3. **Blockers & Risks** - Only list blockers that exist in the data above
 4. **Action Items** - What the PM should follow up on based on actual data
 
-Use markdown formatting. Be concise. If a member has no activity, note it briefly with their assigned task count."""
+Use markdown formatting. Be concise. If a member has no activity, note it briefly with their assigned task count.
+Do not start with a title or the date: the screen already shows them. Start with the Team Summary."""
 
         try:
             response = self._call_llm(prompt, self.system_prompt, temperature=0.1, max_tokens=1500)
@@ -184,7 +192,7 @@ Use markdown formatting. Be concise. If a member has no activity, note it briefl
                 "project": project_info.get('name') if project_info else None,
                 "summary": {
                     "total_members": len(team_members),
-                    "active_members": len(team_members) - len(inactive_members),
+                    "active_members": len(active_members),
                     "inactive_members": inactive_members,
                     "total_blockers": len(all_blockers),
                     "blockers": all_blockers,

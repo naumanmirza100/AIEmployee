@@ -39,6 +39,10 @@ PROJECT_FIELDS = {'name': 'Name', 'description': 'Description', 'status': 'Statu
                   'budget_max': 'Budget to'}
 
 
+#: An update whose values are what the task or project has already.
+NOTHING_CHANGES = 'Nothing would change.'
+
+
 def proposes_changes(actions) -> bool:
     return any(isinstance(a, dict) and a.get('action') in WRITE_ACTIONS for a in actions or [])
 
@@ -142,7 +146,7 @@ def changes(actions, actor):
             if problem:
                 row['problem'] = problem
             elif not row['lines']:
-                row['problem'] = 'Nothing would change.'
+                row['problem'] = NOTHING_CHANGES
         rows.append(row)
     return rows
 
@@ -327,3 +331,14 @@ def make_as_suggested(actions, rows, actor):
     """Make a creation-only proposal as the review form suggests it. Returns (results, created_project_id)."""
     from project_manager_agent import drafts
     return apply(drafts.apply_answers(actions, answers_as_suggested(rows)), actor)
+
+
+def nothing_to_do(changes, rows):
+    """When every change proposed is already the case ("give X to Sana" when X is Sana's), the sentence that
+    says so; None otherwise. Such a card had nothing ticked and a Confirm that could not be pressed."""
+    if rows or not changes or any(c.get('problem') != NOTHING_CHANGES for c in changes):
+        return None
+    names = ', '.join(f'“{c["title"]}”' for c in changes[:3]) + (' and the rest' if len(changes) > 3 else '')
+    return (f"Nothing to change: {names} {'is' if len(changes) == 1 else 'are'} already set that way. "
+            "Say what should be different, and I'll propose it.")
+

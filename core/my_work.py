@@ -386,11 +386,18 @@ def _pm_times_suggested(person, now):
     return items[:LIMIT]
 
 
+def _task_due(due):
+    """A due date picked as a day is kept as midnight UTC; it is shown as that day, not as 05:00 in Karachi."""
+    if isinstance(due, datetime) and due.astimezone(dt_timezone.utc).time() == time(0, 0):
+        return due.astimezone(dt_timezone.utc).date()
+    return due
+
+
 def _task_items(tasks, link):
     return [
         _item('pm', 'task', t.id, t.title,
               detail=' · '.join(p for p in (t.project.name if t.project_id else '', t.get_status_display()) if p),
-              due=t.due_date, action='Open task', link=link)
+              due=_task_due(t.due_date), action='Open task', link=link)
         for t in tasks
     ]
 
