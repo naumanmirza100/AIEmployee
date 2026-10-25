@@ -3,9 +3,10 @@
 The alerts were checked only when the summary row was created, and the row is created empty before the AI fills
 it in, so none of them ever fired (CO-173). A deadline more than a week away got no alert at all, ever.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 
 from django.test import TestCase
+from django.utils import timezone
 
 from core.models import Company
 from operations_agent.models import OperationsDocumentSummary, OperationsNotification
@@ -34,7 +35,7 @@ class SummaryAlertTests(TestCase):
         return list(rows.filter(notification_type=kind) if kind else rows)
 
     def deadline(self, days, what='Security review'):
-        return {'date': (date.today() + timedelta(days=days)).isoformat(), 'description': what}
+        return {'date': (timezone.localdate() + timedelta(days=days)).isoformat(), 'description': what}
 
     def test_a_ready_summary_raises_its_alerts(self):
         self.summary(importance_level='critical', importance_reason='Liability is uncapped',
@@ -57,7 +58,7 @@ class SummaryAlertTests(TestCase):
         self.assertEqual(len(self.alerts()), 2)
 
     def test_a_far_deadline_is_alerted_when_it_comes_within_the_week_and_only_once(self):
-        today = date.today()
+        today = timezone.localdate()
         self.summary(deadlines=[self.deadline(10, 'Go-live')])
         self.assertEqual(self.alerts('threshold_breach'), [])
         self.assertEqual(_alert_deadlines_impl(today + timedelta(days=2)), 0)       # still 8 days out
@@ -69,12 +70,12 @@ class SummaryAlertTests(TestCase):
     def test_a_deadline_alerted_when_the_summary_was_ready_is_not_repeated_each_morning(self):
         self.summary(deadlines=[self.deadline(4)])
         self.assertEqual(len(self.alerts('threshold_breach')), 1)
-        self.assertEqual(_alert_deadlines_impl(date.today() + timedelta(days=1)), 0)
+        self.assertEqual(_alert_deadlines_impl(timezone.localdate() + timedelta(days=1)), 0)
 
     def test_a_second_deadline_in_the_same_document_gets_its_own_alert(self):
         first, second = self.deadline(2, 'Sign the SOW'), self.deadline(12, 'Launch')
         self.summary(deadlines=[first, second])
-        self.assertEqual(_alert_deadlines_impl(date.today() + timedelta(days=6)), 1)
+        self.assertEqual(_alert_deadlines_impl(timezone.localdate() + timedelta(days=6)), 1)
         self.assertEqual(len(self.alerts('threshold_breach')), 2)
 
     def test_past_and_undated_deadlines_are_left_alone(self):
