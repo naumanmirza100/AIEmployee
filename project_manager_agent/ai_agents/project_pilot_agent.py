@@ -236,8 +236,11 @@ class ProjectPilotAgent(BaseAgent):
                 cannot_do = True
                 cannot_do_item = 'users or user accounts'
         
-        # Check for team member creation
-        if 'team member' in question_lower and any(word in question_lower for word in ['create', 'add', 'make']):
+        # Check for team member creation: "add a team member", "add Ali as a team member". Not "add 3 tasks and
+        # assign them to all team members", which was refused on the live site (26 Oct 2026): that is work for
+        # people with the Team Member role (pilot_roles).
+        if re.search(r"\b(?:create|add|make|hire|invite)\s+(?:(?:a|an|new|one|two|three|some|\d+)\s+)*team[\s-]?members?\b"
+                     r"|\bas\s+(?:a\s+|an\s+)?(?:new\s+)?team[\s-]?members?\b|\bnew\s+team[\s-]?members?\b", question_lower):
             cannot_do = True
             cannot_do_item = 'team members directly'
         

@@ -87,6 +87,34 @@ class ReadingTheRoleTests(PMTestCase):
             {'action': 'create_task', 'task_title': 'a', 'assignee_id': 3}])
 
 
+class TeamMembersIsARoleNotNewPeopleTests(PMTestCase):
+    """"add 3 tasks … assign them to all team members only" was refused live as "I cannot assign tasks to team members
+    as I don't manage users": any message with "team member" and "add" was taken for making a new person."""
+
+    def prompt_for(self, question):
+        seen = {}
+
+        def llm(agent, prompt, *args, **kwargs):
+            seen.setdefault('prompt', prompt)
+            return '[]'
+
+        with mock.patch.object(ProjectPilotAgent, '_call_llm', autospec=True, side_effect=llm):
+            ProjectPilotAgent().process(question=question, context={}, available_users=[], chat_history=[])
+        return seen.get('prompt', '')
+
+    def test_work_for_the_team_members_is_not_refused(self):
+        for words in ('add 3 tasks for checking the branch dashboards and assign them to all team members only',
+                      'add a task for the menu and give it to the team members'):
+            self.assertNotIn('You CANNOT create', self.prompt_for(words), words)
+
+    def test_making_a_new_team_member_still_makes_nothing(self):
+        # Turned down, either as something Pilot cannot do or as not a request for projects and tasks.
+        for words in ('add a team member called Ali', 'add Ali as a team member', 'create 2 new team members'):
+            prompt = self.prompt_for(words)
+            self.assertTrue('You CANNOT create team members directly' in prompt
+                            or "doesn't appear to be an action request" in prompt, (words, prompt[:200]))
+
+
 class PilotKeepsToTheRoleTests(PMTestCase):
     """Through the Pilot endpoint, with the AI's answer given. In the base company Pat and Pia are project managers
     and Dev a team member."""
