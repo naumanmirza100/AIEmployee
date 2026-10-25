@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { withSeverity } from "@/utils/messageSeverity"
 
 const TOAST_LIMIT = 1
 
@@ -34,7 +35,9 @@ const toastStore = {
   }
 }
 
-export const toast = ({ ...props }) => {
+export const toast = ({ ...given }) => {
+  // Red only for real errors; a warning or refusal is shown in amber (see messageSeverity).
+  const props = withSeverity(given)
   const id = generateId()
 
   const update = (props) =>

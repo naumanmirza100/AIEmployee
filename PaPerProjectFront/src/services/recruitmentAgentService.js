@@ -3,6 +3,7 @@
 import { companyApi } from './companyAuthService';
 
 import { API_BASE_URL } from '@/config/apiConfig';
+import { noteFailure } from '@/utils/messageSeverity';
 import { streamAnswer } from '@/utils/ndjsonStream';
 
 /**
@@ -71,7 +72,9 @@ export const processCVs = async (files, jobDescriptionId = null, jobDescriptionT
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      const message = errorData.message || `HTTP error! status: ${response.status}`;
+      if (response.status >= 500) noteFailure(message);
+      throw new Error(message);
     }
 
     return await response.json();

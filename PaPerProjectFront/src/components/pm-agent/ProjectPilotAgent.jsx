@@ -14,6 +14,7 @@ import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText,
 import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 import { trackPMRecentlyViewed } from './pmLocalStore';
+import { isRealError } from '@/utils/messageSeverity';
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   const { toast } = useToast();
@@ -875,6 +876,8 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                         <div className="space-y-2 mt-2">
                           {msg.responseData.action_results.map((action, idx) => {
                             const isTaskAction = action.action === 'create_task' || action.action === 'update_task';
+                            // A refusal ("Hafsa is not available") is amber; red only when something broke.
+                            const broke = !action.success && isRealError('', action.message || action.error || '');
                             const formatDate = (iso) => {
                               if (!iso) return '—';
                               try {
@@ -890,17 +893,19 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                               <div
                                 key={idx}
                                 className={`p-3 rounded border text-sm ${
-                                  action.success ? 'bg-emerald-50 border-emerald-200/40 dark:bg-emerald-950/50 dark:border-emerald-800' : 'bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800'
+                                  action.success ? 'bg-emerald-50 border-emerald-200/40 dark:bg-emerald-950/50 dark:border-emerald-800'
+                                    : broke ? 'bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800'
+                                    : 'bg-amber-50 border-amber-200 dark:bg-amber-950/40 dark:border-amber-700'
                                 }`}
                               >
                                 <div className="flex items-start gap-2">
                                   {action.success ? (
                                     <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
                                   ) : (
-                                    <XCircle className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+                                    <XCircle className={`h-4 w-4 mt-0.5 shrink-0 ${broke ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
                                   )}
                                   <div className="flex-1 min-w-0">
-                                    <Badge variant={action.success ? 'default' : 'destructive'} className="mb-1.5">
+                                    <Badge variant={action.success ? 'default' : broke ? 'destructive' : 'outline'} className={`mb-1.5 ${!action.success && !broke ? 'border-amber-500 text-amber-700 dark:text-amber-300' : ''}`}>
                                       {action.action?.replace(/_/g, ' ') || 'Action'}
                                     </Badge>
                                     {(action.message || action.error) && (

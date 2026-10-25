@@ -2,6 +2,7 @@
 
 import { API_BASE_URL } from '@/config/apiConfig';
 import { rememberReturnTo, signedOutOnPurpose } from '@/utils/returnTo';
+import { noteFailure } from '@/utils/messageSeverity';
 /**
  * Get company authentication token from localStorage
  */
@@ -125,6 +126,7 @@ const companyApiRequest = async (endpoint, options = {}) => {
       const error = new Error(errorData.message || errorData.detail || `HTTP error! status: ${response.status}`);
       error.status = response.status;
       error.data = errorData;
+      if (response.status >= 500) noteFailure(error.message);
       throw error;
     }
 
@@ -138,6 +140,7 @@ const companyApiRequest = async (endpoint, options = {}) => {
       console.error('Network error - Failed to fetch:', error);
       const networkError = new Error('Failed to connect to server. Please check if the backend is running.');
       networkError.isNetworkError = true;
+      noteFailure(networkError.message);
       throw networkError;
     }
     console.error('Company API Request Error:', error);
