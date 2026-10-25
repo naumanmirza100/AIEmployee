@@ -17,6 +17,8 @@ is looked up in the caller's scope and every value validated by the service.
 from __future__ import annotations
 
 import logging
+import re
+from datetime import date
 
 from django.db import transaction
 
@@ -342,3 +344,69 @@ def nothing_to_do(changes, rows):
     return (f"Nothing to change: {names} {'is' if len(changes) == 1 else 'are'} already set that way. "
             "Say what should be different, and I'll propose it.")
 
+
+
+# Words that name no one: "move it to Monday", "set it to High".
+_NOT_NAMES = {
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'today', 'tomorrow', 'kal',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november',
+    'december', 'high', 'medium', 'low', 'done', 'review', 'blocked', 'the', 'this', 'that', 'it', 'is', 'me', 'us',
+    'task', 'tasks', 'project', 'team', 'everyone', 'someone', 'nobody', 'isko', 'usko', 'inko', 'sab', 'sabko',
+}
+_UNASSIGN = re.compile(r'\b(un-?assign\w*|nobody|no one|no-one|none|koi nahi|kisi ko nahi|hata\w*|remove \w+ from)\b',
+                       re.I)
+_NAMED = (
+    # "give the cart task to Zubair", "assign it to Zubair Khan"
+    re.compile(r'\b(?:give|assign|reassign|hand|pass|move)\b[^.?!]*?\bto\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)'),
+    re.compile(r'\b([A-Z][a-z]+)\s+ko\b'),                                       # "Zubair ko cart wala task de do"
+    re.compile(r'\b(?:assign|give)\s+([A-Z][a-z]+)\s+(?:the|a|an|this|that|all|it)\b'),   # "give Zubair the cart task"
+)
+
+
+def _is_member(word, people):
+    word = word.lower()
+    for person in people:
+        names = f"{person.get('name') or ''} {person.get('username') or ''}".lower().replace('.', ' ').split()
+        if word in names or any(n.startswith(word) for n in names if len(word) >= 3):
+            return True
+    return False
+
+
+def refusal(actions, question, people, today):
+    """A sentence turning the request down when the AI's reading of it would do something nobody asked for;
+    None otherwise. Found by asking wrong things on the live site (25 Oct 2026):
+    - "give the cart task to Zubair", with no Zubair in the company, came back as taking the task from Sana and
+      leaving it with nobody;
+    - "move the project deadline to yesterday" came back as a deadline in the past, before the project's start.
+    `people` is the company's people as Pilot sees them ({'name', 'username'})."""
+    text = str(question or '')
+    reassigns = [a for a in actions if a.get('action') in ('update_task', 'create_task')
+                 and ('assignee_id' in (a.get('updates') or {}) or a.get('action') == 'create_task')]
+    if reassigns:
+        strangers = []
+        for pattern in _NAMED:
+            for match in pattern.finditer(text):
+                words = match.group(1).split()
+                if words[0].lower() in _NOT_NAMES or _is_member(words[0], people):
+                    continue
+                strangers.append(' '.join(words))
+        if strangers:
+            return (f"I couldn't find {strangers[0]} in your team, so nothing was changed. Add them under Users "
+                    "first, or name someone who is in the team.")
+        emptied = [a for a in reassigns if a.get('action') == 'update_task'
+                   and not (a.get('updates') or {}).get('assignee_id')]
+        if emptied and not _UNASSIGN.search(text):
+            return ("I couldn't tell who should have it from your team, so nothing was changed. Name someone in the "
+                    "team, or say \"unassign\" to leave it with nobody.")
+    for action in actions:
+        if action.get('action') != 'update_project':
+            continue
+        when = (action.get('updates') or {}).get('deadline') or (action.get('updates') or {}).get('end_date')
+        try:
+            day = date.fromisoformat(str(when)[:10]) if when else None
+        except ValueError:
+            day = None
+        if day and day < today:
+            return (f"{day.day} {day:%B %Y} has already passed, so the deadline was not moved. A deadline is today "
+                    "or later: say another date.")
+    return None

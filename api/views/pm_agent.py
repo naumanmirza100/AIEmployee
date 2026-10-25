@@ -601,10 +601,11 @@ def _revise_rejected_card(request, company_user, available_users, today):
     project = (projects_for_company_user(company_user).filter(pk=saved['project_id']).first()
                if saved.get('project_id') else None)
     return _pilot_review_response(actions, answer, project, available_users, company_user, request,
-                                  duplicate=saved.get('duplicate'))
+                                  duplicate=saved.get('duplicate'), question=reason)
 
 
-def _pilot_review_response(actions, answer, project, available_users, company_user, request, duplicate=None):
+def _pilot_review_response(actions, answer, project, available_users, company_user, request, duplicate=None,
+                           question=''):
     """Show a Pilot proposal as a review card, or make it at once when the company auto-confirms.
 
     Pilot used to apply its actions the moment they arrived, unless a new task was missing an
@@ -620,6 +621,11 @@ def _pilot_review_response(actions, answer, project, available_users, company_us
     review_project = project
     if review_project is None and drafts.only_project_id(actions):
         review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
+    refused = pilot_review.refusal(actions, question, available_users, timezone.localdate())
+    if refused:
+        # Someone not in the team, or a deadline that has passed: said in words, nothing to confirm.
+        return Response({"status": "success", "data": {"answer": refused, "action_results": []}},
+                        status=status.HTTP_200_OK)
     gaps = drafts.inspect(actions, available_users, today=timezone.localdate(), project=review_project)
     actor = pm_services.DashboardActor(company_user, request)
     if not duplicate and pilot_review.auto_confirms(company_user.company, actions):
@@ -789,7 +795,8 @@ def project_pilot(request):
             if actions is None:
                 # Which project? The chat shows the latest ones as buttons; one sends the request again with it.
                 return _which_project(answer, all_projects, question)
-            return _pilot_review_response(actions, answer, project, available_users, company_user, request)
+            return _pilot_review_response(actions, answer, project, available_users, company_user, request,
+                                          question=question)
 
         # What the message asks for, read by one small AI call (pilot_intent); without a reading the word lists
         # in the agent route it, as before.
@@ -822,7 +829,8 @@ def project_pilot(request):
             if when:
                 actions, answer = pilot_deadlines.deadline_move(project, when, today=today,
                                                                 move_tasks=bool(intent.get('move_tasks_too')))
-                return _pilot_review_response(actions, answer, project, available_users, company_user, request)
+                return _pilot_review_response(actions, answer, project, available_users, company_user, request,
+                                              question=question)
 
         agent = AgentRegistry.get_agent("project_pilot")
         # Route LLM call through the company key/quota resolver. Resolver will
@@ -1051,7 +1059,7 @@ def project_pilot(request):
             # The same description again, or a project by that name, is offered as a numbered copy.
             duplicate = pilot_duplicates.check(actions, projects_for_company_user(company_user), question)
             return _pilot_review_response(actions, result.get("answer"), project, available_users,
-                                          company_user, request, duplicate=duplicate)
+                                          company_user, request, duplicate=duplicate, question=question)
 
         # Nothing to change: the agent answered a question or declined.
         answer_text = (result.get("answer") or "").strip()
