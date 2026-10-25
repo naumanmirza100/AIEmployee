@@ -60,6 +60,14 @@ class PilotFromFileTests(PMTestCase):
         project = Project.objects.get(name='Launch')
         self.assertEqual(Task.objects.get(title='Write copy').project, project)
 
+    def test_with_auto_confirm_on_the_document_is_made_at_once(self):
+        self.company.pm_auto_confirm = True
+        self.company.save(update_fields=['pm_auto_confirm'])
+        result = self.run_pipeline()
+        self.assertNotIn('draft', result)
+        self.assertEqual(result['answer'], 'Created 1 project and 1 task.')
+        self.assertEqual(Task.objects.get(title='Write copy').project, Project.objects.get(name='Launch'))
+
     def test_an_upload_without_an_instruction_still_asks_first(self):
         result = self.run_pipeline(prompt='')
         self.assertTrue(result['confirmation_required']['needs_confirmation'])

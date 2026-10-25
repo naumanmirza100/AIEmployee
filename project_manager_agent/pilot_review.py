@@ -293,3 +293,34 @@ def summary(results):
     if failed:
         sentences.append(f"{_plural(len(failed), 'change')} couldn't be made: {failed[0]['error']}")
     return ' '.join(sentences) or 'Nothing was changed.'
+
+
+# ---------------------------------------------------------------------------
+# Making new work at once, when the company has chosen to
+# ---------------------------------------------------------------------------
+
+def auto_confirms(company, actions) -> bool:
+    """Whether to make this proposal without the review card: the company switched on `pm_auto_confirm`, and
+    every change is a creation. An update or a deletion is always reviewed."""
+    return (bool(getattr(company, 'pm_auto_confirm', False))
+            and not any(isinstance(a, dict) and a.get('action') in CHANGE_ACTIONS for a in actions or []))
+
+
+def answers_as_suggested(rows):
+    """The review form's answers as it first appears, every suggested deadline, assignee and due date taken:
+    what pressing Confirm without touching it would send. `rows` is `drafts.inspect`'s."""
+    answers = {}
+    for row in rows or ():
+        if row.get('action') == 'create_project' and row.get('deadline'):
+            answers[row['index']] = {'deadline': row['deadline']}
+        elif row.get('action') == 'create_task':
+            fields = {k: row[k] for k in ('assignee_id', 'due_date') if row.get(k) not in (None, '')}
+            if fields:
+                answers[row['index']] = fields
+    return answers
+
+
+def make_as_suggested(actions, rows, actor):
+    """Make a creation-only proposal as the review form suggests it. Returns (results, created_project_id)."""
+    from project_manager_agent import drafts
+    return apply(drafts.apply_answers(actions, answers_as_suggested(rows)), actor)

@@ -28,13 +28,14 @@ import frontlineAgentService from '@/services/frontlineAgentService';
 import DashboardNavbar from '@/components/common/DashboardNavbar';
 import ConfirmDialog from '@/components/common/ConfirmDialog';
 import HandoverDialog from '@/components/hr/HandoverDialog';
+import UserImportDialog from '@/components/company/UserImportDialog';
 import { API_BASE_URL } from '@/config/apiConfig';
 import {
   Building2, Plus, Briefcase, Users, Eye,
   Loader2, Search, Calendar, MapPin, Clock, Download, BrainCircuit, FolderKanban,
   ChevronDown, ChevronRight, ListTodo, UserCheck, UserPlus, Edit, Trash2, Mail,
   CheckCircle2, Circle, PlayCircle, AlertCircle, FileCheck, TrendingUp, User, ChevronLeft,
-  Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2, Lock, CreditCard
+  Ticket, RotateCcw, KeyRound, RefreshCw, Copy, Maximize2, Minimize2, Lock, CreditCard, FileSpreadsheet
 } from 'lucide-react';
 
 const toLocaleDateStr = (date) => {
@@ -112,6 +113,7 @@ const CompanyDashboardPage = () => {
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersPagination, setUsersPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
+  const [showImportUsers, setShowImportUsers] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userSubmitting, setUserSubmitting] = useState(false);
   const [userForm, setUserForm] = useState({
@@ -1206,6 +1208,12 @@ const CompanyDashboardPage = () => {
                 <Button onClick={() => setShowCreateJobModal(true)}>
                   <Plus className="h-4 w-4 mr-2" />
                   Post New Job
+                </Button>
+              )}
+              {activeTab === 'users' && (
+                <Button variant="outline" className="mr-2" onClick={() => setShowImportUsers(true)} data-testid="import-users-button">
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Import from Excel
                 </Button>
               )}
               {activeTab === 'users' && (
@@ -2807,6 +2815,8 @@ const CompanyDashboardPage = () => {
         </Dialog>
         
         {/* Create/Edit User Modal */}
+        <UserImportDialog open={showImportUsers} onOpenChange={setShowImportUsers} onAdded={fetchUsers} />
+
         <Dialog open={showCreateUserModal} onOpenChange={(open) => {
           setShowCreateUserModal(open);
           if (!open) {

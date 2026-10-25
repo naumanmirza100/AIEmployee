@@ -196,6 +196,8 @@ urlpatterns = [
 
     # Company User Management endpoints (for company users to manage regular users)
     re_path(r'^company/users/create/?$', company_users.create_user, name='company_create_user'),  # POST
+    re_path(r'^company/users/import-template/?$', company_users.users_import_template, name='company_users_import_template'),  # GET
+    re_path(r'^company/users/import/?$', company_users.users_import, name='company_users_import'),  # POST (multipart)
     re_path(r'^company/users/?$', company_users.list_users, name='company_list_users'),  # GET
     re_path(r'^company/users/(?P<userId>\d+)/?$', company_users.get_user, name='company_get_user'),  # GET
     re_path(r'^company/users/(?P<userId>\d+)/update/?$', company_users.update_user, name='company_update_user'),  # PUT/PATCH

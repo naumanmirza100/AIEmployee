@@ -1,6 +1,7 @@
 // API Configuration and Service Layer
 
 import { API_BASE_URL } from '@/config/apiConfig';
+import { noteFailure } from '@/utils/messageSeverity';
 
 /**
  * Get authentication token from localStorage
@@ -171,6 +172,7 @@ const apiRequest = async (endpoint, options = {}) => {
       const error = new Error(errorMessage);
       error.status = response.status;
       error.data = data;
+      if (response.status >= 500) noteFailure(error.message);
       throw error;
     }
 
@@ -181,6 +183,7 @@ const apiRequest = async (endpoint, options = {}) => {
       console.error('Network Error (CORS or connection issue):', error);
       const networkError = new Error('Network error: Unable to connect to server. Please check CORS settings and ensure the backend is running.');
       networkError.isNetworkError = true;
+      noteFailure(networkError.message);
       throw networkError;
     }
     
@@ -279,6 +282,7 @@ export const api = {
         const error = new Error(data.message || `HTTP error! status: ${response.status}`);
         error.status = response.status;
         error.data = data;
+        if (response.status >= 500) noteFailure(error.message);
         throw error;
       }
 

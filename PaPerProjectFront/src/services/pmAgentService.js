@@ -2,6 +2,7 @@
 
 import { companyApi, getCompanyToken } from './companyAuthService';
 import { API_BASE_URL } from '@/config/apiConfig';
+import { noteFailure } from '@/utils/messageSeverity';
 import { streamAnswer } from '@/utils/ndjsonStream';
 
 /**
@@ -298,6 +299,7 @@ export const projectPilotFromFile = (file, projectId = null, chatHistory = null,
       if (!ok) {
         const err = new Error(data.message || `HTTP error! status: ${xhr.status}`);
         err.status = xhr.status;
+        if (xhr.status >= 500 || xhr.status === 0) noteFailure(err.message);
         return reject(err);
       }
       resolve(data);

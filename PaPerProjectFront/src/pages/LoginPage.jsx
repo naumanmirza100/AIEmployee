@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,6 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { takeReturnTo } from '@/utils/returnTo';
 import { Lock, Mail, Loader2, Shield, Eye, EyeOff } from 'lucide-react';
+import LoginSwitch from '@/components/auth/LoginSwitch';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -105,6 +106,7 @@ const LoginPage = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="px-4 sm:px-6 pb-6">
+              <LoginSwitch active="employee" />
               <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="email" className="text-sm">Email Address</Label>
@@ -164,13 +166,6 @@ const LoginPage = () => {
                   )}
                 </Button>
               </form>
-
-              <div className="mt-4 sm:mt-6 text-center text-xs sm:text-sm text-muted-foreground">
-                <p>
-                  Signing in to a company dashboard?{' '}
-                  <Link to="/company/login" className="text-primary hover:underline">Use the company sign-in</Link>
-                </p>
-              </div>
             </CardContent>
           </Card>
         </motion.div>
