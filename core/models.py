@@ -2307,7 +2307,10 @@ PROVIDER_CHOICES = [
     ('grok', 'xAI Grok'),
 ]
 
-DEFAULT_FREE_TOKENS = 100_000
+# Free AI tokens per agent a company gets when it buys the agent (AdminPricingConfig's default and fallback).
+# 10,000,000 from 25 Oct 2026, for now, so testing and demos don't run out (the client meeting did at
+# 100,000); migration core 0119 set the pricing rows to it. Existing companies' balances were not changed.
+DEFAULT_FREE_TOKENS = 10_000_000
 
 
 class CompanyAPIKey(models.Model):
