@@ -221,6 +221,7 @@ def meeting_respond(request, meeting_id):
                 MeetingResponse.objects.create(
                     meeting=meeting,
                     responded_by='invitee',
+                    responder=user,
                     action=action,
                     proposed_time=counter_time,
                     reason=reason,
@@ -307,6 +308,8 @@ def _pm_meeting_items(user):
         for r in m.responses.all().order_by('created_at'):
             if r.responded_by == 'organizer':
                 responder_name = m.organizer.full_name
+            elif r.responder_id:
+                responder_name = r.responder.get_full_name() or r.responder.username
             else:
                 responder_name = m.invitee.get_full_name() or m.invitee.username if m.invitee else 'Invitee'
             responses.append({
@@ -810,7 +813,7 @@ def meeting_email_action(request, action, token):
             participant.save(update_fields=['status', 'responded_at'])
 
             MeetingResponse.objects.create(
-                meeting=meeting, responded_by='invitee', action=action, reason='',
+                meeting=meeting, responded_by='invitee', responder=participant.user, action=action, reason='',
             )
             meeting.update_overall_status()
     except ScheduleConflict as clash:

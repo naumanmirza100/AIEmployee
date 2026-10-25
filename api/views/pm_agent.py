@@ -4156,6 +4156,8 @@ def _serialize_meeting(meeting):
     for r in meeting.responses.all().order_by('created_at'):
         if r.responded_by == 'organizer':
             responder_name = meeting.organizer.full_name
+        elif r.responder_id:
+            responder_name = r.responder.get_full_name() or r.responder.username
         else:
             responder_name = meeting.invitee.get_full_name() or meeting.invitee.username if meeting.invitee else 'Invitee'
         responses.append({

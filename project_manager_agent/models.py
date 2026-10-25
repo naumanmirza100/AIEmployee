@@ -421,6 +421,10 @@ class MeetingResponse(models.Model):
         help_text='New proposed time (for counter-proposals)',
     )
     reason = models.TextField(blank=True, default='', help_text='Reason for rejection or counter-proposal')
+    responder = models.ForeignKey(
+        'auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+        help_text='The invitee who replied. Without it every reply showed the first invitee by name.',
+    )
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

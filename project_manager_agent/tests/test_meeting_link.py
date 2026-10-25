@@ -17,7 +17,7 @@ from project_manager_agent.models import MeetingParticipant, PMNotification, Sch
 from .base import PMTestCase
 
 
-class MeetingLinkTests(PMTestCase):
+class MeetingCase(PMTestCase):
 
     def setUp(self):
         super().setUp()
@@ -34,6 +34,9 @@ class MeetingLinkTests(PMTestCase):
 
     def confirmations(self):
         return Notification.objects.filter(type='meeting_confirmed')
+
+
+class MeetingLinkTests(MeetingCase):
 
     def test_the_link_comes_when_the_last_person_accepts_and_everyone_is_told(self):
         self.accept(self.dev)
@@ -100,3 +103,27 @@ class MeetingLinkTests(PMTestCase):
         ScheduledMeeting.objects.filter(pk=self.meeting.pk).update(proposed_time=timezone.now() + timedelta(minutes=5))
         tasks.send_meeting_reminders()
         self.assertFalse(Notification.objects.filter(type='meeting_reminder').exists())
+
+
+class WhoRepliedTests(MeetingCase):
+    """Every reply in a meeting's history showed the first invitee's name (PM demo rehearsal, 25 Oct 2026)."""
+
+    def test_each_reply_carries_its_person(self):
+        self.accept(self.dev)
+        self.accept(self.pm)
+        names = [r['responder_name'] for r in pm_agent._serialize_meeting(self.meeting)['responses']]
+        self.assertEqual(names, ['Dev Tester', 'Pat Tester'])
+        [item] = meeting_views._pm_meeting_items(self.pm)
+        self.assertEqual([r['responder_name'] for r in item['responses']], ['Dev Tester', 'Pat Tester'])
+
+    def test_past_replies_are_given_their_person_from_the_answer_times(self):
+        from importlib import import_module
+
+        from django.apps import apps
+        from project_manager_agent.models import MeetingResponse
+        self.accept(self.dev)
+        self.accept(self.pm)
+        MeetingResponse.objects.update(responder=None)     # as replies were kept before
+        import_module('project_manager_agent.migrations.0020_meeting_response_responder').name_past_replies(apps, None)
+        self.assertEqual(list(MeetingResponse.objects.order_by('id').values_list('responder_id', flat=True)),
+                         [self.dev.id, self.pm.id])
