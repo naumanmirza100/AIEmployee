@@ -314,6 +314,14 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
     context["user_assignments"] = _build_user_assignments(
         available_users, project_id=project_id, all_tasks=all_tasks, owner=None
     )
+    # "only the developers" typed with the file: the AI is offered only those people (pilot_roles). Read from the
+    # typed words: a document that mentions developers is not an instruction.
+    from project_manager_agent import pilot_roles
+    no_one = pilot_roles.nobody(available_users, user_prompt)
+    if no_one:
+        return {"answer": no_one, "action_results": [], "cannot_do": "",
+                "extracted_text_preview": extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text}
+    ai_people = pilot_roles.limit(available_users, user_prompt)
 
     chat_history = list(chat_history or [])
     agent = AgentRegistry.get_agent("project_pilot")
@@ -327,7 +335,7 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
     intent = pilot_intent.read(user_prompt, company_user=company_user, projects=all_projects.order_by('-created_at'),
                                fixed_project=project, history=chat_history,
                                today=timezone.localdate()) if user_prompt else None
-    result = agent.process(question=question, context=context, available_users=available_users,
+    result = agent.process(question=question, context=context, available_users=ai_people,
                            chat_history=chat_history, intent=intent)
     if result.get("cannot_do"):
         return {
@@ -473,11 +481,11 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
         "all developers", "all users", "assign the tasks to all",
     ]
     _wants_assign_to_all_file = any(p in _q_lower_file for p in _assign_to_all_phrases_file)
-    if _wants_assign_to_all_file and not _only_n_users_file and available_users:
+    if _wants_assign_to_all_file and not _only_n_users_file and ai_people:
         _create_tasks = [a for a in actions if isinstance(a, dict) and a.get("action") == "create_task"]
         _unassigned = [a for a in _create_tasks if not a.get("assignee_id")]
         if _unassigned:
-            _user_ids = [u["id"] for u in available_users]
+            _user_ids = [u["id"] for u in ai_people]
             for i, action_data in enumerate(_unassigned):
                 action_data["assignee_id"] = _user_ids[i % len(_user_ids)]
             logger.info(f"Backend fallback (from_file): assigned {len(_unassigned)} tasks round-robin to {len(_user_ids)} users")
@@ -488,6 +496,7 @@ def run_project_pilot_pipeline(*, company_user, extracted_text, file_name,
         for i, action_data in enumerate(_create_tasks_f):
             action_data["assignee_id"] = _allowed_ids_file[i % len(_allowed_ids_file)]
         logger.info(f"Backend enforcement (from_file): restricted to only {len(_allowed_ids_file)} users")
+    actions = pilot_roles.keep_to([a for a in actions if isinstance(a, dict)], user_prompt, available_users)
 
     # A deadline typed with the file wins over the document's dates and the model's own estimate
     # (gpt-4o-mini planned "10 days from now" to 7 December). Read from the typed words only.

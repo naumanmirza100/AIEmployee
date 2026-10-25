@@ -352,6 +352,9 @@ _NOT_NAMES = {
     'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november',
     'december', 'high', 'medium', 'low', 'done', 'review', 'blocked', 'the', 'this', 'that', 'it', 'is', 'me', 'us',
     'task', 'tasks', 'project', 'team', 'everyone', 'someone', 'nobody', 'isko', 'usko', 'inko', 'sab', 'sabko',
+    # "give them to All Developers", "Designers ko de do": a role, not a person (pilot_roles).
+    'all', 'only', 'just', 'sirf', 'developer', 'developers', 'devs', 'designer', 'designers', 'member', 'members',
+    'manager', 'managers', 'viewer', 'viewers', 'intern', 'interns', 'internee', 'internees',
 }
 _UNASSIGN = re.compile(r'\b(un-?assign\w*|nobody|no one|no-one|none|koi nahi|kisi ko nahi|hata\w*|remove \w+ from)\b',
                        re.I)
