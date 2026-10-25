@@ -509,11 +509,20 @@ def run_project_pilot_job(self, job_id):
         return {'status': 'ready', 'job_id': job_id}
 
     except Exception as exc:
-        logger.exception("run_project_pilot_job: job %s failed", job_id)
+        from core.api_key_service import KeyServiceError
+        blocked = isinstance(exc, KeyServiceError)
+        if blocked:
+            logger.info("run_project_pilot_job: job %s blocked (%s)", job_id, exc.reason)
+        else:
+            logger.exception("run_project_pilot_job: job %s failed", job_id)
         try:
             job.status = 'failed'
-            job.error_message = f"{type(exc).__name__}: {exc}"[:2000]
+            # A used-up allowance or a missing key is the company's to sort out, not a crash: the
+            # chat shows the reason (and a way to API Keys) instead of "QuotaExhausted: ".
+            job.error_message = (exc.user_message if blocked else f"{type(exc).__name__}: {exc}")[:2000]
             job.timing_ms = {**timing_ms, 'total_ms': int((time.time() - _t_overall) * 1000)}
+            if blocked:
+                job.timing_ms['_error_code'] = exc.reason
             job.completed_at = timezone.now()
             job.save(update_fields=['status', 'error_message', 'timing_ms',
                                     'completed_at', 'updated_at'])

@@ -18,7 +18,7 @@ from django.shortcuts import get_object_or_404
 
 from core.models import Project, Task, Subtask, TeamMember, UserProfile
 from project_manager_agent.ai_agents import AgentRegistry
-from project_manager_agent import drafts, pilot_review
+from project_manager_agent import drafts, pilot_deadlines, pilot_review
 from project_manager_agent.models import (
     PMKnowledgeQAChat,
     PMKnowledgeQAChatMessage,
@@ -545,6 +545,72 @@ def _build_user_assignments(available_users, *, project_id=None, all_tasks=None,
     return user_assignments
 
 
+# "yes it is confirmed", "ok go ahead" — the start of a reply agreeing to something.
+_CONFIRMED_IN_WORDS = re.compile(
+    r"^\s*(yes|yeah|yep|yup|ok(ay)?|sure|confirm(ed)?|go\s+ahead|do\s+it|proceed|please\s+do|correct)\b", re.I)
+
+
+def _with_request_confirmed(question, chat_history):
+    """When Pilot asked a question in words and the user answers "yes ...", the request they agreed to.
+
+    "Change the deadline of this project ..." used to get a plain-text "shall I?" back; "yes it is
+    confirmed" was then read on its own, matched nothing, and Pilot said it would make the change
+    without making it. The earlier request is put back in front of the reply so it is acted on (as a
+    review card). Changes are confirmed on the card; this only covers the times Pilot asks anyway."""
+    if not _CONFIRMED_IN_WORDS.match(question or '') or len(question) > 300:
+        return question
+    last_reply = next((m for m in reversed(chat_history) if (m or {}).get('role') == 'assistant'), None)
+    if not last_reply or '?' not in str(last_reply.get('content') or ''):
+        return question
+    earlier = [str(m.get('content') or '').strip() for m in chat_history
+               if (m or {}).get('role') == 'user' and str(m.get('content') or '').strip()]
+    if not earlier or _CONFIRMED_IN_WORDS.match(earlier[-1]):
+        return question
+    return f"{earlier[-1]}\n\n{question}"
+
+
+def _pilot_review_response(actions, answer, project, available_users, company_user, request):
+    """Show a Pilot proposal as a review card, or make it at once when the company auto-confirms.
+
+    Pilot used to apply its actions the moment they arrived, unless a new task was missing an
+    assignee or deadline — so updates, deletes and complete creates ran with nobody looking ("delete
+    all projects except Website"). Now any proposal that would change something comes back as a
+    review card: creates as an editable form (drafts), updates and deletes described against what is
+    stored now (pilot_review). Nothing is written here unless the company switched auto-confirm on;
+    `project_pilot_confirm` makes exactly what the user confirmed, through the service layer."""
+    # The project the tasks belong to: the one chosen in the picker, or the one they all name.
+    review_project = project
+    if review_project is None and drafts.only_project_id(actions):
+        review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
+    gaps = drafts.inspect(actions, available_users, today=timezone.localdate(), project=review_project)
+    actor = pm_services.DashboardActor(company_user, request)
+    if pilot_review.auto_confirms(company_user.company, actions):
+        # The company makes new work without the review card (Company profile → PM chat).
+        action_results, created_project_id = pilot_review.make_as_suggested(actions, gaps['rows'], actor)
+        return Response({"status": "success",
+                         "data": {"answer": pilot_review.summary(action_results),
+                                  "action_results": action_results,
+                                  "created_project_id": created_project_id,
+                                  "auto_confirmed": True}},
+                        status=status.HTTP_200_OK)
+    return Response(
+        {
+            "status": "needs_input",
+            "data": {
+                # Not the raw `answer`: that is usually the JSON the actions came from, and it
+                # rendered as a wall of code.
+                "answer": drafts.chat_text(actions, answer, gaps),
+                "actions": actions,
+                "project_id": project.id if project else None,
+                **gaps,
+                "changes": pilot_review.changes(actions, actor),
+                "review": True,
+            },
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -591,6 +657,7 @@ def project_pilot(request):
                         "status": t.status,
                         "priority": t.priority,
                         "description": t.description,
+                        "due_date": t.due_date.date().isoformat() if t.due_date else None,
                         "assignee_id": t.assignee.id if t.assignee else None,
                         "assignee_username": t.assignee.username if t.assignee else None,
                         "subtasks": [
@@ -638,6 +705,7 @@ def project_pilot(request):
                         "status": t.status,
                         "priority": t.priority,
                         "description": t.description,
+                        "due_date": t.due_date.date().isoformat() if t.due_date else None,
                         "project_name": t.project.name,
                     }
                     for t in all_tasks[:10]
@@ -650,6 +718,21 @@ def project_pilot(request):
         )
 
         chat_history = _get_chat_history(request)
+        question = _with_request_confirmed(question, chat_history)
+        today = timezone.localdate()
+
+        # "Change the deadline of this project to 10 days, and the tasks accordingly" is arithmetic:
+        # answered here, as a review card, without the AI (which asked in words and changed nothing).
+        moved = pilot_deadlines.deadline_change_request(
+            question, all_projects.order_by('-created_at'), selected=project,
+            history=chat_history, today=today)
+        if moved is not None:
+            actions, answer = moved
+            if actions is None:
+                return Response({"status": "success", "data": {"answer": answer, "action_results": []}},
+                                status=status.HTTP_200_OK)
+            return _pilot_review_response(actions, answer, project, available_users, company_user, request)
+
         agent = AgentRegistry.get_agent("project_pilot")
         # Route LLM call through the company key/quota resolver. Resolver will
         # raise QuotaExhausted (402) or NoKeyAvailable (403) on hard-block —
@@ -863,49 +946,15 @@ def project_pilot(request):
                 except AssigneeNotAllowed:
                     action_data["assignee_id"] = None
 
-        # ---- Review before anything changes ---------------------------------
-        # Pilot used to apply its actions the moment they arrived, unless a new
-        # task was missing an assignee or deadline — so updates, deletes and
-        # complete creates ran with nobody looking ("delete all projects except
-        # Website"). Now any proposal that would change something comes back as
-        # a review card: creates as an editable form (drafts), updates and
-        # deletes described against what is stored now (pilot_review). Nothing
-        # is written here; `project_pilot_confirm` makes exactly what the user
-        # confirmed, through the service layer.
+        # A deadline the user stated wins over the model's estimate: gpt-4o-mini planned "10 days from
+        # now" to 7 December (client test, 25 Oct 2026). The tasks are fitted inside it.
+        stated = pilot_deadlines.stated_deadline(question, today)
+        if stated and pilot_deadlines.fit_new_project(actions, stated, today):
+            logger.info("project_pilot: project deadline set to the stated %s", stated)
+
         if pilot_review.proposes_changes(actions):
-            # The project the tasks belong to: the one chosen in the picker, or the one they all name.
-            review_project = project
-            if review_project is None and drafts.only_project_id(actions):
-                review_project = projects_for_company_user(company_user).filter(pk=drafts.only_project_id(actions)).first()
-            gaps = drafts.inspect(actions, available_users,
-                                  today=timezone.localdate(), project=review_project)
-            actor = pm_services.DashboardActor(company_user, request)
-            if pilot_review.auto_confirms(company_user.company, actions):
-                # The company makes new work without the review card (Company profile → PM chat).
-                action_results, created_project_id = pilot_review.make_as_suggested(actions, gaps['rows'], actor)
-                return Response({"status": "success",
-                                 "data": {"answer": pilot_review.summary(action_results),
-                                          "action_results": action_results,
-                                          "created_project_id": created_project_id,
-                                          "auto_confirmed": True}},
-                                status=status.HTTP_200_OK)
-            changes = pilot_review.changes(actions, actor)
-            return Response(
-                {
-                    "status": "needs_input",
-                    "data": {
-                        # Not the raw `answer`: that is usually the JSON the
-                        # actions came from, and it rendered as a wall of code.
-                        "answer": drafts.chat_text(actions, result.get("answer"), gaps),
-                        "actions": actions,
-                        "project_id": project.id if project else None,
-                        **gaps,
-                        "changes": changes,
-                        "review": True,
-                    },
-                },
-                status=status.HTTP_200_OK,
-            )
+            return _pilot_review_response(actions, result.get("answer"), project, available_users,
+                                          company_user, request)
 
         # Nothing to change: the agent answered a question or declined.
         answer_text = (result.get("answer") or "").strip()
@@ -3098,6 +3147,8 @@ def project_pilot_job_status(request, job_id):
     # What the document proposes, as a review card — as `project_pilot`
     # returns with status 'needs_input'. Confirmed via `project_pilot_confirm`.
     draft = timing.pop('_draft', None)
+    # Set when the AI was refused (allowance used up, no key): the chat says so in amber, with API Keys.
+    error_code = timing.pop('_error_code', None)
     return Response({
         "status": "success",
         "data": {
@@ -3110,6 +3161,7 @@ def project_pilot_job_status(request, job_id):
             "confirmation_required": confirmation_required,
             "draft": draft,
             "error": job.error_message or "",
+            "error_code": error_code,
             "timing_ms": timing,
             "created_at": job.created_at.isoformat() if job.created_at else None,
             "completed_at": job.completed_at.isoformat() if job.completed_at else None,

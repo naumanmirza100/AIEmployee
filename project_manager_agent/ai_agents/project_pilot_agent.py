@@ -162,6 +162,11 @@ class ProjectPilotAgent(BaseAgent):
             # done", "set its priority to high".
             re.search(r"\bmark\b.+\bas\b", question_lower)
             or re.search(r"\bset\b.*\b(status|priority|deadline|due date)\b", question_lower)
+            # "change the deadline of this project", "extend the due dates of the tasks": the list
+            # wants the words side by side, so these got a text reply and nothing changed.
+            or re.search(r"\b(change|update|move|extend|shorten|push|postpone|reschedule|shift|adjust)\b"
+                         r"[^.?!\n]{0,60}\b(deadlines?|due dates?|end date|timeline|priorit(y|ies)|status)\b",
+                         question_lower)
         )
 
         # Detect bulk operations: "mark all tasks as done", "set all to high priority", etc.
@@ -268,7 +273,7 @@ class ProjectPilotAgent(BaseAgent):
                     context_str += f"\nTasks in Selected Project:\n"
                     for task in project['tasks']:
                         task_id = task.get('id', 'N/A')
-                        task_line = f"- ID: {task_id}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                        task_line = f"- ID: {task_id}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')}{', Due: ' + str(task['due_date'])[:10] if task.get('due_date') else ''})"
                         if task.get('assignee_username'):
                             task_line += f" [Assigned to: {task.get('assignee_username')}]"
                         else:
@@ -285,7 +290,7 @@ class ProjectPilotAgent(BaseAgent):
                 context_str += f"\nCurrent Tasks:\n"
                 for task in context['tasks'][:20]:
                     task_id = task.get('id', 'N/A')
-                    task_line = f"- ID: {task_id}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')})"
+                    task_line = f"- ID: {task_id}, Title: {task.get('title', '')} (Status: {task.get('status', '')}, Priority: {task.get('priority', 'N/A')}{', Due: ' + str(task['due_date'])[:10] if task.get('due_date') else ''})"
                     if task.get('assignee_username'):
                         task_line += f" [Assigned to: {task.get('assignee_username')}]"
                     if task.get('project_name'):
@@ -1092,6 +1097,7 @@ CRITICAL RULES:
 - Break down ALL features/modules/services mentioned into separate tasks
 - PROJECT TIMELINE (think before writing dates — do NOT just default to "today"):
   Today's date is {_today}. The user's request may or may not mention concrete dates.
+  (0) If the user's own instruction says when the project must be finished ("deadline 10 days from now", "within 2 weeks", "by 15 Nov"), the deadline is exactly that date, counted from today. It wins over any dates in an attached document and over your own estimate below, and every task's due_date must be on or before it.
   (1) If the user explicitly stated a start date (e.g. "starting Jan 15", "begin next Monday", "starts 2026-02-01"), use that as start_date. Otherwise use {_today} as start_date.
   (2) Estimate the project's total duration by reasoning about scope, complexity, number of features/modules, integration count, and team size. Small project = 2–6 weeks, medium = 2–4 months, large/complex = 4–9 months, enterprise = 9+ months.
   (3) Set deadline = start_date + estimated duration (this is the project's end / due date — there is no separate end_date field).
@@ -1335,7 +1341,7 @@ CRITICAL RULES:
 - NEVER include update_task actions - this is a NEW project creation
 - Create 10-20 tasks covering ALL features/modules/services mentioned
 - Break down each major component into separate tasks
-- PROJECT TIMELINE: If user mentions a start date use it, otherwise use {_today}. Set deadline = start_date + estimated total duration based on project complexity (small=2-6 weeks, medium=2-4 months, large=4-9 months, enterprise=9+ months). The deadline is the project's single end / due date — there is no separate end_date field.
+- PROJECT TIMELINE: If the user's own instruction says when the project must be finished ("deadline 10 days from now", "within 2 weeks", "by 15 Nov"), the deadline is exactly that date counted from today, and every task is due on or before it. Otherwise: if user mentions a start date use it, otherwise use {_today}. Set deadline = start_date + estimated total duration based on project complexity (small=2-6 weeks, medium=2-4 months, large=4-9 months, enterprise=9+ months). The deadline is the project's single end / due date — there is no separate end_date field.
 - TASK DUE DATES: Anchor every task to the project's start_date, not to today. (1) Estimate effort: small=3-7 days, medium=1-2 weeks, large=2-4 weeks. (2) Order tasks by dependency — foundational tasks first. (3) Compute due_date = start_date + cumulative offset. The final task's due_date must be ≤ the project's deadline. Justify in reasoning. Do not leave due_date empty.
 - PRIORITY: Set by importance AND urgency. High = critical for project to work + urgent; Medium = important but not blocking; Low = optional. Justify in reasoning.
 - For each task's "task_description" field, provide COMPREHENSIVE description (4-6 sentences).
@@ -1381,7 +1387,9 @@ This seems like a question or information request. The Project Pilot agent only 
 
 Please use the Knowledge Q&A agent for questions and information queries.
 
-Return a helpful text response (NOT JSON) explaining this."""
+Return a helpful text response (NOT JSON) explaining this.
+
+This reply cannot change anything. Never say you have made, or will make, a change, and never ask the user to confirm in words: changes are shown on a review card with a Confirm button. If the user seems to want a change, tell them to say exactly what to change, e.g. "change the deadline of <project name> to 15 Nov" or "set task <task title> to high priority"."""
         
         try:
             # Determine if this is a text-only response (not JSON)

@@ -3,11 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { companyApi } from '@/services/companyAuthService';
-import { Loader2, FileText, CheckSquare, AlertTriangle, Users, Lightbulb, ListPlus, History } from 'lucide-react';
+import { Loader2, FileText, CheckSquare, AlertTriangle, Users, Lightbulb, ListPlus, History, ClipboardList } from 'lucide-react';
+import ProjectRecordView from './ProjectRecordView';
 
 export default function MeetingNotesAgent() {
   const { toast } = useToast();
@@ -20,6 +22,8 @@ export default function MeetingNotesAgent() {
   const [savedNotes, setSavedNotes] = useState([]);
   const [ticked, setTicked] = useState(new Set());
   const [creatingTasks, setCreatingTasks] = useState(false);
+  // Analyze notes (paste a meeting's notes) or Project record (what was decided and done on the project).
+  const [tab, setTab] = useState('analyze');
 
   const loadSaved = (projectId) => {
     if (!projectId) { setSavedNotes([]); return; }
@@ -92,6 +96,32 @@ export default function MeetingNotesAgent() {
   };
 
   return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="bg-white/[0.04]">
+            <TabsTrigger value="analyze" data-testid="tab-analyze" className="text-xs sm:text-sm">
+              <FileText className="w-4 h-4 mr-1.5" /> Analyze notes
+            </TabsTrigger>
+            <TabsTrigger value="record" data-testid="tab-record" className="text-xs sm:text-sm">
+              <ClipboardList className="w-4 h-4 mr-1.5" /> Project record
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <Select value={selectedProject || 'none'} onValueChange={(v) => setSelectedProject(v === 'none' ? null : v)}>
+          <SelectTrigger className="h-10 sm:w-80 bg-white/[0.02] border-white/[0.08] text-white text-left [&>span]:line-clamp-1" data-testid="meeting-notes-project">
+            <SelectValue placeholder={tab === 'record' ? 'Choose a project' : 'Link to Project (optional)'} />
+          </SelectTrigger>
+          <SelectContent className="bg-white/[0.02] border-white/[0.08] z-50">
+            <SelectItem value="none">{tab === 'record' ? 'Choose a project' : 'No Project'}</SelectItem>
+            {projects.map((p) => (
+              <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {tab === 'record' ? <ProjectRecordView projectId={selectedProject} /> : (
     <div className="space-y-6">
       {/* Controls */}
       <Card className="bg-black/30 border-white/[0.06]">
@@ -101,17 +131,6 @@ export default function MeetingNotesAgent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Select value={selectedProject || 'none'} onValueChange={(v) => setSelectedProject(v === 'none' ? null : v)}>
-            <SelectTrigger className="h-10 bg-white/[0.02] border-white/[0.08] text-white">
-              <SelectValue placeholder="Link to Project (optional)" />
-            </SelectTrigger>
-            <SelectContent className="bg-white/[0.02] border-white/[0.08] z-50">
-              <SelectItem value="none">No Project</SelectItem>
-              {projects.map((p) => (
-                <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Textarea
             value={meetingText}
             onChange={(e) => setMeetingText(e.target.value)}
@@ -312,6 +331,8 @@ export default function MeetingNotesAgent() {
             </Card>
           )}
         </div>
+      )}
+    </div>
       )}
     </div>
   );

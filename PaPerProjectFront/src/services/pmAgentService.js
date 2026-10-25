@@ -431,6 +431,10 @@ export const tasksFromSuggestions = async (projectId, items) =>
 export const getSavedMeetingNotes = async (projectId, id = null) =>
   companyApi.get(`/project-manager/projects/${projectId}/meeting-notes${id ? `?id=${id}` : ''}`);
 
+/** The project's record: decisions, work handed out, due and late, risks — Meeting Notes → Project record. */
+export const getProjectRecord = async (projectId) =>
+  companyApi.get(`/project-manager/projects/${projectId}/record`);
+
 /** The project's latest schedule plan, or null. */
 export const getSavedSchedulePlan = async (projectId) =>
   companyApi.get(`/project-manager/projects/${projectId}/schedule-plan`);
@@ -737,6 +741,7 @@ export default {
   tickChecklistItem,
   tasksFromSuggestions,
   getSavedMeetingNotes,
+  getProjectRecord,
   getSavedSchedulePlan,
   downloadSchedulePlanIcs,
   scanNotifications,

@@ -21,6 +21,10 @@ from core.models import Subtask, Task
 
 from . import parsing
 from .errors import ServiceError
+from .history import moved, snapshot
+
+#: Kept from and to in the audit entry of an edit, for the project record.
+TASK_TRACKED = ('status', 'assignee', 'due_date', 'priority')
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +173,7 @@ def create_task(actor, data):
 def update_task(actor, task_id, data):
     """Apply the fields present in `data`. Returns (task, changed_field_names)."""
     task = actor.task_for_edit(task_id)
+    before = snapshot(task, TASK_TRACKED)
     changed = []
 
     if 'title' in data:
@@ -220,7 +225,8 @@ def update_task(actor, task_id, data):
         if new_deps is not None:
             task.depends_on.set(new_deps)
             changed.append('depends_on')
-    actor.audit('task_updated', 'Task', task.id, task.title, {'fields': changed})
+    actor.audit('task_updated', 'Task', task.id, task.title,
+                {'fields': changed, 'project_id': task.project_id, **moved(before, task, TASK_TRACKED)})
     return task, changed
 
 

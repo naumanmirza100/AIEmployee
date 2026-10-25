@@ -61,7 +61,7 @@ class WidgetWithoutAITests(FrontlineTestCase):
         for question in ('How do I reset my password?', 'Where is my invoice?', 'Is there a mobile app?'):
             self.ask(question)
         [alert] = self.alerts()
-        self.assertIn('Free platform tokens for this agent are exhausted', alert.message)
+        self.assertIn('used all of its free AI allowance', alert.message)
         self.assertEqual(alert.data.get('link'), '/company/settings/api-keys')
         self.assertEqual(self.alerts(self.member), [])                  # admins and the Frontline role only
 

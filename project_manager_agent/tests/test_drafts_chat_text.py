@@ -24,11 +24,11 @@ class ChatTextTests(SimpleTestCase):
             with self.subTest(raw=raw):
                 text = drafts.chat_text(self.actions, raw)
                 self.assertNotIn('{', text)
-                self.assertIn('1 project and 2 tasks', text)
+                self.assertIn('project "Rebuild" and 2 tasks', text)   # named, for a later "this project"
 
     def test_prose_with_embedded_actions_is_replaced_too(self):
         text = drafts.chat_text(self.actions, 'Sure! Here: {"action": "create_task"}')
-        self.assertIn('1 project and 2 tasks', text)
+        self.assertIn('project "Rebuild" and 2 tasks', text)   # named, for a later "this project"
 
     def test_a_real_sentence_is_kept(self):
         self.assertEqual(drafts.chat_text(self.actions, 'I split this into three tasks.'),

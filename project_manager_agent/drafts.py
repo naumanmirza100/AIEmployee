@@ -420,9 +420,14 @@ def chat_text(actions, answer=None, gaps=None):
     def plural(n, noun):
         return '%d %s%s' % (n, noun, '' if n == 1 else 's')
 
+    # A new project is named: a later "change the deadline of this project" in the same chat finds it
+    # by that name (the chat history carries only this text, not the card).
+    new_projects = [a for a in actions or [] if isinstance(a, dict) and a.get('action') == 'create_project']
     phrases = []
     for verb, words in (('create', 'create'), ('update', 'change'), ('delete', 'delete')):
-        nouns = [plural(counts[f'{verb}_{noun}'], noun) for noun in ('project', 'task')
+        nouns = [f'project "{describe(new_projects[0])}"'
+                 if (verb, noun) == ('create', 'project') and len(new_projects) == 1
+                 else plural(counts[f'{verb}_{noun}'], noun) for noun in ('project', 'task')
                  if counts.get(f'{verb}_{noun}')]
         if nouns:
             phrases.append('%s %s' % (words, ' and '.join(nouns)))

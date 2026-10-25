@@ -301,6 +301,7 @@ urlpatterns = [
     re_path(r'^project-manager/tool-results/(?P<result_id>\d+)/items/(?P<index>\d+)/done/?$', pm_tool_results.tick_checklist_item, name='pm_tick_checklist_item'),  # POST
     re_path(r'^project-manager/projects/(?P<project_id>\d+)/tasks/from-suggestions/?$', pm_tool_results.tasks_from_suggestions, name='pm_tasks_from_suggestions'),  # POST
     re_path(r'^project-manager/projects/(?P<project_id>\d+)/meeting-notes/?$', pm_tool_results.saved_meeting_notes, name='pm_saved_meeting_notes'),  # GET
+    re_path(r'^project-manager/projects/(?P<project_id>\d+)/record/?$', pm_tool_results.project_record, name='pm_project_record'),  # GET
     re_path(r'^project-manager/projects/(?P<project_id>\d+)/schedule-plan/?$', pm_tool_results.saved_schedule_plan, name='pm_saved_schedule_plan'),  # GET
     re_path(r'^project-manager/projects/(?P<project_id>\d+)/schedule-plan/ics/?$', pm_tool_results.schedule_plan_ics, name='pm_schedule_plan_ics'),  # GET
     re_path(r'^project-manager/ai/calendar-schedule/?$', pm_agent.calendar_schedule, name='pm_calendar_schedule'),

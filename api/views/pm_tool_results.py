@@ -16,6 +16,7 @@ from api.permissions import IsCompanyUserOnly
 from api.views.pm_agent import PMCRUDThrottle
 from core.tenancy import projects_for_company_user
 from project_manager_agent import services as pm_services
+from project_manager_agent import project_record as record
 from project_manager_agent import tool_results
 from project_manager_agent.models import ProjectToolResult
 
@@ -150,3 +151,16 @@ def schedule_plan_ics(request, project_id):
     response = HttpResponse(generate_plan_ics(project, assignments), content_type='text/calendar; charset=utf-8')
     response['Content-Disposition'] = f'attachment; filename="plan-{project.id}.ics"'
     return response
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMCRUDThrottle])
+def project_record(request, project_id):
+    """What was decided and done on the project, in date order, with what is due, late and at risk:
+    Meeting Notes → Project record. Built from stored entries; no AI call."""
+    project = _project(request, project_id)
+    if project is None:
+        return Response(NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
+    return Response({'status': 'success', 'data': record.build(project)})
