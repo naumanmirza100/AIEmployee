@@ -20,7 +20,10 @@ class DocumentTimeTests(MarketingTestCase):
         agent = DocumentAuthoringAgent()
         with mock.patch.object(DocumentAuthoringAgent, '_call_llm_for_writing', side_effect=side_effect) as llm, \
                 mock.patch.object(DocumentAuthoringAgent, '_is_document_structure_valid', return_value=False), \
-                mock.patch('marketing_agent.agents.document_authoring_agent.time.monotonic', side_effect=clock):
+                mock.patch('marketing_agent.agents.document_authoring_agent.time') as module_time:
+            # Only this module's clock: patching time.monotonic itself let any other caller in the run
+            # use up the two ticks, and the brief then failed with StopIteration.
+            module_time.monotonic.side_effect = clock
             result = agent.process('create', self.ann.id, 'brief', {'title': 'Brief'}, campaign_id=spring.id)
         return result, llm
 
