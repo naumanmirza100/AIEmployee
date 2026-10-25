@@ -277,6 +277,7 @@ urlpatterns = [
     re_path(r'^project-manager/ai/project-pilot/chats/create/?$', pm_agent.create_project_pilot_chat, name='pm_project_pilot_chats_create'),
     re_path(r'^project-manager/ai/project-pilot/chats/(?P<chat_id>\d+)/update/?$', pm_agent.update_project_pilot_chat, name='pm_project_pilot_chats_update'),
     re_path(r'^project-manager/ai/project-pilot/chats/(?P<chat_id>\d+)/delete/?$', pm_agent.delete_project_pilot_chat, name='pm_project_pilot_chats_delete'),
+    re_path(r'^project-manager/ai/project-pilot/chats/(?P<chat_id>\d+)/messages/(?P<message_id>\d+)/cancel/?$', pm_agent.project_pilot_cancel_card, name='pm_project_pilot_cancel_card'),  # POST
     
     # Manual Project and Task Creation endpoints (Company User)
     re_path(r'^project-manager/projects/create/?$', pm_agent.create_project_manual, name='pm_create_project_manual'),

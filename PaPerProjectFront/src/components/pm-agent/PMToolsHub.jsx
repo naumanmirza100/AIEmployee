@@ -39,7 +39,7 @@ const TOOLS = [
   },
   {
     key: 'meeting-notes',
-    title: 'Meeting Notes',
+    title: 'Meeting Notetaker',
     desc: 'Paste meeting notes to extract action items, decisions, and summaries',
     icon: FileText,
     color: '#a3e635',
@@ -69,7 +69,7 @@ const TOOLS = [
   },
   {
     key: 'workflow',
-    title: 'Workflow & SOP',
+    title: 'Workflow / SOP Runner',
     desc: 'Get workflow suggestions, checklists, and best practices for each phase',
     icon: Workflow,
     color: '#2dd4bf',
@@ -79,7 +79,7 @@ const TOOLS = [
   },
   {
     key: 'calendar-schedule',
-    title: 'Calendar & Schedule',
+    title: 'Calendar Auto-planner',
     desc: 'AI-optimized day-by-day schedule planner with conflict detection',
     icon: CalendarDays,
     color: '#fbbf24',

@@ -37,6 +37,9 @@ _CUE_BEFORE = re.compile(
     r'wrap(ped)?\s+up|timeline|duration|end)\b', re.I)
 _CUE_AFTER = re.compile(r'^\s*(from\s+(now|today)|deadline|timeline|at\s+(the\s+)?max(imum)?|at\s+most|max(imum)?\b)', re.I)
 _IN_BEFORE = re.compile(r'\b(in|within)\s*$', re.I)
+_RELATIVE = re.compile(r'\b(more|extra|additional|longer|shorter|less|fewer|earlier|later|before|after)\b', re.I)
+# "change the deadline from 10 days to 20 days": the first is the date being replaced.
+_FROM_BEFORE = re.compile(r'\bfrom\s+(the\s+|next\s+|current\s+|old\s+)?$', re.I)
 
 _MONTH = r'(' + '|'.join(sorted(MONTHS, key=len, reverse=True)) + r')\.?'
 _DATES = [
@@ -72,31 +75,36 @@ def _add_workdays(d, n):
     return d
 
 
-def _span_deadlines(text, today):
+def _span_deadlines(text, today, loose=False):
     found = []
     for match in _SPAN.finditer(text):
         before = text[max(0, match.start() - 45):match.start()]
+        old = bool(_FROM_BEFORE.search(before))
         after = text[match.end():match.end() + 25]
-        if not (_CUE_BEFORE.search(before) or _CUE_AFTER.search(after) or _IN_BEFORE.search(before)):
+        if loose:
+            # "3 more days" changes a date by that much; that is the model's to work out.
+            if _RELATIVE.search(text[max(0, match.start() - 12):match.end() + 12]):
+                continue
+        elif not (_CUE_BEFORE.search(before) or _CUE_AFTER.search(after) or _IN_BEFORE.search(before)):
             continue
         n = _count(match.group(1))
         if not n:
             continue
         unit = match.group(3).lower()
         if unit == 'month':
-            found.append(_add_months(today, n))
+            found.append((_add_months(today, n), old))
         elif unit == 'week':
-            found.append(today + timedelta(weeks=n))
+            found.append((today + timedelta(weeks=n), old))
         else:
-            found.append(_add_workdays(today, n) if match.group(2) else today + timedelta(days=n))
+            found.append((_add_workdays(today, n) if match.group(2) else today + timedelta(days=n), old))
     return found
 
 
-def _date_deadlines(text, today):
+def _date_deadlines(text, today, loose=False):
     found = []
     for pattern, order in _DATES:
         for match in pattern.finditer(text):
-            if not _DATE_CUE.search(text[max(0, match.start() - 40):match.start()]):
+            if not loose and not _DATE_CUE.search(text[max(0, match.start() - 40):match.start()]):
                 continue
             parts = dict(zip(order, match.groups()))
             try:
@@ -107,22 +115,28 @@ def _date_deadlines(text, today):
                 continue
             if not parts.get('y') and when < today:
                 when = date(year + 1, month, when.day)
-            found.append(when)
+            found.append((when, bool(_FROM_BEFORE.search(text[max(0, match.start() - 20):match.start()]))))
     return found
 
 
-def stated_deadline(text, today=None):
+def stated_deadline(text, today=None, loose=False):
     """The deadline the user asked for, as a date, or None.
 
     Reads "10 days from now", "in 2 weeks", "within 10 working days",
     "deadline of one month", "by 15 Nov", "deadline 2026-11-04". Counted from
     today: 25 Oct + 10 days is 4 Nov. With several ("first demo in 2 weeks,
-    launch in 3 months") the project ends at the latest. Pass only the user's
-    own words, never an attached document, whose dates are its own business."""
+    launch in 3 months") the project ends at the latest; one said after "from"
+    is the date being replaced ("from 10 days to 20 days"). Pass only the
+    user's own words, never an attached document, whose dates are its own.
+
+    `loose`: the reason a dated proposal was rejected with, where a bare "make it
+    15 days" or "30 Nov instead" can only mean the deadline."""
     if not text:
         return None
     today = today or date.today()
-    return max(_date_deadlines(text, today) + _span_deadlines(text, today), default=None)
+    found = _date_deadlines(text, today, loose) + _span_deadlines(text, today, loose)
+    wanted = [d for d, old in found if not old] or [d for d, _ in found]
+    return max(wanted, default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -139,12 +153,13 @@ def _rescale(d, anchor, old_end, new_end):
     return _on_workday_between(moved, anchor, new_end)
 
 
-def fit_new_project(actions, deadline, today=None):
+def fit_new_project(actions, deadline, today=None, stretch=False):
     """Give the proposed new project the stated `deadline` and fit its tasks inside it.
 
     Task dates the agent planned past the deadline are squeezed in proportion,
-    so their order and spacing survive. Returns True when a project was there
-    to fit. Changes `actions` in place."""
+    so their order and spacing survive. With `stretch` (a proposal revised to a
+    new deadline) they are also spread out when the deadline moves later.
+    Returns True when a project was there to fit. Changes `actions` in place."""
     today = today or date.today()
     project = next((a for a in actions or [] if isinstance(a, dict) and a.get('action') == 'create_project'), None)
     if project is None or deadline is None:
@@ -161,7 +176,7 @@ def fit_new_project(actions, deadline, today=None):
     project['deadline'] = deadline.isoformat()
     project.pop('end_date', None)
     project.pop('deadline_days', None)
-    if planned_end and planned_end > deadline:
+    if planned_end and (planned_end > deadline or (stretch and planned_end != deadline)):
         for task in tasks:
             due = _to_date(task.get('due_date'))
             if due:
@@ -177,11 +192,15 @@ _MOVE = re.compile(
     r'\b(change|changing|update|move|set|make|extend|shorten|reduce|bring|push|postpone|pull|cut|adjust|'
     r'reschedule|shift|keep)\b[^.?!\n]{0,60}\b(deadline|due\s+date|end\s+date|finish\s+date|timeline)', re.I)
 _TASKS_TOO = re.compile(r'\b(tasks?|accordingly|everything|all\s+(the\s+)?dates|their\s+(dates|deadlines))\b', re.I)
-_THIS_PROJECT = re.compile(r'\b(this|the|that|my|our|same)\s+project\b|\bproject\'?s\b|\bits\s+deadline\b', re.I)
 _GENERIC_NAME_WORDS = {'project', 'the', 'and', 'for', 'new', 'app', 'system', 'platform', 'website', 'web',
                        'online', 'digital', 'mobile', 'portal', 'management', 'development', 'brief', 'pdf',
                        'docx', 'txt', 'attached', 'uploaded', 'file'}
 _MAKES_NEW = re.compile(r'\b(create|new\s+project|build\s+a|make\s+a\s+project|from\s+(the\s+)?(pdf|file|document|brief))\b', re.I)
+
+
+#: Pilot's question when it can't tell which project; the chat offers the projects as buttons, and a typed
+#: answer to it is joined to the request it asks about (api.views.pm_agent._with_request_confirmed).
+WHICH_PROJECT = "Which project's deadline should I move? Pick one below, or choose it in the project box above the chat."
 
 
 def asks_to_move_deadline(text):
@@ -200,8 +219,7 @@ def project_meant(text, projects, selected=None, history=None):
         return named[0]
     if named:
         return max(named, key=lambda p: len(p.name))
-    if not _THIS_PROJECT.search(text):
-        return None
+    # "this project", "the project", or none named at all: the one this chat is about.
     for message in reversed(list(history or [])):
         content = str((message or {}).get('content') or '').lower()
         hits = [p for p in projects if p.name and p.name.strip().lower() in content]
@@ -265,15 +283,15 @@ def deadline_change_request(text, projects, *, selected=None, history=None, toda
     # Read only now: every typed request passes through here, and few are about a deadline.
     project = project_meant(text, list(projects), selected=selected, history=history)
     if project is None:
-        return None, ("Which project's deadline should I move? Pick it in the project box above the chat, "
-                      "or name it in your message.")
+        return None, WHICH_PROJECT
     from core.models import Task
     tasks = list(Task.objects.filter(project=project).only('id', 'title', 'status', 'due_date'))
     actions = move_deadline(project, tasks, deadline, today=today, move_tasks=bool(_TASKS_TOO.search(text)))
     moved = len(actions) - 1
     when = deadline.strftime('%d %b %Y').lstrip('0')
-    answer = f'Here\'s the change: "{project.name}" finishes on {when}'
-    answer += (f', and {moved} task{"" if moved == 1 else "s"} move{"s" if moved == 1 else ""} to fit. '
-               if moved else '. ')
-    answer += 'Check it below — nothing changes until you confirm.'
+    # Markdown, as the chat shows it: the project and the date stand out.
+    answer = f'Here\'s the change: **{project.name}** finishes on **{when}**'
+    answer += (f', and **{moved} task{"" if moved == 1 else "s"}** move{"s" if moved == 1 else ""} to fit.'
+               if moved else '.')
+    answer += '\n\nCheck it below — nothing changes until you confirm.'
     return actions, answer

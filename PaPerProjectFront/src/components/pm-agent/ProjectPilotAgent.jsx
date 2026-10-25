@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import PilotGapForm from './PilotGapForm';
+import PilotQuickReplies from './PilotQuickReplies';
+import ChatMarkdown from '@/components/shared/ChatMarkdown';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -10,11 +12,15 @@ import { useToast } from '@/components/ui/use-toast';
 import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage, toastForError } from '@/utils/apiErrorMessage';
 import { useBackgroundUpload } from '@/components/shared/BackgroundUploadManager';
-import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle, ChevronsLeft, ChevronsRight, Bot } from 'lucide-react';
+import { Loader2, Send, Sparkles, Plus, MessageCircle, Trash2, Upload, FileText, X, CheckCircle2, XCircle, ChevronsLeft, ChevronsRight, Bot, Lock } from 'lucide-react';
 import InfoHint from '../frontline/InfoHint';
 import { PM_HINTS } from './pmTutorialSteps';
 import { trackPMRecentlyViewed } from './pmLocalStore';
 import { isRealError } from '@/utils/messageSeverity';
+
+// A reply asking for a yes or no ("Shall I update the deadline?") gets Confirm and Reject buttons; a reply
+// asking for details does not.
+const ASKS_TO_CONFIRM = /\b(shall i|should i|do you want|would you like|want me to|can i go ahead|is (that|this) (ok|okay|right|correct|fine)|please confirm|confirm)\b[^?]{0,200}\?/i;
 
 const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   const { toast } = useToast();
@@ -89,6 +95,12 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
 
   const selectedChat = chats.find((c) => c.id === selectedChatId);
   const currentMessages = selectedChat?.messages ?? [];
+  // Once a conversation has started its project is fixed (the server keeps it): the one picked at the start,
+  // or the one it settled on later. Before that, the project box decides.
+  const chatLocked = !!selectedChat && currentMessages.length > 0;
+  const activeProjectId = chatLocked
+    ? (selectedChat.projectId || null)
+    : (selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null);
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
   const getProjectTitle = (projectId) => {
@@ -111,7 +123,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
           setChats((prev) => [updatedChat, ...prev.filter((c) => c.id !== selectedChatId)]);
         } else throw new Error(updRes.message || 'Failed to save chat');
       } else {
-        const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+        const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg], project_id: activeProjectId });
         if (createRes.status === 'success' && createRes.data) {
           const newChatData = normalizeChat(createRes.data);
           setChats((prev) => [newChatData, ...prev]);
@@ -119,7 +131,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
         } else throw new Error(createRes.message || 'Failed to create chat');
       }
     } else {
-      const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+      const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg], project_id: activeProjectId });
       if (createRes.status === 'success' && createRes.data) {
         const newChatData = normalizeChat(createRes.data);
         setChats((prev) => [newChatData, ...prev]);
@@ -138,23 +150,44 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
   // through the normal chat path; the LLM sees the previous confirmation
   // card (which lists the proposed tasks) in chat history and regenerates
   // actions accordingly.
-  // Apply a proposal the user filled in and confirmed. Tracks which message's
-  // card is in flight / finished so the chat can disable just that one rather
-  // than the whole conversation.
-  const [confirmingIndex, setConfirmingIndex] = useState(null);
-  const [confirmedIndexes, setConfirmedIndexes] = useState(() => new Set());
-  const [cancelledIndexes, setCancelledIndexes] = useState(() => new Set());
+  // Apply a proposal the user filled in and confirmed. The outcome is kept on
+  // the chat message by the server (`responseData.resolved`), so a confirmed or
+  // cancelled card stays that way after a reload; it used to live only in this
+  // page, keyed by the message's position, and came back with its Confirm
+  // button (and the next chat's card at that position looked done).
+  const [confirmingKey, setConfirmingKey] = useState(null);
+  const cardKey = (msg, i) => `${selectedChatId}:${msg.id ?? i}`;
 
-  const confirmPilotDraft = async (messageIndex, draft, answers, skip = []) => {
+  const markResolved = (chatId, messageId, resolved) => {
+    if (!chatId || !messageId || !resolved) return;
+    setChats((prev) => prev.map((c) => (c.id !== chatId ? c : {
+      ...c,
+      messages: c.messages.map((m) => (m.id !== messageId ? m : {
+        ...m, responseData: { ...(m.responseData || {}), resolved },
+      })),
+    })));
+  };
+
+  const confirmPilotDraft = async (msg, i, answers, skip = []) => {
+    const draft = msg.responseData || {};
+    const chatId = selectedChatId;
     try {
-      setConfirmingIndex(messageIndex);
-      const response = await pmAgentService.projectPilotConfirm(draft.actions || [], answers, skip);
+      setConfirmingKey(cardKey(msg, i));
+      const response = await pmAgentService.projectPilotConfirm(draft.actions || [], answers, skip,
+        { chatId, messageId: msg.id });
       if (response.status !== 'success') {
         throw new Error(response.message || 'Failed to create');
       }
       const results = response.data?.action_results || [];
       const failed = results.filter((r) => !r.success);
-      setConfirmedIndexes((prev) => new Set(prev).add(messageIndex));
+      markResolved(chatId, msg.id, response.data?.resolved
+        || (results.some((r) => r.success) ? { status: 'confirmed', answer: response.data?.answer } : null));
+      // The conversation made a project: it is about that project from now on (the server fixed it).
+      const made = response.data?.chat_project;
+      if (made) {
+        setChats((prev) => prev.map((c) => (c.id !== chatId ? c
+          : { ...c, projectId: String(made.id), projectName: made.name })));
+      }
       toast({
         title: failed.length ? 'Done, with problems' : 'Done',
         description: response.data?.answer || 'Done.',
@@ -162,30 +195,61 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       });
       if (results.some((r) => r.success) && onProjectUpdate) onProjectUpdate();
     } catch (error) {
+      if (error?.data?.code === 'already_resolved') {
+        markResolved(chatId, msg.id, error.data.resolved);
+        toast({ title: 'Already done', description: error.data.message });
+        return;
+      }
       toast({
         title: 'Error',
         description: apiErrorMessage(error, 'Failed to create'),
         variant: 'destructive',
       });
     } finally {
-      setConfirmingIndex(null);
+      setConfirmingKey(null);
     }
   };
 
-  const submitPilotChat = async (followUpText, extraContent = '') => {
+  // Reject a card, with a reason or without. With `revise`, Pilot proposes it again with that change.
+  const rejectPilotDraft = async (msg, reason = '', revise = false) => {
+    const chatId = selectedChatId;
+    const fallback = reason ? { status: 'rejected', reason } : { status: 'cancelled' };
+    try {
+      const res = await pmAgentService.cancelProjectPilotCard(chatId, msg.id, reason);
+      markResolved(chatId, msg.id, res?.data?.resolved || fallback);
+    } catch {
+      markResolved(chatId, msg.id, fallback);
+    }
+    if (revise && reason) {
+      await submitPilotChat(reason, '', { reviseOf: msg.id, shown: `Revise: ${reason}` });
+    } else {
+      toast({ title: 'Rejected', description: 'Nothing was created or changed.' });
+    }
+  };
+
+  // A question Pilot asked in words, answered with a button: yes goes back with the request it asked about
+  // (the server joins them); no carries the reason, if one was given.
+  const answerPilotQuestion = (yes, reason = '') => submitPilotChat(
+    yes ? 'Yes, go ahead.' : `No.${reason ? ` ${reason}` : ''}`);
+
+  // `opts`: projectId — a project chosen on a "Which project?" button; reviseOf — the card rejected with
+  // this reason, for Pilot to propose again; shown — what the chat shows as the user's message.
+  const submitPilotChat = async (followUpText, extraContent = '', opts = {}) => {
     if (!followUpText || !followUpText.trim()) return;
     const q = followUpText.trim();
-    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectId = opts.projectId
+      || activeProjectId;
     const projectTitle = getProjectTitle(projectId);
     try {
       setLoading(true);
-      const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      const response = await pmAgentService.projectPilot(q, projectId, currentMessages,
+        { chat_id: selectedChatId || undefined, ...(opts.reviseOf ? { revise_of: opts.reviseOf } : {}) });
       // The proposal is missing details we ask about. Show it as a form
       // instead of applying it; PilotGapForm posts it back once confirmed.
       if (response.status === 'needs_input') {
         const data = response.data || {};
         await addMessagePairToChat(
-          { role: 'user', content: q },
+          { role: 'user', content: opts.shown || q },
           {
             role: 'assistant',
             content: data.answer || 'I need a few more details before I create this.',
@@ -202,7 +266,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
         const cannotDo = data.cannot_do || response.cannot_do;
         const userMsg = {
           role: 'user',
-          content: extraContent ? `${q}\n\n${extraContent}` : q,
+          content: opts.shown || (extraContent ? `${q}\n\n${extraContent}` : q),
           responseData: projectTitle ? { project_id: projectId, project_title: projectTitle } : undefined,
         };
         const assistantMsg = {
@@ -216,6 +280,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             cannot_do: cannotDo,
             project_id: projectId,
             project_title: projectTitle,
+            // "Which project?": the projects to pick from, and the request to send again with one.
+            choices: data.choices || undefined,
+            retry: data.retry || undefined,
           },
         };
         await addMessagePairToChat(userMsg, assistantMsg, q);
@@ -275,12 +342,13 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       return;
     }
     const q = question.trim();
-    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectId = activeProjectId;
     const projectTitle = getProjectTitle(projectId);
 
     try {
       setLoading(true);
-      const response = await pmAgentService.projectPilot(q, projectId, currentMessages);
+      const response = await pmAgentService.projectPilot(q, projectId, currentMessages,
+        { chat_id: selectedChatId || undefined });
       // The proposal is missing details we ask about. Show it as a form
       // instead of applying it; PilotGapForm posts it back once confirmed.
       if (response.status === 'needs_input') {
@@ -317,6 +385,8 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             cannot_do: cannotDo,
             project_id: projectId,
             project_title: projectTitle,
+            choices: data.choices || undefined,
+            retry: data.retry || undefined,
           },
         };
         await addMessagePairToChat(userMsg, assistantMsg, q);
@@ -375,7 +445,9 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       }
     }
     // Fall through: create a new chat (chat was deleted, or snapshot was null).
-    const createRes = await pmAgentService.createProjectPilotChat({ title, messages: [userMsg, assistantMsg] });
+    const createRes = await pmAgentService.createProjectPilotChat({
+      title, messages: [userMsg, assistantMsg], project_id: userMsg.responseData?.project_id || null,
+    });
     if (createRes.status === 'success' && createRes.data) {
       const newChatData = normalizeChat(createRes.data);
       setChats((prev) => [newChatData, ...prev]);
@@ -399,7 +471,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
     // Snapshot every input at enqueue time — user may change any of these
     // while the background job is running.
     const file = selectedFile;
-    const projectId = selectedProjectId && selectedProjectId !== 'all' ? selectedProjectId : null;
+    const projectId = activeProjectId;
     const projectTitle = getProjectTitle(projectId);
     const userPrompt = (question || '').trim();
     const historySnapshot = currentMessages;
@@ -414,7 +486,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
       title: file.name,
       agent: 'project-pilot',
       upload: (onProgress) => pmAgentService.projectPilotFromFile(
-        file, projectId, historySnapshot, userPrompt || null, { onProgress },
+        file, projectId, historySnapshot, userPrompt || null, { onProgress, chatId: chatIdSnapshot },
       ),
       // Tier 2: the endpoint returns 202 with a job_id and the Celery
       // worker runs the pipeline. The manager polls this endpoint until
@@ -865,14 +937,29 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                         const a = msg.responseData.answer;
                         const looksLikeJson = typeof a === 'string' && (a.trim().startsWith('{') || a.trim().startsWith('['));
                         if (looksLikeJson) return null;
-                        return <p className="text-sm whitespace-pre-wrap">{a}</p>;
+                        // Markdown: replies come as a sentence and a few bullets, not one paragraph.
+                        return <ChatMarkdown className="text-sm">{a}</ChatMarkdown>;
                       })()}
                       {/* Fallback to the raw message text — but never for a draft awaiting
                           details: its content can be the agent's JSON, and the gap form
                           below already explains itself. Also covers drafts saved in chat
                           history before the backend started sending a readable sentence. */}
                       {!msg.responseData?.needs_input && !(msg.responseData?.answer && typeof msg.responseData.answer === 'string' && !msg.responseData.answer.trim().startsWith('[') && !msg.responseData.answer.trim().startsWith('{')) && !(msg.responseData?.action_results?.length > 0) && msg.content && (
-                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                        <ChatMarkdown className="text-sm">{msg.content}</ChatMarkdown>
+                      )}
+                      {/* The last reply asks something: answer it with a click. "Which project?" offers
+                          the projects; any other question gets Confirm and Reject (with a reason). */}
+                      {i === currentMessages.length - 1 && !msg.responseData?.needs_input
+                        && !msg.responseData?.confirmation_required && !(msg.responseData?.action_results?.length > 0) && (
+                        <PilotQuickReplies
+                          choices={msg.responseData?.retry ? (msg.responseData.choices || []) : []}
+                          onChoose={(c) => submitPilotChat(msg.responseData.retry, '', {
+                            projectId: String(c.id), shown: `Project: ${c.name}`,
+                          })}
+                          question={ASKS_TO_CONFIRM.test(String(msg.responseData?.answer || msg.content || ''))}
+                          onAnswer={answerPilotQuestion}
+                          disabled={loading}
+                        />
                       )}
                       {(msg.responseData?.action_results?.length > 0) && (
                         <div className="space-y-2 mt-2">
@@ -973,12 +1060,17 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                           proceed via clickable options. */}
                       {msg.responseData?.needs_input && (
                         <PilotGapForm
+                          // One card per chat and message: the form keeps its dates in state, and
+                          // without a key it kept the previous chat's after switching (E4).
+                          key={cardKey(msg, i)}
                           data={msg.responseData}
-                          busy={confirmingIndex === i}
-                          done={confirmedIndexes.has(i)}
-                          cancelled={cancelledIndexes.has(i)}
-                          onConfirm={(answers, skip) => confirmPilotDraft(i, msg.responseData, answers, skip)}
-                          onCancel={() => setCancelledIndexes((prev) => new Set(prev).add(i))}
+                          busy={confirmingKey === cardKey(msg, i)}
+                          done={msg.responseData.resolved?.status === 'confirmed'}
+                          doneText={msg.responseData.resolved?.answer}
+                          cancelled={['cancelled', 'rejected'].includes(msg.responseData.resolved?.status)}
+                          rejectReason={msg.responseData.resolved?.reason}
+                          onConfirm={(answers, skip) => confirmPilotDraft(msg, i, answers, skip)}
+                          onReject={(reason, revise) => rejectPilotDraft(msg, reason, revise)}
                         />
                       )}
                       {msg.responseData?.confirmation_required && (() => {
@@ -1065,10 +1157,24 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
             <div className="flex items-center gap-2 mb-2">
               <div data-tour-pm-pp="project-select" className="flex items-center gap-1.5 flex-1 min-w-0">
                 <InfoHint {...PM_HINTS.pmPpProjectSelect} />
-                {/* EXEC-BUG-03: freeze the project selector while the AI is
+                {/* A conversation's project is fixed once it has started: the box gives way to the
+                    project's name. Switching project half-way mixed up which tasks were meant;
+                    another project takes a new conversation. */}
+                {chatLocked ? (
+                  <div className="flex items-center gap-1.5 h-8 flex-1 min-w-0 rounded-md border border-input px-2 text-xs bg-muted/40"
+                       data-testid="pilot-fixed-project"
+                       title="This conversation is about this project. To work on another one, start a new conversation.">
+                    <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{selectedChat?.projectName || 'All projects'}</span>
+                    <button type="button" onClick={newChat} className="ml-auto shrink-0 text-[11px] text-primary hover:underline">
+                      New conversation
+                    </button>
+                  </div>
+                ) : (
+                /* EXEC-BUG-03: freeze the project selector while the AI is
                     generating. Changing the target project mid-flight
                     detaches the response from the tasks the user asked
-                    about. */}
+                    about. */
                 <Select
                   value={selectedProjectId || 'all'}
                   disabled={loading}
@@ -1096,6 +1202,7 @@ const ProjectPilotAgent = ({ projects = [], onProjectUpdate, onNavigate }) => {
                   )}
                 </SelectContent>
               </Select>
+                )}
               </div>
 
               <input

@@ -159,9 +159,12 @@ class Project(models.Model):
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    # A hash of the document or description Project Pilot made the project from, so the same one coming again
+    # is recognised (project_manager_agent/pilot_duplicates.py). Empty for projects made by hand.
+    source_fingerprint = models.CharField(max_length=64, blank=True, default='', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         ordering = ['-created_at']
         indexes = [

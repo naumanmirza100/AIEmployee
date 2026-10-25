@@ -97,7 +97,7 @@ export default function CalendarScheduleView({ onOpenPilot }) {
     return (
       <PMEmptyState
         title="Create a project first"
-        subtitle="Calendar & Schedule plans a day-by-day timeline with conflict detection for a project's tasks. Start one in Pilot to unlock this tool."
+        subtitle="Calendar Auto-planner plans a day-by-day timeline with conflict detection for a project's tasks. Start one in Pilot to unlock this tool."
         onOpenPilot={onOpenPilot}
       />
     );
@@ -109,7 +109,7 @@ export default function CalendarScheduleView({ onOpenPilot }) {
       <Card className="bg-black/30 border-white/[0.06]">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg text-violet-300 flex items-center gap-2">
-            <CalendarDays className="w-5 h-5" /> Calendar & Schedule Planner
+            <CalendarDays className="w-5 h-5" /> Calendar Auto-planner
           </CardTitle>
         </CardHeader>
         <CardContent>

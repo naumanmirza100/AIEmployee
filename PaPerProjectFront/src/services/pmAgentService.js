@@ -10,12 +10,14 @@ import { streamAnswer } from '@/utils/ndjsonStream';
  * @param {string} question
  * @param {number|null} projectId
  * @param {Array<{role: string, content: string}>} chatHistory - Optional conversation history for this chat
+ * @param {object} [extra] - e.g. { revise_of: messageId }: a review card rejected with a reason, to propose again
  */
-export const projectPilot = async (question, projectId = null, chatHistory = null) => {
+export const projectPilot = async (question, projectId = null, chatHistory = null, extra = {}) => {
   try {
     const body = {
       question: question.trim(),
       project_id: projectId || null,
+      ...extra,
     };
     if (Array.isArray(chatHistory) && chatHistory.length > 0) {
       body.chat_history = chatHistory.map((m) => ({ role: m.role, content: m.content || '' }));
@@ -41,19 +43,27 @@ export const projectPilot = async (question, projectId = null, chatHistory = nul
  * @param {Array}  actions  the proposal, exactly as it was received
  * @param {object} answers  {actionIndex: {field: value}} from the form
  * @param {Array}  skip     indexes of actions the user unticked
+ * @param {object} card     {chatId, messageId} of the chat message holding the card: the server keeps the
+ *                          outcome there, so the card stays done after a reload and can't be confirmed twice
  */
-export const projectPilotConfirm = async (actions, answers = {}, skip = []) => {
+export const projectPilotConfirm = async (actions, answers = {}, skip = [], card = {}) => {
   try {
     return await companyApi.post('/project-manager/ai/project-pilot/confirm', {
       actions,
       answers,
       skip,
+      chat_id: card.chatId || null,
+      message_id: card.messageId || null,
     });
   } catch (error) {
     console.error('Project Pilot confirm error:', error);
     throw error;
   }
 };
+
+/** Reject a review card, with an optional reason; it stays rejected after a reload. */
+export const cancelProjectPilotCard = async (chatId, messageId, reason = '') =>
+  companyApi.post(`/project-manager/ai/project-pilot/chats/${chatId}/messages/${messageId}/cancel`, { reason });
 
 /**
  * Task Prioritization Agent
@@ -267,6 +277,10 @@ export const projectPilotFromFile = (file, projectId = null, chatHistory = null,
   formData.append('file', file);
   if (projectId) {
     formData.append('project_id', projectId);
+  }
+  // A conversation with a project: the server reads the file for that project, whatever else is sent.
+  if (options.chatId) {
+    formData.append('chat_id', options.chatId);
   }
   if (Array.isArray(chatHistory) && chatHistory.length > 0) {
     formData.append('chat_history', JSON.stringify(chatHistory.map((m) => ({ role: m.role, content: m.content || '' }))));
@@ -715,6 +729,7 @@ export default {
   knowledgeQAStream,
   projectPilot,
   projectPilotConfirm,
+  cancelProjectPilotCard,
   projectPilotFromFile,
   getProjectPilotJobStatus,
   taskPrioritization,

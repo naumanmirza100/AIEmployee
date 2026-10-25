@@ -188,6 +188,9 @@ def _create_project(actor, action):
             pm_services.update_project(actor, project.id, {'project_manager_id': action['project_manager_id']})
         except pm_services.ServiceError:
             logger.info('pilot: proposed project manager %s refused', action['project_manager_id'])
+    # What it was made from, so the same document or description coming again is recognised.
+    from project_manager_agent.pilot_duplicates import keep_fingerprint
+    keep_fingerprint(project, action)
     return project
 
 
