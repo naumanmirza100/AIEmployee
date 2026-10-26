@@ -236,6 +236,7 @@ def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
 #: hr_agent.alerts, which also uses it to pick who gets HR's bell alerts.
 from hr_agent import alerts as hr_alerts  # noqa: E402
 from hr_agent import meeting_links  # noqa: E402
+from core.HR_agent import intent as hr_intent  # noqa: E402
 from core import meeting_notices  # noqa: E402
 from hr_agent.alerts import HR_ADMIN_ROLES  # noqa: E402
 
@@ -624,11 +625,22 @@ def hr_knowledge_qa(request):
             if recent:
                 contextualized = "Previous conversation:\n" + "\n".join(recent) + "\n\nCurrent question: " + question
 
+        # What the message asks for (core/HR_agent/intent.py): a request for leave or a meeting is told where
+        # it is done instead of being searched for in the policies; a question is searched in English, standalone.
+        reading = hr_intent.read(question, history if isinstance(history, list) else [], company_id=company.id)
+        instead = hr_intent.redirect(reading, 'dashboard')
+        if instead:
+            return Response({'status': 'success', 'data': {
+                'success': True, 'answer': instead, 'has_verified_info': False, 'citations': [],
+                'redirect': reading['kind']}})
+
         agent = HRAgent(company_id=company.id)
         result = agent.answer_question(
             contextualized,
             asker_role=_resolve_asker_role(company_user),
             asker_employee=asker_employee,
+            search_query=(reading or {}).get('english'),
+            wants_everything=reading['full_list'] if reading else None,
         )
         # F1 — compliance log: an HR doc being quoted into a Q&A answer is
         # functionally a read of that doc. The direct-read endpoints already log
@@ -720,6 +732,8 @@ def hr_knowledge_qa_stream(request):
             if recent:
                 contextualized = "Previous conversation:\n" + "\n".join(recent) + "\n\nCurrent question: " + question
 
+        reading = hr_intent.read(question, history if isinstance(history, list) else [], company_id=company.id)
+        instead = hr_intent.redirect(reading, 'dashboard')
         agent = HRAgent(company_id=company.id)
 
         def _event_stream():
@@ -729,11 +743,20 @@ def hr_knowledge_qa_stream(request):
             the frontend just needs to split on newlines."""
             collected_citations = []
             collected_doc_ids = []
+            if instead:
+                # A request for leave or a meeting: where it is done, not policy text (core/HR_agent/intent.py).
+                yield _json.dumps({'type': 'meta', 'has_verified_info': False, 'citations': [],
+                                   'cache_hit': False, 'redirect': reading['kind']}) + '\n'
+                yield _json.dumps({'type': 'token', 'value': instead}) + '\n'
+                yield _json.dumps({'type': 'done', 'answer': instead, 'timing_ms': {}, 'cache_hit': False}) + '\n'
+                return
             try:
                 for event in agent.answer_question_stream(
                     contextualized,
                     asker_role=_resolve_asker_role(company_user),
                     asker_employee=asker_employee,
+                    search_query=(reading or {}).get('english'),
+                    wants_everything=reading['full_list'] if reading else None,
                 ):
                     # Capture citations for the after-stream access-log write.
                     if event.get('type') == 'meta':

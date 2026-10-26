@@ -17,6 +17,7 @@ from django.conf import settings
 from core import whole_document
 from project_manager_agent.ai_agents.base_agent import BaseAgent
 from .services import HRKnowledgeService, build_employee_context
+from .intent import NOT_IN_THE_DOCUMENTS
 from .prompts import HR_SYSTEM_PROMPT, employee_context_block, get_knowledge_prompt
 
 logger = logging.getLogger(__name__)
@@ -99,22 +100,27 @@ class HRAgent(BaseAgent):
             logger.warning("HR employee context unavailable: %s", exc)
             return None
 
-    def _plan_whole_document(self, question, knowledge_result, employee_context):
+    def _plan_whole_document(self, question, knowledge_result, employee_context, wants_everything=None):
         from hr_agent.models import HRDocument
         return whole_document.plan(
             question, knowledge_result.get('citations'), company_id=self.company_id,
             agent_key_name=self.agent_key_name, document_model=HRDocument, citation_type='hr_document',
-            preamble=employee_context_block(employee_context))
+            preamble=employee_context_block(employee_context), wants_everything=wants_everything)
 
     def answer_question(self, question: str, *, asker_role: str = 'employee',
                         # Bumped from 3 → 12 for OpenAI embeddings + larger
                         # chunks. See KnowledgeService.get_answer for full
                         # rationale; the old 3 was a bottleneck that starved
                         # the LLM of context on broad "list all" questions.
-                        asker_employee=None, max_results: int = 12) -> dict:
+                        asker_employee=None, max_results: int = 12, search_query=None,
+                        wants_everything=None) -> dict:
         """Q&A entry point. ``asker_role`` controls what the retriever is
         allowed to see; ``asker_employee`` (Employee instance, optional)
-        unlocks personalised answers (their leave balance, manager etc.)."""
+        unlocks personalised answers (their leave balance, manager etc.).
+        ``search_query`` is the question restated in English and standalone by
+        the AI reading (core/HR_agent/intent.py): the documents are searched
+        with it, so a Roman Urdu question or a follow-up finds its passages.
+        ``wants_everything`` is that reading's "a complete list"."""
         # Per-phase timing so the UI + logs can pinpoint which step is slow.
         _t_overall = time.time()
         timing_ms: dict = {}
@@ -137,7 +143,7 @@ class HRAgent(BaseAgent):
 
         _t_retr = time.time()
         knowledge_result = self.knowledge_service.get_answer(
-            question,
+            search_query or question,
             asker_role=asker_role,
             asker_employee_id=getattr(asker_employee, 'id', None),
             max_results=max_results,
@@ -156,8 +162,8 @@ class HRAgent(BaseAgent):
             timing_ms['total'] = int((time.time() - _t_overall) * 1000)
             return {
                 'success': True,
-                'answer': "I don't have verified information on this in our HR knowledge base. "
-                          "I'll route this to the HR team to follow up.",
+                # It used to promise "I'll route this to the HR team to follow up"; nothing routed anything.
+                'answer': NOT_IN_THE_DOCUMENTS,
                 'has_verified_info': False,
                 'confidence': knowledge_result.get('confidence', 'none'),
                 'best_score': knowledge_result.get('best_score'),
@@ -169,7 +175,7 @@ class HRAgent(BaseAgent):
         # A question that asks for everything is answered from the documents whole (core/whole_document.py); if
         # that is not possible or fails, from the excerpts below as before.
         employee_context = self._employee_context(asker_employee)
-        whole = self._plan_whole_document(question, knowledge_result, employee_context)
+        whole = self._plan_whole_document(question, knowledge_result, employee_context, wants_everything)
         if whole is not None:
             _t_llm = time.time()
             formatted = whole_document.answer(self, whole, system_prompt=self.system_prompt)
@@ -240,7 +246,8 @@ class HRAgent(BaseAgent):
 
     def answer_question_stream(self, question: str, *, asker_role: str = 'employee',
                                 # See note on answer_question(): bumped 3 → 12.
-                                asker_employee=None, max_results: int = 12):
+                                asker_employee=None, max_results: int = 12, search_query=None,
+                                wants_everything=None):
         """Generator variant of :meth:`answer_question`. Yields dicts:
 
           * ``{'type': 'meta', ...}`` — first event with retrieval results
@@ -291,7 +298,7 @@ class HRAgent(BaseAgent):
 
         _t_retr = time.time()
         knowledge_result = self.knowledge_service.get_answer(
-            question,
+            search_query or question,
             asker_role=asker_role,
             asker_employee_id=getattr(asker_employee, 'id', None),
             max_results=max_results,
@@ -307,8 +314,7 @@ class HRAgent(BaseAgent):
 
         # No-verified-info path — emit fixed message and stop.
         if not knowledge_result.get('has_verified_info'):
-            fallback = ("I don't have verified information on this in our HR "
-                        "knowledge base. I'll route this to the HR team to follow up.")
+            fallback = NOT_IN_THE_DOCUMENTS
             yield {
                 'type': 'meta',
                 'has_verified_info': False,
@@ -327,7 +333,7 @@ class HRAgent(BaseAgent):
         # Compose prompt + stream LLM tokens. A question that asks for everything is tried first on the documents
         # whole (core/whole_document.py); when that fails before any text is out, the passages answer it.
         employee_context = self._employee_context(asker_employee)
-        whole = self._plan_whole_document(question, knowledge_result, employee_context)
+        whole = self._plan_whole_document(question, knowledge_result, employee_context, wants_everything)
         attempts = []
         if whole is not None:
             attempts.append((whole.prompt, 0, whole.max_tokens, whole.citations, whole.note))

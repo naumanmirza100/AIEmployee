@@ -171,8 +171,17 @@ def my_hr_ask(request):
         return Response({'status': 'error', 'message': 'Please keep the question under 2,000 characters.'},
                         status=status.HTTP_400_BAD_REQUEST)
     try:
-        result = HRAgent(company_id=company.id).answer_question(question, asker_role='employee',
-                                                                 asker_employee=emp)
+        # "kal ki chutti chahiye" is a request for leave, not a question about the policy: say where it is done
+        # (core/HR_agent/intent.py). A question is searched in English, so Roman Urdu finds its passages.
+        from core.HR_agent import intent as hr_intent
+        reading = hr_intent.read(question, company_id=company.id)
+        instead = hr_intent.redirect(reading, 'my_space')
+        if instead:
+            return Response({'status': 'success', 'data': {
+                'answer': instead, 'has_verified_info': False, 'sources': [], 'redirect': reading['kind']}})
+        result = HRAgent(company_id=company.id).answer_question(
+            question, asker_role='employee', asker_employee=emp,
+            search_query=(reading or {}).get('english'), wants_everything=reading['full_list'] if reading else None)
     except KeyServiceError:
         # The company's AI allowance or key is between us and the company; an employee is
         # not shown billing messages, and a 402/403 would sign them out of My Space.

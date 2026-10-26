@@ -98,7 +98,8 @@ class MySpaceHRTests(HRTestCase):
             code, body = self.post('/api/user/hr/ask', {'question': 'How many days of annual leave do I have left?'})
         self.assertEqual(code, 200, body)
         self.assertEqual(body['data']['sources'], [{'title': 'Leave Policy 2026'}])
-        self.assertEqual(ask.call_args.kwargs, {'asker_role': 'employee', 'asker_employee': self.sara})
+        self.assertEqual(ask.call_args.kwargs, {'asker_role': 'employee', 'asker_employee': self.sara,
+                                                'search_query': None, 'wants_everything': None})
 
     def test_without_the_hr_agent_or_an_hr_record_the_page_says_so(self):
         CompanyModulePurchase.objects.filter(company=self.company).update(status='cancelled')

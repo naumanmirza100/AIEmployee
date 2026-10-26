@@ -609,6 +609,10 @@ GROQ_FALLBACK_MODEL = os.getenv('GROQ_FALLBACK_MODEL', 'openai/gpt-oss-120b')
 # Project Pilot reads each message with one small AI call before routing it (project_manager_agent/pilot_intent.py).
 # PM_PILOT_AI_INTENT=false in .env goes back to routing by word lists only.
 PM_PILOT_AI_INTENT = os.getenv('PM_PILOT_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
+# HR's question boxes read each message with one small AI call (core/HR_agent/intent.py): a request for leave or a
+# meeting is told where it is done, a question is searched in English. HR_AI_INTENT=false goes back to searching
+# every message as typed.
+HR_AI_INTENT = os.getenv('HR_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
 
 PM_AGENT_LLM_CONFIG = {
     'defaults': {

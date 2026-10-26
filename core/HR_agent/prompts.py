@@ -67,6 +67,21 @@ def employee_context_block(employee_context: dict | None) -> str:
     return "<employee_context>\n" + "\n".join(ctx_lines) + "\n</employee_context>\n\n"
 
 
+def _sanitize_conversation(text):
+    """The injection filter on what people typed, not on the labels the view writes around it. The view sends
+    "Previous conversation:\nUser: ...\nAssistant: ...\n\nCurrent question: ...", and the filter's "assistant:" rule
+    blanked every "Assistant:" line, so a follow-up lost what had been answered."""
+    lines = []
+    for line in str(text).split('\n'):
+        for label in ('User: ', 'Assistant: ', 'Current question: '):
+            if line.startswith(label):
+                lines.append(label + sanitize_user_input(line[len(label):]))
+                break
+        else:
+            lines.append(line if line == 'Previous conversation:' else sanitize_user_input(line))
+    return '\n'.join(lines)
+
+
 def get_knowledge_prompt(question: str, knowledge_results, employee_context: dict | None = None) -> str:
     """Compose the user-facing prompt for HR Knowledge Q&A.
 
@@ -75,7 +90,7 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
     personalisation payload — when present we render it inside an
     <employee_context> block so the LLM can refer to "your" data.
     """
-    safe_question = sanitize_user_input(question or '')
+    safe_question = _sanitize_conversation(question or '')
     parts = [
         "Answer the user's question using the verified knowledge-base excerpts below.\n\n",
         "RULES:\n",
@@ -86,7 +101,7 @@ def get_knowledge_prompt(question: str, knowledge_results, employee_context: dic
         "   • Then a **Details** section: short paragraphs OR a bulleted list of the key points.\n"
         "   • For processes, categories, or eligibility rules — use a bulleted/numbered list, one item per line, with a short explanation.\n"
         "   • End with a **Notes / Caveats** line only if the excerpts mention conditions, exceptions, or 'subject to' phrasing worth surfacing.\n",
-        "4. If the excerpts don't cover the topic, say exactly: \"I don't have verified information on this in our HR knowledge base. I'll route this to the HR team to follow up.\"\n",
+        "4. If the excerpts don't cover the topic, say exactly: \"I couldn't find this in the company's HR documents, so I can't answer it reliably. Please ask HR directly.\"\n",
         "5. NO preamble. NO meta-commentary like \"Based on the provided excerpts…\" or \"According to the document content…\" — just answer directly.\n",
         "6. NO verbatim block-quotes of excerpt content — paraphrase in your own words. Short quotes (< 15 words) are fine when precision matters.\n",
         "7. Do NOT refuse just because excerpts look like headings, table-of-contents, or dot-leaders — synthesise from whatever substantive content exists.\n\n",
