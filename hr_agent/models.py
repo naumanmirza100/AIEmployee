@@ -894,10 +894,25 @@ class HRMeeting(models.Model):
     action_items = models.JSONField(default=list, blank=True)
 
     reminder_24h_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_60m_sent_at = models.DateTimeField(null=True, blank=True)
     reminder_15m_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_5m_sent_at = models.DateTimeField(null=True, blank=True)
+    # The dashboard login that booked it. The organizer is an Employee, and an owner or admin booking as HR has
+    # none, so their replies and reminders reached nobody.
+    booked_by = models.ForeignKey('core.CompanyUser', on_delete=models.SET_NULL, null=True, blank=True,
+                                  related_name='hr_meetings_booked')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    #: Every reminder stamp, cleared together whenever the time moves.
+    REMINDER_FIELDS = ('reminder_24h_sent_at', 'reminder_60m_sent_at', 'reminder_15m_sent_at', 'reminder_5m_sent_at')
+
+    def clear_reminders(self):
+        """The time moved: every reminder is due again. Returns the field names, for `save(update_fields=...)`."""
+        for field in self.REMINDER_FIELDS:
+            setattr(self, field, None)
+        return list(self.REMINDER_FIELDS)
 
     class Meta:
         app_label = 'hr_agent'
@@ -936,6 +951,10 @@ class HRMeeting(models.Model):
         if new_status != self.response_status:
             self.response_status = new_status
             self.save(update_fields=['response_status', 'updated_at'])
+            if new_status == 'accepted':
+                # Everyone has said yes: the meeting gets its link and everyone is told (hr_agent.meeting_links).
+                from hr_agent import meeting_links
+                meeting_links.on_final(self)
 
 
 class HRMeetingParticipant(models.Model):

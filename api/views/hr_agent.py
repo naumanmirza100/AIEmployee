@@ -235,6 +235,7 @@ def _validate_goal_weight_sum(employee, cycle_id, new_weight: int,
 #: `company_user` is deliberately NOT here — see `_is_hr_admin`. Defined in
 #: hr_agent.alerts, which also uses it to pick who gets HR's bell alerts.
 from hr_agent import alerts as hr_alerts  # noqa: E402
+from hr_agent import meeting_links  # noqa: E402
 from core import meeting_notices  # noqa: E402
 from hr_agent.alerts import HR_ADMIN_ROLES  # noqa: E402
 
@@ -2379,6 +2380,7 @@ def create_hr_meeting(request):
                 timezone_name=tz_name,
                 meeting_link=d.get('meeting_link') or None,
                 location=d.get('location') or '',
+                booked_by=request.user,
             )
             if participant_ids:
                 m.participants.set(participant_ids)
@@ -3366,6 +3368,8 @@ def _hr_resolve_relative_date(message, now_dt):
         return None
     today = now_dt.date()
 
+    if _re.search(r'\bday\s+after\s+tomorrow\b', msg):
+        return today + _td(days=2)
     if _re.search(r'\btomorrow\b', msg):
         return today + _td(days=1)
     if _re.search(r'\btoday\b', msg):
@@ -3382,6 +3386,9 @@ def _hr_resolve_relative_date(message, now_dt):
         if not _re.search(rf'\b{token}\b', msg):
             continue
         days_ahead = (wd - today.weekday()) % 7
+        if _re.search(r'\bnext\s+week\b', msg):
+            # "next week Friday", "Friday next week": that weekday in the week after this one.
+            return today - _td(days=today.weekday()) + _td(days=7 + wd)
         if _re.search(rf'\bnext\s+{token}\b', msg):
             # "next Friday": one week from now (or +7 if today is Friday)
             days_ahead = 7 if days_ahead == 0 else days_ahead + 7
@@ -3393,6 +3400,73 @@ def _hr_resolve_relative_date(message, now_dt):
         return today + _td(days=days_ahead)
 
     return None
+
+
+_HR_SAY_IT_AGAIN = ("I didn't catch that. Tell me who the meeting is with and when, for example: "
+                    "\"Book a 30-minute 1:1 with Ali tomorrow at 3 pm\".")
+_HR_CHANGE_IN_THE_LIST = ("I can't move or cancel a meeting from the chat. Open **Meetings**, find the meeting, "
+                          "and use **Change time**, **Edit** or **Cancel** on it.")
+
+_HR_MEETING_TYPES = {
+    '1:1': 'one_on_one', '1_1': 'one_on_one', '1_on_1': 'one_on_one', 'one_to_one': 'one_on_one',
+    'onboarding': 'onboarding_orientation', 'orientation': 'onboarding_orientation',
+    'review': 'performance_review', 'performance': 'performance_review', 'appraisal': 'performance_review',
+    'check_in': 'mid_year_check_in', 'checkin': 'mid_year_check_in', 'mid_year': 'mid_year_check_in',
+    'exit': 'exit_interview', 'grievance': 'grievance_hearing', 'hearing': 'grievance_hearing',
+    'training': 'training_session', 'benefits': 'benefits_consult', 'benefits_consultation': 'benefits_consult',
+}
+
+
+def _hr_meeting_type(value):
+    """One of HRMeeting's types, whatever the AI wrote ("exit interview", "1:1"). The type decides whether the
+    meeting is private, and was saved as written: an invalid value, and a grievance hearing visible company-wide."""
+    valid = {key for key, _ in HRMeeting.MEETING_TYPE_CHOICES}
+    word = re.sub(r'[\s-]+', '_', str(value or '').strip().lower())
+    if not word:
+        return 'one_on_one'
+    if word in valid:
+        return word
+    return _HR_MEETING_TYPES.get(word, 'other')
+
+
+def _hr_people_from_names(names, all_emps):
+    """The people the AI read as named for the meeting, matched to the company's employees: by full email, full name,
+    every word of the name ("Ali" in "Ali Raza"), then a close spelling ("Fatma" for Fatima, "Mohammad" for Muhammad).
+    Returns the same shape as `_hr_find_users_in_message`, plus `unknown`: the names that match nobody."""
+    import difflib
+
+    def norm(text):
+        text = ' '.join(re.sub(r"[^\w\s@.'-]", ' ', str(text or '').lower()).split())
+        text = re.sub(r'^(?:mr|mrs|ms|miss|dr|sir|madam)\.?\s+', '', text)
+        return re.sub(r'\s+(?:sahab|sahib|ji|bhai|baji|sb)$', '', text)
+
+    people = [(e, norm(e.full_name)) for e in all_emps]
+    found, unknown = [], []
+    ambiguous_token, ambiguous_candidates = None, []
+    for raw in names:
+        wanted = norm(raw)
+        if not wanted:
+            continue
+        email = [e for e, _ in people if '@' in wanted and (e.work_email or '').lower() == wanted]
+        whole = [e for e, name in people if name == wanted]
+        words = [e for e, name in people if all(w in name.split() for w in wanted.split())]
+        candidates = email or whole or words
+        if not candidates and len(wanted) >= 4:
+            close = set(difflib.get_close_matches(wanted, [name for _, name in people], n=3, cutoff=0.8))
+            if not close and ' ' not in wanted:
+                close = {name for _, name in people if difflib.get_close_matches(wanted, name.split(), n=1, cutoff=0.8)}
+            candidates = [e for e, name in people if name in close]
+        unique = list({e.id: e for e in candidates}.values())
+        if len(unique) == 1:
+            if unique[0].id not in {e.id for e in found}:
+                found.append(unique[0])
+        elif len(unique) > 1:
+            if ambiguous_token is None:
+                ambiguous_token, ambiguous_candidates = str(raw), unique[:5]
+        else:
+            unknown.append(str(raw))
+    return {'all_matched': found, 'ambiguous_token': ambiguous_token,
+            'ambiguous_candidates': ambiguous_candidates, 'unknown': unknown}
 
 
 def _hr_find_users_in_message(message: str, all_emps):
@@ -3615,12 +3689,28 @@ def hr_meeting_schedule(request):
             "                          //   exact/first-name match. If unsure, leave null and the\n"
             "                          //   server will resolve or ask for clarification.\n"
             "   \"location\": str|null, \"meeting_link\": str|null,\n"
-            "   \"reply\": str  // friendly natural-language reply. NEVER claim to have scheduled\n"
-            "                   //   a meeting — the server decides that.\n"
+            "   \"time_given\": bool,     // did the user say WHEN (a day and/or a time)?\n"
+            "   \"when_words\": str|null, // the day as the user meant it, in English words: \"tomorrow\",\n"
+            "                          //   \"day after tomorrow\", \"next Friday\", \"Monday 3 November\";\n"
+            "                          //   null when no day was said\n"
+            "   \"duration_given\": bool, // did the user say how long?\n"
+            "   \"is_question\": bool,    // true when the user ASKS how something works (\"how do I book a\n"
+            "                          //   review?\") instead of asking for a meeting\n"
+            "   \"reply\": str  // friendly natural-language reply. NEVER claim to have scheduled,\n"
+            "                   //   moved or cancelled a meeting — the server decides that.\n"
             "  }\n"
             "Use intent='create' for ANY request to set up a new meeting, even when who, when or\n"
             "how long is missing, or a name is not in the directory — the server asks the user for\n"
             "whatever is missing. Use 'clarify' only when you can't tell what the user wants.\n"
+            "Read typos, other phrasings and Roman Urdu/Hinglish the same way, e.g. \"meeting rakh do\" /\n"
+            "\"meeting fix kar do\" = book a meeting; \"kal\" = tomorrow; \"parson\" = day after tomorrow;\n"
+            "\"agle hafte\" = next week; peer/somvaar = Monday, mangal = Tuesday, budh = Wednesday,\n"
+            "jumeraat = Thursday, jumma = Friday, hafta = Saturday, itwaar = Sunday; \"3 baje\" = 3 o'clock\n"
+            "(subah = morning, dopehar = afternoon, shaam = evening); \"aadha ghanta\" = 30 minutes,\n"
+            "\"ek ghanta\" = 60 minutes; \"X ke saath\" / \"X se\" = with X.\n"
+            "participant_names: the people for THIS meeting only. When the message just completes a\n"
+            "meeting from the conversation that is not booked yet (e.g. it only gives the time), include\n"
+            "that meeting's people; after a meeting was booked, a new request starts afresh.\n"
             "Default duration_minutes=30 when unspecified. Default meeting_type='one_on_one'.\n"
             f"Visibility for exit_interview/grievance_hearing/performance_review will be set to private automatically.\n\n"
             f"Employee directory ({len(emp_rows)} rows):\n" + "\n".join(directory_lines) + "\n\n"
@@ -3674,17 +3764,28 @@ def hr_meeting_schedule(request):
                 parsed = json.loads(s)
             except Exception:
                 return Response({'status': 'success', 'data': {
-                    'reply': raw or 'I need a bit more info to schedule that.',
+                    'reply': _HR_SAY_IT_AGAIN,
                     'meeting': None, 'parsed': None,
                 }})
+            if not isinstance(parsed, dict):
+                parsed = {}
 
+        parsed['meeting_type'] = _hr_meeting_type(parsed.get('meeting_type'))
         intent = (parsed.get('intent') or 'clarify').lower()
+        # A question about booking ("how do I schedule a review?") is answered, not turned into a booking form.
+        asked_how = picked is None and parsed.get('is_question') is True
         # An incomplete request ("schedule a meeting") is exactly what the
         # details form is for, but the model tends to call it 'clarify' and
         # answer in prose, and then no form appears. A plain request to set
         # up a meeting is a create, whatever the model says.
-        if intent == 'clarify' and _HR_NEW_MEETING_RE.search(message):
+        if intent == 'clarify' and not asked_how and _HR_NEW_MEETING_RE.search(message):
             intent = 'create'
+        if asked_how and intent == 'create':
+            intent = 'clarify'
+        if picked is None and intent in ('update', 'cancel'):
+            # Nothing here moves or cancels a meeting, so nothing may say it did ("I've moved your 1:1 to 4pm").
+            return Response({'status': 'success', 'data': {
+                'reply': _HR_CHANGE_IN_THE_LIST, 'meeting': None, 'parsed': parsed, 'action': intent}})
         meeting_payload = None
 
         # ---- Deterministic participant resolution ------------------------
@@ -3702,9 +3803,16 @@ def hr_meeting_schedule(request):
             all_matched_emps = list(Employee.objects.filter(company=company, pk__in=ids))
             det = {'all_matched': all_matched_emps,
                    'ambiguous_candidates': [], 'ambiguous_token': None}
+        elif isinstance(parsed.get('participant_names'), list):
+            # The AI's reading of who is meant (any spelling, any language, the conversation so far), checked
+            # against the real people. The raw words used to decide: "Fatma" was dropped without a word, "sara din"
+            # (all day) invited Sara, and everyone named in earlier turns was invited again.
+            det = _hr_people_from_names(parsed['participant_names'], all_emps)
+            all_matched_emps = det['all_matched']
         else:
             det = _hr_find_users_in_message(message, all_emps)
             all_matched_emps = det['all_matched']
+        read_names = picked is None and isinstance(parsed.get('participant_names'), list)
 
         # Ambiguous single-token match (e.g. two employees both named "Ali").
         # We surface this even if other participants matched cleanly — the
@@ -3743,7 +3851,10 @@ def hr_meeting_schedule(request):
             raw_names = []
         # For a new meeting, an unknown name goes to the details form below
         # (with a note saying who wasn't found) rather than ending the turn.
-        unknown_names = raw_names if (not all_matched_emps and raw_names) else []
+        if read_names:
+            unknown_names = det.get('unknown') or []          # said even when someone else was found
+        else:
+            unknown_names = raw_names if (not all_matched_emps and raw_names) else []
         if unknown_names and intent != 'create':
             names_str = ', '.join(f'"{n}"' for n in raw_names)
             override_reply = (
@@ -3765,7 +3876,8 @@ def hr_meeting_schedule(request):
         # ---- Combine deterministic matches with any explicit IDs the LLM
         # extracted (drop any that don't map to a real company employee). ---
         validated_ids = {e.id for e in all_matched_emps}
-        llm_ids = parsed.get('participant_ids') or []
+        # Ids the AI picked by itself ("my manager") are not taken: only people it named and we found.
+        llm_ids = [] if read_names else (parsed.get('participant_ids') or [])
         if isinstance(llm_ids, list):
             allowed = set(Employee.objects.filter(
                 pk__in=[int(x) for x in llm_ids if _is_int(x)], company=company,
@@ -3780,7 +3892,7 @@ def hr_meeting_schedule(request):
         # treat that as the definitive list — this preserves the user's
         # ability to change the participants mid-flow.
         current_turn_named = bool(all_matched_emps or raw_names)
-        if not current_turn_named and isinstance(history, list) and history:
+        if not read_names and not current_turn_named and isinstance(history, list) and history:
             historical_matches = []
             historical_ids = set()
             # Only scan USER turns — assistant turns quote back the
@@ -3824,8 +3936,11 @@ def hr_meeting_schedule(request):
                 # correction below: that corrects *the model's* reading of
                 # the user's words, and there was no model reading here.
                 sched = picked
-            elif _hr_message_has_time_reference(message):
-                # Wall-clock time in the user's zone (see the prompt).
+            elif (parsed.get('time_given') is True
+                  or (parsed.get('time_given') is None and _hr_message_has_time_reference(message))):
+                # Wall-clock time in the user's zone (see the prompt). Whether a time was said is the AI's
+                # reading ("kal 3 baje", "tomorow at 3"); the word list is only for a reading without it, and it
+                # also fired on "May I…", "I am free" and "the 2nd round".
                 sched = in_zone(parsed.get('scheduled_at'), tz_name)
 
             # HR-BUG-07: correct the DATE portion when we can resolve it
@@ -3838,7 +3953,11 @@ def hr_meeting_schedule(request):
                 try:
                     # "Tomorrow" is the user's tomorrow: resolve against their
                     # local date, not UTC's, which differs near midnight.
-                    resolved_date = _hr_resolve_relative_date(message, local_now)
+                    # From the AI's English words for the day ("Not tomorrow, Friday" → "Friday"; "kal" →
+                    # "tomorrow"), not from the first day-word in the raw text, which turned "Not tomorrow —
+                    # Friday" into tomorrow.
+                    words = parsed.get('when_words') if 'when_words' in parsed else message
+                    resolved_date = _hr_resolve_relative_date(words, local_now)
                     if resolved_date is not None and resolved_date != sched.date():
                         corrected = sched.replace(
                             year=resolved_date.year,
@@ -3872,7 +3991,8 @@ def hr_meeting_schedule(request):
             if picked is None:
                 if not sched:
                     missing.append('time')
-                if not duration_mentioned(message):
+                said_length = parsed.get('duration_given')
+                if not (said_length is True or (said_length is None and duration_mentioned(message))):
                     missing.append('duration')
                 # Named someone who can't be invited (no login): the form
                 # says so and lets the user choose again, rather than refuse.
@@ -3902,7 +4022,7 @@ def hr_meeting_schedule(request):
                     ]},
                 }})
 
-            mtype = (parsed.get('meeting_type') or 'one_on_one')
+            mtype = _hr_meeting_type(parsed.get('meeting_type'))
             visibility = 'private' if mtype in _HR_PRIVATE_TYPES else 'company'
             organizer = None
             if organizer_id:
@@ -3927,6 +4047,7 @@ def hr_meeting_schedule(request):
                         timezone_name=tz_name,
                         meeting_link=parsed.get('meeting_link') or None,
                         location=parsed.get('location') or '',
+                        booked_by=company_user,
                     )
                     m.participants.set(valid_ids)
                     _seed_meeting_proposal(m, request.user)
@@ -4058,11 +4179,8 @@ def update_hr_meeting(request, meeting_id):
             # Updated meetings get fresh reminders. Everyone's accept/decline
             # was against the OLD slot, so it is cleared below too, or the
             # card would show agreement on a time nobody saw.
-            m.reminder_24h_sent_at = None
-            m.reminder_15m_sent_at = None
             m.response_status = 'pending'
-            dirty.extend(['scheduled_at', 'reminder_24h_sent_at', 'reminder_15m_sent_at',
-                          'response_status'])
+            dirty.extend(['scheduled_at', 'response_status'] + m.clear_reminders())
     if 'duration_minutes' in d:
         try:
             m.duration_minutes = max(5, min(480, int(d['duration_minutes'])))
@@ -4142,9 +4260,7 @@ def update_hr_meeting(request, meeting_id):
                                 'duration_minutes': m.duration_minutes,
                                 'visibility': m.visibility,
                                 'participant_count': len(new_participant_ids) if participants_changed else None,
-                                'fields_changed': sorted(set(dirty) - {'updated_at',
-                                                                      'reminder_24h_sent_at',
-                                                                      'reminder_15m_sent_at'})})
+                                'fields_changed': sorted(set(dirty) - {'updated_at', *HRMeeting.REMINDER_FIELDS})})
     _viewer = _hr_viewer_employee(request)
     return Response({'status': 'success', 'data': _serialize_hr_meeting(
         m, viewer_employee_id=_viewer.id if _viewer else None)})
@@ -4205,24 +4321,35 @@ def _hr_viewer_employee(request):
     ).first()
 
 
-def _send_hr_meeting_email(recipients, subject, body):
-    """Best-effort notification mail. Never raises — a dead SMTP box must not
-    fail the response the user just recorded."""
-    recipients = [e for e in dict.fromkeys(recipients or [])
-                  if e and not e.lower().endswith('.invalid')]
-    if not recipients:
+def _tell_other_side(m, *, as_role, action, responder_name, reason, became_final, actor_user_id):
+    """A reply on an HR meeting, told to the other side in the bell and by email.
+
+    A participant's reply goes to the organiser's side (`meeting_links.organiser_logins`: the login that booked it,
+    the organizer, or HR); the reply that made the meeting final says so and gives the link. The organiser's reply
+    goes to the attendees, except one that made the meeting final: the confirmation (`meeting_links.on_final`) has
+    told them already. It used to be one plain email to the organizer's work address, so an owner or admin booking as
+    HR, who has no HR record, heard of no reply at all."""
+    from core.notification_utils import notify_company_users, notify_employees
+    verb = {'accepted': 'accepted', 'rejected': 'declined',
+            'counter_proposed': 'suggested a new time for',
+            'withdrawn': 'withdrawn'}[action]
+    heading = f'Meeting {"declined" if action == "rejected" else action.replace("_", " ")}: {m.title}'
+    message = f'{responder_name} has {verb} the meeting "{m.title}". When: {_hr_meeting_when(m)}.'
+    if reason:
+        message += f' Reason: {reason}'
+    if as_role == 'organizer':
+        if became_final:
+            return
+        people = [u for u in meeting_links.attendee_logins(m, include_declined=True) if u.pk != actor_user_id]
+        notify_employees(people, title=heading, message=message, link=meeting_links.MEETINGS_PAGE,
+                         kind='hr_meeting_reply', email_subject=heading)
         return
-    try:
-        from django.core.mail import send_mail
-        send_mail(
-            subject=subject,
-            message=body,
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
-            recipient_list=recipients,
-            fail_silently=True,
-        )
-    except Exception:
-        logger.warning("HR meeting notification email failed for %s", recipients, exc_info=True)
+    message += meeting_links.organiser_note(m)
+    company_users, employees = meeting_links.organiser_logins(m)
+    notify_company_users(company_users, title=heading, message=message, link='/hr/dashboard?tab=meetings',
+                         kind='hr_meeting_reply')
+    notify_employees([u for u in employees if u.pk != actor_user_id], title=heading, message=message,
+                     link=meeting_links.MEETINGS_PAGE, kind='hr_meeting_reply', email_subject=heading)
 
 
 def _hr_meeting_when(m) -> str:
@@ -4437,13 +4564,13 @@ def _hr_respond(m, *, data, viewer_emp, is_hr, fallback_name, actor_cu):
                     # The time moved, so every prior answer is stale — reset the
                     # table and re-collect. Reminder flags reset too so the new
                     # slot gets its own 24h/15m nudges.
-                    m.reminder_24h_sent_at = None
-                    m.reminder_15m_sent_at = None
                     m.participant_rows.all().update(
                         status='pending', counter_proposed_time=None, responded_at=None)
-                    meeting_fields.extend(['scheduled_at', 'status',
-                                           'reminder_24h_sent_at', 'reminder_15m_sent_at'])
+                    meeting_fields.extend(['scheduled_at', 'status'] + m.clear_reminders())
                 m.save(update_fields=list(set(meeting_fields + ['response_status', 'updated_at'])))
+                if action == 'accepted' and before['response_status'] != 'accepted':
+                    # Everyone is in: the meeting's link, and everyone told (hr_agent.meeting_links).
+                    meeting_links.on_final(m)
             else:
                 participant_row.status = action
                 participant_row.reason = reason
@@ -4454,10 +4581,7 @@ def _hr_respond(m, *, data, viewer_emp, is_hr, fallback_name, actor_cu):
                 if action == 'counter_proposed':
                     m.scheduled_at = counter_time
                     m.status = 'rescheduled'
-                    m.reminder_24h_sent_at = None
-                    m.reminder_15m_sent_at = None
-                    m.save(update_fields=['scheduled_at', 'status', 'reminder_24h_sent_at',
-                                          'reminder_15m_sent_at', 'updated_at'])
+                    m.save(update_fields=['scheduled_at', 'status', 'updated_at'] + m.clear_reminders())
                 m.refresh_from_db()
                 m.update_response_status()
 
@@ -4479,20 +4603,9 @@ def _hr_respond(m, *, data, viewer_emp, is_hr, fallback_name, actor_cu):
     m.refresh_from_db()
 
     # --- Notify the other side ---------------------------------------------
-    verb = {'accepted': 'accepted', 'rejected': 'declined',
-            'counter_proposed': 'suggested a new time for',
-            'withdrawn': 'withdrawn'}[action]
-    when_text = _hr_meeting_when(m)
-    subject = f'Meeting {action.replace("_", " ")}: {m.title}'
-    body = f'{responder_name} has {verb} the meeting "{m.title}".\n\nWhen: {when_text}'
-    if reason:
-        body += f'\nReason: {reason}'
-    if as_role == 'organizer':
-        recipients = [row.employee.work_email
-                      for row in m.participant_rows.select_related('employee')]
-    else:
-        recipients = [m.organizer.work_email] if m.organizer_id else []
-    _send_hr_meeting_email(recipients, subject, body)
+    _tell_other_side(m, as_role=as_role, action=action, responder_name=responder_name, reason=reason,
+                     became_final=(before['response_status'] != 'accepted' and meeting_links.is_final(m)),
+                     actor_user_id=(viewer_emp.user_id if viewer_emp else None))
 
     _write_audit_log(
         actor_cu, company, f'hr_meeting.{action}', 'HRMeeting', m.id,

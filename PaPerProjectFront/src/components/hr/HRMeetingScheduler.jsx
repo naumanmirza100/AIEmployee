@@ -37,7 +37,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Loader2, Send, Calendar, MessageCircle, RefreshCw, Plus, Trash2,
   ChevronsLeft, ChevronsRight, Bot, Download, Pencil, X, ListChecks,
-  Sparkles, CheckCircle, XCircle, Clock, ArrowRightLeft,
+  Sparkles, CheckCircle, XCircle, Clock, ArrowRightLeft, Video,
 } from 'lucide-react';
 import hrAgentService from '@/services/hrAgentService';
 import MeetingDraftForm from '@/components/common/MeetingDraftForm';
@@ -1044,6 +1044,19 @@ export default function HRMeetingScheduler() {
                               </>
                             )}
                           </div>
+
+                          {/* The place to meet: made once everyone invited has accepted, and sent to them all
+                              (hr_agent/meeting_links.py), as in Project Manager. */}
+                          {m.response_status === 'accepted' && m.meeting_link && ['scheduled', 'rescheduled'].includes(m.status)
+                            && m.scheduled_at && new Date(m.scheduled_at).getTime() + (m.duration_minutes || 30) * 60000 > Date.now() && (
+                            <div data-testid="hr-meeting-link" className="flex flex-wrap items-center gap-2 pt-1">
+                              <a href={m.meeting_link} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 px-3 h-7 text-xs font-medium text-white">
+                                <Video className="h-3.5 w-3.5" /> Join meeting
+                              </a>
+                              <span className="text-[11px] text-white/55">Everyone has accepted. Join 5 minutes before the start.</span>
+                            </div>
+                          )}
 
                           {/* Post-meeting nudge */}
                           {isPast && m.status === 'scheduled' && (

@@ -125,25 +125,29 @@ class HRReminderTests(PauseTestCase):
         return HRMeeting.objects.get(pk=self.meeting.pk).reminder_24h_sent_at is not None
 
     def test_everyone_gets_it_by_default(self):
-        send_hr_meeting_reminders()
+        with self.captureOnCommitCallbacks(execute=True):     # emails go once the reminder is saved
+            send_hr_meeting_reminders()
         self.assertEqual(self.to(), ['dana@test.local', 'mo@test.local', 'olga@test.local'])
 
     def test_a_paused_person_does_not(self):
         self.pause(self.member)
-        send_hr_meeting_reminders()
+        with self.captureOnCommitCallbacks(execute=True):     # emails go once the reminder is saved
+            send_hr_meeting_reminders()
         self.assertEqual(self.to(), ['dana@test.local', 'olga@test.local'])
         self.assertTrue(self.stamped())
 
     def test_nor_someone_who_turned_reminders_off(self):
         self.turn_off(self.admin, 'meeting_reminders')
-        send_hr_meeting_reminders()
+        with self.captureOnCommitCallbacks(execute=True):     # emails go once the reminder is saved
+            send_hr_meeting_reminders()
         self.assertEqual(self.to(), ['mo@test.local', 'olga@test.local'])
 
     def test_when_nobody_wants_it_nothing_is_sent_and_it_is_not_tried_again(self):
         self.meeting.participants.through.objects.filter(employee=self.outsider).delete()
         self.pause(self.member)
         self.pause(self.admin)
-        send_hr_meeting_reminders()
+        with self.captureOnCommitCallbacks(execute=True):     # emails go once the reminder is saved
+            send_hr_meeting_reminders()
         self.assertEqual(mail.outbox, [])
         self.assertTrue(self.stamped())
 

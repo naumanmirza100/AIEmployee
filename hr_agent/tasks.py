@@ -892,110 +892,97 @@ def _ensure_scheduled(template, employee, when, *, context=None, related_documen
 
 
 # --------------------------------------------------------------------------
-# Meeting reminders — port of Frontline's send_meeting_reminders
+# Meeting reminders
 # --------------------------------------------------------------------------
+
+#: (stamp field, minutes before the start it is sent, how far either side of that it may go out). Beat runs the job
+#: every five minutes, so each window is wide enough to be hit once.
+HR_REMINDERS = (
+    ('reminder_24h_sent_at', 24 * 60, (3, 2)),
+    ('reminder_60m_sent_at', 60, (5, 5)),
+    ('reminder_15m_sent_at', 15, (5, 5)),
+    ('reminder_5m_sent_at', 5, (3, 3)),
+)
+
+
+def _hr_reminder_text(m, minutes_left):
+    """'"Exit interview" starts in 14 minutes (at Monday, October 26 at 03:00 PM Asia/Karachi).' plus the link line.
+    The minutes are the real ones: the job runs every five minutes, so a "15-minute" reminder can go out with 11 left
+    (seen in Project Manager's on 26 Oct 2026)."""
+    from core.scheduling import when_text
+    from hr_agent import meeting_links
+    left = _hr_time_left(minutes_left)
+    text = f'"{m.title}" starts {left} (at {when_text(m.scheduled_at, m.timezone_name)}).'
+    return text + meeting_links.join_note(m, last_reminder=minutes_left <= 8)
+
+
+def _hr_time_left(minutes_left):
+    if minutes_left >= 120:
+        return f'in {round(minutes_left / 60)} hours'
+    n = max(1, round(minutes_left))
+    return f'in {n} minute{"" if n == 1 else "s"}'
+
 
 @shared_task(name='hr_agent.tasks.send_hr_meeting_reminders')
 def send_hr_meeting_reminders():
-    """24h + 15min reminder emails for upcoming HR meetings.
+    """Reminders before an HR meeting: a day, an hour, 15 minutes and 5 minutes before, each saying how many minutes
+    are really left, to every attendee who hasn't declined and to the organiser's side, in the bell and by email.
 
-    Mirrors `Frontline_agent.tasks.send_meeting_reminders` shape. Run every 5
-    minutes via Beat. Asymmetric -3m..+2m window around each anchor avoids
-    missed reminders on a punctual cron and matches Frontline's convention.
+    Like Project Manager's (project_manager_agent/tasks.py). The last one goes only to a meeting everyone has
+    accepted, with "Join now" and its link; the others carry the link once there is one. A meeting everyone declined,
+    withdrawn or cancelled gets none: it used to be reminded, and so were the people who had declined. Runs every
+    five minutes via Beat.
     """
     from datetime import timedelta as _td
-    from django.core.mail import send_mail
+
+    from core.notification_settings import address_wants_email
+    from core.notification_utils import notify_company_users, notify_employees
+    from hr_agent import meeting_links
     from hr_agent.models import HRMeeting
 
     now = timezone.now()
-    results = {'r24h_sent': 0, 'r15m_sent': 0, 'failed': 0}
-
-    def _recipients(m: 'HRMeeting'):
-        emails = set()
-        if m.organizer and m.organizer.work_email:
-            emails.add(m.organizer.work_email)
-        for p in m.participants.all():
-            if p.work_email:
-                emails.add(p.work_email)
-        return list(emails)
-
-    def _send(m, label):
-        subject = f"Reminder ({label}): {m.title}"
-        if m.scheduled_at:
-            tz_name = (m.timezone_name or '').strip()
-            try:
-                from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-                local_dt = m.scheduled_at.astimezone(ZoneInfo(tz_name)) if tz_name else m.scheduled_at
-                when = local_dt.strftime('%Y-%m-%d %H:%M') + (f' {tz_name}' if tz_name else ' UTC')
-            except Exception:
-                when = m.scheduled_at.isoformat() + (f' ({tz_name})' if tz_name else '')
-        else:
-            when = '(unknown)'
-        parts = [
-            f"This is a reminder that '{m.title}' is scheduled for {when}.",
-            f"Type: {m.get_meeting_type_display()}.",
-            f"Duration: {m.duration_minutes} minutes.",
-        ]
-        if m.meeting_link:
-            parts.append(f"Meeting link: {m.meeting_link}")
-        if m.location:
-            parts.append(f"Location: {m.location}")
-        if m.description:
-            parts.append(""); parts.append(m.description)
-        recipients = _recipients(m)
-        if not recipients:
-            return False
-        # Anyone who is also a dashboard login can pause emails or turn reminders
-        # off (core.notification_settings). When that leaves nobody, the reminder
-        # counts as dealt with, so it is not looked at again every five minutes.
-        from core.notification_settings import address_wants_email
-        recipients = [r for r in recipients if address_wants_email(m.company_id, r, 'meeting_reminders')]
-        if not recipients:
-            return True
-        try:
-            send_mail(
-                subject=subject, message="\n\n".join(parts),
-                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
-                recipient_list=recipients, fail_silently=False,
-            )
-            return True
-        except Exception as exc:
-            logger.warning("HR meeting reminder send failed for meeting %s: %s", m.id, exc)
-            return False
+    results = {'sent': 0, 'failed': 0}
 
     from core.modules import active_company_ids
     paying = active_company_ids('hr_agent')
 
-    r24_lo = now + _td(hours=24) - _td(minutes=3)
-    r24_hi = now + _td(hours=24) + _td(minutes=2)
-    for m in HRMeeting.objects.filter(
-        company_id__in=paying,
-        status__in=['scheduled', 'rescheduled'],
-        scheduled_at__gte=r24_lo, scheduled_at__lte=r24_hi,
-        reminder_24h_sent_at__isnull=True,
-    ):
-        if _send(m, '24 hours'):
-            m.reminder_24h_sent_at = now
-            m.save(update_fields=['reminder_24h_sent_at', 'updated_at'])
-            results['r24h_sent'] += 1
-        else:
-            results['failed'] += 1
+    for field, minutes, (early, late) in HR_REMINDERS:
+        lo, hi = now + _td(minutes=minutes - early), now + _td(minutes=minutes + late)
+        due = (HRMeeting.objects
+               .filter(company_id__in=paying, status__in=['scheduled', 'rescheduled'],
+                       scheduled_at__gte=lo, scheduled_at__lte=hi, **{f'{field}__isnull': True})
+               .exclude(response_status__in=['rejected', 'withdrawn'])
+               .select_related('organizer', 'booked_by'))
+        if field == 'reminder_5m_sent_at':
+            due = due.filter(response_status='accepted').exclude(meeting_link__isnull=True).exclude(meeting_link='')
+        for m in due:
+            try:
+                minutes_left = (m.scheduled_at - now).total_seconds() / 60
+                text = _hr_reminder_text(m, minutes_left)
+                heading = f'Meeting reminder: {m.title}'
+                subject = f'Reminder: {m.title} starts {_hr_time_left(minutes_left)}'
+                company_users, employees = meeting_links.organiser_logins(m)
+                # Everyone gets it in the bell; by email unless the dashboard login with their address paused
+                # emails or turned meeting reminders off (core.notification_settings).
+                people = meeting_links.attendee_logins(m) + employees
+                by_email = [u for u in people if address_wants_email(m.company_id, u.email, 'meeting_reminders')]
+                notify_employees(by_email, title=heading, message=text, link=meeting_links.MEETINGS_PAGE,
+                                 kind='hr_meeting_reminder', email_subject=subject)
+                notify_employees([u for u in people if u not in by_email], title=heading, message=text,
+                                 link=meeting_links.MEETINGS_PAGE, kind='hr_meeting_reminder')
+                notify_company_users(company_users, title=heading, message=text, link='/hr/dashboard?tab=meetings',
+                                     kind='hr_meeting_reminder')
+                setattr(m, field, now)
+                # A later reminder already passed (the meeting was booked an hour before it starts) isn't owed.
+                for earlier_field, earlier_minutes, _ in HR_REMINDERS:
+                    if earlier_minutes > minutes and getattr(m, earlier_field) is None:
+                        setattr(m, earlier_field, now)
+                m.save(update_fields=list(HRMeeting.REMINDER_FIELDS) + ['updated_at'])
+                results['sent'] += 1
+            except Exception as exc:
+                logger.warning("HR meeting reminder failed for meeting %s: %s", m.id, exc)
+                results['failed'] += 1
 
-    r15_lo = now + _td(minutes=12)
-    r15_hi = now + _td(minutes=17)
-    for m in HRMeeting.objects.filter(
-        company_id__in=paying,
-        status__in=['scheduled', 'rescheduled'],
-        scheduled_at__gte=r15_lo, scheduled_at__lte=r15_hi,
-        reminder_15m_sent_at__isnull=True,
-    ):
-        if _send(m, '15 minutes'):
-            m.reminder_15m_sent_at = now
-            m.save(update_fields=['reminder_15m_sent_at', 'updated_at'])
-            results['r15m_sent'] += 1
-        else:
-            results['failed'] += 1
-
-    if any(results[k] for k in ('r24h_sent', 'r15m_sent', 'failed')):
+    if results['sent'] or results['failed']:
         logger.info("send_hr_meeting_reminders: %s", results)
     return results

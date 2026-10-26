@@ -65,14 +65,16 @@ TOPICS = (
           'Before a meeting in Project Manager, HR or Frontline that you organise or are in, and when '
           "invitees to yours haven't replied. Project Manager's are always in the bell; the bell is how "
           'a reminder is sent only once.',
-          ('project_manager_agent', 'hr_agent', 'frontline_agent'), email_default=True, in_app_locked=True),
+          ('project_manager_agent', 'hr_agent', 'frontline_agent'), kinds=('hr_meeting_reminder',),
+          email_default=True, in_app_locked=True),
     Topic('tasks_assigned', 'Tasks assigned to you',
           'Someone gives you a task in Project Manager or from an executive meeting, adds to one of '
           'yours, or takes one away.',
           ('project_manager_agent', 'exec_meeting_agent'), email_default=True, in_app=False),
     Topic('meeting_replies', 'Replies to meetings you organise',
-          'An invitee accepts, declines or suggests another time, in Project Manager or Executive Meeting.',
-          ('project_manager_agent', 'exec_meeting_agent'), kinds=('pm_meeting_reply', 'exec_meeting_reply'),
+          'An invitee accepts, declines or suggests another time, in Project Manager, HR or Executive Meeting.',
+          ('project_manager_agent', 'hr_agent', 'exec_meeting_agent'),
+          kinds=('pm_meeting_reply', 'hr_meeting_reply', 'exec_meeting_reply'),
           email_default=True),
     Topic('leave_requests', 'Leave requests waiting for a decision',
           "Someone you approve leave for, or anyone's if you run HR, asks for time off.",
