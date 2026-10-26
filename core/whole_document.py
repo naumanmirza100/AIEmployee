@@ -117,6 +117,9 @@ def _budget(company_id, agent_key_name, max_output):
     return max(0, budget)
 
 
+_PAGE_MARK = re.compile(r'\x0c?__PAGE_(\d+)__\n?')
+
+
 def _documents(document_model, company_id, citations, budget):
     """The documents the search found, most relevant first, as many as fit in `budget`. None when the most relevant
     one does not fit: a "complete" list from the lesser documents would be wrong."""
@@ -133,6 +136,8 @@ def _documents(document_model, company_id, citations, budget):
     for position, doc_id in enumerate(ids):
         doc = rows.get(doc_id)
         text = (getattr(doc, 'document_content', '') or '').strip() if doc else ''
+        # The extractor's page marks ("\x0c__PAGE_2__") were quoted back in answers: "page 2 (__PAGE_2__)".
+        text = _PAGE_MARK.sub(lambda m: f'[Page {m.group(1)}]\n', text)
         size = estimate_tokens(text)
         if not text or used + size > budget:
             if position == 0:
@@ -156,7 +161,7 @@ def build_prompt(question, documents, preamble=''):
         "table), combine them into one list and leave none out. Keep each item to a line or two so the whole list "
         "fits, and group the items the way the documents group them.\n",
         "4. Open with one sentence saying what the list is. End with where it comes from: the document, and the "
-        "pages when the text marks them (__PAGE_n__ starts page n).\n",
+        "pages when the text marks them (a line \"[Page n]\" starts page n; write \"page n\").\n",
         "5. If the documents hold no such list, say so plainly instead of guessing.\n",
         "6. NO preamble or meta-commentary such as \"Based on the documents\".\n\n",
     ]
