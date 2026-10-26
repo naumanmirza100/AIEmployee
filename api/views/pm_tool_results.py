@@ -164,3 +164,13 @@ def project_record(request, project_id):
     if project is None:
         return Response(NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
     return Response({'status': 'success', 'data': record.build(project)})
+
+
+@api_view(['GET'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([PMCRUDThrottle])
+def company_record(request):
+    """All projects at once: Meeting Notes → Project record with "All projects" chosen. What was added, changed,
+    removed and confirmed across the company, day by day, then where each project stands. No AI call."""
+    return Response({'status': 'success', 'data': record.build_company(request.user)})

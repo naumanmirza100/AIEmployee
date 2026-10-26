@@ -449,6 +449,9 @@ export const getSavedMeetingNotes = async (projectId, id = null) =>
 export const getProjectRecord = async (projectId) =>
   companyApi.get(`/project-manager/projects/${projectId}/record`);
 
+/** The record of all projects at once: Meeting Notes → Project record with "All projects" chosen. */
+export const getCompanyRecord = async () => companyApi.get('/project-manager/record');
+
 /** The project's latest schedule plan, or null. */
 export const getSavedSchedulePlan = async (projectId) =>
   companyApi.get(`/project-manager/projects/${projectId}/schedule-plan`);
@@ -757,6 +760,7 @@ export default {
   tasksFromSuggestions,
   getSavedMeetingNotes,
   getProjectRecord,
+  getCompanyRecord,
   getSavedSchedulePlan,
   downloadSchedulePlanIcs,
   scanNotifications,

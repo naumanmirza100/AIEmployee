@@ -87,6 +87,90 @@ class ProjectRecordTests(PMTestCase):
         self.assertEqual(code, 404)
 
 
+class CompanyRecordTests(PMTestCase):
+    """"All projects" in the box: what was added, changed, removed and confirmed across every project, each line
+    under its project, with the team's and the meetings' news, and where each project stands. Asked for on
+    26 Oct 2026."""
+
+    def setUp(self):
+        super().setUp()
+        from hr_agent.models import Employee, HRAuditLog
+        from project_manager_agent.models import MeetingParticipant, MeetingResponse, ScheduledMeeting
+        actor = pm_services.DashboardActor(self.dash)
+        pm_services.create_task(actor, {'project_id': self.project.id, 'title': 'Design', 'assignee_id': self.dev.id,
+                                        'due_date': self.inside})
+        late = pm_services.create_task(actor, {'project_id': self.colleague_project.id, 'title': 'Brochure',
+                                               'assignee_id': self.pm.id})
+        Task.objects.filter(pk=late.pk).update(due_date=timezone.now() - timedelta(days=2))
+        old = pm_services.create_project(actor, {'name': 'Old site'})
+        pm_services.delete_project(actor, old['id'] if isinstance(old, dict) else old.id)
+        pm_services.create_task(pm_services.DashboardActor(self.rival_dash),
+                                {'project_id': self.rival_project.id, 'title': 'Their secret task'})
+        meeting = ScheduledMeeting.objects.create(
+            organizer=self.dash, invitee=self.dev, title='Kick-off', duration_minutes=30, timezone_name='Asia/Karachi',
+            proposed_time=timezone.now() + timedelta(days=2), status='accepted')
+        MeetingParticipant.objects.create(meeting=meeting, user=self.dev, status='accepted')
+        MeetingResponse.objects.create(meeting=meeting, responded_by='invitee', action='accepted', responder=self.dev)
+        gone = self.employee('gus')
+        record = Employee.objects.get(user=gone)            # every employee login has an HR record
+        HRAuditLog.objects.create(company=self.company, actor=self.dash, action='employee.deactivate',
+                                  target_type='employee', target_id=record.id, diff={})
+        self.record = project_record.build_company(self.dash)
+        self.groups = {g['label']: [i['text'] for i in g['items']]
+                       for day in self.record['timeline'] for g in day['groups']}
+        self.everything = '\n'.join(t for texts in self.groups.values() for t in texts)
+
+    def test_each_line_is_under_its_project_and_the_company_news_has_its_own(self):
+        self.assertIn('1 task added: “Design” — assigned to Dev Tester (1)', self.groups['Website rebuild'])
+        self.assertTrue(any(t.startswith('1 task added: “Brochure”') for t in self.groups['Colleague project']))
+        self.assertIn('Project removed: “Old site” (by Dana Dash)', self.groups['Projects'])
+        self.assertTrue(any(t.startswith('Joined the team: ') and 'Dev Tester (Team Member)' in t
+                            for t in self.groups['Team']), self.groups['Team'])
+        self.assertTrue(any(t.startswith('Confirmed, everyone accepted: “Kick-off”') for t in self.groups['Meetings']),
+                        self.groups['Meetings'])
+        self.assertTrue(any(t.startswith('1 meeting booked: “Kick-off”') and 'with Dev Tester' in t
+                            for t in self.groups['Meetings']))
+        self.assertIn('Left the team: Gus Tester', self.groups['Team'])
+
+    def test_someone_who_left_with_open_work_is_named(self):
+        from django.contrib.auth.models import User
+        User.objects.filter(pk=self.pm.pk).update(is_active=False)          # Pat has "Brochure", late
+        record = project_record.build_company(self.dash)
+        self.assertTrue(next(m for m in record['team'] if m['name'] == 'Pat Tester')['left'])
+        self.assertIn('Pat Tester has left the team but still has 1 open task: hand them over (Users → their row).',
+                      record['next_steps'])
+
+    def test_another_companys_work_never_shows(self):
+        self.assertNotIn('Their secret task', self.everything)
+        self.assertNotIn('Their project', [p['name'] for p in self.record['projects']])
+        self.assertNotIn('Their project', self.groups)
+
+    def test_where_every_project_stands_late_first(self):
+        names = [p['name'] for p in self.record['projects']]
+        self.assertEqual(names[0], 'Colleague project')           # the one with late work
+        self.assertEqual(sorted(names), ['Colleague project', 'Website rebuild'])
+        overview = self.record['overview']
+        self.assertEqual((overview['projects'], overview['tasks'], overview['late']), (2, 2, 1))
+        self.assertEqual([(t['title'], t['project']) for t in self.record['due']['late']],
+                         [('Brochure', 'Colleague project')])
+        self.assertTrue(any(s.startswith('Colleague project: 1 task late') for s in self.record['next_steps']),
+                        self.record['next_steps'])
+        team = {m['name']: (m['open'], m['projects']) for m in self.record['team']}
+        self.assertEqual(team['Dev Tester'], (1, 1))
+        self.assertEqual(team['Pat Tester'], (1, 1))
+
+    def test_the_newest_day_comes_first(self):
+        dates = [day['date'] for day in self.record['timeline']]
+        self.assertEqual(dates, sorted(dates, reverse=True))
+
+    def test_the_endpoint(self):
+        code, body = self.call(pm_tool_results.company_record, self.dash, method='get')
+        self.assertEqual(code, 200, body)
+        self.assertEqual(body['data']['scope'], 'all')
+        _, theirs = self.call(pm_tool_results.company_record, self.rival_dash, method='get')
+        self.assertEqual([p['name'] for p in theirs['data']['projects']], ['Their project'])
+
+
 class UntitledMeetingTests(PMTestCase):
 
     def test_notes_with_no_topic_are_a_meeting_not_meeting_meeting(self):

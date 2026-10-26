@@ -108,12 +108,17 @@ export default function MeetingNotesAgent() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        <Select value={selectedProject || 'none'} onValueChange={(v) => setSelectedProject(v === 'none' ? null : v)}>
+        {/* No project chosen: "All projects" on the record tab (the record of every project at once), "No Project"
+            when analysing notes. */}
+        <Select value={selectedProject || (tab === 'record' ? 'all' : 'none')}
+                onValueChange={(v) => setSelectedProject(v === 'none' || v === 'all' ? null : v)}>
           <SelectTrigger className="h-10 sm:w-80 bg-white/[0.02] border-white/[0.08] text-white text-left [&>span]:line-clamp-1" data-testid="meeting-notes-project">
-            <SelectValue placeholder={tab === 'record' ? 'Choose a project' : 'Link to Project (optional)'} />
+            <SelectValue placeholder={tab === 'record' ? 'All projects' : 'Link to Project (optional)'} />
           </SelectTrigger>
           <SelectContent className="bg-white/[0.02] border-white/[0.08] z-50">
-            <SelectItem value="none">{tab === 'record' ? 'Choose a project' : 'No Project'}</SelectItem>
+            {tab === 'record'
+              ? <SelectItem value="all">All projects</SelectItem>
+              : <SelectItem value="none">No Project</SelectItem>}
             {projects.map((p) => (
               <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
             ))}
@@ -121,7 +126,7 @@ export default function MeetingNotesAgent() {
         </Select>
       </div>
 
-      {tab === 'record' ? <ProjectRecordView projectId={selectedProject} /> : (
+      {tab === 'record' ? <ProjectRecordView projectId={selectedProject} onPickProject={(id) => setSelectedProject(String(id))} /> : (
     <div className="space-y-6">
       {/* Controls */}
       <Card className="bg-black/30 border-white/[0.06]">
