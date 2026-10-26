@@ -108,7 +108,12 @@ export const askHRKnowledgeStream = async (question, chatHistory = [], callbacks
     throw err;
   }
   if (!response.ok) {
-    const errMsg = `HTTP ${response.status}`;
+    // The server says why (no AI key, tokens used up, signed out); "HTTP 400" told nobody anything.
+    let errMsg = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      errMsg = body?.message || body?.detail || errMsg;
+    } catch { /* not JSON */ }
     onError?.(new Error(errMsg));
     throw new Error(errMsg);
   }
@@ -1172,6 +1177,13 @@ export const listLeaveRequests = async (params = {}) => {
   }
 };
 
+// ---------- Leave allowances ----------
+/** Each leave type's days a year, and whether this login may change them. */
+export const getLeaveAllowances = async () => companyApi.get('/hr/leave-allowances');
+
+/** Save the days a year ({leave_type: days}) and set everyone's balance for this year to them. */
+export const applyLeaveAllowances = async (allowances) => companyApi.post('/hr/leave-allowances', { allowances });
+
 // ---------- Holidays ----------
 export const listHolidays = async (year = null) => {
   try {
@@ -1416,6 +1428,8 @@ export default {
   withdrawLeaveRequest,
   listLeaveRequests,
   getHREmployeeDetail,
+  getLeaveAllowances,
+  applyLeaveAllowances,
   listHolidays,
   createHoliday,
   deleteHoliday,

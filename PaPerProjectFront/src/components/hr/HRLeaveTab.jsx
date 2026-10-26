@@ -33,6 +33,7 @@ import {
 import hrAgentService from '@/services/hrAgentService';
 import { companyAuthService } from '@/services';
 import HRHolidaysCard from './HRHolidaysCard';
+import HRLeaveAllowancesCard from './HRLeaveAllowancesCard';
 
 const STATUS_BADGE = {
   pending: 'bg-amber-500/10 text-amber-300 border-amber-400/30',
@@ -626,6 +627,7 @@ export default function HRLeaveTab() {
       </Dialog>
 
       {/* The days the leave count above skips. There was no screen for them. */}
+      <HRLeaveAllowancesCard />
       <HRHolidaysCard />
     </div>
   );

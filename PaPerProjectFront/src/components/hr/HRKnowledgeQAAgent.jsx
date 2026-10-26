@@ -234,6 +234,7 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
               threshold: meta.threshold,
               citations: meta.citations || [],
               cache_hit: !!meta.cache_hit,
+              redirect: meta.redirect || null,
             },
           }));
         },
@@ -259,6 +260,7 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
           best_score: metaEvent?.best_score,
           threshold: metaEvent?.threshold,
           citations: metaEvent?.citations || [],
+          redirect: metaEvent?.redirect || null,
           cache_hit: !!(doneEvent?.cache_hit),
           responseTimeMs: Math.round(endedAt - startedAt),
           timing_ms: doneEvent?.timing_ms || null,
@@ -545,16 +547,17 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
                             <div className="mt-3 pt-2 border-t border-white/10 text-xs text-white/60 space-y-1">
                               <div className="font-medium">Sources</div>
                               <ol className="list-decimal list-inside space-y-0.5">
-                                {msg.responseData.citations.map((c, ci) => (
-                                  <li key={ci}>
-                                    <span className="font-medium text-white/80">{c.title}</span>
-                                    {c.score != null && <span className="text-white/40"> · score {c.score}</span>}
+                                {/* Each document and page once: the same handbook was listed six times, with search scores. */}
+                                {[...new Set(msg.responseData.citations.map((c) => c.title))].map((title) => (
+                                  <li key={title}>
+                                    <span className="font-medium text-white/80">{title}</span>
                                   </li>
                                 ))}
                               </ol>
                             </div>
                           )}
-                          {msg.responseData?.has_verified_info === false && (
+                          {/* Not under "ask for leave there" / "book meetings there": nothing was searched for. */}
+                          {msg.responseData?.has_verified_info === false && !msg.responseData?.redirect && (
                             <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/[0.06] p-3 space-y-2.5">
                               <div className="flex items-center gap-1.5 text-amber-300 text-xs font-semibold">
                                 <AlertCircle className="h-3.5 w-3.5" />
@@ -603,55 +606,18 @@ const HRKnowledgeQAAgent = ({ onGoToDocuments } = {}) => {
                                     <Upload className="h-3 w-3" />
                                     Upload HR documents
                                   </Button>
-                                  <span className="text-[11px] text-white/40">
-                                    Your question will still be routed to HR for follow-up.
-                                  </span>
                                 </div>
                               )}
                             </div>
                           )}
                           {(() => {
+                            // How long it took, and nothing else: the search's inner timings and path
+                            // ("faiss(store_ready=115ms)|hits=6|…") were for the developers and are in the server log.
                             const t = msg.responseData?.responseTimeMs ?? msg.responseTimeMs;
                             if (typeof t !== 'number') return null;
-                            const tm = msg.responseData?.timing_ms;
-                            const parts = [];
-                            if (tm && !tm.cache) {
-                              if (typeof tm.retrieval === 'number') parts.push(`retrieval ${(tm.retrieval / 1000).toFixed(1)}s`);
-                              if (typeof tm.llm === 'number') parts.push(`llm ${(tm.llm / 1000).toFixed(1)}s`);
-                            }
-                            const rb = tm?.retrieval_breakdown;
-                            const rp = tm?.retrieval_path;
-                            const rbParts = [];
-                            if (rb && (tm?.retrieval || 0) > 1000) {
-                              const keys = ['query_embed', 'json_scan', 'keyword', 'chunk_fetch', 'output_build'];
-                              for (const k of keys) {
-                                if (typeof rb[k] === 'number' && rb[k] > 50) {
-                                  rbParts.push(`${k}=${(rb[k] / 1000).toFixed(1)}s`);
-                                }
-                              }
-                              if (typeof rb.json_scan_chunks === 'number' && rb.json_scan_chunks > 0) {
-                                rbParts.push(`scanned=${rb.json_scan_chunks}`);
-                              }
-                            }
                             return (
-                              <div className="mt-2 text-[10px] text-white/40 space-y-0.5">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <span>⏱ Answered in {(t / 1000).toFixed(2)}s</span>
-                                  {parts.length > 0 && (
-                                    <span className="text-white/30">({parts.join(' · ')})</span>
-                                  )}
-                                  {msg.responseData?.cache_hit && (
-                                    <span className="px-1.5 py-[1px] rounded bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 text-[9px] font-medium">
-                                      cached
-                                    </span>
-                                  )}
-                                </div>
-                                {(rbParts.length > 0 || rp) && (
-                                  <div className="text-[9px] text-white/30 font-mono">
-                                    {rp && <span>path: {rp} </span>}
-                                    {rbParts.join(' · ')}
-                                  </div>
-                                )}
+                              <div className="mt-2 text-[10px] text-white/40">
+                                <span>⏱ Answered in {(t / 1000).toFixed(1)}s</span>
                               </div>
                             );
                           })()}

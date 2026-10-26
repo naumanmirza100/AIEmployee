@@ -168,10 +168,14 @@ def build_prompt(question, documents, preamble=''):
     return ''.join(parts)
 
 
-def plan(question, citations, *, company_id, agent_key_name, document_model, citation_type, preamble=''):
-    """The whole-document call to make for this question, or None to answer from the passages."""
+def plan(question, citations, *, company_id, agent_key_name, document_model, citation_type, preamble='',
+         wants_everything=None):
+    """The whole-document call to make for this question, or None to answer from the passages. `wants_everything` is
+    the caller's AI reading of whether a complete list is wanted (HR: core/HR_agent/intent.py); without one, the word
+    lists decide, which missed "saari leave types batao" and fired on "tell me all about maternity leave"."""
     try:
-        if not getattr(settings, 'KQA_WHOLE_DOCUMENT', True) or not asks_for_everything(question):
+        wanted = asks_for_everything(question) if wants_everything is None else wants_everything
+        if not getattr(settings, 'KQA_WHOLE_DOCUMENT', True) or not wanted:
             return None
         max_output = int(getattr(settings, 'KQA_WHOLE_DOCUMENT_MAX_OUTPUT_TOKENS', 4_000))
         budget = _budget(company_id, agent_key_name, max_output)

@@ -121,7 +121,12 @@ const HRDashboard = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const validTabValues = React.useMemo(() => HR_TAB_ITEMS.map((t) => t.value), []);
   const rawTab = searchParams.get('tab');
-  const activeTab = validTabValues.includes(rawTab) ? rawTab : 'overview';
+  // People opens on Employees and Knowledge › Documents on Documents: those sub-tabs only held a card with a button
+  // to the full view (and a developer's note), one more click every time.
+  const rawSub = searchParams.get('sub');
+  const shownTab = rawTab === 'people' && (!rawSub || rawSub === 'employees') ? 'employees'
+    : rawTab === 'knowledge' && rawSub === 'documents' ? 'documents' : rawTab;
+  const activeTab = validTabValues.includes(shownTab) ? shownTab : 'overview';
   const setActiveTab = React.useCallback((v) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -935,13 +940,13 @@ const HRDashboard = () => {
                   <AgentTile
                     icon={Users} accent={STAT_PALETTE.emerald}
                     title="Employees"
-                    desc="Browse your company's employees — auto-synced from auth.User via UserProfile."
+                    desc="Everyone with an employee login, added under Dashboard › Users or from Recruitment."
                     onClick={() => setActiveTab('employees')}
                   />
                   <AgentTile
                     icon={FileText} accent={STAT_PALETTE.pink}
                     title="Documents"
-                    desc="Handbook, policies, contracts, payroll. Confidentiality-gated retrieval."
+                    desc="Handbook, policies, contracts, payroll. Each one says who may read it."
                     onClick={() => setActiveTab('documents')}
                   />
                   <AgentTile
@@ -982,7 +987,7 @@ const HRDashboard = () => {
                         <Users className="h-5 w-5 text-violet-400" /> Employees
                         <InfoHint {...HR_HINTS.hrEmpTable} />
                       </CardTitle>
-                      <CardDescription>Auto-synced from your company's auth.User accounts.</CardDescription>
+                      <CardDescription>Everyone added under Dashboard › Users (one by one or from Excel), and new hires from Recruitment.</CardDescription>
                     </div>
                     <div className="flex flex-wrap gap-2 items-center">
                       <div className="flex items-center gap-1.5" data-tour-hr-emp="filter">
@@ -1024,7 +1029,7 @@ const HRDashboard = () => {
                       <Spinner />
                     ) : employees.length === 0 ? (
                       <EmptyState icon={Users} title="No employees yet"
-                        sub="When new auth.Users are added under your company, they'll appear here automatically." />
+                        sub="Add people under Dashboard › Users, one by one or from an Excel sheet; they appear here straight away." />
                     ) : (
                       <div data-tour-hr-emp="table" className="rounded-xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
                         <div className="overflow-x-auto">
@@ -1308,7 +1313,7 @@ const HRDashboard = () => {
                         <FileText className="h-5 w-5 text-violet-400" /> HR Documents
                         <InfoHint {...HR_HINTS.hrDocsGrid} />
                       </CardTitle>
-                      <CardDescription>Handbook, policies, contracts, payroll. Confidentiality-gated.</CardDescription>
+                      <CardDescription>Handbook, policies, contracts, payroll. Each one says who may read it.</CardDescription>
                     </div>
                     <div className="flex items-center gap-2" data-tour-hr-docs="upload">
                       <Button onClick={() => setUploadOpen(true)}>
@@ -1485,7 +1490,7 @@ const HRDashboard = () => {
                       <div>
                         <Label htmlFor="hr-upload-file">File</Label>
                         <Input id="hr-upload-file" type="file"
-                          accept=".pdf,.docx,.doc,.txt,.md,.html,.htm"
+                          accept=".pdf,.docx,.txt,.md,.html,.htm"
                           onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
                       </div>
                       <div>

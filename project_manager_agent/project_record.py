@@ -557,7 +557,7 @@ def build_company(company_user, today=None):
     no_owner = next((m for m in team_rows if m['name'] == 'No owner' and m['open']), None)
     if no_owner:
         next_steps.append(f'{_plural(no_owner["open"], "open task")} in {_plural(no_owner["projects"], "project")} '
-                          'have no owner yet.')
+                          f'{"has" if no_owner["open"] == 1 else "have"} no owner yet.')
     owners = [m for m in team_rows if m['name'] != 'No owner']
     average = sum(m['open'] for m in owners) / len(owners) if owners else 0
     loaded = [m for m in owners if m['open'] >= 6 and m['open'] >= 2 * average]

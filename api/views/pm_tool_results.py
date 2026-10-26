@@ -163,7 +163,17 @@ def project_record(request, project_id):
     project = _project(request, project_id)
     if project is None:
         return Response(NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
-    return Response({'status': 'success', 'data': record.build(project)})
+    with _company_clock(request):
+        return Response({'status': 'success', 'data': record.build(project)})
+
+
+def _company_clock(request):
+    """The record's days on the company's own clock (Company profile → Time zone), UTC until it is set: something done
+    at 1 am in Lahore was listed under the day before."""
+    from django.utils import timezone as dj_timezone
+    from core.scheduling import zone_name
+    company = getattr(request.user, 'company', None)
+    return dj_timezone.override(zone_name(getattr(company, 'timezone_name', '')))
 
 
 @api_view(['GET'])
@@ -173,4 +183,5 @@ def project_record(request, project_id):
 def company_record(request):
     """All projects at once: Meeting Notes → Project record with "All projects" chosen. What was added, changed,
     removed and confirmed across the company, day by day, then where each project stands. No AI call."""
-    return Response({'status': 'success', 'data': record.build_company(request.user)})
+    with _company_clock(request):
+        return Response({'status': 'success', 'data': record.build_company(request.user)})

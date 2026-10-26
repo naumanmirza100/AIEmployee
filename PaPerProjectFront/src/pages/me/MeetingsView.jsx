@@ -224,7 +224,7 @@ export default function MeetingsView() {
                         <Video className="h-3 w-3" /> Join
                       </a>
                     )}
-                    {m.meeting_link && m.source === 'pm' && (
+                    {m.meeting_link && (m.source === 'pm' || (m.source === 'hr' && m.status === 'accepted')) && (
                       <span className="text-white/40">Please join 5 minutes before the start.</span>
                     )}
                   </div>

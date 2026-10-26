@@ -85,7 +85,8 @@ class HiredToHRTests(TestCase):
         workflow = HRWorkflow.objects.create(company=self.company, name=spec['name'],
                                              trigger_conditions=spec['trigger_conditions'],
                                              steps=spec['steps'], is_active=True)
-        code, body = self.hire()
+        with self.captureOnCommitCallbacks(execute=True):      # it starts once the new starter is saved for good
+            code, body = self.hire()
         self.assertEqual(body['data']['onboarding_workflows'], ['New hire onboarding'])
         employee = Employee.objects.get(full_name='Cara Candidate')
         self.assertTrue(HRWorkflowExecution.objects.filter(workflow=workflow, employee_id=employee.id).exists())

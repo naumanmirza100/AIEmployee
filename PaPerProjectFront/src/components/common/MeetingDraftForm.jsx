@@ -90,7 +90,8 @@ const MeetingDraftForm = ({ draft = {}, missing = [], options = {}, note, onConf
     if (!ready) return;
     onConfirm({
       ...draft,
-      title: title.trim() || null,
+      // The title the summary above shows is the one booked (HR's server used to say "HR meeting").
+      title: title.trim() || `Meeting with ${nameOf(attendeeIds[0])}`,
       invitee_ids: attendeeIds.map(Number),
       invitee_names: attendeeIds.map(nameOf),
       duration_minutes: Number(duration),

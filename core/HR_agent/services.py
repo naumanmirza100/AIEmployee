@@ -367,10 +367,13 @@ class HRKnowledgeService:
         # whose heading matches even if the body text doesn't.
         _t = _time.time()
         from django.db.models import Q as _Q
+        # The question itself: with a conversation in front ("Previous conversation: ..."), this never matched.
+        from core.whole_document import current_question as _current_question
+        literal = _current_question(query)[:80]
         keyword_hits: list[int] = list(
             chunks_qs.filter(
-                _Q(chunk_text__icontains=query[:80])
-                | _Q(section_heading__icontains=query[:80])
+                _Q(chunk_text__icontains=literal)
+                | _Q(section_heading__icontains=literal)
             ).values_list('id', flat=True)[:50]
         )
         self.last_retrieval_timing['keyword'] = int((_time.time() - _t) * 1000)
@@ -421,8 +424,9 @@ class HRKnowledgeService:
             out.append({
                 'chunk_id': c.id,
                 'document_id': c.document_id,
+                # No chunk numbers: the AI quoted them back ("Source: Handbook, Chunks 1 and 2").
                 'title': (f"{c.document.title} — {heading}{page_label}" if heading
-                          else f"{c.document.title} (Chunk {c.chunk_index}{page_label})"),
+                          else f"{c.document.title}{page_label}"),
                 'section_heading': heading,
                 'page_number': page,
                 'content': c.chunk_text,

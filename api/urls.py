@@ -928,6 +928,7 @@ urlpatterns = [
     re_path(r'^hr/holidays/(?P<holiday_id>\d+)/delete/?$', hr_agent.delete_holiday, name='hr_delete_holiday'),  # DELETE
 
     # Leave accrual policies
+    re_path(r'^hr/leave-allowances/?$', hr_agent.leave_allowances, name='hr_leave_allowances'),  # GET, POST
     re_path(r'^hr/leave-accrual-policies/?$', hr_agent.list_accrual_policies, name='hr_list_accrual_policies'),  # GET
     re_path(r'^hr/leave-accrual-policies/upsert/?$', hr_agent.upsert_accrual_policy, name='hr_upsert_accrual_policy'),  # POST
     re_path(r'^hr/leave-accrual-policies/(?P<policy_id>\d+)/delete/?$', hr_agent.delete_accrual_policy, name='hr_delete_accrual_policy'),  # DELETE

@@ -186,6 +186,9 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
 
   // Edit employee state — inline edit dialog.
   const [editForm, setEditForm] = useState({ open: false, saving: false, payload: {} });
+  // Who they report to: decides who approves their leave, their team page and the org chart. It could only be set by
+  // the Excel import.
+  const [managerChoices, setManagerChoices] = useState([]);
 
   // Audit log — HR-admin only, lazy-fetched when the section is expanded.
   const [auditLog, setAuditLog] = useState({ rows: [], loading: false, loaded: false, allowed: true });
@@ -205,14 +208,20 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
         probation_end_date: emp.probation_end_date || '',
         timezone_name: emp.timezone_name || '',
         phone: emp.phone || '',
+        manager_id: emp.manager_id ? String(emp.manager_id) : 'none',
       },
     });
+    hrAgentService.listHREmployees({ limit: 500 })
+      .then((res) => setManagerChoices((res?.data || []).filter((x) => x.id !== emp.id)))
+      .catch(() => setManagerChoices([]));
   };
 
   const handleSaveEdit = async () => {
     setEditForm((s) => ({ ...s, saving: true }));
     try {
-      const res = await hrAgentService.updateHREmployee(employeeId, editForm.payload);
+      const payload = { ...editForm.payload,
+        manager_id: editForm.payload.manager_id && editForm.payload.manager_id !== 'none' ? Number(editForm.payload.manager_id) : null };
+      const res = await hrAgentService.updateHREmployee(employeeId, payload);
       const updated = res?.data;
       if (updated) setData((prev) => ({ ...prev, employee: updated }));
       toast({ title: 'Employee updated' });
@@ -558,10 +567,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
         <DialogHeader>
           <DialogTitle>{e?.full_name || 'Employee'}</DialogTitle>
           <DialogDescription>
-            {e ? (<>
-              <span className="font-mono text-xs">user_id={e.user_id ?? '—'}</span>
-              {e.username && <> · @{e.username}</>}
-            </>) : '—'}
+            {e ? [e.job_title, e.username && `@${e.username}`].filter(Boolean).join(' · ') || '—' : '—'}
           </DialogDescription>
         </DialogHeader>
 
@@ -1028,6 +1034,18 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
           <div className="col-span-1">
             <Label className="text-xs">Department</Label>
             <Input value={editForm.payload.department || ''} onChange={(ev) => setEditField('department', ev.target.value)} />
+          </div>
+          <div className="col-span-1">
+            <Label className="text-xs">Manager</Label>
+            <Select value={editForm.payload.manager_id || 'none'} onValueChange={(v) => setEditField('manager_id', v)}>
+              <SelectTrigger data-testid="edit-employee-manager" className="text-left [&>span]:truncate"><SelectValue placeholder="No manager" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No manager</SelectItem>
+                {managerChoices.map((m) => (
+                  <SelectItem key={m.id} value={String(m.id)}>{m.full_name}{m.job_title ? ` · ${m.job_title}` : ''}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="col-span-1">
             <Label className="text-xs">Employment status</Label>

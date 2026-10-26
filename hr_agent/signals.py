@@ -331,9 +331,21 @@ def employee_post_save(sender, instance: Employee, created, **kwargs):
     except Exception:
         logger.exception("Could not bring logins in line with HR status for employee %s", instance.pk)
     if created:
-        ctx = _employee_context(instance, event='employee_hired')
-        _run_matching_workflows(company_id=instance.company_id,
-                                event='employee_hired', context=ctx)
+        # After the save that made the record is committed. The record is made the moment someone gets a login, and
+        # the Excel import saves their start date and manager right after, in the same transaction: the onboarding
+        # workflow ran in between, so its welcome email said "first day to be confirmed" and the meetings with the
+        # manager failed for want of one.
+        pk, company_id = instance.pk, instance.company_id
+
+        def hired():
+            employee = Employee.objects.filter(pk=pk).first()
+            if employee is None:
+                return
+            from hr_agent import allowances
+            allowances.give_to(employee)          # this year's leave, from the company's allowances
+            _run_matching_workflows(company_id=company_id, event='employee_hired',
+                                    context=_employee_context(employee, event='employee_hired'))
+        transaction.on_commit(hired)
         return
 
     # Status-change triggers
