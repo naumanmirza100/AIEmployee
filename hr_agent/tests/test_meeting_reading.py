@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from django.utils import timezone
 
 from api.views import hr_agent as views
-from hr_agent.models import HRMeeting
+from hr_agent.models import Employee, HRMeeting
 
 from .base import HRTestCase
 
@@ -117,6 +117,13 @@ class ReadingTests(HRTestCase):
                         when_words='tomorrow', scheduled_at=self.at(1, 15).isoformat())
         self.assertEqual(data['action'], 'ambiguous_user')
 
+    def test_someone_who_left_is_not_offered(self):
+        gone = self.employee_with_login('ali2', 'Ali Khan', self.company, self.admin)
+        Employee.objects.filter(pk=gone.pk).update(employment_status='offboarded')
+        data = self.ask('meeting with Ali tomorrow 3pm', participant_names=['Ali'], time_given=True,
+                        when_words='tomorrow', scheduled_at=self.at(1, 15).isoformat())
+        self.assertEqual(data['draft']['invitee_names'], ['Ali Raza'])
+
     # ---- what kind of request ---------------------------------------------------------------------------------
 
     def test_a_question_is_answered_not_turned_into_a_form(self):
@@ -164,3 +171,14 @@ class ReadingTests(HRTestCase):
             'timezone': 'Asia/Karachi'})
         self.assertEqual(body['data']['action'], 'scheduled', body)
         self.assertEqual(HRMeeting.objects.get().title, 'Meeting with Ali Raza')
+
+    def test_a_review_without_a_title_is_called_a_review(self):
+        # Seen live: "Sana ke saath parson 11 baje performance review rakh do" came back once with a title and once
+        # without, and was then booked as "Meeting with Sana Javed".
+        data = self.ask('Ali ke saath parson 11 baje performance review rakh do', participant_names=['Ali'],
+                        meeting_type='performance_review', time_given=True, when_words='day after tomorrow',
+                        scheduled_at=self.at(2, 11).isoformat())
+        self.assertEqual(data['draft']['title'], 'Performance review with Ali Raza')
+        self.assertIsNone(self.ask('1:1 with Ali tomorrow 3pm', participant_names=['Ali'], time_given=True,
+                                   when_words='tomorrow', scheduled_at=self.at(1, 15).isoformat())['draft']['title'])
+        self.assertEqual(views._hr_default_title(['Ali Raza'], 'exit_interview'), 'Exit interview with Ali Raza')

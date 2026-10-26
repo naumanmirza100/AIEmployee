@@ -2319,7 +2319,10 @@ def _hr_details_form(*, company, parsed, missing, participant_ids, sched, unknow
         'invitee_names': [e['full_name'] for e in invitable],
         'proposed_time': sched.isoformat() if sched else None,
         'duration_minutes': duration,
-        'title': parsed.get('title') or None,
+        # A review, exit interview, onboarding… is named so in the form; a plain 1:1 keeps the form's own placeholder.
+        'title': parsed.get('title') or (
+            _hr_default_title([e['full_name'] for e in invitable], _hr_meeting_type(parsed.get('meeting_type')))
+            if _hr_meeting_type(parsed.get('meeting_type')) not in ('one_on_one', 'other') else None),
         'description': parsed.get('description') or '',
         'meeting_type': parsed.get('meeting_type') or 'one_on_one',
         'location': parsed.get('location') or '',
@@ -3456,13 +3459,16 @@ _HR_MEETING_TYPES = {
 }
 
 
-def _hr_default_title(names):
-    """A meeting booked without a title is called what the details form showed, as in PM: "Meeting with Bilal
-    Ahmed", not "HR meeting"."""
+def _hr_default_title(names, meeting_type=None):
+    """A meeting without a title is called what the details form showed, as in PM: "Meeting with Bilal Ahmed", not
+    "HR meeting". A kind of meeting other than a plain 1:1 gives its name: "Performance review with Sana Javed" (the AI
+    gave one only some of the time)."""
     names = [n for n in names if n]
+    kind = dict(HRMeeting.MEETING_TYPE_CHOICES).get(meeting_type) if meeting_type not in (None, 'one_on_one', 'other') else None
+    head = kind[:1] + kind[1:].lower() if kind else 'Meeting'
     if not names:
-        return 'HR meeting'
-    return 'Meeting with ' + ', '.join(names[:3]) + (f' +{len(names) - 3}' if len(names) > 3 else '')
+        return kind or 'HR meeting'
+    return f'{head} with ' + ', '.join(names[:3]) + (f' +{len(names) - 3}' if len(names) > 3 else '')
 
 
 def _hr_meeting_type(value):
@@ -3676,15 +3682,16 @@ def hr_meeting_schedule(request):
                     'meeting': None, 'parsed': None, 'action': 'error',
                 }})
 
-        # Build a tiny employee directory the LLM can name-match against.
-        emp_rows = list(Employee.objects.filter(company=company)
-                        .values('id', 'full_name', 'work_email', 'job_title')[:200])
+        # Build a tiny employee directory the LLM can name-match against. People who have left are not in it: they
+        # were offered, and made "1:1 with Zainab" ask which Zainab when one had left.
+        current = Employee.objects.filter(company=company).exclude(employment_status='offboarded')
+        emp_rows = list(current.values('id', 'full_name', 'work_email', 'job_title')[:200])
         directory_lines = [
             f"- id={e['id']}, name={e['full_name']!r}, email={e['work_email']}, role={e['job_title'] or 'n/a'}"
             for e in emp_rows
         ]
         # Cache the full Employee objects for our own name resolver below.
-        all_emps = list(Employee.objects.filter(company=company))
+        all_emps = list(current)
         directory_hint = "\n".join(
             f"  • {e['full_name']} ({e['job_title'] or 'no title'})"
             for e in emp_rows[:15]
@@ -4087,7 +4094,7 @@ def hr_meeting_schedule(request):
                                 reveal_private=_is_hr_admin(company_user))
                     m = HRMeeting.objects.create(
                         company=company,
-                        title=(parsed.get('title') or _hr_default_title(people_names))[:200],
+                        title=(parsed.get('title') or _hr_default_title(people_names, mtype))[:200],
                         description=(parsed.get('description') or '')[:5000],
                         meeting_type=mtype,
                         visibility=visibility,
