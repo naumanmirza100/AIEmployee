@@ -2319,7 +2319,10 @@ def _hr_details_form(*, company, parsed, missing, participant_ids, sched, unknow
         'invitee_names': [e['full_name'] for e in invitable],
         'proposed_time': sched.isoformat() if sched else None,
         'duration_minutes': duration,
-        'title': parsed.get('title') or None,
+        # A review, exit interview, onboarding… is named so in the form; a plain 1:1 keeps the form's own placeholder.
+        'title': parsed.get('title') or (
+            _hr_default_title([e['full_name'] for e in invitable], _hr_meeting_type(parsed.get('meeting_type')))
+            if _hr_meeting_type(parsed.get('meeting_type')) not in ('one_on_one', 'other') else None),
         'description': parsed.get('description') or '',
         'meeting_type': parsed.get('meeting_type') or 'one_on_one',
         'location': parsed.get('location') or '',
@@ -3456,13 +3459,16 @@ _HR_MEETING_TYPES = {
 }
 
 
-def _hr_default_title(names):
-    """A meeting booked without a title is called what the details form showed, as in PM: "Meeting with Bilal
-    Ahmed", not "HR meeting"."""
+def _hr_default_title(names, meeting_type=None):
+    """A meeting without a title is called what the details form showed, as in PM: "Meeting with Bilal Ahmed", not
+    "HR meeting". A kind of meeting other than a plain 1:1 gives its name: "Performance review with Sana Javed" (the AI
+    gave one only some of the time)."""
     names = [n for n in names if n]
+    kind = dict(HRMeeting.MEETING_TYPE_CHOICES).get(meeting_type) if meeting_type not in (None, 'one_on_one', 'other') else None
+    head = kind[:1] + kind[1:].lower() if kind else 'Meeting'
     if not names:
-        return 'HR meeting'
-    return 'Meeting with ' + ', '.join(names[:3]) + (f' +{len(names) - 3}' if len(names) > 3 else '')
+        return kind or 'HR meeting'
+    return f'{head} with ' + ', '.join(names[:3]) + (f' +{len(names) - 3}' if len(names) > 3 else '')
 
 
 def _hr_meeting_type(value):
@@ -4088,7 +4094,7 @@ def hr_meeting_schedule(request):
                                 reveal_private=_is_hr_admin(company_user))
                     m = HRMeeting.objects.create(
                         company=company,
-                        title=(parsed.get('title') or _hr_default_title(people_names))[:200],
+                        title=(parsed.get('title') or _hr_default_title(people_names, mtype))[:200],
                         description=(parsed.get('description') or '')[:5000],
                         meeting_type=mtype,
                         visibility=visibility,
