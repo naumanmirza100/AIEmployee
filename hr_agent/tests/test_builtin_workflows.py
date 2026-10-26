@@ -77,6 +77,25 @@ class BuiltInWorkflowTests(HRTestCase):
         for meeting in (orientation, check_in):
             self.assertLess(meeting.scheduled_at.weekday(), 5)                         # never a weekend
 
+    def test_run_for_someone_who_joined_long_ago_spaces_the_meetings_from_today(self):
+        # Seen in the HR demo: run by hand for someone who joined in March, both meetings were put on tomorrow 10:00.
+        today = timezone.localdate()
+        nina = self.hire(start_date=today - timedelta(days=200))
+        run = self.run_for(self.install('new_hire_onboarding'), nina)
+        self.assertEqual(run.status, 'completed', run.result_data)
+        orientation, check_in = HRMeeting.objects.filter(company=self.company).order_by('scheduled_at')
+        self.assertLessEqual(orientation.scheduled_at.date(), today + timedelta(days=3))     # the next working day
+        self.assertGreaterEqual(check_in.scheduled_at.date(), today + timedelta(days=30))
+        self.assertLess(check_in.scheduled_at.date(), today + timedelta(days=33))
+
+    def test_a_check_in_still_ahead_keeps_its_day(self):
+        today = timezone.localdate()
+        nina = self.hire(start_date=today - timedelta(days=10))
+        self.run_for(self.install('new_hire_onboarding'), nina)
+        check_in = HRMeeting.objects.filter(company=self.company, title='30-day check-in').get()
+        self.assertGreaterEqual(check_in.scheduled_at.date(), today + timedelta(days=20))  # day 30 of her job
+        self.assertLess(check_in.scheduled_at.date(), today + timedelta(days=23))
+
     def test_a_new_hire_with_no_login_still_gets_the_email_and_hr_is_told_about_the_meetings(self):
         workflow = self.install('new_hire_onboarding')
         nina = self.hire(with_login=False)
@@ -110,7 +129,12 @@ class BuiltInWorkflowTests(HRTestCase):
                 'today is never used': ({'offset_days_from_now': 0}, None, (2026, 10, 12, 10)),
                 'a start date that has passed': ({'offset_days_from_start': 0}, started, (2026, 10, 12, 10)),
                 'a start date on a Saturday': ({'offset_days_from_start': 0}, starts, (2026, 10, 26, 10)),
-                'counted from the start date': ({'offset_days_from_start': 30}, started, (2026, 10, 12, 10)),
+                # 1 Oct has passed: 30 days from today instead (Sun 8 Nov, so Monday), not tomorrow.
+                'a passed day from the start is counted from today': ({'offset_days_from_start': 30}, started,
+                                                                      (2026, 11, 9, 10)),
+                'a day from the start still ahead is kept': ({'offset_days_from_start': 30},
+                                                             SimpleNamespace(start_date=date(2026, 9, 25)),
+                                                             (2026, 10, 26, 10)),     # Sun 25 Oct, so Monday
                 'the hour the step asks for': ({'offset_days_from_now': 4, 'at_hour': 14}, None, (2026, 10, 13, 14)),
                 'no start date: counted from today': ({'offset_days_from_start': 5}, None, (2026, 10, 14, 10)),
             }
