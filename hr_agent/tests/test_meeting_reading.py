@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from django.utils import timezone
 
 from api.views import hr_agent as views
-from hr_agent.models import HRMeeting
+from hr_agent.models import Employee, HRMeeting
 
 from .base import HRTestCase
 
@@ -116,6 +116,13 @@ class ReadingTests(HRTestCase):
         data = self.ask('meeting with Ali tomorrow 3pm', participant_names=['Ali'], time_given=True,
                         when_words='tomorrow', scheduled_at=self.at(1, 15).isoformat())
         self.assertEqual(data['action'], 'ambiguous_user')
+
+    def test_someone_who_left_is_not_offered(self):
+        gone = self.employee_with_login('ali2', 'Ali Khan', self.company, self.admin)
+        Employee.objects.filter(pk=gone.pk).update(employment_status='offboarded')
+        data = self.ask('meeting with Ali tomorrow 3pm', participant_names=['Ali'], time_given=True,
+                        when_words='tomorrow', scheduled_at=self.at(1, 15).isoformat())
+        self.assertEqual(data['draft']['invitee_names'], ['Ali Raza'])
 
     # ---- what kind of request ---------------------------------------------------------------------------------
 

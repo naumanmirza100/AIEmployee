@@ -3676,15 +3676,16 @@ def hr_meeting_schedule(request):
                     'meeting': None, 'parsed': None, 'action': 'error',
                 }})
 
-        # Build a tiny employee directory the LLM can name-match against.
-        emp_rows = list(Employee.objects.filter(company=company)
-                        .values('id', 'full_name', 'work_email', 'job_title')[:200])
+        # Build a tiny employee directory the LLM can name-match against. People who have left are not in it: they
+        # were offered, and made "1:1 with Zainab" ask which Zainab when one had left.
+        current = Employee.objects.filter(company=company).exclude(employment_status='offboarded')
+        emp_rows = list(current.values('id', 'full_name', 'work_email', 'job_title')[:200])
         directory_lines = [
             f"- id={e['id']}, name={e['full_name']!r}, email={e['work_email']}, role={e['job_title'] or 'n/a'}"
             for e in emp_rows
         ]
         # Cache the full Employee objects for our own name resolver below.
-        all_emps = list(Employee.objects.filter(company=company))
+        all_emps = list(current)
         directory_hint = "\n".join(
             f"  • {e['full_name']} ({e['job_title'] or 'no title'})"
             for e in emp_rows[:15]
