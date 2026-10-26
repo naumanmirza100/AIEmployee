@@ -108,7 +108,12 @@ export const askHRKnowledgeStream = async (question, chatHistory = [], callbacks
     throw err;
   }
   if (!response.ok) {
-    const errMsg = `HTTP ${response.status}`;
+    // The server says why (no AI key, tokens used up, signed out); "HTTP 400" told nobody anything.
+    let errMsg = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      errMsg = body?.message || body?.detail || errMsg;
+    } catch { /* not JSON */ }
     onError?.(new Error(errMsg));
     throw new Error(errMsg);
   }

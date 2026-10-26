@@ -424,8 +424,9 @@ class HRKnowledgeService:
             out.append({
                 'chunk_id': c.id,
                 'document_id': c.document_id,
+                # No chunk numbers: the AI quoted them back ("Source: Handbook, Chunks 1 and 2").
                 'title': (f"{c.document.title} — {heading}{page_label}" if heading
-                          else f"{c.document.title} (Chunk {c.chunk_index}{page_label})"),
+                          else f"{c.document.title}{page_label}"),
                 'section_heading': heading,
                 'page_number': page,
                 'content': c.chunk_text,

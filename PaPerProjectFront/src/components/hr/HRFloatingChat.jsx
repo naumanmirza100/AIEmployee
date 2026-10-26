@@ -645,55 +645,18 @@ const HRFloatingChat = () => {
                       <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
                         <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Sources</p>
                         {m.citations && m.citations.length > 0
-                          ? m.citations.slice(0, 3).map((c, idx) => (
-                              <div key={idx} className="text-[11px] text-white/60 truncate">
-                                • {c.title || c.source || 'Source'}
+                          ? [...new Set(m.citations.map((c) => c.title || c.source || 'Source'))].slice(0, 3).map((title) => (
+                              <div key={title} className="text-[11px] text-white/60 truncate">
+                                • {title}
                               </div>
                             ))
                           : <div className="text-[11px] text-white/60 truncate">• {m.source}</div>}
                       </div>
                     )}
-                    {typeof m.responseTimeMs === 'number' && m.role === 'assistant' && !m.error && (() => {
-                      const tm = m.timing_ms;
-                      const parts = [];
-                      if (tm && !tm.cache) {
-                        if (typeof tm.retrieval === 'number') parts.push(`retrieval ${(tm.retrieval / 1000).toFixed(1)}s`);
-                        if (typeof tm.llm === 'number') parts.push(`llm ${(tm.llm / 1000).toFixed(1)}s`);
-                      }
-                      const rb = tm?.retrieval_breakdown;
-                      const rbParts = [];
-                      if (rb && (tm?.retrieval || 0) > 1000) {
-                        const keys = ['query_embed', 'json_scan', 'keyword', 'chunk_fetch', 'output_build'];
-                        for (const k of keys) {
-                          if (typeof rb[k] === 'number' && rb[k] > 50) {
-                            rbParts.push(`${k}=${(rb[k] / 1000).toFixed(1)}s`);
-                          }
-                        }
-                        if (typeof rb.json_scan_chunks === 'number' && rb.json_scan_chunks > 0) {
-                          rbParts.push(`scanned=${rb.json_scan_chunks}`);
-                        }
-                      }
-                      return (
-                        <div className="mt-1.5 text-[10px] text-white/40 space-y-0.5">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span>⏱ {(m.responseTimeMs / 1000).toFixed(2)}s</span>
-                            {parts.length > 0 && (
-                              <span className="text-white/30">({parts.join(' · ')})</span>
-                            )}
-                            {m.cache_hit && (
-                              <span className="px-1 py-[1px] rounded bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 text-[9px] font-medium">
-                                cached
-                              </span>
-                            )}
-                          </div>
-                          {rbParts.length > 0 && (
-                            <div className="text-[9px] text-white/30 font-mono">
-                              {rbParts.join(' · ')}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
+                    {/* How long it took; the search's inner timings were for the developers (server log). */}
+                    {typeof m.responseTimeMs === 'number' && m.role === 'assistant' && !m.error && (
+                      <div className="mt-1.5 text-[10px] text-white/40">⏱ {(m.responseTimeMs / 1000).toFixed(1)}s</div>
+                    )}
                   </div>
                 </div>
               ))}

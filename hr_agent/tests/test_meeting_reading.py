@@ -153,3 +153,14 @@ class ReadingTests(HRTestCase):
         self.assertEqual(body['data']['action'], 'scheduled', body)
         m = HRMeeting.objects.get()
         self.assertEqual((m.meeting_type, m.visibility), ('grievance_hearing', 'private'))
+
+    def test_a_meeting_without_a_title_is_called_what_the_form_showed(self):
+        # Seen in the demo run: the form said "Meeting with Bilal Ahmed" and the meeting was booked as "HR meeting".
+        draft = {'title': None, 'meeting_type': 'one_on_one', 'duration_minutes': 30,
+                 'invitee_ids': [self.ali.id], 'invitee_names': ['Ali Raza']}
+        when = (timezone.now() + timedelta(days=2)).replace(hour=10, minute=0, second=0, microsecond=0)
+        code, body = self.call(views.hr_meeting_schedule, self.admin, {
+            'message': 'Book it.', 'pending_intent': draft, 'proposed_time': when.isoformat(),
+            'timezone': 'Asia/Karachi'})
+        self.assertEqual(body['data']['action'], 'scheduled', body)
+        self.assertEqual(HRMeeting.objects.get().title, 'Meeting with Ali Raza')

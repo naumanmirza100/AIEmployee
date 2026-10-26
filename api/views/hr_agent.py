@@ -3456,6 +3456,15 @@ _HR_MEETING_TYPES = {
 }
 
 
+def _hr_default_title(names):
+    """A meeting booked without a title is called what the details form showed, as in PM: "Meeting with Bilal
+    Ahmed", not "HR meeting"."""
+    names = [n for n in names if n]
+    if not names:
+        return 'HR meeting'
+    return 'Meeting with ' + ', '.join(names[:3]) + (f' +{len(names) - 3}' if len(names) > 3 else '')
+
+
 def _hr_meeting_type(value):
     """One of HRMeeting's types, whatever the AI wrote ("exit interview", "1:1"). The type decides whether the
     meeting is private, and was saved as written: an invalid value, and a grievance hearing visible company-wide."""
@@ -4070,13 +4079,15 @@ def hr_meeting_schedule(request):
             valid_ids = list(Employee.objects.filter(pk__in=validated_ids, company=company)
                              .values_list('id', flat=True))
             people = _hr_people(company, valid_ids, organizer.id if organizer else None)
+            people_names = list(Employee.objects.filter(pk__in=valid_ids).order_by('full_name')
+                                .values_list('full_name', flat=True))
             try:
                 with booking_guard(people):
                     ensure_free(people, sched, duration, tz_name=tz_name, viewer_source='hr',
                                 reveal_private=_is_hr_admin(company_user))
                     m = HRMeeting.objects.create(
                         company=company,
-                        title=(parsed.get('title') or 'HR meeting')[:200],
+                        title=(parsed.get('title') or _hr_default_title(people_names))[:200],
                         description=(parsed.get('description') or '')[:5000],
                         meeting_type=mtype,
                         visibility=visibility,

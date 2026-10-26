@@ -567,10 +567,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
         <DialogHeader>
           <DialogTitle>{e?.full_name || 'Employee'}</DialogTitle>
           <DialogDescription>
-            {e ? (<>
-              <span className="font-mono text-xs">user_id={e.user_id ?? '—'}</span>
-              {e.username && <> · @{e.username}</>}
-            </>) : '—'}
+            {e ? [e.job_title, e.username && `@${e.username}`].filter(Boolean).join(' · ') || '—' : '—'}
           </DialogDescription>
         </DialogHeader>
 
@@ -1041,7 +1038,7 @@ export default function HREmployeeDetailDrawer({ open, employeeId, onOpenChange 
           <div className="col-span-1">
             <Label className="text-xs">Manager</Label>
             <Select value={editForm.payload.manager_id || 'none'} onValueChange={(v) => setEditField('manager_id', v)}>
-              <SelectTrigger data-testid="edit-employee-manager"><SelectValue placeholder="No manager" /></SelectTrigger>
+              <SelectTrigger data-testid="edit-employee-manager" className="text-left [&>span]:truncate"><SelectValue placeholder="No manager" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No manager</SelectItem>
                 {managerChoices.map((m) => (
