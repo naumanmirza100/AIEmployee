@@ -378,7 +378,7 @@ class KnowledgeService:
                     'document_id': chunk.document_id,
                     'score': 1.0, # Base keyword score
                     'content': chunk.chunk_text,
-                    'title': f"{chunk.document.title} (Chunk {chunk.chunk_index}{page_label})",
+                    'title': f"{chunk.document.title}{page_label}",
                     'file_format': chunk.document.file_format,
                     'document_type': chunk.document.document_type,
                     'page_number': chunk.page_number,
@@ -575,7 +575,7 @@ class KnowledgeService:
                             'document_id': c.document_id,
                             'score': float(score),
                             'content': c.chunk_text,
-                            'title': f"{c.document.title} (Chunk {c.chunk_index}{page_label})",
+                            'title': f"{c.document.title}{page_label}",
                             'file_format': c.document.file_format,
                             'document_type': c.document.document_type,
                             'page_number': c.page_number,
@@ -640,7 +640,7 @@ class KnowledgeService:
                 'document_id': chunk.document_id,
                 'score': similarity,
                 'content': chunk.chunk_text,
-                'title': f"{chunk.document.title} (Chunk {chunk.chunk_index}{page_label})",
+                'title': f"{chunk.document.title}{page_label}",
                 'file_format': chunk.document.file_format,
                 'document_type': chunk.document.document_type,
                 'page_number': chunk.page_number,
@@ -971,9 +971,12 @@ class TicketAutomationService:
     Service for ticket automation including classification and auto-resolution.
     """
     
-    def __init__(self):
+    def __init__(self, company_id: Optional[int] = None):
         self.classification_rules = TicketClassificationRules()
-        self.knowledge_service = KnowledgeService()
+        # With the company: its own uploaded documents are searched for a solution. Built without one, a ticket's
+        # solution was looked for only in the shared FAQ, policy and manual tables, never in the company's documents.
+        self.company_id = company_id
+        self.knowledge_service = KnowledgeService(company_id=company_id)
         logger.info("TicketAutomationService initialized")
     
     def classify_ticket(self, title: str, description: str) -> Dict:
@@ -1010,7 +1013,8 @@ class TicketAutomationService:
         
         # Search knowledge base with description and category
         search_query = f"{description} {category}"
-        search_results = self.knowledge_service.search_knowledge(search_query, max_results=3)
+        search_results = self.knowledge_service.search_knowledge(search_query, max_results=3,
+                                                                 company_id=self.company_id)
         
         if search_results['success'] and search_results['count'] > 0:
             best_match = search_results['results'][0]

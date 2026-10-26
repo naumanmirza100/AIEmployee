@@ -144,9 +144,14 @@ class TicketClassificationRules:
             }
         
         text = f"{title} {description}".lower() if title else description.lower()
-        
+
+        # An easy question, unless it says it is urgent or serious: "How do I stop being charged twice? This is
+        # urgent" used to stop at "how do i" and come out low priority, not escalated.
+        is_complex = any(re.search(indicator, text, re.IGNORECASE) for indicator in cls.COMPLEX_INDICATORS)
+        sounds_urgent = any(cls._says(keyword, text) for keyword in cls.PRIORITY_KEYWORDS[TicketPriority.URGENT])
+
         # Check for auto-resolvable patterns first
-        for pattern_config in cls.AUTO_RESOLVABLE_PATTERNS:
+        for pattern_config in ([] if is_complex or sounds_urgent else cls.AUTO_RESOLVABLE_PATTERNS):
             if re.search(pattern_config['pattern'], text, re.IGNORECASE):
                 logger.info(f"Matched auto-resolvable pattern: {pattern_config['pattern']}")
                 return {
@@ -158,9 +163,6 @@ class TicketClassificationRules:
                     'resolution_template': pattern_config.get('resolution_template'),
                     'reasoning': f"Matched auto-resolvable pattern: {pattern_config['pattern']}"
                 }
-        
-        # Check for complex indicators (escalation needed)
-        is_complex = any(re.search(indicator, text, re.IGNORECASE) for indicator in cls.COMPLEX_INDICATORS)
         
         # Classify category
         category_scores = {}
@@ -179,7 +181,7 @@ class TicketClassificationRules:
         # Classify priority
         priority_scores = {}
         for priority, keywords in cls.PRIORITY_KEYWORDS.items():
-            score = sum(1 for keyword in keywords if keyword in text)
+            score = sum(1 for keyword in keywords if cls._says(keyword, text))
             if score > 0:
                 priority_scores[priority] = score
         
@@ -208,6 +210,12 @@ class TicketClassificationRules:
             'reasoning': f"Category: {category.value} (confidence: {category_confidence:.2f}), Priority: {priority.value}, Complex: {is_complex}"
         }
     
+    @staticmethod
+    def _says(keyword: str, text: str) -> bool:
+        """The keyword as whole words: plain `in` found "now" in "know", "down" in "download", "help" in
+        "helpful", and marked such tickets urgent."""
+        return re.search(r'\b' + re.escape(keyword) + r'\b', text) is not None
+
     @classmethod
     def is_low_complexity(cls, description: str) -> bool:
         """

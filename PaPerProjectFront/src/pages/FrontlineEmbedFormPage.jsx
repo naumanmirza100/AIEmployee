@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import { API_BASE_URL } from '@/config/apiConfig';
 import { withParentOrigin } from '@/utils/embedOrigin';
 import { Loader2, Send, CheckCircle, Paperclip, X } from 'lucide-react';
@@ -42,6 +43,8 @@ export default function FrontlineEmbedFormPage() {
   const [submitError, setSubmitError] = useState('');
   const [askLoading, setAskLoading] = useState(false);
   const [answer, setAnswer] = useState('');
+  // The quick question asked for a person: the form above is how they reach one.
+  const [wantsPerson, setWantsPerson] = useState(false);
 
   const handleFileSelection = (incoming) => {
     setFileWarning('');
@@ -140,6 +143,7 @@ export default function FrontlineEmbedFormPage() {
     const q = question.trim();
     if (!q || !widgetKey) return;
     setAnswer('');
+    setWantsPerson(false);
     setAskLoading(true);
     try {
       const res = await fetch(withParentOrigin(`${API_BASE_URL}/frontline/public/qa/`), {
@@ -150,6 +154,7 @@ export default function FrontlineEmbedFormPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || 'Request failed');
       setAnswer(data?.data?.answer ?? data?.answer ?? 'No answer available.');
+      setWantsPerson(!!data?.data?.handoff_requested);
     } catch (err) {
       setAnswer(`Sorry, something went wrong: ${err.message}`);
     } finally {
@@ -284,7 +289,16 @@ export default function FrontlineEmbedFormPage() {
             </button>
           </form>
           {answer && (
-            <div className="mt-2 p-3 rounded-lg bg-muted border text-sm whitespace-pre-wrap">{answer}</div>
+            // Formatted, as in the chat: the answer's **bold** and lists were shown as typed.
+            <div className="mt-2 p-3 rounded-lg bg-muted border text-sm space-y-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5">
+              <ReactMarkdown>{answer}</ReactMarkdown>
+              {wantsPerson && (
+                <p className="text-xs text-muted-foreground">
+                  To reach a person, send your name, email and message with the form above, and someone from our
+                  team will reply by email.
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>

@@ -1649,18 +1649,39 @@ def public_qa(request):
             public_history = []
         agent = FrontlineAgent(company_id=company.id)
         ai_unavailable = False
+        # What the message is, read by one small AI call (core/Frontline_agent/intent.py): a greeting or thanks is
+        # answered without searching, a request for a person or a call goes to a person, a problem is answered and
+        # goes to a person, a question is searched in English. No reading: the word lists below, as before.
+        from core.Frontline_agent import intent as fl_intent
         try:
-            result = agent.answer_question(
-                question,
-                company_id=company.id,
-                scope_document_type=scope_document_type,
-                scope_document_ids=scope_document_ids,
-                min_similarity=min_similarity,
-                max_age_days=max_age_days,
-                max_results=max_results,
-                enable_rewrite=enable_rewrite,
-                history=public_history,
-            )
+            reading = fl_intent.read(question, public_history, company_id=company.id)
+        except KeyServiceError:
+            reading = None          # the answer below meets the same refusal and handles it
+        kind = reading['kind'] if reading else None
+        try:
+            if kind in fl_intent.NO_SEARCH:
+                result = {'answer': fl_intent.say(kind, reading), 'has_verified_info': True, 'confidence': 'high',
+                          'sources': [], 'citations': [], 'reply_kind': kind}
+            else:
+                result = agent.answer_question(
+                    question,
+                    company_id=company.id,
+                    scope_document_type=scope_document_type,
+                    scope_document_ids=scope_document_ids,
+                    min_similarity=min_similarity,
+                    max_age_days=max_age_days,
+                    max_results=max_results,
+                    enable_rewrite=enable_rewrite,
+                    history=public_history,
+                    search_query=(reading or {}).get('english'),
+                    wants_everything=reading['full_list'] if reading else None,
+                )
+                if kind == 'problem':
+                    # Whatever the documents say, a person follows it up (the hand-off below).
+                    result = dict(result)
+                    result['answer'] = (f"{result.get('answer')}\n\n{fl_intent.say('problem_also', reading)}"
+                                        if result.get('has_verified_info') else fl_intent.say('problem', reading))
+                    result['reply_kind'] = kind
         except KeyServiceError as exc:
             # The company's AI is out of tokens, switched off, or its key was
             # refused. That is between us and the company. A visitor on its
@@ -1689,22 +1710,28 @@ def public_qa(request):
         try:
             from Frontline_agent.handoff import detect_handoff_request, trigger_handoff
             from Frontline_agent.contacts import upsert_contact_from_email
-            if detect_handoff_request(question) and _widget_may_open_ticket(company):
+            # The reading decides (it knows "I don't need a human" from "I need a human"); without one, the phrases.
+            handoff_reason = (fl_intent.HANDOFF_REASON.get(kind) if reading
+                              else ('customer_requested' if detect_handoff_request(question) else None))
+            if handoff_reason and _widget_may_open_ticket(company):
                 visitor_email = (data.get('visitor_email') or data.get('email') or '').strip()
                 visitor_name = (data.get('visitor_name') or data.get('name') or '').strip()
                 contact = (upsert_contact_from_email(company, visitor_email, visitor_name)
                            if visitor_email else None)
                 handoff_user = _ensure_handoff_system_user()
+                priority = 'high' if reading and reading.get('urgent') else 'medium'
+                label = {'call_requested': 'Call requested', 'problem_reported': 'Problem'}.get(handoff_reason,
+                                                                                               'Hand-off')
                 ticket = Ticket.objects.create(
-                    title=f"Hand-off: {question[:60]}{'...' if len(question) > 60 else ''}",
+                    title=f"{label}: {question[:60]}{'...' if len(question) > 60 else ''}",
                     description=question,
-                    status='new', priority='medium', category='other',
+                    status='new', priority=priority, category='other',
                     company=company, created_by=handoff_user, assigned_to=handoff_user,
                     contact=contact,
-                    sla_due_at=_sla_due_at_for_priority('medium', company=company),
+                    sla_due_at=_sla_due_at_for_priority(priority, company=company),
                 )
                 trigger_handoff(
-                    ticket, reason='customer_requested',
+                    ticket, reason=handoff_reason,
                     context={
                         'question': question,
                         'ai_answer': (result.get('answer') or '')[:4000],
@@ -2023,6 +2050,9 @@ def public_submit(request):
 
         _run_notification_triggers(company.id, 'ticket_created', ticket)
         _run_workflow_triggers(company.id, 'ticket_created', ticket, user)
+        # The customer is told by email that it arrived, with its reference (Frontline_agent/customer_mail.py).
+        from Frontline_agent.customer_mail import acknowledge_web_form
+        acknowledge_web_form(ticket, message)
         return Response({
             'status': 'success',
             'message': 'Submitted successfully. We will get back to you soon.',
@@ -2156,6 +2186,16 @@ def download_widget_attachment(request, ticket_id, filename):
     return FileResponse(resolved.open('rb'), filename=display_name)
 
 
+def _staff_reading(question, history, company_id):
+    """The AI reading of a staff member's question (core/Frontline_agent/intent.py), for its English search text and
+    whether it asks for a whole list; None when there is none. A key or quota refusal is left to the answer itself."""
+    from core.Frontline_agent import intent as fl_intent
+    try:
+        return fl_intent.read(question, history if isinstance(history, list) else [], company_id=company_id)
+    except Exception:
+        return None
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -2207,6 +2247,7 @@ def knowledge_qa(request):
 
         # Initialize agent with company_id
         agent = FrontlineAgent(company_id=company.id)
+        reading = _staff_reading(question, history, company.id)
         result = agent.answer_question(
             question,
             company_id=company.id,
@@ -2218,6 +2259,8 @@ def knowledge_qa(request):
             enable_rewrite=enable_rewrite,
             company_user_id=company_user.id,
             history=history,
+            search_query=(reading or {}).get('english'),
+            wants_everything=reading['full_list'] if reading else None,
         )
         
         # When agent doesn't have verified info, create a ticket task assigned to this company user
@@ -2332,6 +2375,7 @@ def knowledge_qa_stream(request):
         history = data.get('chat_history') or None
 
         agent = FrontlineAgent(company_id=company.id)
+        reading = _staff_reading(question, history, company.id)
 
         def _event_stream():
             collected_doc_ids = []
@@ -2346,6 +2390,8 @@ def knowledge_qa_stream(request):
                     max_results=max_results,
                     company_user_id=company_user.id,
                     history=history,
+                    search_query=(reading or {}).get('english'),
+                    wants_everything=reading['full_list'] if reading else None,
                 ):
                     if event.get('type') == 'meta':
                         for c in (event.get('citations') or []):
@@ -4096,6 +4142,9 @@ def _serialize_meeting(m, include_transcript=False):
         'participant_user_ids': [p.id for p in m.participants.all()],
         'reminder_24h_sent_at': m.reminder_24h_sent_at.isoformat() if m.reminder_24h_sent_at else None,
         'reminder_15m_sent_at': m.reminder_15m_sent_at.isoformat() if m.reminder_15m_sent_at else None,
+        'customer_name': m.customer_name,
+        'customer_email': m.customer_email,
+        'ticket_id': m.ticket_id,
         'action_items': m.action_items or [],
         'notes': m.notes,
         'created_at': m.created_at.isoformat(),
@@ -4233,12 +4282,42 @@ def list_meetings(request):
         return Response({'status': 'error', 'message': _SERVER_ERROR_MESSAGE}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _meeting_customer(company, data):
+    """({'name', 'email', 'ticket'}, None) for a call's customer, or (None, a 400 response). The customer comes from
+    `customer_email` / `customer_name`, or from the company's ticket `ticket_id` (its contact) when they are left
+    empty. No customer at all is allowed: an internal call."""
+    from django.core.exceptions import ValidationError
+    from django.core.validators import validate_email
+    name = str(data.get('customer_name') or '').strip()[:200]
+    email = str(data.get('customer_email') or '').strip()[:254]
+    ticket = None
+    if data.get('ticket_id'):
+        try:
+            ticket = Ticket.objects.filter(pk=int(data['ticket_id']), company=company).select_related('contact').first()
+        except (TypeError, ValueError):
+            ticket = None
+        if ticket is None:
+            return None, Response({'status': 'error', 'message': 'That ticket was not found.'},
+                                  status=status.HTTP_400_BAD_REQUEST)
+        if not email and ticket.contact_id and ticket.contact.email:
+            email = ticket.contact.email
+            name = name or (ticket.contact.name or '')
+    if email:
+        try:
+            validate_email(email)
+        except ValidationError:
+            return None, Response({'status': 'error', 'message': "The customer's email address isn't valid."},
+                                  status=status.HTTP_400_BAD_REQUEST)
+    return {'name': name, 'email': email, 'ticket': ticket}, None
+
+
 @api_view(["POST"])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
 def create_meeting(request):
     """Create a meeting. If `meeting_link` is empty and `auto_jitsi` is not False,
-    a fresh Jitsi link is auto-generated."""
+    a fresh Jitsi link is auto-generated. `customer_name` / `customer_email` (or `ticket_id`) name the customer, who is
+    emailed the invitation and the reminders."""
     try:
         company_user = request.user
         company = company_user.company
@@ -4271,12 +4350,16 @@ def create_meeting(request):
         attendees, refused = _meeting_attendees(company, data)
         if refused:
             return _no_login_response(refused)
+        customer, refusal = _meeting_customer(company, data)
+        if refusal:
+            return refusal
         people = attendees + ([organizer.id] if organizer_is_employee else [])
         try:
             with booking_guard(people):
                 ensure_free(people, scheduled_at, duration_minutes, tz_name=tz_name,
                             viewer_source='frontline')
                 m = FrontlineMeeting.objects.create(
+                    customer_name=customer['name'], customer_email=customer['email'], ticket=customer['ticket'],
                     title=title[:200],
                     description=data.get('description') or '',
                     company=company,
@@ -4294,6 +4377,9 @@ def create_meeting(request):
             return clash.response()
         # The people booked are told. Frontline used to block their calendar and say nothing.
         meeting_notices.tell('frontline', m, None, actor_user_id=organizer.id if organizer_is_employee else None)
+        # And the customer the call is with, who used to be told nothing (Frontline_agent/meeting_customer.py).
+        from Frontline_agent import meeting_customer
+        meeting_customer.tell_customer(m, 'booked')
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)},
                         status=status.HTTP_201_CREATED)
@@ -4355,8 +4441,8 @@ def update_meeting(request, meeting_id):
             if dt != m.scheduled_at:
                 m.scheduled_at = dt
                 # Schedule change → reset reminder flags so Celery will re-send.
-                m.reminder_24h_sent_at = None
-                m.reminder_15m_sent_at = None
+                for field in FrontlineMeeting.REMINDER_FIELDS:
+                    setattr(m, field, None)
         if 'duration_minutes' in data:
             try:
                 m.duration_minutes = max(5, min(24 * 60, int(data['duration_minutes'])))
@@ -4384,6 +4470,13 @@ def update_meeting(request, meeting_id):
             m.notes = str(data['notes'])
         if 'transcript' in data:
             m.transcript = str(data['transcript'])
+        if 'customer_name' in data or 'customer_email' in data:
+            customer, refusal = _meeting_customer(company, {
+                'customer_name': data.get('customer_name', m.customer_name),
+                'customer_email': data.get('customer_email', m.customer_email)})
+            if refusal:
+                return refusal
+            m.customer_name, m.customer_email = customer['name'], customer['email']
 
         current = set(m.participants.values_list('id', flat=True))
         new_attendees = None
@@ -4413,6 +4506,11 @@ def update_meeting(request, meeting_id):
             return clash.response()
         meeting_notices.tell('frontline', m, seats_before,
                              actor_user_id=login_user_id_for_company_user(request.user))
+        from Frontline_agent import meeting_customer
+        if was_active and m.status == 'cancelled':
+            meeting_customer.tell_customer(m, 'cancelled')
+        elif m.status in active_states and (m.scheduled_at != old_start or m.duration_minutes != old_duration):
+            meeting_customer.tell_customer(m, 'moved')
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)})
     except KeyServiceError:
@@ -4432,10 +4530,16 @@ def delete_meeting(request, meeting_id):
         if err:
             return err
         seats_before = meeting_notices.snapshot('frontline', m)
+        import copy
+        gone = copy.copy(m)             # delete() clears the id the customer's calendar file needs
+        was_upcoming = m.status in ('scheduled', 'rescheduled') and m.scheduled_at and m.scheduled_at > timezone.now()
         m.delete()
         # A deleted meeting is a cancelled one to the people who were in it.
         meeting_notices.tell('frontline', m, seats_before, after=None,
                              actor_user_id=login_user_id_for_company_user(request.user))
+        if was_upcoming:
+            from Frontline_agent import meeting_customer
+            meeting_customer.tell_customer(gone, 'cancelled')
         return Response({'status': 'success'})
     except KeyServiceError:
         raise
@@ -6367,8 +6471,9 @@ def send_ticket_reply(ticket, body_text, body_html='', *, to=None, cc=None, auth
     subject = ticket.title or '(no subject)'
     # A widget hand-off's title starts "Hand-off:" for the staff's queue; the customer
     # reading the reply sees their own question.
-    if subject.startswith('Hand-off: '):
-        subject = subject[len('Hand-off: '):]
+    for label in ('Hand-off: ', 'Call requested: ', 'Problem: '):
+        if subject.startswith(label):
+            subject = subject[len(label):]
     if tag not in subject:
         subject = f"Re: {subject} {tag}"
 

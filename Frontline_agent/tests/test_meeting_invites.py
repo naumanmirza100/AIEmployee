@@ -18,7 +18,8 @@ from Frontline_agent.models import FrontlineMeeting
 from .base import FrontlineTestCase
 
 
-class FrontlineInviteTests(FrontlineTestCase):
+class MeetingTestCase(FrontlineTestCase):
+    """Two employees, a time three days ahead, and helpers to book and edit (shared with test_meeting_customer)."""
 
     def setUp(self):
         super().setUp()
@@ -55,6 +56,9 @@ class FrontlineInviteTests(FrontlineTestCase):
         with self.captureOnCommitCallbacks(execute=True):
             code, body = self.call(views.update_meeting, self.admin, data, method='patch', meeting_id=meeting.id)
         self.assertEqual(code, 200, body)
+
+
+class FrontlineInviteTests(MeetingTestCase):
 
     # ---- a new meeting ------------------------------------------------------------------
 

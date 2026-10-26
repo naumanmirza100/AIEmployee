@@ -51,6 +51,7 @@ CELERY_TASK_ALWAYS_EAGER = True
 # No real AI call to read Pilot messages; the tests that check it turn it on.
 PM_PILOT_AI_INTENT = False
 HR_AI_INTENT = False          # tests stub the reading where they need one
+FRONTLINE_AI_INTENT = False    # the same
 CELERY_TASK_EAGER_PROPAGATES = True
 WHITENOISE_AUTOREFRESH = True
 

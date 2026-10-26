@@ -56,7 +56,8 @@ def detect_handoff_request(text: str) -> bool:
 # Hand-off state transitions
 # --------------------------------------------------------------------------
 
-VALID_REASONS = {'low_confidence', 'customer_requested', 'manual_escalation', 'sla_risk'}
+VALID_REASONS = {'low_confidence', 'customer_requested', 'call_requested', 'problem_reported', 'manual_escalation',
+                 'sla_risk'}
 
 
 def trigger_handoff(ticket, reason: str, context: Optional[dict] = None) -> bool:
@@ -74,7 +75,7 @@ def trigger_handoff(ticket, reason: str, context: Optional[dict] = None) -> bool
     ticket.handoff_requested_at = timezone.now()
     # When AI couldn't close it, we usually want priority bumped so it surfaces.
     # Don't downgrade higher priorities.
-    if reason in ('customer_requested', 'low_confidence') and ticket.priority == 'low':
+    if reason in ('customer_requested', 'call_requested', 'problem_reported', 'low_confidence') and ticket.priority == 'low':
         ticket.priority = 'medium'
     ticket.save(update_fields=[
         'handoff_status', 'handoff_reason', 'handoff_context',

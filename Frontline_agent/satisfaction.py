@@ -15,6 +15,17 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def customer_email(ticket):
+    """The customer's address: the ticket's contact. It used to be `ticket.created_by`, the login that opened the
+    ticket — for chat and email tickets the hand-off bot (`noreply-handoff@frontline.local`), for web-form tickets the
+    company's first login — so the customer was never asked and staff were asked to rate themselves."""
+    contact = getattr(ticket, 'contact', None)
+    email = (getattr(contact, 'email', '') or '').strip()
+    if email.lower().endswith(('.local', '.invalid')):
+        return ''
+    return email
+
+
 def ensure_satisfaction_survey(ticket):
     """Create the survey row and send the invitation. Returns the row or None.
 
@@ -32,7 +43,7 @@ def ensure_satisfaction_survey(ticket):
     if ticket is None:
         return None
 
-    recipient_email = (getattr(ticket.created_by, 'email', '') or '').strip()
+    recipient_email = customer_email(ticket)
 
     survey = TicketSatisfaction.objects.filter(ticket=ticket).first()
     if survey is None:
@@ -56,18 +67,29 @@ def ensure_satisfaction_survey(ticket):
 
     try:
         from django.core.mail import send_mail
-        public_base = (getattr(settings, 'FRONTLINE_PUBLIC_BASE_URL', '') or '').rstrip('/')
+        # FRONTLINE_PUBLIC_BASE_URL is set nowhere, so the email said "(token: …)" instead of a link; the site's own
+        # address (FRONTEND_URL) serves the rating page.
+        from core.notification_settings import frontend_url
+        public_base = ((getattr(settings, 'FRONTLINE_PUBLIC_BASE_URL', '') or '').rstrip('/')
+                       or frontend_url())
         link = f"{public_base}/embed/csat?t={survey.token}" if public_base else f"(token: {survey.token})"
+        title = ticket.title or ''
+        for label in ('Hand-off: ', 'Call requested: ', 'Problem: ', 'Web form: '):
+            if title.startswith(label):
+                title = title[len(label):]
+        company = getattr(ticket, 'company', None)
+        team = (getattr(company, 'name', '') or '').strip() or 'Support Team'
         send_mail(
-            subject=f"How did we do? Ticket #{ticket.id}",
+            subject=f"How did we do? [FL-{ticket.id}]",
             message=(
                 f"Hi,\n\n"
-                f"Your support ticket \"{ticket.title}\" was just resolved. "
-                f"Would you mind rating how we did?\n\n"
+                f"Your request \"{title}\" has been resolved. "
+                f"Would you mind rating how we did? It takes one click:\n\n"
                 f"{link}\n\n"
-                f"Thanks — Support Team"
+                f"Thank you — {team}"
             ),
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            from_email=((getattr(company, 'support_from_email', '') or '').strip()
+                        or getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')),
             recipient_list=[recipient_email],
             fail_silently=False,
         )

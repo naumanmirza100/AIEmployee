@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import MacroPickerDialog from './MacroPickerDialog';
 import { labelOf } from '@/utils/labels';
@@ -20,7 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Loader2, Trash2, Headphones, CheckCircle2, Send, Plus, RefreshCw,
-  Sparkles, User, BookOpen, Paperclip, RotateCcw,
+  Sparkles, User, BookOpen, Paperclip, RotateCcw, CalendarPlus,
 } from 'lucide-react';
 import { HINTS } from './frontlineTutorialSteps';
 import InfoHint from './InfoHint';
@@ -34,6 +35,15 @@ import frontlineAgentService from '@/services/frontlineAgentService';
 // ============================================================================
 export function HandoffQueueTab() {
   const { toast } = useToast();
+  const navigate = useNavigate();
+  // A customer who asked for a call: Meetings opens with the booking form filled from this ticket.
+  const bookCall = (t) => {
+    const q = new URLSearchParams({ tab: 'meetings', book: '1', ticket: String(t.id) });
+    if (t.contact?.email) q.set('customer_email', t.contact.email);
+    if (t.contact?.name) q.set('customer_name', t.contact.name);
+    q.set('topic', (t.handoff_context?.question || t.title || '').slice(0, 300));
+    navigate(`/frontline/dashboard?${q.toString()}`);
+  };
   const [statusFilter, setStatusFilter] = useState('pending');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -308,6 +318,8 @@ export function HandoffQueueTab() {
   const reasonLabel = (r) => ({
     low_confidence: 'Low AI confidence',
     customer_requested: 'Customer asked for a human',
+    call_requested: 'Customer asked for a call',
+    problem_reported: 'Customer reported a problem',
     manual_escalation: 'Manual escalation',
     sla_risk: 'SLA at risk',
   }[r] || r || '—');
@@ -606,6 +618,11 @@ export function HandoffQueueTab() {
               >
                 <BookOpen className="h-4 w-4 mr-1" /> Macros
               </Button>
+              {drawer.ticket?.handoff_reason === 'call_requested' && (
+                <Button variant="outline" size="sm" onClick={() => bookCall(drawer.ticket)} data-testid="FL-handoff-book-call">
+                  <CalendarPlus className="h-4 w-4 mr-1" /> Book the call
+                </Button>
+              )}
               {drawer.ticket?.handoff_status === 'pending' && (
                 <Button
                   variant="outline"

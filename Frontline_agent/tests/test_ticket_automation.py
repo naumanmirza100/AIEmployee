@@ -57,6 +57,10 @@ class TicketAutomationTests(FrontlineTestCase):
         self.assertIn(response.status_code, (200, 201), response.content)
         return Ticket.objects.filter(company=self.company, title__startswith='Web form').latest('id')
 
+    def from_automation(self):
+        """The emails automation sent: not the acknowledgement every contact-form sender now gets."""
+        return [m for m in mail.outbox if not m.subject.startswith('We received your message')]
+
     def email_in(self, answer=SURE, **overrides):
         triage, answering = self.ai(answer=answer)
         with triage, answering, self.captureOnCommitCallbacks(execute=True):
@@ -69,7 +73,7 @@ class TicketAutomationTests(FrontlineTestCase):
         with mock.patch.object(FrontlineAgent, '_extract_ticket_intent', side_effect=AssertionError('no AI')):
             ticket = self.submit_form()
         self.assertEqual((ticket.category, ticket.priority, ticket.last_triaged_at), ('other', 'medium', None))
-        self.assertEqual(mail.outbox, [])
+        self.assertEqual(self.from_automation(), [])
 
     # ---- classifying ---------------------------------------------------------------------------------------
 
@@ -80,7 +84,7 @@ class TicketAutomationTests(FrontlineTestCase):
         self.assertIsNotNone(ticket.last_triaged_at)
         self.assertEqual(ticket.entities, {'product_name': 'Pro plan'})
         self.assertLess(ticket.sla_due_at, timezone.now() + timedelta(hours=9))     # high: 8 hours, not 24
-        self.assertEqual(mail.outbox, [])                                           # classifying sends nothing
+        self.assertEqual(self.from_automation(), [])                                # classifying sends nothing
 
     def test_an_email_ticket_keeps_its_sender_when_classified(self):
         self.switch_on(classify=True)

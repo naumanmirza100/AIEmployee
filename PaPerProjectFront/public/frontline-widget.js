@@ -21,8 +21,9 @@
 
   function toggle() {
     open = !open;
+    // Shown and hidden only. It used to blank the chat on close and load it again on open, so a visitor who closed
+    // it lost the conversation and was asked for their name and email again.
     if (container) container.style.display = open ? 'block' : 'none';
-    if (iframe) iframe.src = open ? iframeSrc : '';
   }
 
   function create() {
