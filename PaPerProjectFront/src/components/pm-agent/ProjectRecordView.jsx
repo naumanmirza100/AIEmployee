@@ -6,7 +6,7 @@ import pmAgentService from '@/services/pmAgentService';
 import { apiErrorMessage } from '@/utils/apiErrorMessage';
 import {
   Loader2, FolderPlus, ListPlus, UserCheck, CalendarClock, Gavel, CheckCircle2, Users, AlertTriangle, Flag,
-  Trash2, Pencil, RefreshCw, Copy, Printer, ClipboardList, Lightbulb, Clock,
+  Trash2, Pencil, RefreshCw, Copy, Printer, Lightbulb, Clock, UserPlus, FolderKanban, CalendarDays,
 } from 'lucide-react';
 
 // One project's story on a page or two: what was decided and done, in date order, then what is due, late and at
@@ -25,6 +25,14 @@ const KIND = {
   priority: { icon: Flag, color: 'text-amber-300' },
   deleted: { icon: Trash2, color: 'text-white/50' },
   edit: { icon: Pencil, color: 'text-white/50' },
+  people: { icon: UserPlus, color: 'text-sky-300' },
+};
+
+// The groups of the record of all projects that are not a project.
+const GROUP = {
+  Team: { icon: Users, color: 'text-sky-300' },
+  Meetings: { icon: CalendarDays, color: 'text-fuchsia-300' },
+  Projects: { icon: FolderKanban, color: 'text-violet-300' },
 };
 
 const SEVERITY = {
@@ -68,11 +76,37 @@ function asText(r) {
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// The record of all projects as plain text.
+function asTextAll(r) {
+  const o = r.overview;
+  const lines = ['All projects — record', `${o.projects} projects · ${o.done}/${o.tasks} tasks done · ${o.late} late · ${o.people} people`, ''];
+  lines.push('PROJECTS');
+  r.projects.forEach((p) => lines.push(`  • ${p.name} — ${p.status}, ${p.done}/${p.tasks} done${p.late ? `, ${p.late} late` : ''}, deadline ${shortDate(p.deadline)}`));
+  lines.push('', 'WHAT HAPPENED (newest first)');
+  if (r.earlier) lines.push(`(${r.earlier})`);
+  r.timeline.forEach((day) => {
+    lines.push(longDate(day.date));
+    day.groups.forEach((g) => {
+      lines.push(`  ${g.label}`);
+      g.items.forEach((i) => lines.push(`    • ${i.text}`));
+    });
+  });
+  const section = (title, rows) => { if (rows.length) { lines.push('', title, ...rows.map((x) => `  • ${x}`)); } };
+  section('DECISIONS', r.decisions.map((d) => `${shortDate(d.date)} — ${d.text} (${d.project}, ${d.source})`));
+  section('LATE', r.due.late.map((t) => `${t.title} — ${t.project}, ${t.owner}, due ${shortDate(t.due)} (${dueWords(t.days)})`));
+  section('DUE IN THE NEXT 7 DAYS', r.due.soon.map((t) => `${t.title} — ${t.project}, ${t.owner}, ${shortDate(t.due)}`));
+  section('RISKS', r.risks.map((k) => `${k.text} [${k.severity}] (${k.project})`));
+  section("WHO'S DOING WHAT", r.team.map((m) => `${m.name}${m.left ? ' (left the team)' : ''}: ${m.open} open, ${m.done} done${m.late ? `, ${m.late} late` : ''}, ${m.projects} project${m.projects === 1 ? '' : 's'}`));
+  section('NEXT STEPS', r.next_steps);
+  return lines.join('\n');
+}
+
 function printRecord(r) {
   const win = window.open('', '_blank', 'width=900,height=1000');
   if (!win) return false;
-  const body = escapeHtml(asText(r)).replace(/^([A-Z][A-Z' 0-9]+)$/gm, '<h3>$1</h3>');
-  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(r.project.name)} — project record</title>
+  const all = r.scope === 'all';
+  const body = escapeHtml(all ? asTextAll(r) : asText(r)).replace(/^([A-Z][A-Z' 0-9()]+)$/gm, '<h3>$1</h3>');
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(all ? 'All projects' : r.project.name)} — ${all ? 'record' : 'project record'}</title>
     <style>body{font:13px/1.5 system-ui,sans-serif;margin:32px;color:#111}pre{white-space:pre-wrap;font:inherit;margin:0}
     h3{font-size:12px;letter-spacing:.06em;color:#5b21b6;margin:14px 0 2px}</style></head>
     <body><pre>${body}</pre><script>window.onload=()=>{window.print()}</script></body></html>`);
@@ -91,7 +125,223 @@ function Section({ icon: Icon, title, color = 'text-violet-300', children, testi
   );
 }
 
-export default function ProjectRecordView({ projectId }) {
+const Bar = ({ pct, tone = 'bg-emerald-500/70' }) => (
+  <div className="h-1.5 rounded bg-white/[0.06] overflow-hidden"><div className={`h-full ${tone}`} style={{ width: `${pct}%` }} /></div>
+);
+
+// "All projects": what was added, changed, removed and confirmed across the company, each day grouped by project,
+// with the team's and the meetings' news; then where each project stands. project_record.build_company.
+function CompanyRecordView({ onPickProject }) {
+  const { toast } = useToast();
+  const [record, setRecord] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await pmAgentService.getCompanyRecord();
+      setRecord(res?.data || null);
+    } catch (e) {
+      setRecord(null);
+      toast({ title: 'Could not load the record', description: apiErrorMessage(e, ''), variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  if (loading && !record) {
+    return <div className="flex items-center justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div>;
+  }
+  if (!record) return null;
+
+  const o = record.overview;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(asTextAll(record));
+      toast({ title: 'Copied', description: 'The record of all projects is on the clipboard.' });
+    } catch {
+      toast({ title: 'Copy did not work', description: 'Use Print instead.', variant: 'destructive' });
+    }
+  };
+  const pick = (id) => onPickProject && id && onPickProject(id);
+
+  return (
+    <div className="space-y-4" data-testid="company-record">
+      {/* Where the company stands */}
+      <Card className="bg-black/30 border-white/[0.06]">
+        <CardContent className="pt-5 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-white">All projects</h3>
+              <p className="text-xs text-white/55 mt-0.5">
+                Everything added, changed, removed and confirmed, across every project. Choose a project in the box, or
+                press its name below, for its own record.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={load} disabled={loading}>
+                <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} /> Refresh
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={copy}>
+                <Copy className="w-3.5 h-3.5 mr-1" /> Copy
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => printRecord(record) || copy()}>
+                <Printer className="w-3.5 h-3.5 mr-1" /> Print / PDF
+              </Button>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
+            {[['Projects', o.projects], ['People', o.people], ['Tasks', o.tasks], ['Done', o.done], ['Open', o.open], ['Late', o.late]].map(([label, n]) => (
+              <div key={label} className="rounded-md bg-white/[0.03] py-2">
+                <div className={`text-lg font-semibold ${label === 'Late' && n ? 'text-red-300' : 'text-white'}`}>{n}</div>
+                <div className="text-[11px] text-white/45">{label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="space-y-1">
+            <div className="flex justify-between text-[11px] text-white/45">
+              <span>{o.pct_done}% of all tasks done</span>
+              <span>{Object.entries(o.statuses || {}).map(([s, n]) => `${n} ${s.toLowerCase()}`).join(' · ')}</span>
+            </div>
+            <Bar pct={o.pct_done} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Every project at a glance, the ones with late work first */}
+      <Section icon={FolderKanban} title={`Projects (${record.projects.length})`} testid="company-record-projects">
+        {record.projects.length === 0 && <p className="text-white/45">No projects yet.</p>}
+        <div className="divide-y divide-white/[0.05]">
+          {record.projects.map((p) => (
+            <div key={p.id} className="py-2 grid gap-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] sm:items-center sm:gap-4">
+              <div className="min-w-0">
+                <button type="button" className="text-left text-white font-medium hover:text-violet-300 hover:underline truncate max-w-full"
+                        onClick={() => pick(p.id)} title="Open this project's record">{p.name}</button>
+                <div className="text-[11px] text-white/45">
+                  {p.status} · {p.priority} priority · deadline {shortDate(p.deadline)}
+                  {p.days_left !== null && p.days_left !== undefined && (
+                    <span className={p.days_left < 0 ? 'text-red-300' : p.days_left <= 7 ? 'text-amber-300' : ''}>
+                      {' '}({p.days_left < 0 ? `${-p.days_left} days past` : `${p.days_left} days left`})
+                    </span>
+                  )}
+                </div>
+                {p.next_step && <div className="text-[11px] text-emerald-300/80 mt-0.5">→ {p.next_step}</div>}
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px] text-white/45"><span>{p.done}/{p.tasks} done</span><span>{p.pct_done}%</span></div>
+                <Bar pct={p.pct_done} />
+              </div>
+              <div className="text-xs whitespace-nowrap">
+                {p.late ? <span className="text-red-300">{p.late} late</span> : <span className="text-white/40">nothing late</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+        {o.more_projects > 0 && <p className="text-xs text-white/40">and {o.more_projects} more, not changed lately</p>}
+      </Section>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* What happened, newest day first, each day grouped by project */}
+        <Card className="bg-white/[0.02] border-white/[0.06] lg:col-span-2" data-testid="company-record-timeline">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-violet-300 flex items-center gap-1.5"><Clock className="w-4 h-4" /> What happened, newest first</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {record.timeline.length === 0 && <p className="text-sm text-white/45">Nothing recorded yet.</p>}
+            <ol className="relative border-l border-white/[0.08] ml-2 space-y-5">
+              {record.timeline.map((day) => (
+                <li key={day.date} className="ml-4">
+                  <span className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full bg-violet-500/80" />
+                  <div className="text-xs font-medium text-white/80">{longDate(day.date)}</div>
+                  <div className="mt-1.5 space-y-2">
+                    {day.groups.map((g) => {
+                      const G = g.project_id ? { icon: FolderKanban, color: 'text-violet-300' } : (GROUP[g.label] || GROUP.Projects);
+                      const GIcon = G.icon;
+                      return (
+                        <div key={g.label} className="rounded-md bg-white/[0.025] px-3 py-2">
+                          <div className={`text-xs font-semibold flex items-center gap-1.5 ${G.color}`}>
+                            <GIcon className="w-3.5 h-3.5" />
+                            {g.project_id
+                              ? <button type="button" className="hover:underline text-left" onClick={() => pick(g.project_id)}>{g.label}</button>
+                              : g.label}
+                          </div>
+                          <ul className="mt-1 space-y-1">
+                            {g.items.map((item, i) => {
+                              const k = KIND[item.kind] || KIND.edit;
+                              const Icon = k.icon;
+                              return (
+                                <li key={i} className="flex items-start gap-2 text-sm text-white/70">
+                                  <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${k.color}`} />
+                                  <span>{item.text}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </li>
+              ))}
+            </ol>
+            {record.earlier && <p className="text-xs text-white/40 mt-4">{record.earlier}</p>}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <Section icon={CalendarClock} title="Due and late" color="text-amber-300" testid="company-record-due">
+            {record.due.late.length === 0 && record.due.soon.length === 0 && <p className="text-white/45">Nothing late or due this week.</p>}
+            {record.due.late.map((t) => (
+              <div key={`l${t.id}`} className="flex justify-between gap-2"><span>{t.title} <span className="text-white/40 text-xs">· {t.project} · {t.owner}</span></span>
+                <span className="text-red-300 text-xs whitespace-nowrap">{dueWords(t.days)}</span></div>
+            ))}
+            {record.due.more_late > 0 && <p className="text-xs text-white/40">and {record.due.more_late} more late</p>}
+            {record.due.soon.map((t) => (
+              <div key={`s${t.id}`} className="flex justify-between gap-2"><span>{t.title} <span className="text-white/40 text-xs">· {t.project} · {t.owner}</span></span>
+                <span className="text-amber-300 text-xs whitespace-nowrap">{shortDate(t.due)}</span></div>
+            ))}
+            {record.due.more_soon > 0 && <p className="text-xs text-white/40">and {record.due.more_soon} more this week</p>}
+          </Section>
+
+          <Section icon={Gavel} title={`Decisions (${record.decisions.length})`} testid="company-record-decisions">
+            {record.decisions.length === 0 ? <p className="text-white/45">None recorded yet.</p> : record.decisions.map((d, i) => (
+              <div key={i}><span className="text-white/45 text-xs mr-1.5">{shortDate(d.date)}</span>{d.text}
+                <span className="text-[11px] text-white/35"> · {d.project}</span></div>
+            ))}
+          </Section>
+
+          <Section icon={AlertTriangle} title={`Risks (${record.risks.length})`} color="text-red-300" testid="company-record-risks">
+            {record.risks.length === 0 ? <p className="text-white/45">No open risks.</p> : record.risks.map((r, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase shrink-0 ${SEVERITY[r.severity] || SEVERITY.medium}`}>{r.severity}</span>
+                <span>{r.text} <span className="text-[11px] text-white/35">· {r.project}</span></span>
+              </div>
+            ))}
+          </Section>
+
+          <Section icon={Users} title="Who's doing what" color="text-sky-300" testid="company-record-team">
+            {record.team.length === 0 ? <p className="text-white/45">No tasks yet.</p> : record.team.map((m) => (
+              <div key={m.name} className="flex justify-between gap-2"><span className={m.name === 'No owner' ? 'text-amber-300' : ''}>{m.name}
+                {m.left && <span className="ml-1.5 px-1 rounded bg-amber-900/40 text-amber-300 text-[10px] uppercase">left</span>}</span>
+                <span className="text-xs text-white/50 whitespace-nowrap">{m.open} open · {m.done} done{m.late ? <span className="text-red-300"> · {m.late} late</span> : null}
+                  {' '}· {m.projects} project{m.projects === 1 ? '' : 's'}</span></div>
+            ))}
+          </Section>
+
+          {record.next_steps.length > 0 && (
+            <Section icon={Lightbulb} title="Suggested next steps" color="text-emerald-300" testid="company-record-next">
+              {record.next_steps.map((s, i) => <div key={i} className="flex gap-2"><span className="text-emerald-400">→</span><span>{s}</span></div>)}
+            </Section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ProjectRecordView({ projectId, onPickProject }) {
   const { toast } = useToast();
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -112,14 +362,8 @@ export default function ProjectRecordView({ projectId }) {
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId]);
 
-  if (!projectId) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-white/40" data-testid="record-pick-project">
-        <ClipboardList className="w-12 h-12 mb-3 text-white/35" />
-        <p className="text-sm text-center">Choose a project above to see its record: decisions, work handed out, due dates and risks.</p>
-      </div>
-    );
-  }
+  // No project chosen means "All projects".
+  if (!projectId) return <CompanyRecordView onPickProject={onPickProject} />;
   if (loading && !record) {
     return <div className="flex items-center justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div>;
   }

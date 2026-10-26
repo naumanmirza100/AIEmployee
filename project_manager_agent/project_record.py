@@ -175,7 +175,7 @@ class _Day:
         return out
 
 
-def _timeline_and_decisions(project, tasks, entries, meetings, risks):
+def _timeline_and_decisions(project, tasks, entries, meetings, risks, fold=True):
     days = defaultdict(_Day)
     decisions = []
     titles = {t.id: t.title for t in tasks}
@@ -269,7 +269,7 @@ def _timeline_and_decisions(project, tasks, entries, meetings, risks):
                 for d, v in ordered.items()]
     timeline = [day for day in timeline if day['items']]
     earlier = None
-    if len(timeline) > MAX_DAYS:
+    if fold and len(timeline) > MAX_DAYS:
         folded = timeline[:-MAX_DAYS]
         events = sum(len(day['items']) for day in folded)
         earlier = (f'{_plural(len(folded), "earlier day")} ({_shown(folded[0]["date"])} to '
@@ -292,14 +292,15 @@ def _task_line(task, today):
             'priority': task.priority, 'status': task.status}
 
 
-def build(project, today=None):
-    """The record of `project` as the Meeting Notes tab shows it."""
+def build(project, today=None, fold=True):
+    """The record of `project` as the Meeting Notes tab shows it. `fold=False` keeps every day of the timeline
+    (the record of all projects folds them itself)."""
     today = today or timezone.localdate()
     tasks = list(Task.objects.filter(project=project).select_related('assignee').order_by('due_date', 'id'))
     entries = _entries(project, [t.id for t in tasks])
     meetings = _meetings(project)
     risks = list(ProjectRisk.objects.filter(project=project).order_by('identified_at'))
-    timeline, earlier, decisions = _timeline_and_decisions(project, tasks, entries, meetings, risks)
+    timeline, earlier, decisions = _timeline_and_decisions(project, tasks, entries, meetings, risks, fold=fold)
 
     open_tasks = [t for t in tasks if t.status != 'done']
     done = len(tasks) - len(open_tasks)
@@ -384,5 +385,204 @@ def build(project, today=None):
         'risks': risk_list[:MAX_LIST],
         'team': team,
         'next_steps': next_steps,
+        'generated_at': timezone.now().isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# All projects at once
+# ---------------------------------------------------------------------------
+
+MAX_DAYS_ALL = 21             # dates shown in the record of all projects
+MAX_PROJECTS = 60             # the most recently changed, when a company has more
+MAX_LIST_ALL = 10
+
+
+def _some(items, limit=3):
+    return '; '.join(items[:limit]) + (f' and {len(items) - limit} more' if len(items) > limit else '')
+
+
+def _company_people(company):
+    """Everyone who has had an employee login with the company, still working or since switched off."""
+    from django.contrib.auth.models import User
+    return (User.objects.filter(is_superuser=False)
+            .filter(Q(profile__company=company) | Q(profile__created_by_company_user__company=company))
+            .select_related('profile').distinct())
+
+
+def _meeting_time(meeting):
+    """The meeting's time in its own time zone, as the meeting lists show it."""
+    if not meeting.proposed_time:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        return meeting.proposed_time.astimezone(ZoneInfo(meeting.timezone_name or 'UTC'))
+    except Exception:
+        return timezone.localtime(meeting.proposed_time)
+
+
+def _company_events(company, people):
+    """What happened outside any one project, by day: projects removed, people joining and leaving, meetings booked,
+    confirmed and called off. {date: [(group, kind, text)]}."""
+    from hr_agent.models import Employee, HRAuditLog
+    from project_manager_agent.models import MeetingResponse, ScheduledMeeting
+    events = defaultdict(list)
+
+    for e in (PMAuditLog.objects.filter(company_user__company=company, model_name='Project', action='project_deleted')
+              .select_related('company_user')):
+        by = getattr(e.company_user, 'full_name', '') or ''
+        events[_day(e.created_at)].append(
+            ('Projects', 'deleted', f'Project removed: “{e.object_title}”' + (f' (by {by})' if by else '')))
+
+    joined = defaultdict(list)
+    for user in people:
+        profile = getattr(user, 'profile', None)
+        role = profile.get_role_display() if profile is not None else ''
+        joined[_day(user.date_joined)].append(_person(user) + (f' ({role})' if role else ''))
+    for day, names in joined.items():
+        events[day].append(('Team', 'people', 'Joined the team: ' + _some(names, 6)))
+    names_of = {}
+    for e in HRAuditLog.objects.filter(company=company, target_type='employee',
+                                       action__in=('employee.deactivate', 'employee.reactivate')):
+        if e.target_id not in names_of:
+            record = Employee.objects.filter(pk=e.target_id).select_related('user').first()
+            names_of[e.target_id] = _person(record.user) if record is not None and record.user_id else None
+        if names_of[e.target_id]:
+            left = e.action == 'employee.deactivate'
+            events[_day(e.created_at)].append(('Team', 'deleted' if left else 'people',
+                                               f'{"Left the team" if left else "Back on the team"}: '
+                                               f'{names_of[e.target_id]}'))
+
+    booked, confirmed, called_off = defaultdict(list), defaultdict(list), defaultdict(list)
+    for m in (ScheduledMeeting.objects.filter(organizer__company=company)
+              .prefetch_related('participants__user').order_by('created_at')):
+        when = _meeting_time(m)
+        label = f'“{m.title}”' + (f' ({when.day} {when:%b}, {when:%H:%M})' if when else '')
+        invited = [_person(p.user) for p in m.participants.all() if p.user_id]
+        booked[_day(m.created_at)].append(label + (f' with {", ".join(invited[:4])}' if invited else ''))
+        if m.status == 'accepted':
+            last = (MeetingResponse.objects.filter(meeting=m, action='accepted').order_by('-created_at')
+                    .values_list('created_at', flat=True).first())
+            confirmed[_day(last or m.updated_at)].append(label)
+        elif m.status in ('withdrawn', 'rejected'):
+            called_off[_day(m.updated_at)].append(label + (' — withdrawn' if m.status == 'withdrawn' else ' — declined'))
+    for day, items in booked.items():
+        events[day].append(('Meetings', 'meeting', f'{_plural(len(items), "meeting")} booked: {_some(items)}'))
+    for day, items in confirmed.items():
+        events[day].append(('Meetings', 'done', f'Confirmed, everyone accepted: {_some(items)}'))
+    for day, items in called_off.items():
+        events[day].append(('Meetings', 'deleted', f'Called off: {_some(items)}'))
+    return events
+
+
+def build_company(company_user, today=None):
+    """The record of all the company's projects at once ("All projects" in the Meeting Notes box): what was added,
+    changed, removed and confirmed, day by day, each line under its project, with the team's and the meetings'
+    news; then where every project stands, what is due and late everywhere, the decisions, the risks and who is
+    doing what. Built from the same stored entries as one project's record; no AI call."""
+    from core.tenancy import projects_for_company_user
+    today = today or timezone.localdate()
+    company = getattr(company_user, 'company', None)
+    all_projects = projects_for_company_user(company_user)
+    projects = list(all_projects.order_by('-updated_at')[:MAX_PROJECTS])
+    records = [(p, build(p, today, fold=False)) for p in projects]
+
+    # The timeline: each day, a group per project, then the projects removed, the team and the meetings.
+    days = defaultdict(OrderedDict)
+    for project, r in sorted(records, key=lambda pr: pr[0].name.lower()):
+        for day in r['timeline']:
+            days[day['date']][f'p{project.id}'] = {'label': project.name, 'project_id': project.id,
+                                                   'items': day['items']}
+    people = list(_company_people(company)) if company is not None else []
+    if company is not None:
+        for day, rows in _company_events(company, people).items():
+            if not day:
+                continue
+            for group, kind, text in rows:
+                slot = days[day.isoformat()].setdefault(group, {'label': group, 'project_id': None, 'items': []})
+                slot['items'].append({'kind': kind, 'text': text})
+    timeline = [{'date': d, 'groups': list(groups.values())} for d, groups in sorted(days.items())]
+    earlier = None
+    if len(timeline) > MAX_DAYS_ALL:
+        folded = timeline[:-MAX_DAYS_ALL]
+        events = sum(len(g['items']) for day in folded for g in day['groups'])
+        earlier = (f'{_plural(len(folded), "earlier day")} ({_shown(folded[0]["date"])} to '
+                   f'{_shown(folded[-1]["date"])}): {_plural(events, "event")} not shown. Choose a project in the box '
+                   'to see all of its days.')
+        timeline = timeline[-MAX_DAYS_ALL:]
+    timeline.reverse()                        # newest first: across many projects, the latest news matters most
+
+    # Where every project stands, the ones with late work first.
+    summary = [dict(r['project'], next_step=(r['next_steps'][0] if r['next_steps'] else None)) for _, r in records]
+    summary.sort(key=lambda p: (-p['late'], p['days_left'] if p['days_left'] is not None else 10 ** 6, p['name']))
+    totals = {key: sum(p[key] for p in summary) for key in ('tasks', 'done', 'open', 'late')}
+
+    def tagged(rows, project):
+        return [dict(row, project=project.name, project_id=project.id) for row in rows]
+
+    severity = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+    decisions = sorted((d for p, r in records for d in tagged(r['decisions'], p)), key=lambda d: d['date'], reverse=True)
+    late = sorted((t for p, r in records for t in tagged(r['due']['late'], p)), key=lambda t: t['days'] or 0)
+    soon = sorted((t for p, r in records for t in tagged(r['due']['soon'], p)), key=lambda t: t['days'] or 0)
+    risks = sorted((k for p, r in records for k in tagged(r['risks'], p)), key=lambda k: severity.get(k.get('severity'), 2))
+
+    # Who is doing what, across every project.
+    team = defaultdict(lambda: {'open': 0, 'done': 0, 'late': 0, 'projects': set()})
+    for project, r in records:
+        for member in r['team']:
+            row = team[member['name']]
+            for key in ('open', 'done', 'late'):
+                row[key] += member[key]
+            if member['open'] or member['done']:
+                row['projects'].add(project.id)
+    team_rows = sorted(({'name': n, 'open': c['open'], 'done': c['done'], 'late': c['late'],
+                         'projects': len(c['projects'])} for n, c in team.items()),
+                       key=lambda m: (m['name'] == 'No owner', -m['open'], m['name']))
+    working = [u for u in people if u.is_active]
+    busy = {m['name'] for m in team_rows if m['open']}
+    idle = [_person(u) for u in working if _person(u) not in busy]
+
+    next_steps = []
+    for p in summary:
+        if p['days_left'] is not None and p['days_left'] < 0 and p['open']:
+            next_steps.append(f'{p["name"]}: the deadline has passed with {_plural(p["open"], "task")} still open.')
+        elif p['late']:
+            next_steps.append(f'{p["name"]}: {_plural(p["late"], "task")} late — agree new dates or move the deadline.')
+    gone = {_person(u) for u in people if not u.is_active}
+    for m in team_rows:
+        m['left'] = m['name'] in gone
+        if m['left'] and m['open']:
+            next_steps.append(f'{m["name"]} has left the team but still has {_plural(m["open"], "open task")}: '
+                              'hand them over (Users → their row).')
+    no_owner = next((m for m in team_rows if m['name'] == 'No owner' and m['open']), None)
+    if no_owner:
+        next_steps.append(f'{_plural(no_owner["open"], "open task")} in {_plural(no_owner["projects"], "project")} '
+                          'have no owner yet.')
+    owners = [m for m in team_rows if m['name'] != 'No owner']
+    average = sum(m['open'] for m in owners) / len(owners) if owners else 0
+    loaded = [m for m in owners if m['open'] >= 6 and m['open'] >= 2 * average]
+    if loaded and len(owners) > 1:
+        next_steps.append(f'{loaded[0]["name"]} has {_plural(loaded[0]["open"], "open task")} across '
+                          f'{_plural(loaded[0]["projects"], "project")}: consider sharing them out.')
+    if idle and owners:
+        shown = ', '.join(idle[:4]) + (f' and {len(idle) - 4} more' if len(idle) > 4 else '')
+        next_steps.append(f'No open work yet: {shown}.')
+
+    return {
+        'scope': 'all',
+        'overview': {
+            'projects': len(summary), 'more_projects': max(0, all_projects.count() - len(projects)),
+            'statuses': dict(Counter(p['status'] for p in summary)), 'people': len(working),
+            **totals, 'pct_done': round(100 * totals['done'] / totals['tasks']) if totals['tasks'] else 0,
+        },
+        'projects': summary,
+        'timeline': timeline,
+        'earlier': earlier,
+        'decisions': decisions[:MAX_LIST_ALL],
+        'due': {'late': late[:MAX_LIST_ALL], 'soon': soon[:MAX_LIST_ALL],
+                'more_late': max(0, len(late) - MAX_LIST_ALL), 'more_soon': max(0, len(soon) - MAX_LIST_ALL)},
+        'risks': risks[:MAX_LIST_ALL],
+        'team': team_rows,
+        'next_steps': next_steps[:8],
         'generated_at': timezone.now().isoformat(),
     }
