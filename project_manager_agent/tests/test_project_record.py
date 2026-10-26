@@ -163,6 +163,29 @@ class CompanyRecordTests(PMTestCase):
         dates = [day['date'] for day in self.record['timeline']]
         self.assertEqual(dates, sorted(dates, reverse=True))
 
+    def test_days_are_on_the_companys_clock(self):
+        # Seen live, 26 Oct 2026: a task made at 1:50 am in Lahore was listed under the day before (UTC).
+        from datetime import datetime, timezone as tz
+        made = pm_services.create_task(pm_services.DashboardActor(self.dash),
+                                       {'project_id': self.project.id, 'title': 'Late-night task'})
+        PMAuditLog.objects.filter(model_name='Task', object_id=made.id).update(
+            created_at=datetime(2026, 10, 25, 20, 50, tzinfo=tz.utc))          # 1:50 am on 26 Oct in Lahore
+
+        def day_of_late_night_task():
+            _, body = self.call(pm_tool_results.company_record, self.dash, method='get')
+            return next(day['date'] for day in body['data']['timeline'] for g in day['groups'] for i in g['items']
+                        if 'Late-night task' in i['text'])
+
+        self.assertEqual(day_of_late_night_task(), '2026-10-25')                # no time zone set: UTC, as before
+        self.company.timezone_name = 'Asia/Karachi'
+        self.company.save(update_fields=['timezone_name'])
+        self.assertEqual(day_of_late_night_task(), '2026-10-26')
+
+    def test_one_task_with_no_owner_has(self):
+        Task.objects.create(project=self.project, title='Nobody yet')
+        record = project_record.build_company(self.dash)
+        self.assertIn('1 open task in 1 project has no owner yet.', record['next_steps'])
+
     def test_the_endpoint(self):
         code, body = self.call(pm_tool_results.company_record, self.dash, method='get')
         self.assertEqual(code, 200, body)
