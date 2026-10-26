@@ -1172,6 +1172,13 @@ export const listLeaveRequests = async (params = {}) => {
   }
 };
 
+// ---------- Leave allowances ----------
+/** Each leave type's days a year, and whether this login may change them. */
+export const getLeaveAllowances = async () => companyApi.get('/hr/leave-allowances');
+
+/** Save the days a year ({leave_type: days}) and set everyone's balance for this year to them. */
+export const applyLeaveAllowances = async (allowances) => companyApi.post('/hr/leave-allowances', { allowances });
+
 // ---------- Holidays ----------
 export const listHolidays = async (year = null) => {
   try {
@@ -1416,6 +1423,8 @@ export default {
   withdrawLeaveRequest,
   listLeaveRequests,
   getHREmployeeDetail,
+  getLeaveAllowances,
+  applyLeaveAllowances,
   listHolidays,
   createHoliday,
   deleteHoliday,

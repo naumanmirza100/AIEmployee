@@ -814,7 +814,7 @@ const HRFloatingChat = () => {
               <div className="p-2.5 flex gap-2 items-end">
                 {hintsEnabled && <div className="pb-1.5"><InfoHint {...HR_HINTS.hrFcInput} /></div>}
                 <input ref={fileInputRef} type="file" className="hidden" onChange={handleFilePicked}
-                  accept=".pdf,.doc,.docx,.txt,.md,.html" />
+                  accept=".pdf,.docx,.txt,.md,.html" />
                 <button type="button" onClick={() => fileInputRef.current?.click()}
                   disabled={sending || uploading}
                   title="Upload a document to the HR knowledge base"

@@ -1042,6 +1042,11 @@ def upload_hr_document(request):
         if uploaded.size > 50 * 1024 * 1024:
             return Response({'status': 'error', 'message': 'File size exceeds 50MB limit'},
                             status=status.HTTP_400_BAD_REQUEST)
+        # The old Word format can't be read: it was offered, accepted, and then failed while processing.
+        if uploaded.name.lower().endswith('.doc'):
+            return Response({'status': 'error', 'message': "Old Word files (.doc) can't be read. Save it as .docx "
+                                                           'or PDF in Word and upload that.'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         title = (request.POST.get('title') or uploaded.name).strip() or uploaded.name
         description = (request.POST.get('description') or '').strip()
@@ -2538,6 +2543,17 @@ def make_leave_request(emp, company, d):
     leave_type = d.get('leave_type') or 'vacation'
     if leave_type not in dict(LeaveBalance.LEAVE_TYPE_CHOICES):
         return refuse('Unknown leave type.')
+
+    # Nothing checked the balance: people could ask for, and be given, more days than they had. Where the company
+    # keeps balances (hr_agent/allowances.py), a request is held to what is left, less requests still waiting.
+    if leave_type != 'unpaid':
+        from hr_agent import allowances
+        left = allowances.available(emp, leave_type)
+        if left is not None and float(days_requested) > left:
+            label = dict(LeaveBalance.LEAVE_TYPE_CHOICES)[leave_type]
+            have = f'{max(left, 0):g} day{"" if max(left, 0) == 1 else "s"}'
+            return refuse(f'Only {have} of {label} left this year (after requests still waiting), and this request '
+                          f'is {float(days_requested):g}. Ask for fewer days, or for Unpaid leave for the rest.')
 
     approver = resolve_approver_for_leave(emp, company)
     lr = LeaveRequest.objects.create(
@@ -4929,6 +4945,45 @@ def _serialize_accrual_policy(p) -> dict:
     }
 
 
+@api_view(['GET', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+@throttle_classes([HRCRUDThrottle])
+def leave_allowances(request):
+    """Each leave type's days a year (Leave → Leave allowances), hr_agent/allowances.py.
+
+    GET: ``{year, allowances: [{leave_type, label, days}], employees}``. POST ``{allowances: {leave_type: days}}``
+    (HR admins only): saved, and every current employee's balance for this year set to them.
+    """
+    from hr_agent import allowances
+    company = request.user.company
+    if request.method == 'POST':
+        if not _is_hr_admin(request.user):
+            return Response({'status': 'error', 'message': 'Only HR can set leave allowances.'},
+                            status=status.HTTP_403_FORBIDDEN)
+        wanted = (request.data or {}).get('allowances')
+        if not isinstance(wanted, dict):
+            return Response({'status': 'error', 'message': 'allowances must be {leave_type: days}.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            wanted = {k: float(v or 0) for k, v in wanted.items()}
+        except (TypeError, ValueError):
+            return Response({'status': 'error', 'message': 'Each allowance must be a number of days.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        people = allowances.apply(company, wanted)
+        _write_audit_log(request.user, company, 'leave_allowances.apply', 'company', company.id,
+                         after={'allowances': wanted, 'employees': people})
+    now = allowances.current(company)
+    from hr_agent.models import Employee, leave_year_start
+    return Response({'status': 'success', 'data': {
+        'year': leave_year_start().year,
+        'allowances': [{'leave_type': key, 'label': label, 'days': now.get(key, 0)}
+                       for key, label in LeaveBalance.LEAVE_TYPE_CHOICES],
+        'employees': Employee.objects.filter(company=company, employment_status__in=allowances.CURRENT).count(),
+        'can_manage': _is_hr_admin(request.user),
+    }})
+
+
 @api_view(['GET'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -5118,7 +5173,10 @@ def get_my_hr_profile(request):
         if not emp:
             return Response({
                 'status': 'error',
-                'message': "No HR Employee record found for your account. Ask HR to set one up.",
+                # An owner or admin who runs the company usually has none; that is not something to fix.
+                'message': ("This login has no HR record of its own: it runs the company's dashboard. People get "
+                            "an HR record when they are added under Dashboard › Users (or link this login to one "
+                            "from an employee's page, under Logins)."),
             }, status=status.HTTP_404_NOT_FOUND)
         return Response({'status': 'success', 'data': _build_employee_bundle(emp, company)})
     except Exception:

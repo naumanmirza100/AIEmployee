@@ -39,8 +39,10 @@ class BuiltInWorkflowTests(HRTestCase):
             Employee.objects.filter(pk=employee.pk).update(manager=self.member_emp, **fields)
             employee.refresh_from_db()
             return employee
-        return Employee.objects.create(company=self.company, full_name='Nina New', work_email='nina@test.local',
-                                       manager=self.member_emp, employment_status='active', **fields)
+        # Being added starts the "employee hired" workflows once the record is saved (hr_agent.signals).
+        with self.captureOnCommitCallbacks(execute=True):
+            return Employee.objects.create(company=self.company, full_name='Nina New', work_email='nina@test.local',
+                                           manager=self.member_emp, employment_status='active', **fields)
 
     def run_for(self, workflow, employee):
         code, body = self.call(views.execute_hr_workflow, self.admin, {'context': {'employee_id': employee.id}},
