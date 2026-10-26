@@ -202,7 +202,13 @@ def _day_from_offset(step, employee, tz_name):
     """The start time for a step that names a day, not a moment:
     `offset_days_from_now`, or `offset_days_from_start` counted from the
     employee's start date. 10:00 in the meeting's time zone unless the step
-    says `at_hour`; never today or earlier, and never on a weekend."""
+    says `at_hour`; never today or earlier, and never on a weekend.
+
+    A day from the start date that has already passed is counted from today
+    instead: onboarding run by hand for someone who joined in March put the
+    orientation (day 0) and the 30-day check-in (day 30) both on tomorrow.
+    Now the orientation is tomorrow and the check-in 30 days on; a day still
+    ahead (the check-in of someone who joined ten days ago) is kept."""
     from datetime import datetime, time, timedelta
     from zoneinfo import ZoneInfo
     from django.utils import timezone as dj_timezone
@@ -218,6 +224,8 @@ def _day_from_offset(step, employee, tz_name):
     if step.get('offset_days_from_start') is not None:
         start = employee.start_date if (employee is not None and employee.start_date) else today
         day = start + timedelta(days=number('offset_days_from_start'))
+        if day < today:
+            day = today + timedelta(days=number('offset_days_from_start'))
     else:
         day = today + timedelta(days=number('offset_days_from_now'))
     if day <= today:
