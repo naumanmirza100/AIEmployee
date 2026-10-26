@@ -19,19 +19,16 @@ from typing import Any
 BUILTIN_WORKFLOWS: dict[str, dict[str, Any]] = {
     'new_hire_onboarding': {
         'name': 'New hire onboarding',
+        # Only what it really does. It also said "provisions an account" and "assigns the standard new-hire training
+        # set": those two steps only wrote a log line, and their notes ("Stub — wire to your IDP") showed in the run.
         'description': (
-            "Default 30-day onboarding flow. Provisions an account, sends a welcome "
-            "email, books an orientation meeting, schedules a 30-day manager check-in, "
-            "and assigns the standard new-hire training set."
+            "A welcome email naming their first day, an orientation with their manager "
+            "on that day, and a check-in with the manager 30 days later."
         ),
         'trigger_conditions': {'on': 'employee_hired'},
         'requires_approval': False,
         'timeout_seconds': 0,
         'steps': [
-            {
-                'type': 'provision_account',
-                'note': 'Stub — wire to your IDP / Google Workspace creator here.',
-            },
             {
                 'type': 'send_email',
                 'to': '{{employee.work_email}}',
@@ -51,10 +48,6 @@ BUILTIN_WORKFLOWS: dict[str, dict[str, Any]] = {
                 'offset_days_from_start': 0,
                 'with_manager': True,
                 'continue_on_error': True,
-            },
-            {
-                'type': 'assign_training',
-                'training_key': 'standard_new_hire',
             },
             {
                 'type': 'schedule_meeting',

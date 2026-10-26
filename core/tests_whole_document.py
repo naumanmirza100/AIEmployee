@@ -105,6 +105,17 @@ class WholeDocumentTests(TestCase):
                          ['Prospectus (whole document)', 'Handbook (whole document)'])
         self.assertIn('whole_document(docs=2', out['timing_ms']['retrieval_path'])
 
+    def test_page_marks_are_given_as_plain_page_lines(self):
+        # Seen live: "This list is from the Employee Handbook, page 2 (__PAGE_2__)."
+        HRDocument.objects.filter(pk=self.handbook.pk).update(
+            document_content='\x0c__PAGE_1__\nOffice hours 9:30.\n\x0c__PAGE_2__\nHolidays: 5 Feb.')
+        agent = self.hr(self.found(self.handbook))
+        with mock.patch.object(HRAgent, '_call_llm', return_value='Every holiday') as llm:
+            agent.answer_question(LIST_QUESTION, asker_role='hr')
+        prompt = llm.call_args.kwargs['prompt']
+        self.assertIn('[Page 2]\nHolidays: 5 Feb.', prompt)
+        self.assertNotIn('__PAGE_2__', prompt)
+
     def test_an_ordinary_question_still_reads_the_excerpts(self):
         agent = self.hr(self.found(self.prospectus))
         with mock.patch.object(HRAgent, '_call_llm', return_value='A1 is open merit') as llm:
