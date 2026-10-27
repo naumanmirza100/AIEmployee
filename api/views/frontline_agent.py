@@ -6500,11 +6500,10 @@ def send_ticket_reply(ticket, body_text, body_html='', *, to=None, cc=None, auth
     if tag not in subject:
         subject = f"Re: {subject} {tag}"
 
-    # Compose sender.
+    # Compose sender: the company's name on it (Frontline_agent/customer_mail.sender).
     company = ticket.company
-    from_email = ((company.support_from_email or '').strip()
-                  if company else '') or getattr(settings, 'DEFAULT_FROM_EMAIL',
-                                                 'noreply@example.com')
+    from Frontline_agent.customer_mail import sender
+    from_email = sender(company)[0]
 
     # Stamp a Message-ID we control so the customer's reply threads back.
     new_message_id = _message_id_for(ticket.id).strip('<>')

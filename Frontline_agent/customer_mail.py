@@ -11,10 +11,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _sender(company):
+def sender(company):
+    """(From, Reply-To) for every email to a company's customer: replies, the receipt, call invitations, the survey.
+
+    From carries the company's name, "Margalla Software <address>". The customer used to see only the platform's
+    address (live, 27 Oct: "payperproject.laskon@gmail.com"), nothing of who had written to them. Reply-To is the
+    company's support inbox, so an answer comes back onto the ticket."""
+    from email.utils import formataddr, parseaddr
+
     from django.conf import settings
     own = (getattr(company, 'support_from_email', '') or '').strip()
-    from_email = own or getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
+    address = parseaddr(own or getattr(settings, 'DEFAULT_FROM_EMAIL', '') or '')[1] or 'noreply@example.com'
+    name = (getattr(company, 'name', '') or '').strip()
+    from_email = formataddr((name, address)) if name else address
     inbound = getattr(settings, 'FRONTLINE_INBOUND_EMAIL_DOMAIN', '') or ''
     slug = getattr(company, 'support_inbox_slug', '') or ''
     reply_to = f'support+{slug}@{inbound}' if slug and inbound else own
@@ -44,7 +53,7 @@ def acknowledge_web_form(ticket, message):
     def send():
         try:
             from django.core.mail import EmailMessage
-            from_email, reply_to = _sender(company)
+            from_email, reply_to = sender(company)
             EmailMessage(subject=f'We received your message [FL-{ticket.id}]', body=body, from_email=from_email,
                          to=[to], reply_to=[reply_to] if reply_to else None).send(fail_silently=False)
         except Exception:

@@ -34,6 +34,8 @@ class CustomerCallTests(MeetingTestCase):
         [(name, content, kind)] = email.attachments
         self.assertEqual((name, kind), ('call.ics', 'text/calendar'))
         self.assertIn('METHOD:REQUEST', content)
+        from email.utils import parseaddr
+        self.assertEqual(parseaddr(email.from_email)[0], self.company.name)
 
     def test_the_customer_comes_from_the_ticket_the_call_was_asked_for_on(self):
         customer = Contact.objects.create(company=self.company, email='farhan@bakery.test', name='Farhan')
