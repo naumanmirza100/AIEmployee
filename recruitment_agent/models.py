@@ -338,6 +338,9 @@ class JobApplication(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     applied_at = models.DateTimeField(auto_now_add=True)
     access_token = models.CharField(max_length=64, unique=True, blank=True, null=True)
+    screening_started_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Set while one run screens it, so a second run at once leaves it alone (CO-181)")
 
     class Meta:
         db_table = 'ppp_recruitment_job_applications'

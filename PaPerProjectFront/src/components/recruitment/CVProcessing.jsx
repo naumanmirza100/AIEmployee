@@ -234,6 +234,14 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
           title: 'Success',
           description: `Processed ${response.results?.length || 0} CV(s) successfully`,
         });
+        // Files that could not be added, each with its reason (CO-180).
+        if (response.failed_files?.length) {
+          toast({
+            title: `${response.failed_files.length} file(s) not added`,
+            description: response.failed_files.map((f) => `${f.file_name}: ${f.reason}`).join(' '),
+            variant: 'destructive',
+          });
+        }
         // No free interview slot: nobody chosen for interview was invited (CO-228).
         if (response.notice) {
           toast({ title: 'No invitations sent', description: response.notice, variant: 'destructive' });
@@ -323,7 +331,7 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
                   data-testid="REC-cvprocessing-cv-files-input"
                   type="file"
                   multiple
-                  accept=".pdf,.doc,.docx"
+                  accept=".pdf,.docx"
                   onChange={handleFileChange}
                   className="text-sm bg-black/30 border-white/20 text-pure-white file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
                 />

@@ -224,9 +224,11 @@ def process_cvs(request):
         if not job_kw_list and job_keywords:
             job_kw_list = [kw.strip() for kw in job_keywords.split(",") if kw.strip()]
         
-        # Process CV files
+        # Process CV files. Each file on its own: one unreadable file failed the whole upload after the earlier
+        # ones were saved, and uploading again saved them twice (CO-180).
         parsed_results = []
         temp_paths = []
+        failed_files = []
         
         try:
             for uploaded_file in files:
@@ -239,6 +241,8 @@ def process_cvs(request):
                 
                 try:
                     parsed = cv_agent.parse_file(str(temp_path))
+                except KeyServiceError:
+                    raise
                 except Exception as parse_exc:
                     # Check if it's an API key expiration error
                     from recruitment_agent.core import GroqClientError
@@ -250,8 +254,17 @@ def process_cvs(request):
                             'message': 'API key rejected by provider. Please update your key in API Keys settings (BYOK) or contact your admin to refresh the managed key.',
                             'error_type': 'api_key_expired'
                         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-                    else:
-                        raise  # Re-raise other errors
+                    failed_files.append({'file_name': uploaded_file.name, 'reason': _unreadable_reason(uploaded_file.name,
+                                                                                                      parse_exc)})
+                    continue
+
+                # The same person on the same job again: not a second candidate (CO-180).
+                _email = (parsed.get('email') or '').strip().lower() if isinstance(parsed, dict) else ''
+                if job_desc and _email and CVRecord.objects.filter(
+                        job_description=job_desc, parsed_json__icontains=f'"{_email}"').exists():
+                    failed_files.append({'file_name': uploaded_file.name,
+                                         'reason': f'{_email} is already a candidate for this job; not added again.'})
+                    continue
                 
                 record_id = django_repo.store_parsed(uploaded_file.name, parsed) if django_repo else None
                 
@@ -315,6 +328,14 @@ def process_cvs(request):
                 except Exception:
                     pass
             
+            if failed_files and not parsed_results:
+                return Response({
+                    'status': 'error',
+                    'message': 'None of the files could be added. ' + ' '.join(
+                        f"{f['file_name']}: {f['reason']}" for f in failed_files),
+                    'failed_files': failed_files,
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # If parse_only, return parsed results
             if parse_only:
                 return Response({
@@ -373,7 +394,9 @@ def process_cvs(request):
                 reverse=True
             )
             
-            # Apply top_n limit
+            # Top N limits what is shown and who is invited. Everyone's results are saved: they were thrown away for
+            # all but the top N, who stayed candidates with no score (CO-227).
+            everyone = ranked
             if top_n:
                 ranked = ranked[:top_n]
             
@@ -395,7 +418,7 @@ def process_cvs(request):
             email_settings = sharing.email_settings(settings_owner)
 
             # Update CV records with qualification data and auto-schedule interviews
-            for idx, result in enumerate(ranked):
+            for idx, result in enumerate(everyone):
                 if result['record_id']:
                     try:
                         cv_record = CVRecord.objects.get(id=result['record_id'])
@@ -427,6 +450,9 @@ def process_cvs(request):
                     except CVRecord.DoesNotExist:
                         pass
                 
+                if top_n and idx >= top_n:
+                    continue    # saved above; only the top N are invited
+
                 # Auto-schedule interview if decision is INTERVIEW
                 qual_decision = result.get('qualified', {}).get('decision', '') if isinstance(result.get('qualified'), dict) else ''
                 if qual_decision == "INTERVIEW" and interview_agent:
@@ -502,7 +528,8 @@ def process_cvs(request):
             payload = {
                 'status': 'success',
                 'results': ranked,
-                'total': len(ranked)
+                'total': len(ranked),
+                'failed_files': failed_files,
             }
             if no_slots:
                 payload['notice'] = _itime.no_slots_message(job_desc)
@@ -1911,6 +1938,18 @@ def _get_parsed_email_and_name(parsed):
     name = (parsed.get('name') or parsed.get('full_name') or parsed.get('Name') or 'Candidate') if isinstance(parsed, dict) else 'Candidate'
     name = (name or 'Candidate').strip()
     return (email or None), name
+
+
+def _unreadable_reason(file_name, exc):
+    """Why a CV file could not be read, in words the recruiter can act on (CO-102, CO-180)."""
+    suffix = Path(file_name).suffix.lower()
+    if suffix == '.doc':
+        return 'an old Word file (.doc) cannot be read; save it as .docx or PDF and upload it again.'
+    if suffix not in ('.pdf', '.docx', '.txt'):
+        return f'{suffix or "this kind of"} files cannot be read; upload a PDF or .docx.'
+    if 'empty' in str(exc).lower():
+        return 'no text could be read from it (it may be a scanned picture); upload a PDF with text, or a .docx.'
+    return f'it could not be read ({str(exc)[:160]}).'
 
 
 def _reject_recipient(cv_record):

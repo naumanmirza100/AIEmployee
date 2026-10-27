@@ -14,10 +14,13 @@ import logging
 import tempfile
 import threading
 import time
+from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
 from django.db import connection
+from django.db.models import Q
+from django.utils import timezone
 
 from recruitment_agent import application_status, sharing
 
@@ -61,9 +64,36 @@ def recruiter_for(job):
             .order_by('id').first())
 
 
+# A run that died keeps its claim this long, then another run may take the applicant.
+CLAIM_FOR = timedelta(minutes=30)
+
+
+def not_screened(applications):
+    """Applications with no screened candidate behind them. A record with no decision is a run that stopped
+    half-way: it used to mark the applicant 'AI Analysed' for good (CO-181)."""
+    from recruitment_agent.models import CVRecord
+    screened = (CVRecord.objects.filter(job_application__isnull=False).exclude(qualification_decision__isnull=True)
+                .exclude(qualification_decision='').values('job_application_id'))
+    return applications.exclude(pk__in=screened)
+
+
+def _claim(app) -> bool:
+    """Take the applicant for this run; False when another run has it."""
+    from recruitment_agent.models import JobApplication
+    now = timezone.now()
+    return bool(JobApplication.objects.filter(pk=app.pk).filter(
+        Q(screening_started_at__isnull=True) | Q(screening_started_at__lt=now - CLAIM_FOR)
+    ).update(screening_started_at=now))
+
+
+def _release(app):
+    from recruitment_agent.models import JobApplication
+    JobApplication.objects.filter(pk=app.pk).update(screening_started_at=None)
+
+
 def screen(job, applications, actor, agents) -> list:
     """Screen each application in turn. Returns one result per application, as the button shows them."""
-    from recruitment_agent.models import CVRecord
+    from recruitment_agent.models import CVRecord, JobApplication
 
     cv_agent, sum_agent = agents['cv_agent'], agents['sum_agent']
     enrich_agent, qualify_agent = agents['enrich_agent'], agents['qualify_agent']
@@ -95,8 +125,19 @@ def screen(job, applications, actor, agents) -> list:
             continue
         if idx > 0:
             time.sleep(0.5)
+        # Two runs at once (a second tab, a retry, arrival screening) screened and invited the same people twice.
+        if not _claim(app):
+            results.append({'application_id': app.id, 'applicant': name, 'skipped': True,
+                            'reason': 'Being screened by another run'})
+            continue
+        if not not_screened(JobApplication.objects.filter(pk=app.pk)).exists():
+            _release(app)
+            results.append({'application_id': app.id, 'applicant': name, 'skipped': True,
+                            'reason': 'Already screened'})
+            continue
 
         temp_path = None
+        record_id = None
         try:
             suffix = Path(app.cv_file.name).suffix or '.pdf'
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -106,18 +147,6 @@ def screen(job, applications, actor, agents) -> list:
                 temp_path = Path(tmp.name)
 
             parsed = cv_agent.parse_file(str(temp_path))
-            record_id = django_repo.store_parsed(app.cv_file_name or app.cv_file.name, parsed)
-
-            # Link CVRecord to company_user, job, and the JobApplication
-            if record_id:
-                try:
-                    cv_record = CVRecord.objects.get(id=record_id)
-                    cv_record.company_user = actor
-                    cv_record.job_description = job
-                    cv_record.job_application = app
-                    cv_record.save()
-                except CVRecord.DoesNotExist:
-                    pass
 
             summary = sum_agent.summarize(parsed, job_kw_list)
             if not isinstance(summary, dict):
@@ -133,10 +162,16 @@ def screen(job, applications, actor, agents) -> list:
             if not isinstance(qualified, dict):
                 qualified = qualified[0] if isinstance(qualified, list) and qualified else {}
 
-            # Persist full analysis back to CVRecord
+            # Saved once it is scored: a record linked first and scored after was left with no score when
+            # scoring failed, and the applicant was never picked up again (CO-181). A leftover from such a run goes.
+            CVRecord.objects.filter(job_application=app).filter(
+                Q(qualification_decision__isnull=True) | Q(qualification_decision='')).delete()
+            record_id = django_repo.store_parsed(app.cv_file_name or app.cv_file.name, parsed)
             if record_id:
                 try:
                     cv_record = CVRecord.objects.get(id=record_id)
+                    cv_record.job_description = job
+                    cv_record.job_application = app
                     cv_record.insights_json = json.dumps(summary)
                     cv_record.enriched_json = json.dumps(enriched)
                     cv_record.qualification_json = json.dumps(qualified)
@@ -189,8 +224,12 @@ def screen(job, applications, actor, agents) -> list:
             })
         except Exception as exc:
             logger.error(f'Error processing application {app.id}: {exc}', exc_info=True)
-            results.append({'application_id': app.id, 'applicant': name, 'skipped': True, 'reason': str(exc)})
+            from api.views.recruitment_agent import _unreadable_reason
+            reason = (_unreadable_reason(app.cv_file_name or app.cv_file.name, exc)
+                      if isinstance(exc, ValueError) else str(exc))
+            results.append({'application_id': app.id, 'applicant': name, 'skipped': True, 'reason': reason})
         finally:
+            _release(app)
             if temp_path:
                 try:
                     temp_path.unlink()
@@ -204,8 +243,8 @@ def screen_new_application(application_id) -> str:
     from api.views.recruitment_agent import _make_agents
     from recruitment_agent.models import JobApplication
 
-    app = (JobApplication.objects.select_related('job__company', 'job__company_user')
-           .filter(pk=application_id, cv_records__isnull=True).first())
+    app = not_screened(JobApplication.objects.select_related('job__company', 'job__company_user')
+                       .filter(pk=application_id)).first()
     if app is None:
         return 'already screened'
     job = app.job

@@ -329,9 +329,9 @@ def process_job_applicants(request, jobId):
                 'missing_fields': missing_fields,
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Fetch unprocessed applications (no linked cv_record yet)
+        # Applications not screened yet, including any a stopped run left half-done (CO-181).
         unprocessed = list(
-            JobApplication.objects.filter(job=job, cv_records__isnull=True).order_by('applied_at')
+            applicant_screening.not_screened(JobApplication.objects.filter(job=job)).order_by('applied_at')
         )
 
         if not unprocessed:
