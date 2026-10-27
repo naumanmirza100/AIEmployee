@@ -49,7 +49,7 @@ export function FrontlineWorkflowsTab() {
   // row. Side-effect-free preview of what the workflow would do; backend at
   // `dry_run_workflow` returns step-by-step result_data with simulated: true.
   const [dryRunDialog, setDryRunDialog] = useState({
-    open: false, loading: false, workflowName: '', result: null, error: '',
+    open: false, loading: false, workflowName: '', result: null, error: '', ticketId: null,
   });
   const TRIGGER_ON_OPTIONS = [{ value: 'none', label: 'None (manual only)' }, { value: 'ticket_created', label: 'Ticket created' }, { value: 'ticket_updated', label: 'Ticket updated' }];
   const CATEGORY_OPTIONS = ['technical', 'billing', 'account', 'feature_request', 'bug', 'knowledge_gap', 'other'];
@@ -237,13 +237,17 @@ export function FrontlineWorkflowsTab() {
     }
   };
 
-  // Side-effect-free preview. We invoke with an empty context so the user
-  // can sanity-check the workflow shape; a richer "pick a sample ticket"
-  // picker can be added later if needed.
+  // Side-effect-free preview, with the ticket and email chosen under "Execute" above. With an empty context every
+  // step that works on a ticket "would fail" (Missing ticket_id), which read as the workflow being broken.
   const runDryRun = async (w) => {
-    setDryRunDialog({ open: true, loading: true, workflowName: w.name || `Workflow #${w.id}`, result: null, error: '' });
+    const ticketId = executeForm.ticket_id ? parseInt(executeForm.ticket_id, 10) : null;
+    const context = {
+      ...(ticketId ? { ticket_id: ticketId } : {}),
+      ...(executeForm.recipient_email ? { recipient_email: executeForm.recipient_email } : {}),
+    };
+    setDryRunDialog({ open: true, loading: true, workflowName: w.name || `Workflow #${w.id}`, result: null, error: '', ticketId });
     try {
-      const res = await frontlineAgentService.dryRunWorkflow(w.id, {});
+      const res = await frontlineAgentService.dryRunWorkflow(w.id, context);
       if (res.status === 'success') {
         setDryRunDialog((d) => ({ ...d, loading: false, result: res.data || res, error: '' }));
       } else {
@@ -549,7 +553,9 @@ export function FrontlineWorkflowsTab() {
             Dry run: {dryRunDialog.workflowName}
           </DialogTitle>
           <DialogDescription>
-            Preview of what this workflow would do with an empty context. Side-effect-free — no emails, webhooks, or DB writes.
+            {dryRunDialog.ticketId
+              ? `What this workflow would do for ticket #${dryRunDialog.ticketId}. Nothing is sent or changed.`
+              : 'What this workflow would do with no ticket. Nothing is sent or changed. Steps that work on a ticket need one: choose a ticket under Execute above, then run the preview again.'}
           </DialogDescription>
         </DialogHeader>
         <div className="overflow-y-auto min-h-0 flex-1 space-y-3">
