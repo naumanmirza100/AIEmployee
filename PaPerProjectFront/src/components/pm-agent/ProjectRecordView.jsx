@@ -35,6 +35,27 @@ const GROUP = {
   Projects: { icon: FolderKanban, color: 'text-violet-300' },
 };
 
+// The period the record covers. The longer it is, the less each line of "All projects" says (a day lists each
+// project's own lines, a week one line per project a day, a month one line per project a week), so every period
+// comes out at about the same length. project_record.PERIODS.
+const PERIODS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['all', 'All time']];
+const periodName = (key) => (PERIODS.find(([k]) => k === key) || [, ''])[1];
+
+function PeriodPicker({ value, onChange, disabled }) {
+  return (
+    <div className="flex flex-wrap gap-1" role="group" aria-label="Period" data-testid="record-period">
+      {PERIODS.map(([key, label]) => (
+        <button key={key} type="button" disabled={disabled} onClick={() => onChange(key)} data-testid={`record-period-${key}`}
+          className={`h-7 px-2.5 rounded-md text-xs border transition-colors ${value === key
+            ? 'bg-violet-600 border-violet-500 text-white'
+            : 'border-white/[0.08] text-white/60 hover:text-white hover:bg-white/[0.05]'}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const SEVERITY = {
   critical: 'bg-red-900/60 text-red-200', high: 'bg-red-900/40 text-red-300',
   medium: 'bg-amber-900/40 text-amber-300', low: 'bg-white/[0.06] text-white/60',
@@ -56,7 +77,10 @@ const dueWords = (days) => {
 // The record as plain text, for Copy and for the printed page.
 function asText(r) {
   const p = r.project;
-  const lines = [`${p.name} — project record`, `${p.status} · ${p.done}/${p.tasks} tasks done · start ${shortDate(p.start)} · deadline ${shortDate(p.deadline)}`, ''];
+  const lines = [`${p.name} — project record${r.period ? ` · ${periodName(r.period.key)}` : ''}`,
+    `${p.status} · ${p.done}/${p.tasks} tasks done · start ${shortDate(p.start)} · deadline ${shortDate(p.deadline)}`];
+  if (r.period?.summary) lines.push(r.period.summary);
+  lines.push('');
   lines.push('TIMELINE');
   if (r.earlier) lines.push(`(${r.earlier})`);
   r.timeline.forEach((day) => {
@@ -79,13 +103,15 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 // The record of all projects as plain text.
 function asTextAll(r) {
   const o = r.overview;
-  const lines = ['All projects — record', `${o.projects} projects · ${o.done}/${o.tasks} tasks done · ${o.late} late · ${o.people} people`, ''];
-  lines.push('PROJECTS');
+  const lines = [`All projects — record${r.period ? ` · ${periodName(r.period.key)}` : ''}`,
+    `${o.projects} projects · ${o.done}/${o.tasks} tasks done · ${o.late} late · ${o.people} people`];
+  if (r.period?.summary) lines.push(r.period.summary);
+  lines.push('', 'PROJECTS');
   r.projects.forEach((p) => lines.push(`  • ${p.name} — ${p.status}, ${p.done}/${p.tasks} done${p.late ? `, ${p.late} late` : ''}, deadline ${shortDate(p.deadline)}`));
   lines.push('', 'WHAT HAPPENED (newest first)');
   if (r.earlier) lines.push(`(${r.earlier})`);
   r.timeline.forEach((day) => {
-    lines.push(longDate(day.date));
+    lines.push(day.label || longDate(day.date));
     day.groups.forEach((g) => {
       lines.push(`  ${g.label}`);
       g.items.forEach((i) => lines.push(`    • ${i.text}`));
@@ -106,7 +132,7 @@ function printRecord(r) {
   if (!win) return false;
   const all = r.scope === 'all';
   const body = escapeHtml(all ? asTextAll(r) : asText(r)).replace(/^([A-Z][A-Z' 0-9()]+)$/gm, '<h3>$1</h3>');
-  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(all ? 'All projects' : r.project.name)} — ${all ? 'record' : 'project record'}</title>
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(all ? 'All projects' : r.project.name)} — ${all ? 'record' : 'project record'}${r.period ? ` · ${escapeHtml(periodName(r.period.key))}` : ''}</title>
     <style>body{font:13px/1.5 system-ui,sans-serif;margin:32px;color:#111}pre{white-space:pre-wrap;font:inherit;margin:0}
     h3{font-size:12px;letter-spacing:.06em;color:#5b21b6;margin:14px 0 2px}</style></head>
     <body><pre>${body}</pre><script>window.onload=()=>{window.print()}</script></body></html>`);
@@ -131,7 +157,7 @@ const Bar = ({ pct, tone = 'bg-emerald-500/70' }) => (
 
 // "All projects": what was added, changed, removed and confirmed across the company, each day grouped by project,
 // with the team's and the meetings' news; then where each project stands. project_record.build_company.
-function CompanyRecordView({ onPickProject }) {
+function CompanyRecordView({ onPickProject, period, onPeriod }) {
   const { toast } = useToast();
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -139,7 +165,7 @@ function CompanyRecordView({ onPickProject }) {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await pmAgentService.getCompanyRecord();
+      const res = await pmAgentService.getCompanyRecord(period);
       setRecord(res?.data || null);
     } catch (e) {
       setRecord(null);
@@ -149,7 +175,7 @@ function CompanyRecordView({ onPickProject }) {
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [period]);
 
   if (loading && !record) {
     return <div className="flex items-center justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div>;
@@ -176,8 +202,8 @@ function CompanyRecordView({ onPickProject }) {
             <div>
               <h3 className="text-lg font-semibold text-white">All projects</h3>
               <p className="text-xs text-white/55 mt-0.5">
-                Everything added, changed, removed and confirmed, across every project. Choose a project in the box, or
-                press its name below, for its own record.
+                What was added, changed, removed and confirmed, across every project, in brief. Choose a project in the
+                box, or press its name below, for its own record.
               </p>
             </div>
             <div className="flex gap-2">
@@ -192,6 +218,8 @@ function CompanyRecordView({ onPickProject }) {
               </Button>
             </div>
           </div>
+          <PeriodPicker value={period} onChange={onPeriod} disabled={loading} />
+          {record.period?.summary && <p className="text-sm text-white/80" data-testid="record-summary">{record.period.summary}</p>}
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
             {[['Projects', o.projects], ['People', o.people], ['Tasks', o.tasks], ['Done', o.done], ['Open', o.open], ['Late', o.late]].map(([label, n]) => (
               <div key={label} className="rounded-md bg-white/[0.03] py-2">
@@ -227,6 +255,9 @@ function CompanyRecordView({ onPickProject }) {
                     </span>
                   )}
                 </div>
+                <div className="text-[11px] text-white/40">
+                  {p.changes ? `${p.changes} change${p.changes === 1 ? '' : 's'}` : 'No changes'} {period === 'all' ? 'so far' : periodName(period).toLowerCase()}
+                </div>
                 {p.next_step && <div className="text-[11px] text-emerald-300/80 mt-0.5">→ {p.next_step}</div>}
               </div>
               <div className="space-y-1">
@@ -249,12 +280,12 @@ function CompanyRecordView({ onPickProject }) {
             <CardTitle className="text-sm text-violet-300 flex items-center gap-1.5"><Clock className="w-4 h-4" /> What happened, newest first</CardTitle>
           </CardHeader>
           <CardContent>
-            {record.timeline.length === 0 && <p className="text-sm text-white/45">Nothing recorded yet.</p>}
+            {record.timeline.length === 0 && <p className="text-sm text-white/45">Nothing recorded in this period.</p>}
             <ol className="relative border-l border-white/[0.08] ml-2 space-y-5">
               {record.timeline.map((day) => (
                 <li key={day.date} className="ml-4">
                   <span className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full bg-violet-500/80" />
-                  <div className="text-xs font-medium text-white/80">{longDate(day.date)}</div>
+                  <div className="text-xs font-medium text-white/80">{day.label || longDate(day.date)}</div>
                   <div className="mt-1.5 space-y-2">
                     {day.groups.map((g) => {
                       const G = g.project_id ? { icon: FolderKanban, color: 'text-violet-300' } : (GROUP[g.label] || GROUP.Projects);
@@ -306,7 +337,7 @@ function CompanyRecordView({ onPickProject }) {
           </Section>
 
           <Section icon={Gavel} title={`Decisions (${record.decisions.length})`} testid="company-record-decisions">
-            {record.decisions.length === 0 ? <p className="text-white/45">None recorded yet.</p> : record.decisions.map((d, i) => (
+            {record.decisions.length === 0 ? <p className="text-white/45">{period === 'all' ? 'None recorded yet.' : 'None in this period.'}</p> : record.decisions.map((d, i) => (
               <div key={i}><span className="text-white/45 text-xs mr-1.5">{shortDate(d.date)}</span>{d.text}
                 <span className="text-[11px] text-white/35"> · {d.project}</span></div>
             ))}
@@ -328,6 +359,7 @@ function CompanyRecordView({ onPickProject }) {
                 <span className="text-xs text-white/50 whitespace-nowrap">{m.open} open · {m.done} done{m.late ? <span className="text-red-300"> · {m.late} late</span> : null}
                   {' '}· {m.projects} project{m.projects === 1 ? '' : 's'}</span></div>
             ))}
+            {record.more_people > 0 && <p className="text-xs text-white/40">and {record.more_people} more</p>}
           </Section>
 
           {record.next_steps.length > 0 && (
@@ -345,12 +377,15 @@ export default function ProjectRecordView({ projectId, onPickProject }) {
   const { toast } = useToast();
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Each view keeps its own period: one project opens on its whole story, all projects on the last week.
+  const [period, setPeriod] = useState('all');
+  const [periodAll, setPeriodAll] = useState('7d');
 
   const load = async () => {
     if (!projectId) { setRecord(null); return; }
     setLoading(true);
     try {
-      const res = await pmAgentService.getProjectRecord(projectId);
+      const res = await pmAgentService.getProjectRecord(projectId, period);
       setRecord(res?.data || null);
     } catch (e) {
       setRecord(null);
@@ -360,10 +395,10 @@ export default function ProjectRecordView({ projectId, onPickProject }) {
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, period]);
 
   // No project chosen means "All projects".
-  if (!projectId) return <CompanyRecordView onPickProject={onPickProject} />;
+  if (!projectId) return <CompanyRecordView onPickProject={onPickProject} period={periodAll} onPeriod={setPeriodAll} />;
   if (loading && !record) {
     return <div className="flex items-center justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-violet-400" /></div>;
   }
@@ -408,6 +443,8 @@ export default function ProjectRecordView({ projectId, onPickProject }) {
               </Button>
             </div>
           </div>
+          <PeriodPicker value={period} onChange={setPeriod} disabled={loading} />
+          {record.period?.summary && <p className="text-sm text-white/80" data-testid="record-summary">{record.period.summary}</p>}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
             {[['Tasks', p.tasks], ['Done', p.done], ['Open', p.open], ['Late', p.late]].map(([label, n]) => (
               <div key={label} className="rounded-md bg-white/[0.03] py-2">
@@ -439,7 +476,9 @@ export default function ProjectRecordView({ projectId, onPickProject }) {
           </CardHeader>
           <CardContent>
             {record.earlier && <p className="text-xs text-white/40 mb-3">{record.earlier}</p>}
-            {record.timeline.length === 0 && <p className="text-sm text-white/45">Nothing recorded yet.</p>}
+            {record.timeline.length === 0 && (
+              <p className="text-sm text-white/45">{period === 'all' ? 'Nothing recorded yet.' : 'Nothing recorded in this period.'}</p>
+            )}
             <ol className="relative border-l border-white/[0.08] ml-2 space-y-4">
               {record.timeline.map((day) => (
                 <li key={day.date} className="ml-4">
@@ -465,7 +504,7 @@ export default function ProjectRecordView({ projectId, onPickProject }) {
 
         <div className="space-y-4">
           <Section icon={Gavel} title={`Decisions (${record.decisions.length})`} testid="record-decisions">
-            {record.decisions.length === 0 ? <p className="text-white/45">None recorded yet.</p> : record.decisions.map((d, i) => (
+            {record.decisions.length === 0 ? <p className="text-white/45">{period === 'all' ? 'None recorded yet.' : 'None in this period.'}</p> : record.decisions.map((d, i) => (
               <div key={i}><span className="text-white/45 text-xs mr-1.5">{shortDate(d.date)}</span>{d.text}
                 <span className="text-[11px] text-white/35"> · {d.source}</span></div>
             ))}

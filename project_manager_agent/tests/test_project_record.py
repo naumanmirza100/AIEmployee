@@ -8,7 +8,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from api.views import pm_tool_results
-from core.models import ProjectRisk, Task
+from core.models import Project, ProjectRisk, Task
 from project_manager_agent import project_record
 from project_manager_agent import services as pm_services
 from project_manager_agent.models import PMAuditLog, ProjectToolResult
@@ -115,7 +115,8 @@ class CompanyRecordTests(PMTestCase):
         record = Employee.objects.get(user=gone)            # every employee login has an HR record
         HRAuditLog.objects.create(company=self.company, actor=self.dash, action='employee.deactivate',
                                   target_type='employee', target_id=record.id, diff={})
-        self.record = project_record.build_company(self.dash)
+        # Everything above happened today: "Today" lists each project's own lines, as one project's record does.
+        self.record = project_record.build_company(self.dash, period='today')
         self.groups = {g['label']: [i['text'] for i in g['items']]
                        for day in self.record['timeline'] for g in day['groups']}
         self.everything = '\n'.join(t for texts in self.groups.values() for t in texts)
@@ -171,9 +172,11 @@ class CompanyRecordTests(PMTestCase):
         PMAuditLog.objects.filter(model_name='Task', object_id=made.id).update(
             created_at=datetime(2026, 10, 25, 20, 50, tzinfo=tz.utc))          # 1:50 am on 26 Oct in Lahore
 
+        # Both records read the days on the same clock (pm_tool_results._company_clock); a project's record names
+        # every task it lists, so the task is easy to find there.
         def day_of_late_night_task():
-            _, body = self.call(pm_tool_results.company_record, self.dash, method='get')
-            return next(day['date'] for day in body['data']['timeline'] for g in day['groups'] for i in g['items']
+            _, body = self.call(pm_tool_results.project_record, self.dash, method='get', project_id=self.project.id)
+            return next(day['date'] for day in body['data']['timeline'] for i in day['items']
                         if 'Late-night task' in i['text'])
 
         self.assertEqual(day_of_late_night_task(), '2026-10-25')                # no time zone set: UTC, as before
@@ -204,3 +207,100 @@ class UntitledMeetingTests(PMTestCase):
         lines = [item['text'] for day in record['timeline'] for item in day['items']]
         self.assertTrue(any(line.startswith('Meeting: decided Cash on delivery at launch') for line in lines), lines)
         self.assertEqual(record['decisions'][-1]['source'], 'Meeting')
+
+
+class PeriodTests(PMTestCase):
+    """The record's period (Today, Yesterday, Last 7 days, Last 30 days, All time), asked for on 27 Oct 2026: the
+    record of all projects is briefer than one project's, and the longer the period, the less each line says, so
+    a day and a month come out at about the same length."""
+
+    def setUp(self):
+        super().setUp()
+        self.actor = pm_services.DashboardActor(self.dash)
+        self.today = timezone.localdate()
+
+    def task(self, project, title, days_ago=0, **extra):
+        made = pm_services.create_task(self.actor, {'project_id': project.id, 'title': title, **extra})
+        if days_ago:
+            PMAuditLog.objects.filter(model_name='Task', object_id=made.id).update(
+                created_at=timezone.now() - timedelta(days=days_ago))
+        return made
+
+    def lines(self, record):
+        if record.get('scope') == 'all':
+            return [i['text'] for day in record['timeline'] for g in day['groups'] for i in g['items']]
+        return [i['text'] for day in record['timeline'] for i in day['items']]
+
+    def test_a_project_record_keeps_only_its_period(self):
+        self.task(self.project, 'Logo', days_ago=10)
+        self.task(self.project, 'Menu')
+        joined = lambda period: '\n'.join(self.lines(project_record.build(self.project, period=period)))
+        self.assertIn('“Logo”', joined('all'))
+        self.assertIn('“Logo”', joined('30d'))
+        self.assertNotIn('“Logo”', joined('7d'))
+        self.assertIn('“Menu”', joined('today'))
+        self.assertNotIn('“Menu”', joined('yesterday'))
+        record = project_record.build(self.project, period='today')
+        self.assertEqual(record['period']['key'], 'today')
+        self.assertEqual(record['period']['summary'], 'Today: 1 task added.')
+        self.assertEqual(project_record.build(self.project, period='yesterday')['period']['summary'],
+                         'Nothing recorded yesterday.')
+
+    def test_one_day_names_more(self):
+        for title in ('Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon'):
+            self.task(self.project, title)
+        whole = '\n'.join(self.lines(project_record.build(self.project)))
+        today = '\n'.join(self.lines(project_record.build(self.project, period='today')))
+        self.assertIn('“Alpha”, “Beta”, “Gamma” and 2 more', whole)
+        self.assertIn('“Alpha”, “Beta”, “Gamma”, “Delta”, “Epsilon”', today)
+
+    def test_all_projects_get_briefer_as_the_period_grows(self):
+        for title in ('Alpha', 'Beta', 'Gamma'):
+            self.task(self.project, title, assignee_id=self.dev.id)
+        self.task(self.colleague_project, 'Brochure', days_ago=3)
+        today = project_record.build_company(self.dash, period='today')
+        week = project_record.build_company(self.dash, period='7d')
+        month = project_record.build_company(self.dash, period='30d')
+        self.assertEqual((today['detail'], week['detail'], month['detail']), ('normal', 'brief', 'digest'))
+        # Today: each project's own lines, with the tasks named.
+        self.assertTrue(any(t.startswith('3 tasks added: “Alpha”, “Beta”') for t in self.lines(today)), self.lines(today))
+        # The last 7 days: one line per project a day, in numbers.
+        groups = [g for day in week['timeline'] for g in day['groups'] if g['project_id']]
+        self.assertTrue(all(len(g['items']) == 1 for g in groups), groups)
+        self.assertIn('Project created; 3 tasks added', self.lines(week))       # what was decided first, then numbers
+        self.assertIn('1 task added', self.lines(week))
+        self.assertNotIn('“Alpha”', '\n'.join(self.lines(week)))
+        # The last 30 days: one line per project a week, under the week's dates.
+        self.assertTrue(all(day['label'] for day in month['timeline']), month['timeline'])
+        self.assertTrue(month['period']['summary'].startswith('In the last 30 days: 4 tasks added across 2 projects, '),
+                        month['period']['summary'])                       # then the people who joined, and so on
+
+    def test_a_day_and_a_month_come_out_about_the_same_length(self):
+        projects = [self.project, self.colleague_project]
+        for n in range(4):
+            made = pm_services.create_project(self.actor, {'name': f'Shop {n}'})
+            projects.append(Project.objects.get(pk=made['id'] if isinstance(made, dict) else made.id))
+        for p in projects:
+            for days_ago in range(0, 20, 2):
+                for k in range(3):
+                    self.task(p, f'{p.name} task {days_ago}-{k}', days_ago=days_ago)
+        sizes = {}
+        for period in ('today', '7d', '30d', 'all'):
+            record = project_record.build_company(self.dash, period=period)
+            sizes[period] = len(self.lines(record))
+            self.assertLessEqual(sizes[period], project_record.LINES_ALL[record['detail']], period)
+        self.assertLessEqual(sizes['today'], 2 * sizes['7d'], sizes)
+        busy_month = project_record.build_company(self.dash, period='7d')
+        self.assertEqual(len(busy_month['team']) <= project_record.TEAM_ALL, True)
+
+    def test_the_endpoints_take_the_period(self):
+        code, body = self.call(pm_tool_results.company_record, self.dash, {'period': '30d'}, method='get')
+        self.assertEqual(code, 200, body)
+        self.assertEqual((body['data']['period']['key'], body['data']['detail']), ('30d', 'digest'))
+        _, body = self.call(pm_tool_results.company_record, self.dash, {'period': 'fortnight'}, method='get')
+        self.assertEqual(body['data']['period']['key'], '7d')               # the default for all projects
+        _, body = self.call(pm_tool_results.project_record, self.dash, method='get', project_id=self.project.id)
+        self.assertEqual(body['data']['period']['key'], 'all')              # and for one project
+        _, body = self.call(pm_tool_results.project_record, self.dash, {'period': 'yesterday'}, method='get',
+                            project_id=self.project.id)
+        self.assertEqual(body['data']['period']['key'], 'yesterday')

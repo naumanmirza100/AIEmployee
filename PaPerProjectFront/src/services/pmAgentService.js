@@ -446,11 +446,12 @@ export const getSavedMeetingNotes = async (projectId, id = null) =>
   companyApi.get(`/project-manager/projects/${projectId}/meeting-notes${id ? `?id=${id}` : ''}`);
 
 /** The project's record: decisions, work handed out, due and late, risks — Meeting Notes → Project record. */
-export const getProjectRecord = async (projectId) =>
-  companyApi.get(`/project-manager/projects/${projectId}/record`);
+export const getProjectRecord = async (projectId, period = 'all') =>
+  companyApi.get(`/project-manager/projects/${projectId}/record`, { period });
 
-/** The record of all projects at once: Meeting Notes → Project record with "All projects" chosen. */
-export const getCompanyRecord = async () => companyApi.get('/project-manager/record');
+/** The record of all projects at once: Meeting Notes → Project record with "All projects" chosen.
+ *  period: today, yesterday, 7d, 30d or all; the longer it is, the briefer each line. */
+export const getCompanyRecord = async (period = '7d') => companyApi.get('/project-manager/record', { period });
 
 /** The project's latest schedule plan, or null. */
 export const getSavedSchedulePlan = async (projectId) =>
