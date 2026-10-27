@@ -59,6 +59,7 @@ from Frontline_agent.models import (
 from Frontline_agent.document_processor import DocumentProcessor
 from core.Frontline_agent.frontline_agent import FrontlineAgent
 from core.Frontline_agent.embedding_service import EmbeddingService
+from core.document_search import vectors_in
 
 logger = logging.getLogger(__name__)
 
@@ -1173,6 +1174,8 @@ def document_processing_status(request, document_id):
             'processing_status': d.processing_status,
             'chunks_processed': d.chunks_processed,
             'chunks_total': d.chunks_total,
+            # How many parts can be found by meaning; the rest only by matching words (CO-70).
+            'chunks_with_vectors': vectors_in(d) if d.processing_status == 'ready' else None,
             'progress_percent': round(100.0 * (d.chunks_processed or 0) / total, 1) if d.chunks_total else (
                 100.0 if d.processing_status == 'ready' else 0.0
             ),

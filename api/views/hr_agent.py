@@ -57,6 +57,7 @@ from core.api_key_service import KeyServiceError
 from api.streaming import error_event
 # Re-use Frontline's hardened helpers — file validation + broker probe.
 from Frontline_agent.document_processor import DocumentProcessor
+from core.document_search import vectors_in
 
 logger = logging.getLogger(__name__)
 
@@ -1362,6 +1363,8 @@ def get_hr_document_status(request, document_id):
             'is_indexed': bool(d.is_indexed),
             'chunks_processed': done,
             'chunks_total': total,
+            # How many parts can be found by meaning; the rest only by matching words (CO-70).
+            'chunks_with_vectors': vectors_in(d) if d.processing_status == 'ready' else None,
             'percent': percent,
             'updated_at': d.updated_at.isoformat() if d.updated_at else None,
         }})

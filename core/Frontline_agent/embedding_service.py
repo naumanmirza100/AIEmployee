@@ -60,6 +60,8 @@ class EmbeddingService:
         self.available = False
         self.company_id = company_id
         self.agent_key_name = agent_key_name
+        # The company's key context when its own key pays for the embeddings (record_usage needs it).
+        self._key_ctx = None
 
         # Check which provider to use
         embedding_provider = getattr(settings, 'EMBEDDING_PROVIDER', 'auto').lower()
@@ -395,6 +397,7 @@ class EmbeddingService:
             ctx = resolve_for_call(company, self.agent_key_name)
             # Only OpenAI exposes an embeddings endpoint we support here.
             if ctx.provider == 'openai':
+                self._key_ctx = ctx
                 return ctx.api_key
             logger.debug("Resolved key provider %r has no supported embeddings "
                          "endpoint; skipping.", ctx.provider)
@@ -494,6 +497,7 @@ class EmbeddingService:
                     input=text
                 )
                 embedding = response.data[0].embedding
+                self._record_usage(response)
 
             logger.info(f"Generated embedding using {self.provider} (dimension: {len(embedding)})")
             return embedding
@@ -580,6 +584,7 @@ class EmbeddingService:
                     model=self.embedding_model,
                     input=valid_texts
                 )
+                self._record_usage(response)
                 # Map embeddings back to original indices
                 embeddings = [None] * len(texts)
                 for idx, embedding_data in zip(valid_indices, response.data):
@@ -592,6 +597,17 @@ class EmbeddingService:
             logger.error(f"Error generating batch embeddings with {self.provider}: {e}", exc_info=True)
             return [None] * len(texts)
     
+    def _record_usage(self, response):
+        """Count the tokens against the company's allowance when its own key paid for them, as LLM calls do. They
+        were never counted (CO-70)."""
+        if self._key_ctx is None:
+            return
+        try:
+            from core.api_key_service import record_usage
+            record_usage(self._key_ctx, getattr(getattr(response, 'usage', None), 'total_tokens', 0) or 0)
+        except Exception:
+            logger.exception("Could not record embedding usage for company %s", self.company_id)
+
     def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """
         Calculate cosine similarity between two vectors.

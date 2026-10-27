@@ -65,6 +65,7 @@ import {
 import { trackHRRecentlyViewed } from './hrLocalStore';
 import HRWorkflowsTab from './HRWorkflowsTab';
 import companyAuthService from '@/services/companyAuthService';
+import DocumentSearchBanner from '@/components/shared/DocumentSearchBanner';
 import {
   useTutorialNudge,
   tourAvailable, makeHoverLaunchHandlers,
@@ -1315,6 +1316,7 @@ const HRDashboard = () => {
             <TabsContent value="documents" className="mt-6">
               <ErrorBoundary>
                 <div className="flex justify-end mb-3"><TabTourButton tabKey="documents" /></div>
+                <DocumentSearchBanner agent="hr_agent" refreshKey={documents.length} />
                 <Card className="border-white/10 bg-pure-black/20 backdrop-blur-sm">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>

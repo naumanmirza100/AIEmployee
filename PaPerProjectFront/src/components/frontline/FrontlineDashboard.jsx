@@ -108,6 +108,7 @@ import { TicketAutomationCard } from './TicketAutomationCard';
 import { FrontlineMeetingsTab } from './FrontlineMeetingsTab';
 import { CalendarDays } from 'lucide-react';
 import { FrontlineAnalyticsTab } from './FrontlineAnalyticsTab';
+import DocumentSearchBanner from '@/components/shared/DocumentSearchBanner';
 
 // Document types for Q&A scope (must match backend Document.DOCUMENT_TYPE_CHOICES)
 const DOCUMENT_TYPE_OPTIONS = [
@@ -1761,6 +1762,7 @@ const FrontlineDashboard = () => {
         <TabsContent value="documents" className="space-y-4 mt-4">
           <ErrorBoundary>
           <div className="flex justify-end"><TabTourButton tabKey="documents" /></div>
+          <DocumentSearchBanner agent="frontline_agent" refreshKey={documents.length} />
           <FrontlineDocumentsTab
             documents={documents}
             docSummaries={docSummaries}

@@ -53,6 +53,7 @@ from api.views.health import health_check, ping, version
 from api.views import public_jobs
 from api.views import my_work
 from api.views import notification_settings
+from api.views import document_search
 from api.views import do_not_email
 from api.views import company_logins
 from api.views import quick_chats
@@ -320,6 +321,8 @@ urlpatterns = [
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
     re_path(r'^company/notification-settings/chat-webhooks/?$', notification_settings.chat_webhooks,
             name='company_chat_webhooks'),  # GET/PATCH/POST (CO-64)
+    re_path(r'^company/document-search/?$', document_search.document_search_status,
+            name='company_document_search'),  # GET/POST (CO-70)
     re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
             name='company_notification_settings'),  # GET/PATCH
     # The company's dashboard logins and their roles (api/views/company_logins.py).
