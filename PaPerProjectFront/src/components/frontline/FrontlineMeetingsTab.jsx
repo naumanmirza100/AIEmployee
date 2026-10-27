@@ -226,7 +226,7 @@ export const FrontlineMeetingsTab = () => {
       </CardContent>
 
       <Dialog open={open} onOpenChange={(o) => { if (!saving) setOpen(o); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Book a meeting</DialogTitle>
             <DialogDescription>
@@ -240,7 +240,7 @@ export const FrontlineMeetingsTab = () => {
               <Input id="fl-meeting-title" value={form.title} placeholder="Onboarding call with Northwind"
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
               <div className="space-y-1.5">
                 <Label htmlFor="fl-meeting-at">When</Label>
                 <Input id="fl-meeting-at" type="datetime-local" value={form.at}
