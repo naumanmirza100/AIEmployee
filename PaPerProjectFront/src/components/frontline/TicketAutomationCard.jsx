@@ -21,7 +21,7 @@ const SWITCHES = [
   {
     key: 'resolve_from_knowledge',
     label: 'Answer simple tickets from the knowledge base',
-    help: 'When a web-form or email ticket is answered by your documents with high confidence, the answer is emailed to the customer and the ticket is marked auto-resolved. Their reply reopens it. Chat hand-offs always go to a person.',
+    help: 'When a web-form or email ticket asks a simple question your documents answer, the answer is emailed to the customer and the ticket is marked auto-resolved. A problem, a complaint or anything about their own account is left for a person. Their reply reopens it. Chat hand-offs always go to a person.',
   },
 ];
 

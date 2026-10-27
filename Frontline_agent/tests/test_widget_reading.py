@@ -203,3 +203,6 @@ class FormAcknowledgementTests(FrontlineTestCase):
         [email] = [m for m in mail.outbox if m.to == ['farhan@bakery.test']]
         self.assertEqual(email.subject, f'We received your message [FL-{ticket.id}]')
         self.assertIn('Our menu page shows old prices.', email.body)
+        # From the company by name, not just the platform's address (live, 27 Oct).
+        from email.utils import parseaddr
+        self.assertEqual(parseaddr(email.from_email)[0], self.company.name)

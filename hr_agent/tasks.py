@@ -139,8 +139,7 @@ def process_hr_document(self, document_id):
         # (which HR shares) look like `\x0c__PAGE_N__\n`. Build an offset→page
         # index, tag each chunk with the page it came from, and strip the
         # markers before storage so they don't pollute retrieval or prompts.
-        import re as _re
-        _PAGE_MARKER_RE = _re.compile(r'\x0c__PAGE_(\d+)__\n')
+        from Frontline_agent.document_processor import PAGE_MARKER_RE as _PAGE_MARKER_RE
         page_positions = [(m.start(), int(m.group(1)))
                           for m in _PAGE_MARKER_RE.finditer(text_to_chunk)]
 

@@ -61,11 +61,8 @@ def _company_name(meeting):
 
 
 def _sender(meeting):
-    from django.conf import settings
-    company = meeting.company
-    from_email = ((getattr(company, 'support_from_email', '') or '').strip()
-                  or getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'))
-    return from_email, (getattr(company, 'support_from_email', '') or '').strip() or None
+    from Frontline_agent.customer_mail import sender
+    return sender(meeting.company)
 
 
 def calendar_file(meeting, cancel=False):

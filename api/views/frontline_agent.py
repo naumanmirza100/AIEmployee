@@ -6493,14 +6493,17 @@ def send_ticket_reply(ticket, body_text, body_html='', *, to=None, cc=None, auth
     for label in ('Hand-off: ', 'Call requested: ', 'Problem: '):
         if subject.startswith(label):
             subject = subject[len(label):]
+    # A contact-form ticket's title is "Web form: <their name>"; the customer was answered "Re: Web form: Farhan
+    # Qureshi". The reply follows their receipt (customer_mail.acknowledge_web_form) instead, in the same thread.
+    if subject.startswith('Web form: '):
+        subject = 'We received your message'
     if tag not in subject:
         subject = f"Re: {subject} {tag}"
 
-    # Compose sender.
+    # Compose sender: the company's name on it (Frontline_agent/customer_mail.sender).
     company = ticket.company
-    from_email = ((company.support_from_email or '').strip()
-                  if company else '') or getattr(settings, 'DEFAULT_FROM_EMAIL',
-                                                 'noreply@example.com')
+    from Frontline_agent.customer_mail import sender
+    from_email = sender(company)[0]
 
     # Stamp a Message-ID we control so the customer's reply threads back.
     new_message_id = _message_id_for(ticket.id).strip('<>')

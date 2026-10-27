@@ -83,8 +83,7 @@ def process_document(self, document_id):
         # Build an index of (offset_in_raw_text, page_number) so each chunk can be
         # tagged with the page it came from. Then we strip the markers from the
         # actual chunk text before storage.
-        import re as _re
-        _PAGE_MARKER_RE = _re.compile(r'\x0c__PAGE_(\d+)__\n')
+        from Frontline_agent.document_processor import PAGE_MARKER_RE as _PAGE_MARKER_RE
         page_positions = [(m.start(), int(m.group(1)))
                           for m in _PAGE_MARKER_RE.finditer(text_to_chunk)]
 

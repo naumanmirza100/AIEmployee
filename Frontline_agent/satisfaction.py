@@ -67,6 +67,7 @@ def ensure_satisfaction_survey(ticket):
 
     try:
         from django.core.mail import send_mail
+        from Frontline_agent.customer_mail import sender as customer_sender
         # FRONTLINE_PUBLIC_BASE_URL is set nowhere, so the email said "(token: …)" instead of a link; the site's own
         # address (FRONTEND_URL) serves the rating page.
         from core.notification_settings import frontend_url
@@ -88,8 +89,7 @@ def ensure_satisfaction_survey(ticket):
                 f"{link}\n\n"
                 f"Thank you — {team}"
             ),
-            from_email=((getattr(company, 'support_from_email', '') or '').strip()
-                        or getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')),
+            from_email=customer_sender(company)[0],
             recipient_list=[recipient_email],
             fail_silently=False,
         )
