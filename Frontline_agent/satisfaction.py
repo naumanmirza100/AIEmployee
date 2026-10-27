@@ -26,6 +26,16 @@ def customer_email(ticket):
     return email
 
 
+def team_dealt_with(ticket):
+    """Whether someone dealt with the customer: a reply went to them (a person's, or the automatic answer; both are
+    recorded by send_ticket_reply) or a call was booked with them. A ticket closed with neither (a duplicate, spam, one
+    opened by mistake) is not surveyed: on 27 Oct, closing two duplicates asked the customer "How did we do?" twice."""
+    from Frontline_agent.models import FrontlineMeeting, TicketMessage
+    if TicketMessage.objects.filter(ticket=ticket, direction='outbound').exists():
+        return True
+    return FrontlineMeeting.objects.filter(ticket=ticket).exclude(status='cancelled').exists()
+
+
 def ensure_satisfaction_survey(ticket):
     """Create the survey row and send the invitation. Returns the row or None.
 
@@ -51,6 +61,10 @@ def ensure_satisfaction_survey(ticket):
             # No-one to ask. Don't create a row, so a later close with a real
             # requester email can still seed the survey.
             logger.info("CSAT skip: ticket %s has no requester email", ticket.id)
+            return None
+        if not team_dealt_with(ticket):
+            # Nothing to rate. No row either, so a close after a reply still asks.
+            logger.info("CSAT skip: ticket %s was closed without a reply or a call", ticket.id)
             return None
         try:
             survey = TicketSatisfaction.objects.create(

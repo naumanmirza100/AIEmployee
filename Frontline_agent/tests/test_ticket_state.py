@@ -131,10 +131,38 @@ class SatisfactionSurveyTests(FrontlineTestCase):
 
     def setUp(self):
         super().setUp()
-        from Frontline_agent.models import Contact
+        from Frontline_agent.models import Contact, TicketMessage
         self.customer = Contact.objects.create(company=self.company, email='farhan@bakery.test', name='Farhan')
         Ticket.objects.filter(pk=self.ticket.pk).update(contact=self.customer)
         self.ticket.refresh_from_db()
+        # The team replied to the customer, so there is something to rate.
+        self.reply = TicketMessage.objects.create(ticket=self.ticket, direction='outbound', body_text='Fixed it.')
+
+    def test_a_ticket_closed_without_a_reply_or_a_call_asks_nobody(self):
+        # On 27 Oct, closing two duplicates asked the customer "How did we do?" twice.
+        from django.core import mail
+        from Frontline_agent.satisfaction import ensure_satisfaction_survey
+        self.reply.delete()
+        mail.outbox = []
+        code, body = self.call(views.update_ticket, self.admin, {'status': 'closed'},
+                               method='patch', ticket_id=self.ticket.id)
+        self.assertEqual(code, 200, body)
+        self.assertEqual(mail.outbox, [])
+        self.assertFalse(TicketSatisfaction.objects.filter(ticket=self.ticket).exists())
+        self.assertIsNone(ensure_satisfaction_survey(self.ticket))
+
+    def test_a_call_booked_with_the_customer_counts_and_a_cancelled_one_does_not(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from Frontline_agent.models import FrontlineMeeting
+        from Frontline_agent.satisfaction import team_dealt_with
+        self.reply.delete()
+        call = FrontlineMeeting.objects.create(company=self.company, title='Call', ticket=self.ticket,
+                                               organizer=self.admin_user, status='cancelled',
+                                               scheduled_at=timezone.now() + timedelta(days=1))
+        self.assertFalse(team_dealt_with(self.ticket))
+        FrontlineMeeting.objects.filter(pk=call.pk).update(status='scheduled')
+        self.assertTrue(team_dealt_with(self.ticket))
 
     def test_the_survey_goes_to_the_customer_not_the_login_that_opened_the_ticket(self):
         # It went to `created_by`: the hand-off bot for chat tickets, a staff login for web-form ones.
