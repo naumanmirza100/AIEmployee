@@ -365,6 +365,13 @@ def process_job_applicants(request, jobId):
             message = f'Processed {processed_count} of {len(unprocessed)} application(s).'
             if skipped_count:
                 message += f' {skipped_count} skipped.'
+        # Chosen for interview but not invited, and why (CO-103, CO-228).
+        not_invited = {r.get('interview_error') for r in results if r.get('interview_error')}
+        if 'No job requirements to match against' in not_invited:
+            message += ' ' + applicant_screening.NO_KEYWORDS[0].upper() + applicant_screening.NO_KEYWORDS[1:]
+        if 'No free interview slots' in not_invited:
+            from recruitment_agent.interview_time import no_slots_message
+            message += ' ' + no_slots_message(job)
 
         return Response({
             'status': 'success',

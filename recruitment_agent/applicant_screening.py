@@ -68,6 +68,37 @@ def recruiter_for(job):
 CLAIM_FOR = timedelta(minutes=30)
 
 
+NO_KEYWORDS = ("this job's description has nothing the AI can match CVs against (no skills or requirements), so "
+               "candidates were scored but nobody was invited. Add the skills and requirements to the description, "
+               "then process again.")
+
+
+def job_keywords(job, job_desc_agent) -> list:
+    """The job's keywords. A job saved without them (the AI failed, or the company had no Recruitment then) was
+    screened blind for good, and anyone with a long skills list was invited (CO-103): they are worked out now and
+    saved."""
+    from core.api_key_service import KeyServiceError
+    try:
+        keywords = (json.loads(job.keywords_json) if job.keywords_json else {}).get('keywords') or []
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        keywords = []
+    if keywords or job_desc_agent is None or not (job.description or '').strip():
+        return keywords
+    try:
+        parsed = job_desc_agent.parse_text(job.description)
+        if isinstance(parsed, list):
+            parsed = parsed[0] if parsed and isinstance(parsed[0], dict) else {}
+        keywords = (parsed or {}).get('keywords') or []
+        if keywords:
+            job.keywords_json = json.dumps(parsed)
+            job.save(update_fields=['keywords_json'])
+    except KeyServiceError:
+        raise
+    except Exception:
+        logger.warning('Keywords for job %s could not be worked out', job.id, exc_info=True)
+    return keywords
+
+
 def not_screened(applications):
     """Applications with no screened candidate behind them. A record with no decision is a run that stopped
     half-way: it used to mark the applicant 'AI Analysed' for good (CO-181)."""
@@ -101,13 +132,8 @@ def screen(job, applications, actor, agents) -> list:
     from recruitment_agent.interview_time import bookable_slots
     slots_left = bookable_slots(job)
 
-    job_kw_list = None
+    job_kw_list = job_keywords(job, agents.get('job_desc_agent')) or None
     job_description_text = job.description or ''
-    if job.keywords_json:
-        try:
-            job_kw_list = json.loads(job.keywords_json).get('keywords', []) or None
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            pass
 
     # The job owner's screening thresholds and email timings
     settings_owner = sharing.owner(job, actor)
@@ -190,6 +216,9 @@ def screen(job, applications, actor, agents) -> list:
             if qual_decision == 'INTERVIEW' and interview_agent and app.email and slots_left <= 0:
                 # Nothing left to book: the invitation would lead to an empty page (CO-228).
                 interview_error = 'No free interview slots'
+            elif qual_decision == 'INTERVIEW' and not job_kw_list:
+                # Scored without anything to match against: nobody is invited on that (CO-103).
+                interview_error = 'No job requirements to match against'
             elif qual_decision == 'INTERVIEW' and interview_agent and app.email:
                 candidate_name = name or 'Candidate'
                 # The job's title, as hand uploads use. It took the description's first line, which is what the

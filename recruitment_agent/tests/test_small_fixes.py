@@ -82,3 +82,39 @@ class SmallFixTests(TestCase):
         again = self.call(views.schedule_next_interview, {}, interview_id=first.id)
         self.assertEqual(again.status_code, 400)
         self.assertIn('already has an onsite interview', again.data['message'])
+
+
+class JobWithoutKeywordsTests(TestCase):
+    """CO-103: a job saved without keywords screened blind for good, and long skills lists were invited."""
+
+    def setUp(self):
+        SmallFixTests.setUp(self)
+        day = timezone.now().date() + timedelta(days=5)
+        RecruiterInterviewSettings.objects.create(
+            company_user=self.rae, job=self.job, timezone_name='UTC', start_time=time(9, 0), end_time=time(17, 0),
+            schedule_from_date=day, schedule_to_date=day, time_slots_json=[{'datetime': f'{day}T10:00', 'available': True}])
+
+    def applicant(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from recruitment_agent.models import JobApplication
+        return JobApplication.objects.create(job=self.job, first_name='Cara', last_name='Khan', phone='0300 1',
+                                             email='cara@mail.test', cv_file_name='Cara.pdf',
+                                             cv_file=SimpleUploadedFile('Cara.pdf', b'%PDF-1.4 text'))
+
+    def test_keywords_are_worked_out_and_kept(self):
+        from recruitment_agent import applicant_screening
+        from .test_invitations_go_by_themselves import screening
+        agents, invite = screening(['INTERVIEW'], [{'name': 'Cara Khan', 'email': 'cara@mail.test'}])
+        applicant_screening.screen(self.job, [self.applicant()], self.rae, agents)
+        self.job.refresh_from_db()
+        self.assertEqual(json.loads(self.job.keywords_json)['keywords'], ['design'])
+
+    def test_nobody_is_invited_when_there_is_nothing_to_match(self):
+        from recruitment_agent import applicant_screening
+        from .test_invitations_go_by_themselves import screening
+        agents, invite = screening(['INTERVIEW'], [{'name': 'Cara Khan', 'email': 'cara@mail.test'}])
+        agents['job_desc_agent'].parse_text.return_value = {'keywords': []}
+        [result] = applicant_screening.screen(self.job, [self.applicant()], self.rae, agents)
+        invite.assert_not_called()
+        self.assertEqual(result['interview_error'], 'No job requirements to match against')
+        self.assertEqual(CVRecord.objects.get().qualification_decision, 'INTERVIEW')    # the score is kept

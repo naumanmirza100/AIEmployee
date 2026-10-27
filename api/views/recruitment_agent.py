@@ -224,6 +224,10 @@ def process_cvs(request):
         # Use manual keywords if provided
         if not job_kw_list and job_keywords:
             job_kw_list = [kw.strip() for kw in job_keywords.split(",") if kw.strip()]
+        # Keywords worked out now are kept for the job's next run, as screening applicants does (CO-103).
+        if job_kw_list and job_desc and not job_desc.keywords_json:
+            job_desc.keywords_json = json.dumps({'keywords': job_kw_list})
+            job_desc.save(update_fields=['keywords_json'])
         
         # Process CV files. Each file on its own: one unreadable file failed the whole upload after the earlier
         # ones were saved, and uploading again saved them twice (CO-180).
@@ -406,7 +410,7 @@ def process_cvs(request):
             # Nothing left to book: no invitation goes, and the screen says why (CO-228).
             from recruitment_agent import interview_time as _itime
             slots_left = _itime.bookable_slots(job_desc) if job_desc else 0
-            no_slots = False
+            no_slots = no_keywords = False
             
             # Use job's default interview type (Online/Onsite) for auto-scheduled invitations
             auto_interview_type = 'ONLINE'
@@ -488,6 +492,11 @@ def process_cvs(request):
                         no_slots = True
                         result['interview_scheduled'] = False
                         result['interview_error'] = 'No free interview slots'
+                    elif candidate_email and not job_kw_list:
+                        # Scored without anything to match against: nobody is invited on that (CO-103).
+                        no_keywords = True
+                        result['interview_scheduled'] = False
+                        result['interview_error'] = 'No job requirements to match against'
                     elif candidate_email:
                         logger.info(f"Auto-scheduling interview for approved candidate: {candidate_name} ({candidate_email})")
                         try:
@@ -534,6 +543,9 @@ def process_cvs(request):
             }
             if no_slots:
                 payload['notice'] = _itime.no_slots_message(job_desc)
+            elif no_keywords:
+                from recruitment_agent.applicant_screening import NO_KEYWORDS
+                payload['notice'] = NO_KEYWORDS[0].upper() + NO_KEYWORDS[1:]
             return Response(payload)
             
         except KeyServiceError:
