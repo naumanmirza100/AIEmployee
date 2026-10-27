@@ -2600,6 +2600,12 @@ def submit_leave_request(request):
         if not emp:
             return Response({'status': 'error', 'message': 'employee_id required + must belong to your company'},
                             status=status.HTTP_400_BAD_REQUEST)
+        if not _may_file_leave_for(request.user, emp):
+            first = (emp.full_name or '').split(' ')[0] or 'They'
+            return Response({'status': 'error', 'code': 'not_their_leave', 'message': (
+                f'You can put in leave for yourself or for someone who reports to you, and {emp.full_name} does not '
+                f"report to you. Ask an HR admin (the company's owner, an admin, or a login with the HR admin role), "
+                f'or {first} can ask for it under My HR.')}, status=status.HTTP_403_FORBIDDEN)
         lr, refused = make_leave_request(emp, company, d)
         if refused is not None:
             return refused
@@ -2636,7 +2642,8 @@ def update_leave_request(request, request_id):
         caller_user_id = _caller_login_user_id(request.user)
         is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
         if not (is_admin or is_owner):
-            return Response({'status': 'error', 'message': 'Not authorized to edit this leave request'},
+            return Response({'status': 'error', 'message': 'Only the person this leave is for, or an HR admin, can '
+                             'change this request.'},
                             status=status.HTTP_403_FORBIDDEN)
         if lr.status != 'pending':
             return Response({
@@ -2721,7 +2728,8 @@ def cancel_leave_request(request, request_id):
         caller_user_id = _caller_login_user_id(request.user)
         is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
         if not (is_admin or is_owner):
-            return Response({'status': 'error', 'message': 'Only the submitter or HR-admin can cancel this request'},
+            return Response({'status': 'error', 'message': 'Only the person this leave is for, or an HR admin, can '
+                             'cancel this request.'},
                             status=status.HTTP_403_FORBIDDEN)
         if lr.status != 'pending':
             return Response({
@@ -2792,7 +2800,7 @@ def withdraw_leave_request(request, request_id):
             is_owner = caller_user_id and str(caller_user_id) == str(lr.employee.user_id)
             if not (is_admin or is_owner):
                 return Response({'status': 'error',
-                                 'message': 'Only the submitter or HR-admin can withdraw this leave'},
+                                 'message': 'Only the person this leave is for, or an HR admin, can withdraw it.'},
                                 status=status.HTTP_403_FORBIDDEN)
 
             if lr.status != 'approved':
@@ -3020,6 +3028,22 @@ def hr_time_zones(request):
                      before={'timezone_name': zones.OLD_DEFAULT},
                      after={'timezone_name': '', 'company_zone': company.timezone_name, 'records': moved})
     return Response({'status': 'success', 'data': {**zones.summary(company), 'moved': moved}})
+
+
+def _caller_record(company_user):
+    """This dashboard login's own HR record: by its link, else by its work address."""
+    company = company_user.company
+    return (Employee.objects.filter(company=company, company_user=company_user).first()
+            or Employee.objects.filter(company=company, work_email__iexact=company_user.email).first())
+
+
+def _may_file_leave_for(company_user, employee) -> bool:
+    """May this login put in leave for `employee`? HR admins, the person themself, and their manager. Any login
+    could file leave for anyone in the company (CO-66, found 5 Oct 2026; fixed 27 Oct)."""
+    if _is_hr_admin(company_user):
+        return True
+    record = _caller_record(company_user)
+    return bool(record and (employee.id == record.id or employee.manager_id == record.id))
 
 
 def _may_decide_leave(company_user, leave_request) -> bool:

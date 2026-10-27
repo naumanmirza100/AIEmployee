@@ -51,3 +51,29 @@ class DocumentsAreForHRAdminsTests(HRTestCase):
         code, body = self.call(views.create_department, self.member, {'name': 'Design'})
         self.assertEqual(code, 403)
         self.assertIn("the company's owner, an admin, or a login with the HR admin role", body['message'])
+
+
+class LeaveIsFiledByTheRightPeopleTests(HRTestCase):
+    """CO-66's side point: any dashboard login could put in leave for anyone in the company."""
+
+    def submit(self, actor, employee):
+        return self.call(views.submit_leave_request, actor, {
+            'employee_id': employee.id, 'leave_type': 'vacation', 'start_date': '2026-12-07',
+            'end_date': '2026-12-07', 'reason': 'Family'})
+
+    def test_a_colleague_cannot_and_is_told_who_can(self):
+        code, body = self.submit(self.member, self.admin_emp)
+        self.assertEqual(code, 403)
+        self.assertIn('Dana Admin does not report to you', body['message'])
+        self.assertIn('Dana can ask for it under My HR', body['message'])
+
+    def test_oneself_a_manager_and_hr_can(self):
+        self.balance(self.member_emp, leave_type='vacation', accrued_days=10)
+        code, body = self.submit(self.member, self.member_emp)
+        self.assertNotEqual(code, 403, body)
+        report = self.employee(self.login(self.company, 'rae@test.local', 'Rae Report', 'company_user'), 'Rae Report')
+        report.manager = self.member_emp
+        report.save(update_fields=['manager'])
+        self.balance(report, leave_type='vacation', accrued_days=10)
+        self.assertNotEqual(self.submit(self.member, report)[0], 403)
+        self.assertNotEqual(self.submit(self.admin, report)[0], 403)
