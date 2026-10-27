@@ -45,6 +45,17 @@ class CustomerCallTests(MeetingTestCase):
         self.assertEqual((meeting.customer_email, meeting.ticket_id), ('farhan@bakery.test', ticket.id))
         self.assertEqual(len(self.to_customer()), 1)
 
+    def test_booking_the_call_takes_its_hand_off_off_the_queue(self):
+        # Live (27 Oct) the "call requested" hand-off stayed pending after the call was booked.
+        customer = Contact.objects.create(company=self.company, email='farhan@bakery.test', name='Farhan')
+        ticket = Ticket.objects.create(company=self.company, title='Call requested: menu page', description='-',
+                                       created_by=self.admin_user, contact=customer, handoff_status='pending',
+                                       handoff_reason='call_requested')
+        self.assertEqual(self.book(ticket_id=ticket.id)[0], 201)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.handoff_status, 'accepted')
+        self.assertEqual(ticket.assigned_to, views._get_or_create_user_for_company_user(self.admin))
+
     def test_another_companys_ticket_or_a_bad_address_is_refused(self):
         rival_ticket = Ticket.objects.create(company=self.rival, title='Theirs', description='-',
                                              created_by=self.admin_user)

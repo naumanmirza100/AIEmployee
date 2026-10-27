@@ -82,7 +82,30 @@ RULES:
 RESPONSE:"""
 
 
-FRONTLINE_TICKET_PROMPT = """A user has submitted the following support request:
+# The website chat's answer. FRONTLINE_KNOWLEDGE_PROMPT's report layout ("Details", "Notes / Caveats", every detail)
+# suits the team's Knowledge Q&A; on the chat (live, 27 Oct) it gave customers 250-word reports, and a customer whose
+# site was down was told to "contact us on the chat" while on it.
+FRONTLINE_CUSTOMER_CHAT_PROMPT = """A customer wrote this to the company's support (its website chat, contact form or email). Answer from the help-document passages below.
+
+PASSAGES:
+{knowledge_results}
+
+CUSTOMER'S MESSAGE: {user_question}
+
+RULES:
+1. Use ONLY the passages. No outside knowledge.
+2. Write as the company ("we", "our plans"). Never mention documents, passages, guides, a knowledge base, pages or sources, and add no line about where the answer comes from.
+3. Keep it short: answer in one or two sentences first. Add a short bulleted list only when there are several items (plans, steps, options), about 120 words in all. No headings, no "Details" or "Notes" sections.
+4. Give what was asked. Add a condition or exception only when it changes the answer.
+5. The customer is already talking to us: never tell them to contact us. When they report a problem, answer in two or three sentences, with no list: how quickly we reply to and fix a problem like theirs, and what details help us (which page, a screenshot). Our team is told separately.
+6. If the passages don't contain the answer, say exactly: "I couldn't find this in our help documents, so I can't answer it reliably. You can ask to talk to a person, and someone from our team will help you."
+7. Reply in the customer's language: English, or Roman Urdu when they wrote in Roman Urdu.
+8. Friendly and professional. No preamble.
+
+RESPONSE:"""
+
+
+FRONTLINE_TICKET_PROMPT ="""A user has submitted the following support request:
 
 TITLE: {ticket_title}
 DESCRIPTION: {ticket_description}
@@ -135,14 +158,15 @@ INSTRUCTIONS:
 RESPONSE:"""
 
 
-def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
+def get_knowledge_prompt(user_question: str, knowledge_results: list, for_customer: bool = False) -> str:
     """
     Generate knowledge-based prompt for the agent.
-    
+
     Args:
         user_question: User's question
         knowledge_results: List of knowledge base results (can be from get_answer or search_knowledge)
-        
+        for_customer: the website chat's short reply in the company's voice, not the team's full answer
+
     Returns:
         Formatted prompt string
     """
@@ -208,7 +232,8 @@ def get_knowledge_prompt(user_question: str, knowledge_results: list) -> str:
     safe_question = sanitize_user_input(user_question, max_len=4000)
     wrapped_question = wrap_untrusted(safe_question, tag='user_question')
 
-    return FRONTLINE_KNOWLEDGE_PROMPT.format(
+    template = FRONTLINE_CUSTOMER_CHAT_PROMPT if for_customer else FRONTLINE_KNOWLEDGE_PROMPT
+    return template.format(
         knowledge_results=knowledge_text,
         user_question=wrapped_question,
     )

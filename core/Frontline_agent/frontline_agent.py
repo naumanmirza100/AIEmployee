@@ -45,15 +45,18 @@ _ANSWER_CACHE_MAX = 2000
 
 
 def _answer_cache_key(company_id, scope_document_ids, scope_document_type,
-                      question) -> str:
+                      question, for_customer=False) -> str:
     """Deterministic cache key. Normalises question (strip + lowercase) so
-    trivial whitespace / casing differences share a hit."""
+    trivial whitespace / casing differences share a hit. The website chat's
+    short answer and the team's full one are kept apart."""
     payload = {
         'c': int(company_id or 0),
         'ids': sorted([int(x) for x in (scope_document_ids or [])]),
         'types': sorted([str(x) for x in (scope_document_type or [])]),
         'q': (question or '').strip().lower(),
     }
+    if for_customer:
+        payload['customer'] = True
     return hashlib.sha256(_json_top.dumps(payload, sort_keys=True).encode('utf-8')).hexdigest()
 
 
@@ -94,6 +97,11 @@ def invalidate_answer_cache_for_company(company_id):
 #: assist you", which on the website only opened a knowledge-gap ticket for the team's records: nobody was asked to reply.
 NOT_IN_THE_DOCUMENTS = ("I couldn't find this in our help documents, so I can't answer it reliably. You can ask to "
                         "talk to a person, and someone from our team will help you.")
+
+
+def says_not_found(answer) -> bool:
+    """True when an answer is the not-found line: the passages were found, but the AI found nothing in them."""
+    return "couldn't find this in our help documents" in (answer or '')
 
 
 class FrontlineAgent(BaseAgent):
@@ -143,9 +151,13 @@ class FrontlineAgent(BaseAgent):
         history: Optional[List[Dict]] = None,
         search_query: Optional[str] = None,
         wants_everything: Optional[bool] = None,
+        for_customer: bool = False,
     ) -> Dict:
         """
         Answer a question using only verified knowledge base information.
+
+        for_customer: the website chat's short reply in the company's voice (FRONTLINE_CUSTOMER_CHAT_PROMPT), not the
+                      team's full answer with its sections and sources.
 
         scope_document_type / scope_document_ids: restrict uploaded-doc search.
         min_similarity: override the default confidence threshold (lower = more permissive).
@@ -176,7 +188,7 @@ class FrontlineAgent(BaseAgent):
         cache_key = None
         if cache_ttl > 0 and not history:
             cache_key = _answer_cache_key(
-                search_company_id, scope_document_ids, scope_document_type, question,
+                search_company_id, scope_document_ids, scope_document_type, question, for_customer,
             )
             cached = _answer_cache_get(cache_key, cache_ttl)
             if cached is not None:
@@ -265,7 +277,8 @@ class FrontlineAgent(BaseAgent):
         
         # A question that asks for everything is answered from the documents whole (core/whole_document.py); if
         # that is not possible or fails, from the retrieved chunks below as before.
-        whole = self._plan_whole_document(question, knowledge_result, search_company_id, wants_everything)
+        whole = self._plan_whole_document(question, knowledge_result, search_company_id, wants_everything,
+                                          customer=for_customer)
         if whole is not None:
             _t_llm = time.time()
             formatted_answer = whole_document.answer(self, whole, system_prompt=self.system_prompt)
@@ -316,7 +329,7 @@ class FrontlineAgent(BaseAgent):
                     end = min(len(answer_content), idx + 500)
                     logger.info(f"Found keyword '{keyword}' at position {idx}, context: {answer_content[start:end]}")
             
-            prompt = get_knowledge_prompt(question, [knowledge_result])
+            prompt = get_knowledge_prompt(question, [knowledge_result], for_customer=for_customer)
             
             # Log the prompt to see what's being sent to LLM
             logger.info(f"Prompt length: {len(prompt)}")
@@ -336,7 +349,7 @@ class FrontlineAgent(BaseAgent):
                 # 900 tokens ≈ 3–5 well-structured paragraphs or a detailed
                 # bullet list — enough for thorough answers without runaway
                 # essays. Override via `FRONTLINE_QA_MAX_TOKENS` if needed.
-                max_tokens=int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 900)),
+                max_tokens=(500 if for_customer else int(getattr(settings, 'FRONTLINE_QA_MAX_TOKENS', 900))),
             )
             timing_ms['llm'] = int((time.time() - _t_llm) * 1000)
             timing_ms['total'] = int((time.time() - _t_overall) * 1000)
@@ -586,12 +599,12 @@ class FrontlineAgent(BaseAgent):
             'cache_hit': False,
         }
 
-    def _plan_whole_document(self, question, knowledge_result, company_id, wants_everything=None):
+    def _plan_whole_document(self, question, knowledge_result, company_id, wants_everything=None, customer=False):
         from Frontline_agent.models import Document
         return whole_document.plan(
             question, knowledge_result.get('citations'), company_id=company_id or self.company_id,
             agent_key_name=self.agent_key_name, document_model=Document, citation_type='document',
-            wants_everything=wants_everything)
+            wants_everything=wants_everything, customer=customer)
 
     def _contextualise_with_history(self, question: str,
                                     history: List[Dict]) -> Optional[str]:

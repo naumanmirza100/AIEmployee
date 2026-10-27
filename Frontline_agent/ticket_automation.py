@@ -5,9 +5,10 @@ answered a simple one, so the dashboard's "Auto-resolved" figure only counted st
 both off until an admin turns them on (Chat widget tab, "Ticket automation"):
 
 - classify_incoming: the triage staff tickets and Re-triage use sets the category, priority, intent and entities.
-- resolve_from_knowledge: a web-form or email ticket the knowledge base answers with high confidence gets the answer
-  by email and is marked auto-resolved. The customer's reply comes back onto the ticket and reopens it (inbound email
-  does that for every resolved ticket). A chat hand-off is never answered this way: that customer asked for a person.
+- resolve_from_knowledge: a web-form or email ticket the knowledge base answers gets the answer by email and is marked
+  auto-resolved, when one small AI check finds the message a simple question and the drafted reply a full answer. The
+  customer's reply comes back onto the ticket and reopens it (inbound email does that for every resolved ticket). A
+  chat hand-off is never answered this way: that customer asked for a person.
 
 It runs on a Celery worker once the ticket is committed, never inside the customer's request.
 """
@@ -29,6 +30,44 @@ _NOT_KNOWING = ("don't have", 'do not have', "couldn't find", 'could not find', 
                 'not able to find', 'unable to find', "i'm not sure", 'i am not sure')
 _SIGN_OFF = ("\n\nIf this doesn't answer your question, just reply to this email and a member of our team will "
              "pick it up.")
+# Whether a drafted answer may go out without a person. It used to need search confidence 'high', which never came:
+# search_knowledge drops each passage's similarity, and for a short guide stored as one passage the similarity can't
+# tell a good match from a bad one (27 Oct, text-embedding-3-large: "For how long do you keep backups?" 0.24, "Who is
+# your CEO?" 0.24). So the live contact form's "Do you take backups…?" was never answered.
+_CHECK = """A customer wrote to a company's support. The company's assistant drafted a reply from the company's own
+help documents. Decide whether the reply can be emailed without a person checking it first.
+
+Customer's message:
+{question}
+
+Drafted reply:
+{answer}
+
+Return ONLY a JSON object:
+{{"simple_question": true when the message only asks for general information (hours, prices, what a plan includes,
+                     how something works, when invoices are due, how to pay); false when it reports a problem, asks for
+                     something to be done, complains, or needs the customer's own records looked up (a particular
+                     order, payment, charge or invoice of theirs),
+ "fully_answered": true when the reply answers everything the message asks, leaving nothing as unknown,
+ "confidence": a number from 0 to 1}}"""
+_CHECK_MIN_CONFIDENCE = 0.8
+
+
+def _safe_to_send(ticket, question, answer):
+    """One small AI call: is the message a simple question, and does the drafted reply answer all of it?"""
+    import json
+    from core.Frontline_agent.frontline_agent import FrontlineAgent
+    try:
+        raw = FrontlineAgent(company_id=ticket.company_id)._call_llm(
+            prompt=_CHECK.format(question=question[:3000], answer=answer[:3000]),
+            system_prompt='You check support replies. Output only one JSON object.',
+            temperature=0, max_tokens=200, json_mode=True)
+        check = json.loads((raw or '').strip().strip('`').removeprefix('json').strip())
+        return (check.get('simple_question') is True and check.get('fully_answered') is True
+                and float(check.get('confidence', 0)) >= _CHECK_MIN_CONFIDENCE)
+    except Exception as exc:
+        logger.info("Ticket %s not auto-resolved: no check (%s: %s)", ticket.id, type(exc).__name__, exc)
+        return False
 
 
 def switches(company):
@@ -128,9 +167,9 @@ def _customer_question(ticket):
 
 
 def resolve_from_knowledge(ticket):
-    """Email the knowledge base's answer and mark the ticket auto-resolved, when the answer is a confident one."""
+    """Email the knowledge base's answer and mark the ticket auto-resolved, when the check finds it safe to send."""
     from api.views.frontline_agent import send_ticket_reply
-    from core.Frontline_agent.frontline_agent import FrontlineAgent
+    from core.Frontline_agent.frontline_agent import FrontlineAgent, says_not_found
     from Frontline_agent.ticket_state import apply_status_change
 
     if ticket.status not in ('new', 'open') or ticket.priority == 'urgent':
@@ -138,11 +177,14 @@ def resolve_from_knowledge(ticket):
     question = _customer_question(ticket)
     if not question:
         return False
-    result = FrontlineAgent(company_id=ticket.company_id).answer_question(question, company_id=ticket.company_id)
+    result = FrontlineAgent(company_id=ticket.company_id).answer_question(question, company_id=ticket.company_id,
+                                                                          for_customer=True)
     answer = (result.get('answer') or '').strip()
-    if not (result.get('has_verified_info') and result.get('confidence') == 'high' and answer):
+    if not (result.get('has_verified_info') and answer) or says_not_found(answer):
         return False
     if any(phrase in answer.lower() for phrase in _NOT_KNOWING):
+        return False
+    if not _safe_to_send(ticket, question, answer):
         return False
 
     msg, problem, _ = send_ticket_reply(ticket, answer + _SIGN_OFF)

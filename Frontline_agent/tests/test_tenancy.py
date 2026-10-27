@@ -79,6 +79,23 @@ class CreatorScopedEndpointTests(FrontlineTestCase):
         titles = {t['title'] for t in body['data'].get('recent_tickets', [])}
         self.assertNotIn('Rival ticket, our creator', titles)
 
+    def test_customer_tickets_no_person_holds_are_in_the_list_and_the_counts(self):
+        # Live (27 Oct) the cards said "Total Tickets 1" over a queue of three chat hand-offs.
+        bot = views._ensure_handoff_system_user()
+        from Frontline_agent.tasks import _ensure_system_user
+        self.make_ticket(title='Hand-off: menu page', created_by=bot, assigned_to=bot, handoff_status='pending')
+        self.make_ticket(title='Email: invoice', created_by=_ensure_system_user(), assigned_to=None)
+        self.make_ticket(title='Rival hand-off', company=self.rival, created_by=bot, assigned_to=bot)
+        taken = self.make_ticket(title='Taken by a colleague', created_by=bot, assigned_to=self.member_user)
+        code, body = self.call(views.list_tickets, self.admin, method='get')
+        self.assertEqual(code, 200, body)
+        titles = {t['title'] for t in body['data']}
+        self.assertTrue({'Hand-off: menu page', 'Email: invoice'} <= titles, titles)
+        self.assertNotIn('Rival hand-off', titles)
+        self.assertNotIn(taken.title, titles)
+        code, body = self.call(views.frontline_dashboard, self.admin, method='get')
+        self.assertEqual(body['data']['stats']['total_tickets'], len(titles))
+
     def test_update_ticket_task_cannot_reach_another_company(self):
         code, _ = self.call(views.update_ticket_task, self.admin, {'status': 'resolved'},
                             method='patch', ticket_id=self.shared_creator_ticket.id)
