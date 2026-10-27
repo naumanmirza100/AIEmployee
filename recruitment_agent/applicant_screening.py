@@ -144,7 +144,6 @@ def screen(job, applications, actor, agents) -> list:
                     cv_record.qualification_decision = qualified.get('decision') if isinstance(qualified, dict) else None
                     cv_record.qualification_confidence = qualified.get('confidence_score') if isinstance(qualified, dict) else None
                     cv_record.qualification_priority = qualified.get('priority') if isinstance(qualified, dict) else None
-                    cv_record.rank = idx + 1
                     cv_record.save()
                     application_status.after_screening(cv_record)
                 except CVRecord.DoesNotExist:

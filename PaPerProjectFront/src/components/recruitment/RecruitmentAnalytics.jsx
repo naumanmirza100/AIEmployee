@@ -26,7 +26,7 @@ const RecruitmentAnalytics = () => {
 
   const fetchJobs = async () => {
     try {
-      const response = await getJobDescriptions();
+      const response = await getJobDescriptions({ picker: true });
       if (response.status === 'success') {
         setJobs(response.data || []);
       }
@@ -346,6 +346,8 @@ const RecruitmentAnalytics = () => {
                 </button>
               );
             })}
+            {/* The period changes the two trend charts only; the cards, funnel and breakdowns are all-time (CO-107). */}
+            <span className="text-[11px] text-white/40">Changes the trend charts; the other numbers are all time.</span>
           </div>
         </CardContent>
       </Card>
@@ -356,7 +358,7 @@ const RecruitmentAnalytics = () => {
           {
             label: 'Total CVs Processed',
             value: overview.total_cvs,
-            sub: 'Candidates analyzed',
+            sub: 'Candidates analyzed, all time',
             icon: Users,
             color: '#60a5fa',
             bgColor: 'rgba(96,165,250,0.15)',
@@ -365,7 +367,7 @@ const RecruitmentAnalytics = () => {
           {
             label: 'Total Interviews',
             value: overview.total_interviews,
-            sub: 'Scheduled interviews',
+            sub: 'Invitations and interviews, all time',
             icon: Calendar,
             color: '#34d399',
             bgColor: 'rgba(52,211,153,0.15)',
@@ -374,7 +376,7 @@ const RecruitmentAnalytics = () => {
           {
             label: 'Conversion Rate',
             value: `${overview.conversion_rate}%`,
-            sub: 'CV to Interview',
+            sub: 'Screened to booked or held interview, all time',
             icon: Target,
             color: '#fbbf24',
             bgColor: 'rgba(251,191,36,0.15)',
@@ -383,7 +385,7 @@ const RecruitmentAnalytics = () => {
           {
             label: 'Avg Role Fit Score',
             value: `${overview.avg_role_fit_score}%`,
-            sub: 'Average match score',
+            sub: 'Average match score, all time',
             icon: TrendingUp,
             color: '#a78bfa',
             bgColor: 'rgba(167,139,250,0.15)',

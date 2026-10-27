@@ -33,6 +33,7 @@ from recruitment_agent.core import RecruitmentAIClient
 from recruitment_agent import sharing
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
+from recruitment_agent.ranking import BEST_FIRST, ranks_for
 from recruitment_agent.models import (
     Interview,
     CVRecord,
@@ -409,7 +410,6 @@ def process_cvs(request):
                         # qualified has confidence_score, not confidence
                         cv_record.qualification_confidence = result['qualified'].get('confidence_score') if isinstance(result.get('qualified'), dict) else None
                         cv_record.qualification_priority = result['qualified'].get('priority') if isinstance(result.get('qualified'), dict) else None
-                        cv_record.rank = idx + 1
                         cv_record.save()
                         from recruitment_agent import application_status
                         application_status.after_screening(cv_record)
@@ -685,6 +685,15 @@ def list_job_descriptions(request):
             qs = qs.filter(department__icontains=dept_filter)
 
         total = qs.count()
+
+        # The job pickers (CV Processing, Interview Settings, Candidates, Interviews, Analytics) asked once with no
+        # page size and got the nine newest jobs (CO-105). `picker=1` gives every job, without the long texts.
+        if request.query_params.get('picker') in ('1', 'true'):
+            return Response({'status': 'success', 'total': total, 'data': [{
+                'id': jd.id, 'title': jd.title, 'is_active': jd.is_active, 'department': jd.department,
+                'location': jd.location, 'type': jd.type, 'keywords_json': jd.keywords_json,
+                'owner': sharing.owner_payload(jd, company_user),
+            } for jd in qs.order_by('-created_at')]})
 
         # pagination
         try:
@@ -1818,12 +1827,15 @@ def list_cv_records(request):
             except Exception:
                 pass
 
-        cv_records = cv_records.order_by('-rank', '-created_at')
+        # Best first, by score; it sorted by the stored rank, highest number first (CO-104).
+        cv_records = cv_records.order_by(*BEST_FIRST)
         total = cv_records.count()
 
         if paginate and page_size is not None:
             start = (page - 1) * page_size
             cv_records = cv_records[start:start + page_size]
+        cv_records = list(cv_records)
+        ranks = ranks_for(cv_records)
 
         records_list = []
         for cv in cv_records:
@@ -1837,7 +1849,7 @@ def list_cv_records(request):
                 'id': cv.id,
                 'file_name': cv.file_name,
                 'role_fit_score': cv.role_fit_score,
-                'rank': cv.rank,
+                'rank': ranks.get(cv.id),
                 'qualification_decision': cv.qualification_decision,
                 'qualification_confidence': cv.qualification_confidence,
                 'qualification_priority': cv.qualification_priority,
@@ -2074,7 +2086,7 @@ def get_cv_record_detail(request, record_id):
                 'id': cv.id,
                 'file_name': cv.file_name,
                 'role_fit_score': cv.role_fit_score,
-                'rank': cv.rank,
+                'rank': ranks_for([cv]).get(cv.id),
                 'qualification_decision': cv.qualification_decision,
                 'qualification_confidence': cv.qualification_confidence,
                 'qualification_priority': cv.qualification_priority,
@@ -2877,6 +2889,21 @@ def recruitment_analytics(request):
         else:
             total_jobs = sharing.jobs(company_user).count()
             active_jobs = sharing.jobs(company_user).filter(is_active=True).count()
+
+        # The dashboard's four cards. They were counted in the browser from the first page of each list, so they
+        # stopped at 9 jobs and 10 interviews (CO-106).
+        if request.query_params.get('overview') in ('1', 'true'):
+            return Response({'status': 'success', 'data': {'overview': {
+                'total_cvs': total_cvs, 'total_interviews': total_interviews, 'active_jobs': active_jobs,
+                'pending_interviews': Interview.objects.filter(interview_base_filter, status='PENDING').count(),
+            }}})
+
+        # Candidates who really had an interview: booked or held, counted once each (CO-107). The rate counted only
+        # interviews sitting in Scheduled right now, so it fell to 0% as interviews were held, and the funnel's
+        # 'Interviewed' counted every invitation, answered or not.
+        interviewed = (Interview.objects.filter(interview_base_filter,
+                                                status__in=['SCHEDULED', 'RESCHEDULED', 'CONFIRMED', 'COMPLETED'])
+                       .order_by().values('candidate_email').distinct().count())
         
         # ========== CV STATISTICS ==========
         # For SQL Server compatibility: clear any default ordering and sort in Python
@@ -2961,16 +2988,10 @@ def recruitment_analytics(request):
         ))
         interview_over_time.sort(key=lambda x: x['date'] if x['date'] else datetime.min)
         
-        # Interview conversion rate (INTERVIEW decision -> SCHEDULED interview)
-        interview_cvs = CVRecord.objects.filter(
-            cv_base_filter,
-            qualification_decision='INTERVIEW'
-        ).count()
-        scheduled_interviews = Interview.objects.filter(
-            interview_base_filter,
-            status='SCHEDULED'
-        ).count()
-        conversion_rate = (scheduled_interviews / interview_cvs * 100) if interview_cvs > 0 else 0
+        # Conversion rate: screened candidates who went on to a booked or held interview (CO-107).
+        screened = (CVRecord.objects.filter(cv_base_filter).exclude(qualification_decision__isnull=True)
+                    .exclude(qualification_decision='').count())
+        conversion_rate = (interviewed / screened * 100) if screened > 0 else 0
         
         # Interviews by job (only if not filtering by specific job)
         # For SQL Server compatibility: clear any default ordering and sort in Python
@@ -3202,7 +3223,7 @@ def recruitment_analytics(request):
             cv_base_filter
         ).exclude(qualification_decision__isnull=True).exclude(qualification_decision='').count()
         funnel_shortlisted = cv_decisions.get('INTERVIEW', 0)
-        funnel_interviewed = total_interviews
+        funnel_interviewed = interviewed
         funnel_hired = Interview.objects.filter(interview_base_filter, outcome='HIRED').count()
 
         def _conv(current, previous):
@@ -3289,6 +3310,8 @@ def export_candidates_csv(request):
     writer = csv.writer(response)
     writer.writerow(['ID', 'File Name', 'Job Title', 'Role Fit Score', 'Rank',
                      'Qualification Decision', 'Qualification Confidence', 'Created At'])
+    qs = list(qs.order_by('job_description_id', *BEST_FIRST))
+    ranks = ranks_for(qs)
     for cv in qs:
         import json as _json
         parsed = {}
@@ -3301,7 +3324,7 @@ def export_candidates_csv(request):
             parsed.get('name') or cv.file_name,
             cv.job_description.title if cv.job_description else '',
             cv.role_fit_score or '',
-            cv.rank or '',
+            ranks.get(cv.id) or '',
             cv.qualification_decision or '',
             cv.qualification_confidence or '',
             cv.created_at.strftime('%Y-%m-%d %H:%M') if cv.created_at else '',

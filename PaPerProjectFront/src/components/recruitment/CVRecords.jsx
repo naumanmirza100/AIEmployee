@@ -98,7 +98,7 @@ const CVRecords = () => {
 
   const fetchJobs = async () => {
     try {
-      const response = await getJobDescriptions();
+      const response = await getJobDescriptions({ picker: true });
       if (response.status === 'success') setJobs(response.data || []);
     } catch (error) {
       console.error('Error fetching jobs:', error);

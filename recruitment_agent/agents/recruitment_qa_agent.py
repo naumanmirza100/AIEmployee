@@ -17,6 +17,7 @@ from django.utils import timezone
 from core.api_key_service import KeyServiceError
 from recruitment_agent import intent as qa_intent
 from recruitment_agent.core import GroqClient, GroqClientError
+from recruitment_agent.ranking import BEST_FIRST, ranks_for
 from recruitment_agent.models import (
     CVRecord,
     JobApplication,
@@ -833,13 +834,14 @@ FORMATTING:
         )
         jobs_list = []
         for job in jobs_qs:
+            # Best first, by score: the stored rank was the place in one upload or the order of applying (CO-104).
             cvs = (
                 CVRecord.objects.filter(job_description=job)
-                .order_by("rank", "-role_fit_score")
+                .order_by(*BEST_FIRST)
                 .select_related("job_description")[:50]
             )
             candidates = []
-            for cv in cvs:
+            for place, cv in enumerate(cvs, start=1):
                 parsed = json.loads(cv.parsed_json) if cv.parsed_json else {}
                 insights_json = json.loads(cv.insights_json) if cv.insights_json else {}
                 name = _get_parsed_name(parsed)
@@ -859,7 +861,7 @@ FORMATTING:
                     "email": email,
                     "phone": phone,
                     "file_name": cv.file_name,
-                    "rank": cv.rank,
+                    "rank": place,
                     "role_fit_score": cv.role_fit_score,
                     "qualification_decision": cv.qualification_decision or "",
                     "qualification_confidence": cv.qualification_confidence,
@@ -1316,7 +1318,7 @@ FORMATTING:
                 f"Score: {cv.role_fit_score if cv.role_fit_score is not None else 'N/A'} | "
                 f"Decision: {cv.qualification_decision or 'N/A'} | "
                 f"Confidence: {cv.qualification_confidence if cv.qualification_confidence is not None else 'N/A'} | "
-                f"Rank: {cv.rank if cv.rank is not None else 'N/A'}"
+                f"Rank in the job: {ranks_for([cv]).get(cv.id, 'N/A')}"
             )
 
             for label, key in (
@@ -1366,7 +1368,7 @@ FORMATTING:
         index_match = re.search(r'\b(?:candidate|applicant|cv|resume)\s*#?\s*(\d+)\b', question, re.I)
         if index_match:
             idx = int(index_match.group(1))
-            ordered = list(cv_qs.order_by('rank', '-role_fit_score')[:max(idx, 1)])
+            ordered = list(cv_qs.order_by(*BEST_FIRST)[:max(idx, 1)])
             return [ordered[idx - 1]] if 0 < idx <= len(ordered) else []
 
         # Otherwise match a name mentioned in the question against parsed CV names.
@@ -1374,7 +1376,7 @@ FORMATTING:
         if not words:
             return []
         hits = []
-        for cv in cv_qs.order_by('rank', '-role_fit_score')[:200]:
+        for cv in cv_qs.order_by(*BEST_FIRST)[:200]:
             try:
                 parsed = json.loads(cv.parsed_json) if cv.parsed_json else {}
             except (ValueError, TypeError):

@@ -13,9 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Loader2, FileText, Briefcase, Calendar, Settings, Users, Upload, BarChart3, Menu, Check, LayoutDashboard, BarChart2, X, Star, TrendingUp, ArrowUpRight } from 'lucide-react';
 import {
-  getJobDescriptions,
-  getInterviews,
-  getCVRecords,
+  getRecruitmentOverview,
   getSavedPrompts,
   isPromptOnDashboard,
   generateGraph,
@@ -129,21 +127,13 @@ const RecruitmentDashboard = () => {
     try {
       setLoading(true);
       
-      const [jobsRes, interviewsRes, cvRecordsRes] = await Promise.all([
-        getJobDescriptions().catch(() => ({ status: 'success', data: [] })),
-        getInterviews().catch(() => ({ status: 'success', data: [] })),
-        getCVRecords().catch(() => ({ status: 'success', data: [] })),
-      ]);
-
-      const jobs = jobsRes.data || [];
-      const interviews = interviewsRes.data || [];
-      const cvRecords = cvRecordsRes.data || [];
-
+      // Counted on the server: counting the first page of each list stopped at 9 jobs and 10 interviews (CO-106).
+      const overview = await getRecruitmentOverview();
       setStats({
-        totalCVs: cvRecords.length,
-        totalInterviews: interviews.length,
-        activeJobs: jobs.filter(j => j.is_active).length,
-        pendingInterviews: interviews.filter(i => i.status === 'PENDING').length,
+        totalCVs: overview.total_cvs || 0,
+        totalInterviews: overview.total_interviews || 0,
+        activeJobs: overview.active_jobs || 0,
+        pendingInterviews: overview.pending_interviews || 0,
       });
     } catch (error) {
       console.error('Error fetching stats:', error);

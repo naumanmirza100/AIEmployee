@@ -258,6 +258,7 @@ export const getJobDescriptions = async (params = {}) => {
     if (params.department) query.set('department', params.department);
     if (params.page)       query.set('page',       params.page);
     if (params.page_size)  query.set('page_size',  params.page_size);
+    if (params.picker)     query.set('picker',     '1');
     const qs = query.toString();
     const response = await companyApi.get(`/recruitment/job-descriptions${qs ? `?${qs}` : ''}`);
     return response;
@@ -605,6 +606,12 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
     console.error('Get recruitment analytics error:', error);
     throw error;
   }
+};
+
+/** The dashboard's four counts, worked out on the server (CO-106). */
+export const getRecruitmentOverview = async () => {
+  const response = await companyApi.get('/recruitment/analytics', { overview: 1 });
+  return response?.data?.overview || {};
 };
 
 /**

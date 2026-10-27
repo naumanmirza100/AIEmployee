@@ -131,7 +131,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
   const fetchJobs = async () => {
     try {
       setLoadingJobs(true);
-      const response = await getJobDescriptions();
+      const response = await getJobDescriptions({ picker: true });
       if (response.status === 'success' && response.data) {
         setJobs(response.data);
         // Auto-select first job if available and none selected
