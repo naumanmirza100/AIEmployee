@@ -613,6 +613,10 @@ PM_PILOT_AI_INTENT = os.getenv('PM_PILOT_AI_INTENT', 'true').strip().lower() not
 # meeting is told where it is done, a question is searched in English. HR_AI_INTENT=false goes back to searching
 # every message as typed.
 HR_AI_INTENT = os.getenv('HR_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
+# Frontline's chat and Q&A read each message with one small AI call (core/Frontline_agent/intent.py): a greeting
+# or thanks is answered, a request for a person or a call and a reported problem go to a person, a question is
+# searched in English. FRONTLINE_AI_INTENT=false goes back to the word lists.
+FRONTLINE_AI_INTENT = os.getenv('FRONTLINE_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
 
 PM_AGENT_LLM_CONFIG = {
     'defaults': {

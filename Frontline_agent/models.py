@@ -113,6 +113,8 @@ class Ticket(models.Model):
         ('', 'N/A'),
         ('low_confidence', 'Low QA confidence'),
         ('customer_requested', 'Customer asked for a human'),
+        ('call_requested', 'Customer asked for a call'),
+        ('problem_reported', 'Customer reported a problem'),
         ('manual_escalation', 'Agent escalated manually'),
         ('sla_risk', 'SLA at risk'),
     ]
@@ -660,9 +662,21 @@ class FrontlineMeeting(models.Model):
     notes = models.TextField(blank=True)
     transcript = models.TextField(blank=True)
 
+    # The customer the call is with. Only staff used to be invited: the customer was a line in the description and
+    # was told nothing. Now they are emailed the invitation with the link, any change, and the reminders.
+    customer_name = models.CharField(max_length=200, blank=True)
+    customer_email = models.EmailField(blank=True)
+    ticket = models.ForeignKey('Ticket', on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='meetings', help_text='The ticket the call was booked from, if any.')
+
     # Reminder bookkeeping — populated by the Celery task so we send each reminder once.
+    # A day, an hour, 15 and 5 minutes before, as Project Manager's and HR's.
     reminder_24h_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_60m_sent_at = models.DateTimeField(null=True, blank=True)
     reminder_15m_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_5m_sent_at = models.DateTimeField(null=True, blank=True)
+
+    REMINDER_FIELDS = ('reminder_24h_sent_at', 'reminder_60m_sent_at', 'reminder_15m_sent_at', 'reminder_5m_sent_at')
 
     # LLM-extracted action items. Each entry: {text, owner_user_id?, due_date?, ticket_id?}.
     action_items = models.JSONField(default=list, blank=True,

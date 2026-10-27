@@ -41,6 +41,8 @@ def hears_handoffs(company_user) -> bool:
 
 HANDOFF_WHY = {
     'customer_requested': 'The customer asked for a person.',
+    'call_requested': 'The customer asked for a call: agree a time and book it under Meetings.',
+    'problem_reported': 'The customer reported a problem.',
     'low_confidence': "The AI couldn't find a reliable answer.",
     'manual_escalation': 'It was escalated by an agent.',
     'sla_risk': 'It is at risk of missing its response time.',

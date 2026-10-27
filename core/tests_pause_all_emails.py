@@ -161,24 +161,28 @@ class FrontlineReminderTests(PauseTestCase):
         organiser = _get_or_create_user_for_company_user(self.admin)      # the dashboard login's own user
         self.meeting = FrontlineMeeting.objects.create(
             company=self.company, organizer=organiser, title='Customer call',
-            scheduled_at=timezone.now() + timedelta(hours=3), status='scheduled')
+            scheduled_at=timezone.now() + timedelta(minutes=60), status='scheduled')     # the hour-before one
         self.meeting.participants.add(self.employee_login('pat'), self.member_emp.user)
 
+    def remind(self):
+        with self.captureOnCommitCallbacks(execute=True):      # staff emails go once the stamps are saved
+            send_meeting_reminders()
+
     def test_everyone_gets_it_by_default(self):
-        send_meeting_reminders()
+        self.remind()
         self.assertEqual(self.to(), ['dana@test.local', 'mo@test.local', 'pat@test.local'])
 
     def test_a_paused_person_does_not(self):
         self.pause(self.admin)
-        send_meeting_reminders()
+        self.remind()
         self.assertEqual(self.to(), ['mo@test.local', 'pat@test.local'])
 
     def test_when_nobody_wants_it_the_reminder_is_still_marked_dealt_with(self):
         self.meeting.participants.clear()
         self.pause(self.admin)
-        send_meeting_reminders()
+        self.remind()
         self.assertEqual(mail.outbox, [])
-        self.assertIsNotNone(FrontlineMeeting.objects.get(pk=self.meeting.pk).reminder_24h_sent_at)
+        self.assertIsNotNone(FrontlineMeeting.objects.get(pk=self.meeting.pk).reminder_60m_sent_at)
 
 
 class ExecutiveMeetingEmailTests(PauseTestCase):

@@ -65,7 +65,7 @@ TOPICS = (
           'Before a meeting in Project Manager, HR or Frontline that you organise or are in, and when '
           "invitees to yours haven't replied. Project Manager's are always in the bell; the bell is how "
           'a reminder is sent only once.',
-          ('project_manager_agent', 'hr_agent', 'frontline_agent'), kinds=('hr_meeting_reminder',),
+          ('project_manager_agent', 'hr_agent', 'frontline_agent'), kinds=('hr_meeting_reminder', 'frontline_meeting_reminder'),
           email_default=True, in_app_locked=True),
     Topic('tasks_assigned', 'Tasks assigned to you',
           'Someone gives you a task in Project Manager or from an executive meeting, adds to one of '

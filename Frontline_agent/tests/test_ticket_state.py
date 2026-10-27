@@ -129,6 +129,32 @@ class SatisfactionSurveyTests(FrontlineTestCase):
     """FL-DATA-14 — surveys were created by one endpoint that most closes
     never touch."""
 
+    def setUp(self):
+        super().setUp()
+        from Frontline_agent.models import Contact
+        self.customer = Contact.objects.create(company=self.company, email='farhan@bakery.test', name='Farhan')
+        Ticket.objects.filter(pk=self.ticket.pk).update(contact=self.customer)
+        self.ticket.refresh_from_db()
+
+    def test_the_survey_goes_to_the_customer_not_the_login_that_opened_the_ticket(self):
+        # It went to `created_by`: the hand-off bot for chat tickets, a staff login for web-form ones.
+        from django.core import mail
+        from Frontline_agent.satisfaction import ensure_satisfaction_survey
+        mail.outbox = []
+        ensure_satisfaction_survey(self.ticket)
+        [email] = mail.outbox
+        self.assertEqual(email.to, ['farhan@bakery.test'])
+        self.assertIn('/embed/csat?t=', email.body)          # a link, not "(token: …)"
+
+    def test_a_ticket_with_no_customer_asks_nobody(self):
+        from django.core import mail
+        from Frontline_agent.satisfaction import ensure_satisfaction_survey
+        Ticket.objects.filter(pk=self.ticket.pk).update(contact=None)
+        self.ticket.refresh_from_db()
+        mail.outbox = []
+        self.assertIsNone(ensure_satisfaction_survey(self.ticket))
+        self.assertEqual(mail.outbox, [])
+
     def test_closing_a_ticket_creates_a_survey(self):
         code, body = self.call(views.update_ticket, self.admin, {'status': 'resolved'},
                                method='patch', ticket_id=self.ticket.id)

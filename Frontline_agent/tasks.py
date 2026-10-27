@@ -323,112 +323,57 @@ def send_weekly_analytics_digest():
 
 @shared_task(name='Frontline_agent.tasks.send_meeting_reminders')
 def send_meeting_reminders():
-    """Send 24h and 15-minute reminder emails for upcoming frontline meetings.
+    """Reminders before a Frontline call: a day, an hour, 15 minutes and 5 minutes before, each saying how many
+    minutes are really left, with the link to join (Frontline_agent/meeting_customer.py).
 
-    Runs every 5 minutes. Picks meetings whose scheduled_at falls within one of the
-    two reminder windows and hasn't had that reminder marked sent yet. Uses a small
-    window (±2.5 minutes) around the target so a 5-minute poll cadence never misses
-    a meeting."""
+    Staff (the organiser and the colleagues in it) get each one in the bell, and by email unless they paused emails
+    or turned meeting reminders off. The customer gets each one by email. As Project Manager's and HR's. It used to be
+    two emails, 24 hours and 15 minutes before, to staff only, saying "scheduled for 2026-10-27T10:00:00+00:00".
+    Runs every five minutes via Beat; a reminder that went out marks the earlier ones sent too.
+    """
     from datetime import timedelta as _td
-    from django.core.mail import send_mail
-    from django.conf import settings
+    from django.contrib.auth import get_user_model
+    from core.modules import active_company_ids
+    from core.notification_settings import address_wants_email
+    from core.notification_utils import notify_employees
+    from Frontline_agent import meeting_customer
     from Frontline_agent.models import FrontlineMeeting
 
     now = timezone.now()
-    results = {'r24h_sent': 0, 'r15m_sent': 0, 'skipped': 0, 'failed': 0}
-
-    def _recipients(meeting):
-        emails = set()
-        if meeting.organizer and meeting.organizer.email:
-            emails.add(meeting.organizer.email)
-        for p in meeting.participants.all():
-            if p.email:
-                emails.add(p.email)
-        return list(emails)
-
-    def _send(meeting, window_label):
-        subject = f"Reminder ({window_label}): {meeting.title}"
-        when = meeting.scheduled_at.isoformat() if meeting.scheduled_at else '(unknown)'
-        body_parts = [
-            f"This is a reminder that '{meeting.title}' is scheduled for {when} ({meeting.timezone_name}).",
-            f"Duration: {meeting.duration_minutes} minutes.",
-        ]
-        if meeting.meeting_link:
-            body_parts.append(f"Meeting link: {meeting.meeting_link}")
-        if meeting.location:
-            body_parts.append(f"Location: {meeting.location}")
-        if meeting.description:
-            body_parts.append("")
-            body_parts.append(meeting.description)
-        body = "\n\n".join(body_parts)
-
-        recipients = _recipients(meeting)
-        # Anyone who is also a dashboard login can pause emails or turn reminders
-        # off (core.notification_settings).
-        from core.notification_settings import address_wants_email
-        recipients = [r for r in recipients if address_wants_email(meeting.company_id, r, 'meeting_reminders')]
-        if not recipients:
-            # Permanent for this meeting, not a transient failure — so the
-            # caller stamps it anyway. Leaving it unstamped kept the row in
-            # the window, to be re-fetched and re-serialised every 5 minutes
-            # for the next 24 hours (FL-PERF-9).
-            return 'no_recipients'
-        try:
-            send_mail(
-                subject=subject, message=body,
-                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
-                recipient_list=recipients, fail_silently=False,
-            )
-            return 'sent'
-        except Exception as exc:
-            logger.warning("Meeting reminder send failed for meeting %s: %s", meeting.id, exc)
-            return 'failed'
-
-    # 24h reminder: fire whenever the meeting is <= 24h away AND > 15m away (so the
-    # 15-minute reminder stage owns the final stretch) AND the 24h reminder hasn't
-    # been sent yet. The previous narrow ±window was correct only if cron was
-    # punctual; if a worker slipped even 3 minutes, meetings in the missed band
-    # lost their reminder. "Still upcoming + not yet sent" is the real condition.
-    from core.modules import active_company_ids
     paying = active_company_ids('frontline_agent')     # no reminders for a lapsed agent
+    results = {'sent': 0, 'customers': 0, 'failed': 0}
+    order = [field for field, _, _ in meeting_customer.REMINDERS]
+    for field, minutes, (early, late) in meeting_customer.REMINDERS:
+        lo, hi = now + _td(minutes=minutes - early), now + _td(minutes=minutes + late)
+        due = (FrontlineMeeting.objects
+               .filter(company_id__in=paying, status__in=['scheduled', 'rescheduled'],
+                       scheduled_at__gte=lo, scheduled_at__lte=hi, **{f'{field}__isnull': True})
+               .select_related('organizer', 'company').prefetch_related('participants'))
+        for m in due:
+            minutes_left = (m.scheduled_at - now).total_seconds() / 60
+            try:
+                text = meeting_customer.reminder_text(m, minutes_left)
+                heading = f'Meeting reminder: {m.title}'
+                subject = f'Reminder: {m.title} starts {meeting_customer.time_left(minutes_left)}'
+                staff = {u.pk: u for u in [m.organizer, *m.participants.all()] if u is not None}
+                by_email = [pk for pk, u in staff.items()
+                            if u.email and address_wants_email(m.company_id, u.email, 'meeting_reminders')]
+                users = get_user_model().objects
+                notify_employees(users.filter(pk__in=by_email), title=heading, message=text,
+                                 link='/me/meetings', kind='frontline_meeting_reminder', email_subject=subject)
+                notify_employees(users.filter(pk__in=[pk for pk in staff if pk not in by_email]), title=heading,
+                                 message=text, link='/me/meetings', kind='frontline_meeting_reminder')
+                if meeting_customer.remind_customer(m, minutes_left):
+                    results['customers'] += 1
+                results['sent'] += 1
+            except Exception:
+                logger.exception('Frontline meeting %s: reminder %s failed', m.pk, field)
+                results['failed'] += 1
+            # Sent (or failed for good): stamp it and any earlier one, so nothing goes twice.
+            stamps = {f: now for f in order[:order.index(field) + 1] if getattr(m, f) is None}
+            FrontlineMeeting.objects.filter(pk=m.pk).update(**stamps)
 
-    r24_cutoff_upper = now + _td(hours=24)
-    r24_cutoff_lower = now + _td(minutes=15)   # don't double with the 15m stage
-    for m in FrontlineMeeting.objects.filter(
-        company_id__in=paying,
-        status__in=['scheduled', 'rescheduled'],
-        scheduled_at__gt=r24_cutoff_lower,
-        scheduled_at__lte=r24_cutoff_upper,
-        reminder_24h_sent_at__isnull=True,
-    ).select_related('organizer').prefetch_related('participants'):
-        outcome = _send(m, '24 hours')
-        if outcome in ('sent', 'no_recipients'):
-            m.reminder_24h_sent_at = now
-            m.save(update_fields=['reminder_24h_sent_at', 'updated_at'])
-            results['r24h_sent' if outcome == 'sent' else 'skipped'] += 1
-        else:
-            results['failed'] += 1
-
-    # 15-minute reminder: fire whenever the meeting is <= 15m away AND hasn't
-    # already started (>= now). Same stateful logic as above. The old ±2.5m
-    # window missed meetings when cron lagged; this does not.
-    r15_upper = now + _td(minutes=15)
-    for m in FrontlineMeeting.objects.filter(
-        company_id__in=paying,
-        status__in=['scheduled', 'rescheduled'],
-        scheduled_at__gte=now,
-        scheduled_at__lte=r15_upper,
-        reminder_15m_sent_at__isnull=True,
-    ).select_related('organizer').prefetch_related('participants'):
-        outcome = _send(m, '15 minutes')
-        if outcome in ('sent', 'no_recipients'):
-            m.reminder_15m_sent_at = now
-            m.save(update_fields=['reminder_15m_sent_at', 'updated_at'])
-            results['r15m_sent' if outcome == 'sent' else 'skipped'] += 1
-        else:
-            results['failed'] += 1
-
-    if any(results[k] for k in ('r24h_sent', 'r15m_sent', 'failed')):
+    if results['sent'] or results['failed']:
         logger.info("send_meeting_reminders: %s", results)
     return results
 

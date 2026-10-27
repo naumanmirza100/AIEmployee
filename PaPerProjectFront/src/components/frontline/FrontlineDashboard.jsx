@@ -2322,57 +2322,15 @@ const FrontlineDashboard = () => {
                                 )}
                                 {msg.responseData?.confidence === 'low' && (
                                   <div className="mt-2 text-xs rounded-md px-2 py-1 bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30">
-                                    Low-confidence match{typeof msg.responseData?.best_score === 'number' ? ` (score ${msg.responseData.best_score})` : ''}. Consider escalating to a human agent.
+                                    Low-confidence match. Consider escalating to a human agent.
                                   </div>
                                 )}
-                                {(() => {
-                                  const t = msg.responseData?.responseTimeMs ?? msg.responseTimeMs;
-                                  if (typeof t !== 'number') return null;
-                                  const tm = msg.responseData?.timing_ms;
-                                  const parts = [];
-                                  if (tm && !tm.cache) {
-                                    if (typeof tm.retrieval === 'number') parts.push(`retrieval ${(tm.retrieval / 1000).toFixed(1)}s`);
-                                    if (typeof tm.llm === 'number') parts.push(`llm ${(tm.llm / 1000).toFixed(1)}s`);
-                                    if (typeof tm.contextualise === 'number') parts.push(`ctx ${(tm.contextualise / 1000).toFixed(1)}s`);
-                                  }
-                                  // Retrieval sub-phase breakdown — shown when retrieval > 1s so we
-                                  // can pinpoint WHICH phase (faiss build / json-scan / keyword / rerank).
-                                  const rb = tm?.retrieval_breakdown;
-                                  const rp = tm?.retrieval_path;
-                                  const rbParts = [];
-                                  if (rb && (tm?.retrieval || 0) > 1000) {
-                                    const keys = ['query_embed', 'faiss_search', 'faiss_candidates', 'faiss_chunk_fetch', 'faiss_output_build', 'semantic', 'json_scan', 'keyword', 'rerank'];
-                                    for (const k of keys) {
-                                      if (typeof rb[k] === 'number' && rb[k] > 50) {
-                                        rbParts.push(`${k}=${(rb[k] / 1000).toFixed(1)}s`);
-                                      }
-                                    }
-                                    if (typeof rb.json_scan_chunks === 'number' && rb.json_scan_chunks > 0) {
-                                      rbParts.push(`scanned=${rb.json_scan_chunks}`);
-                                    }
-                                  }
-                                  return (
-                                    <div className="mt-2 text-[10px] text-muted-foreground/70 space-y-0.5">
-                                      <div className="flex flex-wrap items-center gap-1.5">
-                                        <span>⏱ Answered in {(t / 1000).toFixed(2)}s</span>
-                                        {parts.length > 0 && (
-                                          <span className="text-muted-foreground/50">({parts.join(' · ')})</span>
-                                        )}
-                                        {msg.responseData?.cache_hit && (
-                                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-medium">
-                                            cached
-                                          </span>
-                                        )}
-                                      </div>
-                                      {(rbParts.length > 0 || rp) && (
-                                        <div className="text-[9px] text-muted-foreground/50 font-mono">
-                                          {rp && <span>path: {rp} </span>}
-                                          {rbParts.join(' · ')}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
+                                {/* How long it took; the search's inner timings and path were for the developers. */}
+                                {typeof (msg.responseData?.responseTimeMs ?? msg.responseTimeMs) === 'number' && (
+                                  <div className="mt-2 text-[10px] text-muted-foreground/70">
+                                    ⏱ Answered in {((msg.responseData?.responseTimeMs ?? msg.responseTimeMs) / 1000).toFixed(1)}s
+                                  </div>
+                                )}
                                 {msg.responseData?.rewritten_query && (
                                   <div className="mt-2 text-xs text-muted-foreground italic">
                                     Interpreted as: "{msg.responseData.rewritten_query}"
@@ -2382,12 +2340,12 @@ const FrontlineDashboard = () => {
                                   <div className="mt-3 pt-2 border-t border-border/50 space-y-2">
                                     <p className="text-xs font-medium text-muted-foreground">Sources</p>
                                     <ol className="space-y-1.5 text-xs text-muted-foreground list-decimal list-inside">
-                                      {msg.responseData.citations.map((c, idx) => (
+                                      {/* Each document and page once, with no search scores. */}
+                                      {msg.responseData.citations
+                                        .filter((c, idx, all) => all.findIndex((o) => (o.title || o.source) === (c.title || c.source)) === idx)
+                                        .map((c, idx) => (
                                         <li key={`${c.document_id || 'src'}-${c.chunk_id || idx}`} className="break-words">
                                           <span className="font-medium text-foreground">{c.title || c.source || 'Source'}</span>
-                                          {typeof c.score === 'number' && (
-                                            <span className="ml-1 text-[10px] opacity-70">({c.score})</span>
-                                          )}
                                           {c.snippet && (
                                             <span className="block mt-0.5 opacity-80 whitespace-pre-wrap">{c.snippet}{c.snippet.length >= 200 ? '…' : ''}</span>
                                           )}

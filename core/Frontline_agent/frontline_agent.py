@@ -90,6 +90,12 @@ def invalidate_answer_cache_for_company(company_id):
         _ANSWER_CACHE.clear()
 
 
+#: The answer when the documents hold nothing reliable. It used to say "Let me create a ticket for a human agent to
+#: assist you", which on the website only opened a knowledge-gap ticket for the team's records: nobody was asked to reply.
+NOT_IN_THE_DOCUMENTS = ("I couldn't find this in our help documents, so I can't answer it reliably. You can ask to "
+                        "talk to a person, and someone from our team will help you.")
+
+
 class FrontlineAgent(BaseAgent):
     """
     Frontline Support AI Agent for PayPerProject.
@@ -105,8 +111,16 @@ class FrontlineAgent(BaseAgent):
         # route through BYOK → quota gate → managed → platform key.
         self.agent_key_name = 'frontline_agent'
         self.knowledge_service = KnowledgeService(company_id=company_id)
-        self.ticket_service = TicketAutomationService()
+        self.ticket_service = TicketAutomationService(company_id=company_id)
         self.system_prompt = FRONTLINE_SYSTEM_PROMPT
+        if company_id:
+            try:
+                from core.models import Company
+                from core.Frontline_agent.prompts import frontline_system_prompt
+                name = Company.objects.filter(pk=company_id).values_list('name', flat=True).first()
+                self.system_prompt = frontline_system_prompt(name)
+            except Exception:
+                logger.exception('FrontlineAgent: company name not read; the general prompt is used')
         logger.info(f"FrontlineAgent initialized (company_id: {company_id})")
     
     def answer_question(
@@ -127,6 +141,8 @@ class FrontlineAgent(BaseAgent):
         enable_rewrite: bool = False,
         company_user_id: Optional[int] = None,
         history: Optional[List[Dict]] = None,
+        search_query: Optional[str] = None,
+        wants_everything: Optional[bool] = None,
     ) -> Dict:
         """
         Answer a question using only verified knowledge base information.
@@ -175,9 +191,11 @@ class FrontlineAgent(BaseAgent):
         # Without this, "what about international ones?" embeds with no notion of
         # "ones what?" and retrieval flails. We only call the LLM when there's
         # actually prior history — first-turn questions skip the cost entirely.
-        retrieval_question = question
+        # search_query: the message as one standalone English question, from the AI reading
+        # (core/Frontline_agent/intent.py). It already folds in the conversation, so no second call is needed.
+        retrieval_question = search_query or question
         contextualised = None
-        if history:
+        if history and not search_query:
             _t_ctx = time.time()
             contextualised = self._contextualise_with_history(question, history)
             timing_ms['contextualise'] = int((time.time() - _t_ctx) * 1000)
@@ -235,7 +253,7 @@ class FrontlineAgent(BaseAgent):
             # "we found nothing" from "we found something but not confidently".
             return {
                 'success': True,
-                'answer': "I don't have verified information about this topic in our knowledge base. Let me create a ticket for a human agent to assist you.",
+                'answer': NOT_IN_THE_DOCUMENTS,
                 'has_verified_info': False,
                 'confidence': knowledge_result.get('confidence', 'none'),
                 'best_score': knowledge_result.get('best_score'),
@@ -247,7 +265,7 @@ class FrontlineAgent(BaseAgent):
         
         # A question that asks for everything is answered from the documents whole (core/whole_document.py); if
         # that is not possible or fails, from the retrieved chunks below as before.
-        whole = self._plan_whole_document(question, knowledge_result, search_company_id)
+        whole = self._plan_whole_document(question, knowledge_result, search_company_id, wants_everything)
         if whole is not None:
             _t_llm = time.time()
             formatted_answer = whole_document.answer(self, whole, system_prompt=self.system_prompt)
@@ -381,6 +399,8 @@ class FrontlineAgent(BaseAgent):
         max_results: int = 10,
         company_user_id: Optional[int] = None,
         history: Optional[List[Dict]] = None,
+        search_query: Optional[str] = None,
+        wants_everything: Optional[bool] = None,
     ):
         """Generator variant of :meth:`answer_question`. Yields:
 
@@ -431,8 +451,8 @@ class FrontlineAgent(BaseAgent):
                 return
 
         # Contextualise follow-ups against history (LLM call).
-        retrieval_question = question
-        if history:
+        retrieval_question = search_query or question
+        if history and not search_query:
             _t_ctx = time.time()
             contextualised = self._contextualise_with_history(question, history)
             timing_ms['contextualise'] = int((time.time() - _t_ctx) * 1000)
@@ -461,9 +481,7 @@ class FrontlineAgent(BaseAgent):
             pass
 
         if not knowledge_result.get('has_verified_info'):
-            fallback = ("I don't have verified information about this topic in "
-                        "our knowledge base. Let me create a ticket for a human "
-                        "agent to assist you.")
+            fallback = NOT_IN_THE_DOCUMENTS
             yield {
                 'type': 'meta',
                 'has_verified_info': False,
@@ -481,7 +499,7 @@ class FrontlineAgent(BaseAgent):
 
         # LLM streaming. A question that asks for everything is tried first on the documents whole
         # (core/whole_document.py); when that fails before any text is out, the retrieved chunks answer it.
-        whole = self._plan_whole_document(question, knowledge_result, search_company_id)
+        whole = self._plan_whole_document(question, knowledge_result, search_company_id, wants_everything)
         attempts = []
         if whole is not None:
             attempts.append((whole.citations, whole.note))
@@ -568,11 +586,12 @@ class FrontlineAgent(BaseAgent):
             'cache_hit': False,
         }
 
-    def _plan_whole_document(self, question, knowledge_result, company_id):
+    def _plan_whole_document(self, question, knowledge_result, company_id, wants_everything=None):
         from Frontline_agent.models import Document
         return whole_document.plan(
             question, knowledge_result.get('citations'), company_id=company_id or self.company_id,
-            agent_key_name=self.agent_key_name, document_model=Document, citation_type='document')
+            agent_key_name=self.agent_key_name, document_model=Document, citation_type='document',
+            wants_everything=wants_everything)
 
     def _contextualise_with_history(self, question: str,
                                     history: List[Dict]) -> Optional[str]:

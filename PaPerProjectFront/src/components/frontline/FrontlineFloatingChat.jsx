@@ -733,9 +733,9 @@ const FrontlineFloatingChat = () => {
                         <div className="mt-2 pt-2 border-t border-white/10 space-y-0.5">
                           <p className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Sources</p>
                           {m.citations && m.citations.length > 0
-                            ? m.citations.slice(0, 3).map((c, idx) => (
-                                <div key={idx} className="text-[11px] text-white/60 truncate">
-                                  • {c.title || c.source || 'Source'}
+                            ? [...new Set(m.citations.map((c) => c.title || c.source || 'Source'))].slice(0, 3).map((title) => (
+                                <div key={title} className="text-[11px] text-white/60 truncate">
+                                  • {title}
                                 </div>
                               ))
                             : <div className="text-[11px] text-white/60 truncate">• {m.source}</div>}
