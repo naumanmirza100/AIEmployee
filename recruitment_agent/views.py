@@ -653,9 +653,7 @@ def get_interview_details(request, interview_id):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-# Follow-up reminders are now sent AUTOMATICALLY ONLY via management command
-# Manual sending has been disabled to ensure consistent automatic processing
-# Run: python manage.py send_interview_reminders (via cron/scheduler)
+# Follow-ups and reminders are sent by recruitment_agent.tasks.check_and_send_followup_emails (Celery beat).
 
 @login_required
 @require_http_methods(["GET", "POST"])

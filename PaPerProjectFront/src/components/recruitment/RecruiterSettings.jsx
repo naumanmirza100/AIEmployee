@@ -659,6 +659,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                     data-testid="REC-settings-followup-delay-input"
                     type="number"
                     step="0.1"
+                    min="1" max="336"
                     value={emailSettings.followup_delay_hours}
                     onChange={(e) => setEmailSettings({
                       ...emailSettings,
@@ -677,6 +678,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                     data-testid="REC-settings-min-hours-between-input"
                     type="number"
                     step="0.1"
+                    min="1" max="336"
                     value={emailSettings.min_hours_between_followups}
                     onChange={(e) => setEmailSettings({
                       ...emailSettings,
@@ -694,6 +696,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                     id="REC-settings-max-followups-input"
                     data-testid="REC-settings-max-followups-input"
                     type="number"
+                    min="0" max="5"
                     value={emailSettings.max_followup_emails}
                     onChange={(e) => setEmailSettings({
                       ...emailSettings,
@@ -712,6 +715,7 @@ const RecruiterSettings = ({ settingsJobId = null, onSettingsJobConsumed }) => {
                     data-testid="REC-settings-reminder-hours-input"
                     type="number"
                     step="0.1"
+                    min="1" max="168"
                     value={emailSettings.reminder_hours_before}
                     onChange={(e) => setEmailSettings({
                       ...emailSettings,

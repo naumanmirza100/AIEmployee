@@ -1,3 +1,5 @@
+> **Out of date (28 Oct 2026).** Follow-ups and reminders are sent only by `recruitment_agent.tasks.check_and_send_followup_emails`, run by Celery beat every five minutes (`recruitment-interview-followups` in `project_manager_ai/settings.py`). There is no cron job, no middleware thread and no `send_interview_reminders` command any more; `manage.py send_interview_followups` runs the same check once.
+
 # Interview Follow-Up Email System - Setup Guide
 
 ## Overview

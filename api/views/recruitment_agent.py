@@ -1940,6 +1940,14 @@ def _get_parsed_email_and_name(parsed):
     return (email or None), name
 
 
+EMAIL_TIMING_LIMITS = (
+    ('followup_delay_hours', 1, 336, float, 'The wait before the first follow-up (hours)'),
+    ('min_hours_between_followups', 1, 336, float, 'The time between follow-ups (hours)'),
+    ('max_followup_emails', 0, 5, int, 'The number of follow-up emails'),
+    ('reminder_hours_before', 1, 168, float, 'The reminder time before an interview (hours)'),
+)
+
+
 def _unreadable_reason(file_name, exc):
     """Why a CV file could not be read, in words the recruiter can act on (CO-102, CO-180)."""
     suffix = Path(file_name).suffix.lower()
@@ -2472,14 +2480,19 @@ def email_settings(request):
                 company_user=company_user
             )
             
-            if 'followup_delay_hours' in request.data:
-                settings.followup_delay_hours = float(request.data['followup_delay_hours'])
-            if 'min_hours_between_followups' in request.data:
-                settings.min_hours_between_followups = float(request.data['min_hours_between_followups'])
-            if 'max_followup_emails' in request.data:
-                settings.max_followup_emails = int(request.data['max_followup_emails'])
-            if 'reminder_hours_before' in request.data:
-                settings.reminder_hours_before = float(request.data['reminder_hours_before'])
+            # Limits (CO-223): a delay or gap of 0 sent a follow-up on every pass of the check, and the number of
+            # follow-ups had no cap. Each refusal says what is allowed.
+            for field, low, high, kind, what in EMAIL_TIMING_LIMITS:
+                if field not in request.data:
+                    continue
+                try:
+                    value = kind(request.data[field])
+                except (TypeError, ValueError):
+                    value = None
+                if value is None or not (low <= value <= high):
+                    return Response({'status': 'error', 'message': f'{what} must be between {low} and {high}.'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                setattr(settings, field, value)
             if 'auto_send_followups' in request.data:
                 settings.auto_send_followups = bool(request.data['auto_send_followups'])
             if 'auto_send_reminders' in request.data:
@@ -2664,6 +2677,14 @@ def interview_settings(request):
                     return Response({
                         'status': 'error',
                         'message': 'schedule_from_date cannot be after schedule_to_date.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                # A mistyped year (2062 for 2026) made hundreds of thousands of slots, read whole on every load and
+                # by the assistant for every question (CO-224).
+                if (settings.schedule_to_date - settings.schedule_from_date).days > 90:
+                    return Response({
+                        'status': 'error',
+                        'message': ('Interview dates can cover at most 90 days. Check the end date, or set the next '
+                                    'dates when these are used up.'),
                     }, status=status.HTTP_400_BAD_REQUEST)
             
             # Validate time range
@@ -3401,8 +3422,12 @@ def export_interviews_csv(request):
     writer = csv.writer(response)
     writer.writerow(['ID', 'Candidate Name', 'Candidate Email', 'Candidate Phone',
                      'Job Role', 'Interview Type', 'Status', 'Outcome',
-                     'Scheduled Date/Time', 'Selected Slot', 'Created At'])
+                     'Scheduled Date/Time', 'Time zone', 'Selected Slot', 'Created At (UTC)'])
+    # Times in the interview's own zone, named: the column was UTC with no label, five hours off the slot beside it
+    # for a recruiter in Karachi (CO-229).
+    from recruitment_agent import interview_time as _itime
     for iv in qs:
+        _zone = _itime.stored_zone(iv) if iv.scheduled_datetime else ''
         writer.writerow([
             iv.id,
             iv.candidate_name or '',
@@ -3412,7 +3437,8 @@ def export_interviews_csv(request):
             iv.interview_type or '',
             iv.status or '',
             iv.outcome or '',
-            iv.scheduled_datetime.strftime('%Y-%m-%d %H:%M') if iv.scheduled_datetime else '',
+            _itime.local(iv.scheduled_datetime, _zone).strftime('%Y-%m-%d %H:%M') if iv.scheduled_datetime else '',
+            _zone,
             iv.selected_slot or '',
             iv.created_at.strftime('%Y-%m-%d %H:%M') if iv.created_at else '',
         ])
