@@ -641,14 +641,23 @@ def _should_send_notification_to_recipient(company_id, recipient_email, channel,
         return True
 
 
+#: The accounts customer tickets are filed under until a person takes them: chat hand-offs and knowledge gaps
+#: (_ensure_handoff_system_user) and email (Frontline_agent.tasks._ensure_system_user).
+SYSTEM_TICKET_ACCOUNTS = ('frontline_handoff_bot', 'frontline_inbound')
+
+
 def _tickets_of(company_user, user):
-    """The tickets a dashboard login works with: the ones it raised or was given, in its own company.
+    """The tickets a dashboard login works with, in its own company: the ones it raised or was given, and the
+    customers' tickets no person holds yet.
 
     The list, the aging list, the top cards and the analytics all count these, so their numbers agree. The cards
     and the analytics used to count only the tickets the viewer raised, so a support lead given every ticket
-    saw 0 at the top of a full list.
+    saw 0 at the top of a full list. Customer tickets held by a system account were in no one's list or count until
+    someone took them: live on 27 Oct the cards said "Total Tickets 1" over a queue of three hand-offs.
     """
-    return Ticket.objects.filter(Q(created_by=user) | Q(assigned_to=user), company=company_user.company)
+    unheld = (Q(assigned_to__username__in=SYSTEM_TICKET_ACCOUNTS)
+              | Q(assigned_to__isnull=True, created_by__username__in=SYSTEM_TICKET_ACCOUNTS))
+    return Ticket.objects.filter(Q(created_by=user) | Q(assigned_to=user) | unheld, company=company_user.company)
 
 
 @api_view(["GET"])
@@ -4385,6 +4394,11 @@ def create_meeting(request):
         # And the customer the call is with, who used to be told nothing (Frontline_agent/meeting_customer.py).
         from Frontline_agent import meeting_customer
         meeting_customer.tell_customer(m, 'booked')
+        # A call booked from a "call requested" hand-off answers it: whoever booked takes the hand-off, so it leaves
+        # the pending queue (it stayed there after the call was booked, as if nobody had acted).
+        if m.ticket_id and m.ticket.handoff_status == 'pending':
+            from Frontline_agent.handoff import accept_handoff
+            accept_handoff(m.ticket, _get_or_create_user_for_company_user(company_user))
 
         return Response({'status': 'success', 'data': _serialize_meeting(m)},
                         status=status.HTTP_201_CREATED)
