@@ -1675,7 +1675,12 @@ def public_qa(request):
                     history=public_history,
                     search_query=(reading or {}).get('english'),
                     wants_everything=reading['full_list'] if reading else None,
+                    for_customer=True,
                 )
+                from core.Frontline_agent.frontline_agent import says_not_found
+                if result.get('has_verified_info') and says_not_found(result.get('answer')):
+                    # Passages came back but held no answer: that is a gap in the documents, as when none came back.
+                    result = dict(result, has_verified_info=False)
                 if kind == 'problem':
                     # Whatever the documents say, a person follows it up (the hand-off below).
                     result = dict(result)

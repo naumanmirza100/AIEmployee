@@ -148,7 +148,7 @@ def _documents(document_model, company_id, citations, budget):
     return chosen or None
 
 
-def build_prompt(question, documents, preamble=''):
+def build_prompt(question, documents, preamble='', customer=False):
     parts = [
         "Answer the question from the documents below. They are given in full, not as excerpts.\n\n",
         "RULES:\n",
@@ -160,8 +160,13 @@ def build_prompt(question, documents, preamble=''):
         "3. When the items appear in several places (a contents page, a list per campus, faculty or section, a "
         "table), combine them into one list and leave none out. Keep each item to a line or two so the whole list "
         "fits, and group the items the way the documents group them.\n",
-        "4. Open with one sentence saying what the list is. End with where it comes from: the document, and the "
-        "pages when the text marks them (a line \"[Page n]\" starts page n; write \"page n\").\n",
+        # A company's customer on its website chat was told "The support plans listed in the document are:" and
+        # "This information is from the Client Support Guide, page 1."
+        ("4. This goes to a customer on the company's website chat. Open with one sentence in the company's own voice "
+         "(\"Our support plans are:\"). Never mention the documents or their pages, or a knowledge base, and add no "
+         "line about where the list comes from.\n" if customer else
+         "4. Open with one sentence saying what the list is. End with where it comes from: the document, and the "
+         "pages when the text marks them (a line \"[Page n]\" starts page n; write \"page n\").\n"),
         "5. If the documents hold no such list, say so plainly instead of guessing.\n",
         "6. NO preamble or meta-commentary such as \"Based on the documents\".\n\n",
     ]
@@ -174,7 +179,7 @@ def build_prompt(question, documents, preamble=''):
 
 
 def plan(question, citations, *, company_id, agent_key_name, document_model, citation_type, preamble='',
-         wants_everything=None):
+         wants_everything=None, customer=False):
     """The whole-document call to make for this question, or None to answer from the passages. `wants_everything` is
     the caller's AI reading of whether a complete list is wanted (HR: core/HR_agent/intent.py); without one, the word
     lists decide, which missed "saari leave types batao" and fired on "tell me all about maternity leave"."""
@@ -193,7 +198,7 @@ def plan(question, citations, *, company_id, agent_key_name, document_model, cit
         return None
     tokens = sum(d['tokens'] for d in documents)
     return Plan(
-        prompt=build_prompt(question, documents, preamble),
+        prompt=build_prompt(question, documents, preamble, customer),
         citations=[{'type': citation_type, 'title': f"{d['title']} (whole document)", 'section_heading': '',
                     'document_id': d['id'], 'chunk_id': None, 'score': None, 'snippet': d['text'][:200]}
                    for d in documents],
