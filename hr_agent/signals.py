@@ -19,6 +19,7 @@ the same Employee row; without a guard we'd loop. Reuses Frontline's
 ``workflow_execution_guard`` ContextVar — same module, same shape.
 """
 import logging
+import uuid
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
@@ -368,7 +369,9 @@ def employee_post_save(sender, instance: Employee, created, **kwargs):
     if before == new_status:
         return
     instance._status_before = new_status
-    change = timezone.now().isoformat()
+    # The time alone could repeat: two changes inside one clock tick (about 15 ms on Windows) shared a key, and the
+    # second run was skipped as a duplicate. This runs once per real change, so a random part is safe.
+    change = f"{timezone.now().isoformat()}#{uuid.uuid4().hex[:8]}"
     if new_status == 'offboarded':
         _run_matching_workflows(
             company_id=instance.company_id, event='employee_leaving',

@@ -390,7 +390,7 @@ class LapsedCleanUpTests(HRTestCase):
             candidate_name='Cara Candidate', candidate_email='cara@test.local', job_role='Welder',
             available_slots_json='[]', company_user=self.admin, confirmation_token='tok-cara')
         page, slots = '/recruitment/interview/select/tok-cara/', '/recruitment/api/interview/available-slots/tok-cara/'
-        closed = 'not available at the moment. Please contact the recruiter.'
+        closed = 'Interview booking for this position is not available at the moment.'   # then whom to write to
 
         self.buy_module(self.company, 'recruitment_agent')
         self.assertNotContains(Client().get(page), closed)

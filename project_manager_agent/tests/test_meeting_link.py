@@ -130,7 +130,9 @@ class WhoRepliedTests(MeetingCase):
 
         from django.apps import apps
         from project_manager_agent.models import MeetingResponse
+        import time
         self.accept(self.dev)
+        time.sleep(0.03)        # two answers inside one Windows clock tick (~15 ms) look simultaneous to the matcher
         self.accept(self.pm)
         MeetingResponse.objects.update(responder=None)     # as replies were kept before
         import_module('project_manager_agent.migrations.0020_meeting_response_responder').name_past_replies(apps, None)
