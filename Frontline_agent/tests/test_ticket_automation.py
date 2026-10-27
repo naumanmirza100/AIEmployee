@@ -131,6 +131,9 @@ class TicketAutomationTests(FrontlineTestCase):
         ticket = self.submit_form()
         self.assertEqual(ticket.status, 'auto_resolved')
         self.assertEqual(mail.outbox[0].to, ['sana@customer.test'])
+        # In the receipt's thread, not "Re: Web form: Sana Malik".
+        [answer] = self.from_automation()
+        self.assertEqual(answer.subject, f'Re: We received your message [FL-{ticket.id}]')
 
     def test_an_answer_that_is_not_sure_is_left_for_a_person(self):
         from core.Frontline_agent.frontline_agent import NOT_IN_THE_DOCUMENTS

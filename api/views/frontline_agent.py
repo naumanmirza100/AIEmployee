@@ -6493,6 +6493,10 @@ def send_ticket_reply(ticket, body_text, body_html='', *, to=None, cc=None, auth
     for label in ('Hand-off: ', 'Call requested: ', 'Problem: '):
         if subject.startswith(label):
             subject = subject[len(label):]
+    # A contact-form ticket's title is "Web form: <their name>"; the customer was answered "Re: Web form: Farhan
+    # Qureshi". The reply follows their receipt (customer_mail.acknowledge_web_form) instead, in the same thread.
+    if subject.startswith('Web form: '):
+        subject = 'We received your message'
     if tag not in subject:
         subject = f"Re: {subject} {tag}"
 
