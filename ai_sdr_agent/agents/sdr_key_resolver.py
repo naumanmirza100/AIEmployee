@@ -12,6 +12,7 @@ After every Groq call:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -30,12 +31,28 @@ class _Reporting:
         self._ctx = ctx
 
     def create(self, *args, **kwargs):
+        started = time.monotonic()
         try:
-            return self._completions.create(*args, **kwargs)
+            response = self._completions.create(*args, **kwargs)
         except Exception as exc:
+            _log_call(self._ctx, kwargs.get('model'), started, False)
             from core.api_key_service import raise_if_auth_error
             raise_if_auth_error(exc, self._ctx)
             raise
+        usage = getattr(response, 'usage', None)
+        _log_call(self._ctx, kwargs.get('model'), started, True, usage and {
+            'prompt_tokens': getattr(usage, 'prompt_tokens', 0),
+            'completion_tokens': getattr(usage, 'completion_tokens', 0),
+            'total_tokens': getattr(usage, 'total_tokens', 0)})
+        return response
+
+
+def _log_call(ctx, model, started, success, usage=None):
+    """One LLMUsage row per AI call, so the API Keys page counts AI SDR's calls and failures. It showed 0 (CO-69)."""
+    from project_manager_agent.ai_agents.base_agent import _record_llm_usage
+    _record_llm_usage(company_id=getattr(ctx, 'company_id', None), agent_name='AISDRAgent', model=model,
+                      usage_dict=usage, duration_ms=(time.monotonic() - started) * 1000, success=success,
+                      agent=AGENT_KEY)
 
 
 class _CheckedGroq:

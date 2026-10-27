@@ -7,6 +7,7 @@ markdown writing and stores the result in OperationsGeneratedDocument.
 """
 
 import logging
+import time
 from typing import Dict, List, Optional
 
 from django.conf import settings
@@ -256,6 +257,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 max_tokens=self.MAX_TOKENS,
                 stream=True,
             )
+            started = time.monotonic()
             try:
                 try:
                     stream = stream_client.chat.completions.create(
@@ -265,6 +267,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                 except TypeError:
                     stream = stream_client.chat.completions.create(**create_kwargs)
             except Exception as call_error:
+                self._log_call(model, started, False)
                 from core.api_key_service import raise_if_auth_error
                 raise_if_auth_error(call_error, key_ctx)
                 raise
@@ -289,6 +292,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
             # Normalize result
             content = full_text.strip()
             if not content:
+                self._log_call(model, started, False)
                 yield ('error', {'message': 'The AI returned an empty response. Please try again.'})
                 return
 
@@ -326,6 +330,7 @@ class DocumentAuthoringAgent(MarketingBaseAgent):
                     record_usage(key_ctx, total_tokens)
                 except Exception as _ru_err:
                     logger.warning('DocumentAuthoringAgent stream record_usage failed: %s', _ru_err)
+            self._log_call(model, started, True, tokens_used)
 
             yield ('done', {
                 'title': prepared['resolved_title'],

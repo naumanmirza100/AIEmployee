@@ -6,6 +6,7 @@ import hashlib
 import json as _json_top
 import logging
 import threading
+import time
 from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 from django.utils import timezone
@@ -728,6 +729,7 @@ Chunks:
 
             # Output is just a JSON list of ~8 integers — cap max_tokens hard
             # so the model can't ramble and inflate latency.
+            started = time.monotonic()
             response = llm_client.chat.completions.create(
                 model=rerank_model,
                 messages=[
@@ -748,6 +750,14 @@ Chunks:
                         record_usage(key_ctx, total)
                 except Exception as exc:
                     logger.warning("Frontline rerank quota decrement failed: %s", exc)
+            # Counted on the API Keys page with Frontline's other calls; it was the one without a row (CO-69).
+            from project_manager_agent.ai_agents.base_agent import _record_llm_usage
+            usage = getattr(response, 'usage', None)
+            _record_llm_usage(company_id=self.company_id, agent_name='FrontlineRerank', model=rerank_model,
+                              usage_dict={'prompt_tokens': getattr(usage, 'prompt_tokens', 0),
+                                          'completion_tokens': getattr(usage, 'completion_tokens', 0),
+                                          'total_tokens': getattr(usage, 'total_tokens', 0)},
+                              duration_ms=(time.monotonic() - started) * 1000, success=True, agent='frontline_agent')
 
             raw = response.choices[0].message.content.strip()
             if raw.startswith("```"):
