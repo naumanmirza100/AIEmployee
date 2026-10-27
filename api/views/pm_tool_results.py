@@ -159,12 +159,14 @@ def schedule_plan_ics(request, project_id):
 @throttle_classes([PMCRUDThrottle])
 def project_record(request, project_id):
     """What was decided and done on the project, in date order, with what is due, late and at risk:
-    Meeting Notes → Project record. Built from stored entries; no AI call."""
+    Meeting Notes → Project record. ?period= today, yesterday, 7d, 30d or all (the default). Built from stored
+    entries; no AI call."""
     project = _project(request, project_id)
     if project is None:
         return Response(NOT_FOUND, status=status.HTTP_404_NOT_FOUND)
     with _company_clock(request):
-        return Response({'status': 'success', 'data': record.build(project)})
+        return Response({'status': 'success',
+                         'data': record.build(project, period=request.query_params.get('period') or 'all')})
 
 
 def _company_clock(request):
@@ -182,6 +184,8 @@ def _company_clock(request):
 @throttle_classes([PMCRUDThrottle])
 def company_record(request):
     """All projects at once: Meeting Notes → Project record with "All projects" chosen. What was added, changed,
-    removed and confirmed across the company, day by day, then where each project stands. No AI call."""
+    removed and confirmed across the company in the period (?period= today, yesterday, 7d (the default), 30d or
+    all), then where each project stands. No AI call."""
     with _company_clock(request):
-        return Response({'status': 'success', 'data': record.build_company(request.user)})
+        return Response({'status': 'success',
+                         'data': record.build_company(request.user, period=request.query_params.get('period') or '7d')})

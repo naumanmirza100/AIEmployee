@@ -586,6 +586,8 @@ def process_hr_scheduled_notifications():
         # Render template body — light templating with {{placeholders}}
         body = _render_template_body(template.body, notif.context or {})
         subject = _render_template_body(template.subject or template.name, notif.context or {})
+        if template.use_llm_personalization:
+            body = _personalized(body, notif) or body
 
         ok, err = False, None
         try:
@@ -655,13 +657,39 @@ def process_hr_scheduled_notifications():
 
 def _render_template_body(body, context):
     """Tiny `{{key}}` template substitution. Same shape as Frontline's
-    `_render_template_body` so HR templates feel familiar to authors."""
+    `_render_template_body` so HR templates feel familiar to authors.
+    A date (as the daily check stores it, 2026-11-03) is written as people write it: 3 November 2026."""
     if not body:
         return ''
     out = body
     for k, v in (context or {}).items():
-        out = out.replace('{{' + str(k) + '}}', str(v) if v is not None else '')
+        out = out.replace('{{' + str(k) + '}}', _readable(v) if v is not None else '')
     return out
+
+
+def _readable(value):
+    from datetime import date as _date
+    text = str(value)
+    if len(text) == 10 and text[4] == '-' and text[7] == '-':
+        try:
+            d = _date.fromisoformat(text)
+            return f'{d.day} {d:%B %Y}'
+        except ValueError:
+            pass
+    return text
+
+
+def _personalized(body, notif):
+    """The message rewritten by the AI for its one recipient ("Personalise each message with AI"), or None: the
+    template's own text is sent then, as the screen promises, whatever went wrong."""
+    try:
+        from core.HR_agent.hr_agent import HRAgent
+        name = (notif.context or {}).get('employee_name') or getattr(notif.recipient_employee, 'full_name', '')
+        return HRAgent(company_id=notif.company_id).personalize_message(body, name=name)
+    except Exception:
+        logger.warning("HR notification %s: AI personalisation failed; sending the template's text", notif.id,
+                       exc_info=True)
+        return None
 
 
 @shared_task(name='hr_agent.tasks.walk_hr_time_based_events')

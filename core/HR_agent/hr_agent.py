@@ -439,6 +439,22 @@ class HRAgent(BaseAgent):
             logger.exception("HRAgent.summarize_document failed")
             return {'success': False, 'error': str(exc)}
 
+    def personalize_message(self, body: str, *, name: str = '') -> Optional[str]:
+        """A template's message, rewritten for the one person it goes to, for templates with "Personalise each
+        message with AI". Every fact, date and name stays as given. None when the AI gives nothing: the caller
+        sends the message as written."""
+        if not body or not body.strip():
+            return None
+        prompt = (
+            f"Rewrite this HR message to {name or 'the employee'} so it reads as written to them personally: "
+            "warm, clear and short (2 to 5 sentences), with a greeting and the same sign-off. Keep every fact, "
+            "date, name and number exactly as given, and add nothing that is not in it. "
+            "Output only the message.\n\n"
+            f"<message>\n{body[:3000]}\n</message>"
+        )
+        text = self._call_llm(prompt=prompt, system_prompt=self.system_prompt, temperature=0.4, max_tokens=400)
+        return (text or '').strip() or None
+
     def extract_from_document(self, content: str, *, schema: Optional[list] = None) -> dict:
         """Extract structured fields from an HR document.
 
