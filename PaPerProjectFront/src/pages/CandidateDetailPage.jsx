@@ -5,9 +5,10 @@ import {
   Loader2, ArrowLeft, Mail, Phone, Briefcase, MapPin,
   DollarSign, Building2, Link2, ExternalLink, Star,
   CheckCircle2, Clock, Calendar, User, GraduationCap,
-  TrendingUp, AlertCircle, CheckCircle, XCircle, FileText, Printer,
+  TrendingUp, AlertCircle, CheckCircle, XCircle, FileText, Printer, Trash2,
 } from 'lucide-react';
-import { getCVRecordDetail, getCVRecordDecisionHistory } from '@/services/recruitmentAgentService';
+import { getCVRecordDetail, getCVRecordDecisionHistory, deleteCandidate } from '@/services/recruitmentAgentService';
+import { useToast } from '@/components/ui/use-toast';
 import QualificationReasoning from '@/components/recruitment/QualificationReasoning';
 
 /* ── helpers ── */
@@ -150,6 +151,23 @@ const CandidateDetailPage = () => {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [decisionHistory, setDecisionHistory] = useState([]);
+  const { toast } = useToast();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Remove this person's data: record, CV, application and interviews (CO-183).
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await deleteCandidate(Number(id));
+      toast({ title: 'Candidate deleted', description: res?.message });
+      navigate('/recruitment/candidates');
+    } catch (e) {
+      toast({ title: 'Not deleted', description: e?.message, variant: 'destructive' });
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -350,11 +368,28 @@ const CandidateDetailPage = () => {
           <ArrowLeft className="h-4 w-4" />Back to Candidates
         </button>
         {detail && (
+          <div className="flex items-center gap-2">
+          {confirmDelete ? (
+            <span className="inline-flex items-center gap-2 text-xs text-red-200" data-testid="REC-candidate-delete-confirm">
+              Delete this candidate, their CV, application and interviews? A booked interview is called off and they are told.
+              <button onClick={handleDelete} disabled={deleting}
+                className="px-3 py-1.5 rounded-lg bg-red-500/80 text-white font-medium disabled:opacity-50">
+                {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Yes, delete'}
+              </button>
+              <button onClick={() => setConfirmDelete(false)} className="px-2 py-1.5 text-white/60 hover:text-white">Cancel</button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} data-testid="REC-candidate-delete-btn"
+              className="inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg text-red-300 hover:bg-red-500/10">
+              <Trash2 className="h-4 w-4" />Delete candidate
+            </button>
+          )}
           <button onClick={handlePrint}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-1.5 rounded-lg transition-colors text-white hover:bg-white/10"
             style={{ background: 'hsl(var(--surface-invert) / 0.07)', border: '1px solid hsl(var(--surface-invert) / 0.12)' }}>
             <Printer className="h-4 w-4" />Print Report
           </button>
+          </div>
         )}
       </div>
 

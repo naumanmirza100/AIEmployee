@@ -608,6 +608,9 @@ export const getRecruitmentAnalytics = async (days = 30, months = 6, jobId = nul
   }
 };
 
+/** Remove one candidate: their record, CV file, application and interviews (CO-183). */
+export const deleteCandidate = async (recordId) => companyApi.delete(`/recruitment/cv-records/${recordId}/delete`);
+
 /** The dashboard's four counts, worked out on the server (CO-106). */
 export const getRecruitmentOverview = async () => {
   const response = await companyApi.get('/recruitment/analytics', { overview: 1 });

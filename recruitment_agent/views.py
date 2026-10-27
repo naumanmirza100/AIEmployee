@@ -1415,6 +1415,9 @@ def _booking_is_closed(interview) -> bool:
     When the company cannot be told, booking stays open, as it was."""
     from core.modules import has_module
     from recruitment_agent.interview_time import company_id_for
+    # The job was deleted: nothing is left to book for (CO-118).
+    if interview.cv_record_id and interview.cv_record.job_description_id is None:
+        return True
     company_id = company_id_for(interview)
     return bool(company_id) and not has_module(company_id, 'recruitment_agent')
 

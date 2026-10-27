@@ -1037,8 +1037,21 @@ def delete_job_description(request, job_description_id):
                 'message': 'Job description not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
+        # Deleting a job removed every application to it and hid its candidates while keeping their data and files
+        # (CO-183). A job with people in it is closed instead; its booked interviews go on.
+        applications = job_desc.applications.count()
+        candidates = job_desc.cv_records.count()
+        if applications or candidates:
+            return Response({
+                'status': 'error', 'code': 'job_has_people',
+                'message': (f'"{job_desc.title}" has {applications} application(s) and {candidates} candidate(s), so it '
+                            'cannot be deleted. Close it instead (Edit, then switch it off): it stops taking '
+                            'applications, unanswered invitations stop being chased, and booked interviews go on. A '
+                            "candidate's data can be removed on their own page with Delete candidate."),
+                'applications': applications, 'candidates': candidates,
+            }, status=status.HTTP_409_CONFLICT)
         job_desc.delete()
-        
+
         return Response({
             'status': 'success',
             'message': 'Job description deleted successfully'
@@ -1052,6 +1065,48 @@ def delete_job_description(request, job_description_id):
             'status': 'error',
             'message': f'Delete failed: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE', 'POST'])
+@authentication_classes([CompanyUserTokenAuthentication])
+@permission_classes([IsCompanyUserOnly])
+def delete_cv_record(request, record_id):
+    """Remove one candidate: their record, CV file, public application and interviews (CO-183). There was no way
+    to delete a candidate, so a request to remove a person's data could not be met. The company's owner, an admin, or
+    whoever owns the job may do it; a booked interview is called off with the candidate and interviewers told."""
+    company_user = request.user
+    cv = sharing.cvs(company_user).select_related('job_description', 'job_application').filter(id=record_id).first()
+    if cv is None:
+        return Response({'status': 'error', 'message': 'Candidate not found'}, status=status.HTTP_404_NOT_FOUND)
+    job = cv.job_description
+    if company_user.role not in ('owner', 'admin') and not (job and job.company_user_id == company_user.id):
+        owner = job.company_user.full_name if job and job.company_user_id else 'the job owner'
+        return Response({'status': 'error', 'code': 'not_allowed', 'message': (
+            f"Only the company's owner, an admin, or {owner} (who owns this job) can delete a candidate.")},
+            status=status.HTTP_403_FORBIDDEN)
+    from recruitment_agent import interviewer_alerts
+    agent = InterviewSchedulingAgent(log_service=LogService())
+    told = 0
+    for iv in Interview.objects.filter(cv_record=cv):
+        if iv.status in ('SCHEDULED', 'CONFIRMED') and iv.scheduled_datetime and iv.scheduled_datetime > dj_timezone.now():
+            told += bool(agent.send_cancellation_email(iv))
+            interviewer_alerts.tell(iv, 'cancelled')
+        iv.delete()
+    for key in [cv.s3_key] if cv.s3_key else []:
+        try:
+            default_storage.delete(key)
+        except Exception:
+            logger.warning('delete_cv_record: could not remove file %s', key)
+    application = cv.job_application
+    name = cv.file_name
+    cv.delete()
+    if application is not None and not application.cv_records.exists():
+        if application.cv_file:
+            application.cv_file.delete(save=False)
+        application.delete()
+    return Response({'status': 'success', 'message': (
+        f'{name} was deleted, with their CV and interviews.'
+        + (' They were told their booked interview is cancelled.' if told else ''))})
 
 
 @api_view(['GET', 'POST'])

@@ -97,6 +97,10 @@ def check_and_send_followup_emails():
                 # The recruiter turned automatic follow-ups off.
                 if not interview.sends_followups():
                     continue
+                # A closed job stops chasing candidates who have not booked; a deleted one too (CO-118).
+                if interview.cv_record_id and not (interview.cv_record.job_description
+                                                   and interview.cv_record.job_description.is_active):
+                    continue
 
                 # Skip if interview is in the past
                 if interview.scheduled_datetime and interview.scheduled_datetime < now:

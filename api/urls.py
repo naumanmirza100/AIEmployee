@@ -410,6 +410,7 @@ urlpatterns = [
     re_path(r'^recruitment/cv-records/bulk-update/?$', recruitment_agent.bulk_update_cv_records, name='recruitment_bulk_update_cv_records'),  # POST
     re_path(r'^recruitment/cv-records/(?P<record_id>\d+)/?$', recruitment_agent.get_cv_record_detail, name='recruitment_get_cv_record_detail'),  # GET
     re_path(r'^recruitment/cv-records/(?P<record_id>\d+)/decision-history/?$', recruitment_agent.get_cv_record_decision_history, name='recruitment_cv_record_decision_history'),  # GET
+    re_path(r'^recruitment/cv-records/(?P<record_id>\d+)/delete/?$', recruitment_agent.delete_cv_record, name='recruitment_delete_cv_record'),  # DELETE/POST (CO-183)
     re_path(r'^recruitment/interviews/(?P<interview_id>\d+)/feedback/?$', recruitment_agent.submit_interview_feedback, name='recruitment_submit_interview_feedback'),  # PATCH/POST
     re_path(r'^recruitment/settings/email/?$', recruitment_agent.email_settings, name='recruitment_email_settings'),  # GET/POST
     re_path(r'^recruitment/settings/interview/?$', recruitment_agent.interview_settings, name='recruitment_interview_settings'),  # GET/POST
