@@ -204,8 +204,9 @@ export const recruitmentQA = async (question) => {
  * Recruitment Q&A with the answer shown as it is written: calls
  * `onText(answerSoFar)` as text arrives and resolves like `recruitmentQA`.
  */
-export const recruitmentQAStream = async (question, { onText, signal } = {}) => {
-  const done = await streamAnswer('/recruitment/qa/stream', { question }, { onText, signal });
+export const recruitmentQAStream = async (question, { onText, signal, chatHistory } = {}) => {
+  const body = chatHistory?.length ? { question, chat_history: chatHistory } : { question };
+  const done = await streamAnswer('/recruitment/qa/stream', body, { onText, signal });
   return { status: 'success', data: done.data };
 };
 

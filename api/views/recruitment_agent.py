@@ -3380,6 +3380,16 @@ def suggest_interview_questions(request):
         return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _qa_history(data):
+    """The conversation so far ({role, content} turns), as HR and Frontline send it: the AI reading of a follow-up
+    ("and for Flutter?", "uski skills?") needs it."""
+    history = data.get('chat_history') if isinstance(data, dict) else None
+    if not isinstance(history, list):
+        return []
+    return [{'role': str(t.get('role')), 'content': str(t.get('content'))[:2000]} for t in history[-8:]
+            if isinstance(t, dict) and t.get('role') in ('user', 'assistant') and t.get('content')]
+
+
 @api_view(['POST'])
 @authentication_classes([CompanyUserTokenAuthentication])
 @permission_classes([IsCompanyUserOnly])
@@ -3408,7 +3418,7 @@ def recruitment_qa(request):
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         qa_agent = RecruitmentQAAgent(groq_client=groq_client)
-        result = qa_agent.process(question=question, company_user=company_user)
+        result = qa_agent.process(question=question, company_user=company_user, history=_qa_history(data))
         return Response({
             'status': 'success',
             'data': {
@@ -3453,7 +3463,7 @@ def recruitment_qa_stream(request):
 
     def events():
         try:
-            for event in agent.process_stream(question=question, company_user=company_user):
+            for event in agent.process_stream(question=question, company_user=company_user, history=_qa_history(data)):
                 if event.get('type') == 'done':
                     result = event['result']
                     event = {'type': 'done', 'data': {'answer': result.get('answer', ''),

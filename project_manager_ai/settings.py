@@ -617,6 +617,9 @@ HR_AI_INTENT = os.getenv('HR_AI_INTENT', 'true').strip().lower() not in ('0', 'f
 # or thanks is answered, a request for a person or a call and a reported problem go to a person, a question is
 # searched in English. FRONTLINE_AI_INTENT=false goes back to the word lists.
 FRONTLINE_AI_INTENT = os.getenv('FRONTLINE_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
+# The Recruitment assistant (AI Questions): what a question asks for, the job and the person it names, read by one AI
+# call instead of word lists (recruitment_agent/intent.py). RECRUITMENT_AI_INTENT=false goes back to the word lists.
+RECRUITMENT_AI_INTENT = os.getenv('RECRUITMENT_AI_INTENT', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
 
 PM_AGENT_LLM_CONFIG = {
     'defaults': {
