@@ -170,3 +170,39 @@ class FreedSlotTests(BookingTests):
                 mock.patch.object(scheduling.InterviewSchedulingAgent, 'send_confirmation_email', return_value=True):
             freed = scheduling.InterviewSchedulingAgent().confirm_slot(other.id, f'{self.day}T10:00')
         self.assertTrue(freed['success'], freed)
+
+
+class OneRecruiterTwoJobsTests(TestCase):
+    """CO-186: a recruiter with only a dashboard login could be booked by two candidates at once for two jobs."""
+
+    def setUp(self):
+        from recruitment_agent.models import CVRecord, JobDescription
+        company = Company.objects.create(name='Acme', email='acme@test.local')
+        CompanyModulePurchase.objects.create(company=company, module_name='recruitment_agent', status='active',
+                                             is_complimentary=True)
+        self.rae = CompanyUser.objects.create(company=company, email='rae@acme.test', full_name='Rae Recruiter',
+                                              role='admin', password_hash='x', is_active=True)
+        self.day = timezone.now().date() + timedelta(days=5)
+        self.interviews = []
+        for title in ('Designer', 'Writer'):
+            job = JobDescription.objects.create(title=title, description='x', company=company, company_user=self.rae)
+            RecruiterInterviewSettings.objects.create(
+                company_user=self.rae, job=job, timezone_name='UTC', start_time=time(9, 0), end_time=time(17, 0),
+                interview_time_gap=45, schedule_from_date=self.day, schedule_to_date=self.day,
+                time_slots_json=[{'datetime': f'{self.day}T10:00', 'available': True},
+                                 {'datetime': f'{self.day}T10:15', 'available': True}])
+            cv = CVRecord.objects.create(file_name=f'{title}.pdf', job_description=job, qualification_decision='INTERVIEW')
+            self.interviews.append(Interview.objects.create(
+                candidate_name=f'{title} Candidate', candidate_email=f'{title.lower()}@mail.test', job_role=title,
+                cv_record=cv, available_slots_json='[]', company_user=self.rae, confirmation_token=f'tok-{title}'))
+
+    def book(self, interview, slot):
+        with mock.patch.object(scheduling, '_create_google_meet_link', return_value=None), \
+                mock.patch.object(scheduling.InterviewSchedulingAgent, 'send_confirmation_email', return_value=True):
+            return scheduling.InterviewSchedulingAgent().confirm_slot(interview.id, f'{self.day}T{slot}')
+
+    def test_the_recruiter_cannot_be_booked_twice_across_jobs(self):
+        designer, writer = self.interviews
+        self.assertTrue(self.book(designer, '10:00')['success'])
+        self.assertFalse(self.book(writer, '10:00')['success'])          # the same time, another job
+        self.assertFalse(self.book(writer, '10:15')['success'])          # overlapping, not the same start

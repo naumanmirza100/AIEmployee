@@ -706,30 +706,20 @@ class InterviewSchedulingAgent:
                     }
 
             
-            # Check for double-booking: same job + same time = only one candidate (doosra bande use select na kr ske)
-            existing_q = Interview.objects.filter(
-                status__in=['SCHEDULED', 'CONFIRMED'],
-                scheduled_datetime=selected_datetime,
-            ).exclude(id=interview_id)
-            # Same job: only interviews for this job can block the slot, whichever
-            # colleague invited them (the job's slots are shared)
-            if interview.cv_record and interview.cv_record.job_description_id:
-                existing_q = existing_q.filter(cv_record__job_description_id=interview.cv_record.job_description_id)
-            # No job: the same recruiter's (company_user or recruiter)
-            elif interview.company_user_id:
-                existing_q = existing_q.filter(company_user_id=interview.company_user_id)
-            else:
-                existing_q = existing_q.filter(recruiter=recruiter)
-            existing_interview = existing_q.first()
-            if existing_interview:
+            # One slot is as long as the gap between slots.
+            if settings and settings.interview_time_gap:
+                interview.duration_minutes = settings.interview_time_gap
+
+            # Another booked interview of this job, or of this recruiter when they are on no shared calendar, at an
+            # overlapping time (not only the same start) takes the slot (CO-186).
+            def clash():
+                return interview_time.overlaps_any(interview_time.booked_spans(interview), selected_datetime,
+                                                   interview.duration_minutes)
+            if clash():
                 return {
                     "success": False,
                     "error": "This time slot is already taken by another candidate for this position. Please select a different time.",
                 }
-            
-            # One slot is as long as the gap between slots.
-            if settings and settings.interview_time_gap:
-                interview.duration_minutes = settings.interview_time_gap
 
             # The recruiter and the interviewers must be free across every
             # agent (PM, HR, Frontline meetings and other interviews). Checked
@@ -747,7 +737,11 @@ class InterviewSchedulingAgent:
                     # candidates of one job cannot take the same slot in the same instant (CO-117).
                     if settings:
                         settings = RecruiterInterviewSettings.objects.select_for_update().get(pk=settings.pk)
-                    if existing_q.exists():
+                    if interview.company_user_id:
+                        # And the recruiter's own row: two jobs' bookings for one login queue here.
+                        from core.models import CompanyUser
+                        CompanyUser.objects.select_for_update().filter(pk=interview.company_user_id).first()
+                    if clash():
                         return {
                             "success": False,
                             "error": "This time slot was just selected by another candidate. Please select a different time slot.",
@@ -861,7 +855,7 @@ class InterviewSchedulingAgent:
             return {"success": True, "slots": [], "message": "No slots configured. Add slots in Interview Settings."}
 
         now = timezone.now()
-        taken = interview_time.taken_by_others(interview)
+        taken = interview_time.booked_spans(interview)
         current_dt_str = None
         if interview.scheduled_datetime:
             current_dt_str = interview_time.slot_key(interview.scheduled_datetime,
@@ -887,7 +881,8 @@ class InterviewSchedulingAgent:
                 slot_norm = f"{date_part}T{time_hour_min}"
             # Available if not scheduled, or scheduled by this interview (current slot)
             is_current = current_dt_str and (slot_norm == current_dt_str or slot_datetime == current_dt_str)
-            scheduled = slot_norm in taken or slot_datetime in taken
+            slot_start = interview_time.aware(slot_datetime, tz)
+            scheduled = bool(slot_start) and interview_time.overlaps_any(taken, slot_start, duration.total_seconds() / 60)
             available = (not scheduled) or is_current
             # Only include future slots (optional: filter past slots for display)
             dt_parsed = interview_time.aware(slot_datetime, tz)
@@ -955,18 +950,12 @@ class InterviewSchedulingAgent:
         # Company can select any future time for reschedule - no start_time/end_time restriction
         # (avoids timezone issues and gives recruiters full flexibility)
 
-        selected_datetime_str = interview_time.slot_key(selected_datetime, tz)
-        existing_q = Interview.objects.filter(
-            status__in=['SCHEDULED', 'CONFIRMED'],
-            scheduled_datetime=selected_datetime,
-        ).exclude(id=interview_id)
-        if interview.cv_record and interview.cv_record.job_description_id:
-            existing_q = existing_q.filter(cv_record__job_description_id=interview.cv_record.job_description_id)
-        elif interview.company_user_id:
-            existing_q = existing_q.filter(company_user_id=interview.company_user_id)
-        else:
-            existing_q = existing_q.filter(recruiter=interview.recruiter)
-        if existing_q.exists():
+        # Overlap with another booked interview of the job, or of the recruiter when they are on no shared
+        # calendar (CO-186).
+        def clash():
+            return interview_time.overlaps_any(interview_time.booked_spans(interview), selected_datetime,
+                                               interview.duration_minutes)
+        if clash():
             return {"success": False, "error": "This time is already selected by another candidate for this job. Please choose a different time."}
 
         # The company may pick any time in the range, in the slot list or not.
@@ -982,8 +971,11 @@ class InterviewSchedulingAgent:
                             tz_name=tz, viewer_source='recruitment',
                             exclude=[('recruitment', interview.id)], reveal_private=True)
                 # The slots' stored 'scheduled' flags are no longer kept: a slot is taken while an interview holds it
-                # (interview_time.taken_by_others, CO-117).
-                if existing_q.exists():
+                # (CO-117), checked again under the recruiter's row lock (CO-186).
+                if interview.company_user_id:
+                    from core.models import CompanyUser
+                    CompanyUser.objects.select_for_update().filter(pk=interview.company_user_id).first()
+                if clash():
                     return {"success": False, "error": "This time is already selected by another candidate for this job. Please choose a different time."}
 
                 selected_slot_display = interview_time.label(selected_datetime, tz)

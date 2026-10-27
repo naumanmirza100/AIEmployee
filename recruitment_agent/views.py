@@ -1354,6 +1354,8 @@ def get_available_slots_for_interview(request, token):
                            exclude=[('recruitment', interview.id)], tz_name=tz)
             if instants else [])
 
+    booked = interview_time.booked_spans(interview)
+
     # Mark which slots are taken
     available_slots = []
     for slot in time_slots:
@@ -1366,7 +1368,9 @@ def get_available_slots_for_interview(request, token):
         # Taken: marked in the settings, booked by another candidate, or
         # someone on this interview is busy then (the candidate isn't told why).
         # The stored 'scheduled' flag is not used: it was never cleared when an interview was cancelled or moved (CO-117).
-        is_scheduled_in_json = slot_key in taken_slot_datetimes
+        # Taken by an overlapping booking of the job, or of a recruiter on no shared calendar (CO-186).
+        is_scheduled_in_json = (slot_key in taken_slot_datetimes or (
+            instant is not None and interview_time.overlaps_any(booked, instant, duration.total_seconds() / 60)))
         is_taken = (is_scheduled_in_json
                     or (instant is not None and overlaps(busy, instant, instant + duration)))
 
