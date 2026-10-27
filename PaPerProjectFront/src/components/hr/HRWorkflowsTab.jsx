@@ -362,9 +362,11 @@ export default function HRWorkflowsTab() {
               <code className="text-violet-300"> update_employee</code>,
               <code className="text-violet-300"> update_leave_balance</code>,
               <code className="text-violet-300"> schedule_meeting</code>,
-              <code className="text-violet-300"> provision_account</code>,
-              <code className="text-violet-300"> assign_training</code>,
+              <code className="text-violet-300"> provision_account</code> and
+              <code className="text-violet-300"> assign_training</code> (they ask HR admins to do it),
               <code className="text-violet-300"> notify_template</code>,
+              <code className="text-violet-300"> notify</code> (a bell alert to <code>hr_admins</code>, <code>manager</code> or <code>employee</code>),
+              <code className="text-violet-300"> create_task</code> (a Project Manager task),
               <code className="text-violet-300"> branch</code>,
               <code className="text-violet-300"> wait</code>.
             </DialogDescription>
