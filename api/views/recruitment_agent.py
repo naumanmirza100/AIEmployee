@@ -4168,7 +4168,10 @@ def api_generate_graph(request):
 
         graph_agent = GraphGeneratorAgent(groq_client, company_user)
         result = graph_agent.generate_graph(prompt)
-        
+        # Asked for something Recruitment's data does not hold: say so, rather than draw invented numbers (CO-184).
+        if result.get('error'):
+            return Response({'status': 'error', 'message': result['error']}, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
             'status': 'success',
             'data': {

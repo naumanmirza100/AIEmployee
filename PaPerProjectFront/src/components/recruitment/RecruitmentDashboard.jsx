@@ -162,7 +162,7 @@ const RecruitmentDashboard = () => {
       console.error('Error generating graph:', error);
       toast({
         title: 'Error',
-        description: 'Failed to generate graph',
+        description: error?.message || 'Failed to generate graph',
         variant: 'destructive',
       });
     } finally {
