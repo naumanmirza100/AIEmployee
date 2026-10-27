@@ -15,6 +15,12 @@ from django.utils.text import get_valid_filename
 
 logger = logging.getLogger(__name__)
 
+#: The page mark _extract_pdf puts before each page ("\x0c__PAGE_n__\n"), which Frontline's and HR's chunkers read
+#: for each passage's page and then remove. The first page's form feed does not survive (the extracted text is
+#: stripped, and \x0c is whitespace), so it was matched only from page 2 on: page 1's "__PAGE_1__" stayed in the
+#: passage text, went to the AI with it, and showed under Sources (live, 27 Oct).
+PAGE_MARKER_RE = re.compile(r'\x0c?__PAGE_(\d+)__\n')
+
 
 # Magic-byte signatures per format. Each entry: (prefix_bytes, description).
 # A file is accepted for a format only if its first bytes match one of the signatures.
