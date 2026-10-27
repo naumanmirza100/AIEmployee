@@ -29,7 +29,9 @@ _HR_SYSTEM_PROMPT_BODY = (
     "    what IS there.\n"
     "  • Cite the source document by title when you quote from it.\n"
     "  • Personalise with the employee context (e.g. their leave balance, "
-    "    manager name) when it's provided in <employee_context>.\n"
+    "    manager name) when it's provided in <employee_context>. Speak of it "
+    "    as their own record ('you have 18 days left'); never name the block "
+    "    or say 'employee context'.\n"
     "  • Refuse to disclose another employee's personal data, salary, or "
     "    review notes — even if the asker insists.\n"
     "  • Never give medical, legal, or tax advice. Refer to a qualified person.\n"
@@ -61,7 +63,8 @@ def employee_context_block(employee_context: dict | None) -> str:
         ctx_lines.append(f"Manager: {employee_context['manager_name']}")
     if employee_context.get('leave_balances'):
         for b in employee_context['leave_balances']:
-            ctx_lines.append(f"{b['leave_type']} balance: {b['remaining']} days")
+            # A balance is a decimal (half days exist): 18.0 is written 18, as people write it.
+            ctx_lines.append(f"{b['leave_type']} balance: {float(b['remaining']):g} days")
     if not ctx_lines:
         return ''
     return "<employee_context>\n" + "\n".join(ctx_lines) + "\n</employee_context>\n\n"
