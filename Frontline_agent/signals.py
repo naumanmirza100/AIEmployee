@@ -13,6 +13,18 @@ from .models import Ticket, Contact
 logger = logging.getLogger(__name__)
 
 
+#: What a "ticket updated" rule is about: the customer-visible ticket. A save that changes only who owns it, its SLA
+#: clock, its hand-off bookkeeping or its tags is not an update to act on: a hand-over of 30 tickets ran every rule 30
+#: times (CO-68).
+WATCHED = ('title', 'description', 'status', 'priority', 'category', 'resolution', 'auto_resolved')
+
+
+@receiver(pre_save, sender=Ticket)
+def remember_watched_fields(sender, instance, **kwargs):
+    if instance.pk:
+        instance._watched_before = Ticket.objects.filter(pk=instance.pk).values(*WATCHED).first()
+
+
 @receiver(post_save, sender=Ticket)
 def run_workflow_triggers_on_ticket_update(sender, instance, created, **kwargs):
     """
@@ -28,6 +40,9 @@ def run_workflow_triggers_on_ticket_update(sender, instance, created, **kwargs):
         return
     if not getattr(instance, 'company_id', None):
         return
+    before = getattr(instance, '_watched_before', None)
+    if before is not None and all(before.get(f) == getattr(instance, f) for f in WATCHED):
+        return                           # nothing a rule watches has changed
     # Check for re-entrancy *before* any DB work so we don't even spin up the view import.
     try:
         from .workflow_context import is_workflow_executing, current_workflow_id
