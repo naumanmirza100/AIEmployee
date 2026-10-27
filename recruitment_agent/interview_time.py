@@ -158,3 +158,34 @@ def people(interview, extra_user_ids=()) -> list[int]:
     company_id = company_id_for(interview)
     ids.discard(None)
     return sorted(member_ids(company_id, ids)) if company_id else []
+
+
+def bookable_slots(job, now=None) -> int:
+    """How many of `job`'s interview slots a candidate could still book: switched on, still ahead, and not taken by
+    another interview for this job. Invitations went out with nothing left to book, and the link then said the period
+    had ended or showed an empty grid (CO-228)."""
+    from django.utils import timezone
+    from recruitment_agent import sharing
+    from recruitment_agent.models import Interview
+    settings = sharing.job_interview_settings(job)
+    if settings is None or not isinstance(settings.time_slots_json, list):
+        return 0
+    tz = settings.timezone_name or 'UTC'
+    now = now or timezone.now()
+    taken = {slot_key(other.scheduled_datetime, stored_zone(other))
+             for other in Interview.objects.filter(cv_record__job_description=job, status__in=['SCHEDULED', 'CONFIRMED'],
+                                                   scheduled_datetime__isnull=False)}
+    count = 0
+    for slot in settings.time_slots_json:
+        if not slot.get('available', True) or slot.get('scheduled'):
+            continue
+        instant = aware(slot.get('datetime', ''), tz)
+        if instant is None or instant <= now or slot_key(instant, tz) in taken:
+            continue
+        count += 1
+    return count
+
+
+def no_slots_message(job) -> str:
+    return (f'No free interview slots for "{job.title}": add dates or hours in Interview Settings, then invite the '
+            'candidates again. Nobody was emailed an invitation.')

@@ -20,6 +20,7 @@ from django.db.models import Q
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.conf import settings
+from django.utils import timezone as dj_timezone
 
 from recruitment_agent.agents.cv_parser import CVParserAgent
 from recruitment_agent.agents.summarization import SummarizationAgent
@@ -262,7 +263,9 @@ def process_cvs(request):
                         if job_desc:
                             cv_record.job_description = job_desc
 
-                        # Auto-link to JobApplication using parsed email or filename
+                        # Auto-link to JobApplication by the email in the CV. It also matched by file name, and
+                        # "CV.pdf" is many people's: the invitation then went to a different applicant, on the
+                        # strength of this CV, and their own CV was never read (CO-101).
                         if job_desc and not cv_record.job_application_id:
                             _parsed_email = ''
                             if isinstance(parsed, dict):
@@ -277,13 +280,6 @@ def process_cvs(request):
                                 _app = (
                                     _JobApp.objects
                                     .filter(job=job_desc, email__iexact=_parsed_email, cv_records__isnull=True)
-                                    .first()
-                                )
-                            # Fallback: filename match
-                            if not _app:
-                                _app = (
-                                    _JobApp.objects
-                                    .filter(job=job_desc, cv_file_name=uploaded_file.name, cv_records__isnull=True)
                                     .first()
                                 )
                             if _app:
@@ -382,6 +378,10 @@ def process_cvs(request):
             
             # Get interview agent for auto-scheduling
             interview_agent = agents.get('interview_agent')
+            # Nothing left to book: no invitation goes, and the screen says why (CO-228).
+            from recruitment_agent import interview_time as _itime
+            slots_left = _itime.bookable_slots(job_desc) if job_desc else 0
+            no_slots = False
             
             # Use job's default interview type (Online/Onsite) for auto-scheduled invitations
             auto_interview_type = 'ONLINE'
@@ -450,7 +450,18 @@ def process_cvs(request):
                     # Use the actual job title as job_role (not first line of description text)
                     job_role = (job_desc.title if job_desc and job_desc.title else None) or "Position"
                     
-                    if candidate_email:
+                    already = bool(candidate_email) and Interview.objects.filter(
+                        cv_record__job_description=job_desc, candidate_email__iexact=candidate_email,
+                    ).exclude(status__in=['CANCELLED', 'COMPLETED']).exists()
+                    if candidate_email and already:
+                        # The same person processed again got a second invitation with a second working link.
+                        result['interview_scheduled'] = False
+                        result['interview_error'] = 'Already invited to an interview for this job'
+                    elif candidate_email and slots_left <= 0:
+                        no_slots = True
+                        result['interview_scheduled'] = False
+                        result['interview_error'] = 'No free interview slots'
+                    elif candidate_email:
                         logger.info(f"Auto-scheduling interview for approved candidate: {candidate_name} ({candidate_email})")
                         try:
                             interview_result = interview_agent.schedule_interview(
@@ -488,11 +499,14 @@ def process_cvs(request):
                         result['interview_scheduled'] = False
                         result['interview_error'] = "No email address found"
             
-            return Response({
+            payload = {
                 'status': 'success',
                 'results': ranked,
                 'total': len(ranked)
-            })
+            }
+            if no_slots:
+                payload['notice'] = _itime.no_slots_message(job_desc)
+            return Response(payload)
             
         except KeyServiceError:
             raise
@@ -1253,9 +1267,14 @@ def update_interview(request, interview_id):
         new_outcome = request.data.get('outcome')
         new_meeting_link = request.data.get('meeting_link')
         resend_confirmation = request.data.get('resend_confirmation', False)
+        # The decision email goes only when asked and the decision really changes (CO-119). Screens from before
+        # this did not ask, so a request without the flag keeps the old behaviour.
+        notify_candidate = request.data.get('notify_candidate', True) not in (False, 'false', 0, '0')
         from recruitment_agent import interviewer_alerts
         was_booked = interview.status in ('SCHEDULED', 'RESCHEDULED', 'CONFIRMED')
         was_hired = interview.outcome == 'HIRED'
+        old_outcome = interview.outcome or ''
+        candidate_emailed = None
 
         if new_status is not None:
             new_status = (new_status or '').strip().upper()
@@ -1355,6 +1374,10 @@ def update_interview(request, interview_id):
         staying = set(interview.interviewers.values_list('id', flat=True)) - added
         if was_booked and interview.status == 'CANCELLED':
             interviewer_alerts.tell(interview, 'cancelled', users=staying)
+            # The candidate too: only the interviewers were told, and the candidate kept a link to a meeting that
+            # was no longer happening (CO-113). An invitation not yet booked is withdrawn without an email.
+            if InterviewSchedulingAgent(log_service=LogService()).send_cancellation_email(interview):
+                candidate_emailed = 'cancelled'
         elif rebooked:
             interviewer_alerts.tell(interview, 'booked', users=staying)
 
@@ -1368,7 +1391,8 @@ def update_interview(request, interview_id):
                 logger.warning(f"Failed to resend confirmation email: {mail_err}")
 
         # Send simple outcome email to candidate when decision is changed
-        if outcome_updated and interview.outcome and interview.candidate_email:
+        if (outcome_updated and interview.outcome and interview.candidate_email and notify_candidate
+                and interview.outcome != old_outcome):
             try:
                 job_title_for_email = None
                 if interview.cv_record and interview.cv_record.job_description:
@@ -1398,6 +1422,7 @@ def update_interview(request, interview_id):
                     fail_silently=True,
                 )
                 logger.info(f"Outcome email sent to {interview.candidate_email} for interview {interview.id} ({interview.outcome})")
+                candidate_emailed = 'outcome'
             except Exception as mail_err:
                 logger.warning(f"Failed to send outcome email to {interview.candidate_email}: {mail_err}")
 
@@ -1405,11 +1430,14 @@ def update_interview(request, interview_id):
         if interview.cv_record and interview.cv_record.job_description:
             job_title = interview.cv_record.job_description.title
 
+        said = {'cancelled': ' The candidate was emailed that it is cancelled.',
+                'outcome': ' The candidate was emailed the decision.'}.get(candidate_emailed, '')
         return Response({
             'status': 'success',
-            'message': 'Interview updated',
+            'message': 'Interview updated.' + said,
             'data': {
                 'id': interview.id,
+                'candidate_emailed': candidate_emailed,
                 'status': interview.status,
                 'outcome': interview.outcome or '',
                 'candidate_name': interview.candidate_name,
@@ -1921,6 +1949,10 @@ def _schedule_interview_for_cv_record(cv_record, company_user, interview_agent, 
     if not candidate_email:
         logger.info(f"Bulk INTERVIEW: CV record id={cv_record.id} skipped - no email available")
         return ('skipped', 'no_email')
+    # The bulk Interview decision had no settings check at all (CO-228).
+    from recruitment_agent.interview_time import bookable_slots
+    if cv_record.job_description is None or bookable_slots(cv_record.job_description) <= 0:
+        return ('skipped', 'no_free_slots')
     job_role = 'Position'
     if cv_record.job_description:
         job_role = (cv_record.job_description.title or 'Position')[:255]
@@ -2153,7 +2185,14 @@ def bulk_update_cv_records(request):
         # Capture old decisions before bulk update for audit trail
         old_decisions = {cv.id: cv.qualification_decision for cv in qs.only('id', 'qualification_decision')}
         remaining_ids = list(old_decisions.keys())
-        updated_count = qs.update(qualification_decision=decision)
+        # Rejected and already told: rejecting them again sent the same email again (CO-111). A candidate the AI
+        # rejected was never told, so the first person's Reject still emails them.
+        already_told = set(qs.filter(qualification_decision='REJECT', rejection_emailed_at__isnull=False)
+                           .values_list('id', flat=True)) if decision == 'REJECT' else set()
+        if decision == 'REJECT':
+            updated_count = qs.update(qualification_decision=decision)
+        else:
+            updated_count = qs.update(qualification_decision=decision, rejection_emailed_at=None)
 
         # Moving a candidate OUT of INTERVIEW (to REJECT/HOLD) removes their
         # still-open interview so they leave the interview section. We keep
@@ -2167,7 +2206,7 @@ def bulk_update_cv_records(request):
         removed_interviews = 0
         cancel_emails_sent = 0
         reject_emails_sent = 0
-        told_rejected = set()        # cv ids whose rejection email went
+        told_rejected = set(already_told)  # cv ids whose rejection email went, now or before
         if decision in ('REJECT', 'HOLD') and remaining_ids:
             _agent = InterviewSchedulingAgent(log_service=LogService())
 
@@ -2175,7 +2214,8 @@ def bulk_update_cv_records(request):
             # whether or not they ever had an interview. This is the candidate's
             # closure, so it replaces the interview-cancelled email on rejection.
             if decision == 'REJECT':
-                for cv in CVRecord.objects.filter(id__in=remaining_ids).select_related('job_description', 'job_application'):
+                for cv in (CVRecord.objects.filter(id__in=remaining_ids).exclude(id__in=already_told)
+                           .select_related('job_description', 'job_application')):
                     r_email, r_name = _reject_recipient(cv)
                     if not r_email:
                         continue
@@ -2184,6 +2224,7 @@ def bulk_update_cv_records(request):
                         if _agent.send_rejection_email(r_name, r_email, job_title):
                             reject_emails_sent += 1
                             told_rejected.add(cv.id)
+                            CVRecord.objects.filter(pk=cv.pk).update(rejection_emailed_at=dj_timezone.now())
                     except Exception as _re:
                         logger.warning(f"Rejection email failed for cv_record {cv.id}: {_re}")
 
@@ -2269,7 +2310,11 @@ def bulk_update_cv_records(request):
             elif updated_count > 0:
                 no_email = skip_reasons.get('no_email', 0)
                 already = skip_reasons.get('already_has_interview', 0)
-                if no_email == updated_count:
+                if skip_reasons.get('no_free_slots'):
+                    message += ('. No invitation emails sent to {n}: their job has no free interview slots. Add '
+                                'dates or hours in Interview Settings, then set them to Interview again.'
+                                .format(n=skip_reasons['no_free_slots']))
+                elif no_email == updated_count:
                     message += '. No invitation emails sent: no email found in parsed CV data for selected candidates.'
                 elif already == updated_count:
                     message += '. No invitation emails sent: all selected candidates already have an interview.'
@@ -2279,6 +2324,9 @@ def bulk_update_cv_records(request):
         # Note the rejection emails sent.
         if decision == 'REJECT' and reject_emails_sent:
             message += f'. Sent an application update email to {reject_emails_sent} candidate(s).'
+        if decision == 'REJECT' and already_told:
+            message = message.rstrip('.') + (f'. {len(already_told)} candidate(s) had already been sent the '
+                                             'rejection email, so it was not sent again.')
 
         # Note removed open interviews when moving candidates to REJECT/HOLD.
         if decision in ('REJECT', 'HOLD') and removed_interviews:
@@ -2309,6 +2357,7 @@ def bulk_update_cv_records(request):
             payload['cancel_emails_sent'] = cancel_emails_sent
         if decision == 'REJECT':
             payload['reject_emails_sent'] = reject_emails_sent
+            payload['already_told'] = len(already_told)
         return Response(payload)
     except (ValueError, TypeError) as e:
         return Response({

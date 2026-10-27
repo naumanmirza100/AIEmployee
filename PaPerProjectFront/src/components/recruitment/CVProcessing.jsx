@@ -234,6 +234,10 @@ const CVProcessing = ({ onProcessComplete, onGoToSettings }) => {
           title: 'Success',
           description: `Processed ${response.results?.length || 0} CV(s) successfully`,
         });
+        // No free interview slot: nobody chosen for interview was invited (CO-228).
+        if (response.notice) {
+          toast({ title: 'No invitations sent', description: response.notice, variant: 'destructive' });
+        }
         if (onProcessComplete) {
           onProcessComplete();
         }

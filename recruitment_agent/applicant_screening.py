@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import tempfile
 import threading
 import time
@@ -69,6 +68,8 @@ def screen(job, applications, actor, agents) -> list:
     cv_agent, sum_agent = agents['cv_agent'], agents['sum_agent']
     enrich_agent, qualify_agent = agents['enrich_agent'], agents['qualify_agent']
     interview_agent, django_repo = agents.get('interview_agent'), agents['django_repo']
+    from recruitment_agent.interview_time import bookable_slots
+    slots_left = bookable_slots(job)
 
     job_kw_list = None
     job_description_text = job.description or ''
@@ -150,11 +151,16 @@ def screen(job, applications, actor, agents) -> list:
                     pass
 
             interview_scheduled = False
+            interview_error = ''
             qual_decision = qualified.get('decision', '') if isinstance(qualified, dict) else ''
-            if qual_decision == 'INTERVIEW' and interview_agent and app.email:
+            if qual_decision == 'INTERVIEW' and interview_agent and app.email and slots_left <= 0:
+                # Nothing left to book: the invitation would lead to an empty page (CO-228).
+                interview_error = 'No free interview slots'
+            elif qual_decision == 'INTERVIEW' and interview_agent and app.email:
                 candidate_name = name or 'Candidate'
-                job_role = (re.sub(r'[\r\n\t\s]+', ' ', job_description_text.split('\n')[0][:100]).strip()
-                            if job_description_text else job.title)
+                # The job's title, as hand uploads use. It took the description's first line, which is what the
+                # interview list, the export, the calendar and the "by role" chart then showed (CO-226).
+                job_role = job.title or 'Position'
                 try:
                     interview_result = interview_agent.schedule_interview(
                         candidate_name=candidate_name,
@@ -179,6 +185,7 @@ def screen(job, applications, actor, agents) -> list:
                 'decision': qual_decision,
                 'role_fit_score': summary.get('role_fit_score') if isinstance(summary, dict) else None,
                 'interview_scheduled': interview_scheduled,
+                'interview_error': interview_error,
                 'skipped': False,
             })
         except Exception as exc:
@@ -213,6 +220,15 @@ def screen_new_application(application_id) -> str:
     if actor is None:
         return 'nobody to act for the company'
     [result] = screen(job, [app], actor, _make_agents(job.company))
+    if result.get('interview_error') == 'No free interview slots':
+        from core.notification_utils import notify_company_users
+        from recruitment_agent.interview_time import no_slots_message
+        name = result.get('applicant') or app.email
+        notify_company_users(
+            [actor], title=f'{name} should be interviewed, but no slot is free'[:255],
+            message=f'The AI chose {name} for an interview for {job.title}. ' + no_slots_message(job),
+            link='/recruitment/settings/interview', kind='recruitment_new_application', severity='warning',
+            data={'job_id': job.id, 'application_id': app.id})
     return 'skipped: ' + result['reason'] if result.get('skipped') else f"screened: {result.get('decision')}"
 
 

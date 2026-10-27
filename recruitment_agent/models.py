@@ -263,6 +263,9 @@ class CVRecord(models.Model):
     enriched_json = models.TextField(null=True, blank=True, help_text="Enrichment results from LeadResearchEnrichmentAgent")
     qualification_json = models.TextField(null=True, blank=True, help_text="Qualification results from LeadQualificationAgent")
     qualification_decision = models.CharField(max_length=32, null=True, blank=True, help_text="INTERVIEW/HOLD/REJECT")
+    rejection_emailed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When the rejection email went; cleared when the decision moves away from REJECT (CO-111)")
     qualification_confidence = models.IntegerField(null=True, blank=True, help_text="Confidence score 0-100")
     qualification_priority = models.CharField(max_length=16, null=True, blank=True, help_text="HIGH/MEDIUM/LOW")
     
