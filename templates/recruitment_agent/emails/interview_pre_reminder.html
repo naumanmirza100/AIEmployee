@@ -21,7 +21,7 @@
                     <!-- Masthead -->
                     <tr>
                         <td style="padding:28px 40px 0;">
-                            <p style="margin:0;font-size:13px;font-weight:700;letter-spacing:0.4px;color:#111827;">Pay Per Project</p>
+                            <p style="margin:0;font-size:13px;font-weight:700;letter-spacing:0.4px;color:#111827;">{{ company_name|default:"Pay Per Project" }}</p>
                         </td>
                     </tr>
 
@@ -86,14 +86,14 @@
                     <tr>
                         <td style="padding:22px 40px 32px;">
                             <p style="margin:0 0 2px;font-size:15px;color:#374151;line-height:1.6;">We look forward to speaking with you.</p>
-                            <p style="margin:14px 0 0;font-size:15px;color:#374151;">Best regards,<br><strong style="color:#111827;">Recruitment Team</strong></p>
+                            <p style="margin:14px 0 0;font-size:15px;color:#374151;">Best regards,<br><strong style="color:#111827;">{% if company_name %}{{ company_name }} hiring team{% else %}Recruitment Team{% endif %}</strong>{% if contact_email %}<br><span style="font-size:13px;color:#6b7280;">Questions? Reply to this email, or write to <a href="mailto:{{ contact_email }}" style="color:#4f46e5;">{{ contact_email }}</a>.</span>{% endif %}</p>
                         </td>
                     </tr>
 
                     <!-- Footer -->
                     <tr>
                         <td style="padding:18px 40px;border-top:1px solid #f1f1f4;">
-                            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">Sent by Pay Per Project · This is an automated message, please don't reply directly.</p>
+                            <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.5;">Sent{% if company_name %} for {{ company_name }}{% endif %} by Pay Per Project{% if not contact_email %} · This is an automated message, please don't reply directly.{% endif %}</p>
                         </td>
                     </tr>
 

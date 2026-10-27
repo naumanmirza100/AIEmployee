@@ -28,5 +28,6 @@ For onsite interviews, please:
 We look forward to meeting you!
 
 Best regards,
-Recruitment Team
+{% if company_name %}{{ company_name }} hiring team{% else %}Recruitment Team{% endif %}{% if contact_email %}
+Questions? Reply to this email, or write to {{ contact_email }}.{% endif %}
 

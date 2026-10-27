@@ -1440,6 +1440,17 @@ def candidate_select_slot(request, token):
             'invalid_token': True,
         })
 
+    from django.shortcuts import render as _render_page
+    from recruitment_agent import candidate_mail
+    who = candidate_mail.who_hires(interview)
+
+    def render(req, template, ctx):
+        """The page in the hiring company's name; 'contact the recruiter' says who that is (CO-187)."""
+        ctx = {**who, **ctx}
+        if who['contact_email'] and isinstance(ctx.get('error'), str):
+            ctx['error'] = ctx['error'].replace('Please contact the recruiter.', f"Please write to {who['contact_email']}.")
+        return _render_page(req, template, ctx)
+
     # If already confirmed/scheduled, show the confirmed details instead of slot picker
     if interview.status == 'SCHEDULED':
         return render(request, 'recruitment_agent/candidate_slot_confirmed.html', {

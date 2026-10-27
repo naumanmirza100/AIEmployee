@@ -238,6 +238,7 @@ def public_job_apply(request, job_id):
     tracking_url = f"{frontend_base}/track-application/{access_token}" if frontend_base else ''
 
     # Send confirmation email with magic tracking link
+    from recruitment_agent import candidate_mail
     try:
         from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None)
         if email and from_email:
@@ -247,17 +248,12 @@ def public_job_apply(request, job_id):
                 'job_title': job.title,
                 'applied_at': application.applied_at,
                 'tracking_url': tracking_url,
+                **candidate_mail.who_hires(job=job),     # in the company's name (CO-187)
             }
             html_body = render_to_string('recruitment_agent/emails/application_confirmation.html', ctx)
             text_body = render_to_string('recruitment_agent/emails/application_confirmation.txt', ctx)
-            send_mail(
-                subject=f"Application Received – {job.title}",
-                message=text_body,
-                from_email=from_email,
-                recipient_list=[email],
-                html_message=html_body,
-                fail_silently=True,
-            )
+            candidate_mail.send(f"Application Received – {job.title}", text_body, html_body, email, job=job,
+                                fail_silently=True)
     except Exception:
         pass  # Never block application submission due to email failure
 

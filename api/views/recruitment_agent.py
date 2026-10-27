@@ -33,6 +33,7 @@ from recruitment_agent.core import RecruitmentAIClient
 from recruitment_agent import sharing
 from recruitment_agent.log_service import LogService
 from recruitment_agent.django_repository import DjangoRepository
+from recruitment_agent import candidate_mail
 from recruitment_agent.ranking import BEST_FIRST, ranks_for
 from recruitment_agent.models import (
     Interview,
@@ -1508,19 +1509,13 @@ def update_interview(request, interview_id):
                     'job_title': job_title_for_email,
                     'outcome_label': outcome_label,
                     'outcome_class': outcome_class,
+                    **candidate_mail.who_hires(interview),
                 }
                 subject = f"Interview outcome – {job_title_for_email}"
                 message = render_to_string('recruitment_agent/emails/interview_outcome.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_outcome.html', context)
-                from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com')
-                send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=from_email,
-                    recipient_list=[interview.candidate_email],
-                    html_message=html_message,
-                    fail_silently=True,
-                )
+                candidate_mail.send(subject, message, html_message, interview.candidate_email, interview=interview,
+                                    fail_silently=True)
                 logger.info(f"Outcome email sent to {interview.candidate_email} for interview {interview.id} ({interview.outcome})")
                 candidate_emailed = 'outcome'
             except Exception as mail_err:
@@ -2344,7 +2339,7 @@ def bulk_update_cv_records(request):
                         continue
                     job_title = (cv.job_description.title if cv.job_description else '') or 'the position'
                     try:
-                        if _agent.send_rejection_email(r_name, r_email, job_title):
+                        if _agent.send_rejection_email(r_name, r_email, job_title, job=cv.job_description):
                             reject_emails_sent += 1
                             told_rejected.add(cv.id)
                             CVRecord.objects.filter(pk=cv.pk).update(rejection_emailed_at=dj_timezone.now())

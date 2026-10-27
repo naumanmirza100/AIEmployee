@@ -7,4 +7,5 @@ Decision: {{ outcome_label }}
 Thank you for your time and interest.
 
 Best regards,
-Recruitment Team
+{% if company_name %}{{ company_name }} hiring team{% else %}Recruitment Team{% endif %}{% if contact_email %}
+Questions? Reply to this email, or write to {{ contact_email }}.{% endif %}

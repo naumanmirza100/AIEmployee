@@ -18,4 +18,4 @@ WHAT HAPPENS NEXT?
 - If shortlisted, you will receive an interview invitation email
 - You can track your status anytime using the link above
 
-This is an automated confirmation. Please do not reply to this email.
+{% if contact_email %}Questions? Reply to this email, or write to {{ contact_email }}.{% else %}This is an automated confirmation. Please do not reply to this email.{% endif %}

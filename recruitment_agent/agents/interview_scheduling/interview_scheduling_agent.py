@@ -18,7 +18,7 @@ from django.core.mail.message import sanitize_address
 from django.conf import settings
 from django.template.loader import render_to_string
 
-from recruitment_agent import interview_time
+from recruitment_agent import candidate_mail, interview_time
 from recruitment_agent.log_service import LogService
 from recruitment_agent.models import Interview
 
@@ -491,6 +491,7 @@ class InterviewSchedulingAgent:
             # Render email template with plain-text fallback if template is missing/broken
             print("\n📝 Rendering email templates...")
             try:
+                context.update(candidate_mail.who_hires(interview))
                 message = render_to_string('recruitment_agent/emails/interview_invitation.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_invitation.html', context)
                 print("✓ Templates rendered successfully")
@@ -528,14 +529,7 @@ class InterviewSchedulingAgent:
             # Send email
             print("\n🚀 Attempting to send email...")
             try:
-                send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=from_email,
-                    recipient_list=[to_email],
-                    html_message=html_message,
-                    fail_silently=False,  # Raise exception on error
-                )
+                candidate_mail.send(subject, message, html_message, to_email, interview=interview)
                 print("✅ Email sent successfully!")
             except Exception as send_error:
                 print(f"❌ ERROR: Email sending failed: {send_error}")
@@ -1091,6 +1085,7 @@ class InterviewSchedulingAgent:
                 return False
 
             try:
+                candidate_context.update(candidate_mail.who_hires(interview))
                 candidate_message = render_to_string('recruitment_agent/emails/interview_confirmation.txt', candidate_context)
                 candidate_html = render_to_string('recruitment_agent/emails/interview_confirmation.html', candidate_context)
                 print("✓ Candidate email templates rendered")
@@ -1116,14 +1111,7 @@ class InterviewSchedulingAgent:
             
             print(f"\n🚀 Sending to candidate: {to_email}")
             try:
-                send_mail(
-                    subject=subject,
-                    message=candidate_message,
-                    from_email=from_email,
-                    recipient_list=[to_email],
-                    html_message=candidate_html,
-                    fail_silently=False,
-                )
+                candidate_mail.send(subject, candidate_message, candidate_html, to_email, interview=interview)
                 print("✅ Candidate email sent successfully!")
             except Exception as send_error:
                 print(f"❌ ERROR: Candidate email failed: {send_error}")
@@ -1260,6 +1248,7 @@ class InterviewSchedulingAgent:
                 'meeting_link': interview.meeting_link or '',
                 'first_time': first_time,
             }
+            context.update(candidate_mail.who_hires(interview))
             message = render_to_string('recruitment_agent/emails/interview_rescheduled.txt', context)
             html_message = render_to_string('recruitment_agent/emails/interview_rescheduled.html', context)
             from_email = (getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com') or '').strip()
@@ -1268,7 +1257,7 @@ class InterviewSchedulingAgent:
             if not to_email:
                 print("⚠ Reschedule email skipped: no candidate email for interview", interview.id)
                 return False
-            send_mail(subject, message, from_email, [to_email], html_message=html_message, fail_silently=False)
+            candidate_mail.send(subject, message, html_message, to_email, interview=interview)
             print(f"✓ Reschedule email sent to candidate: {to_email} (interview {interview.id})")
             return True
         except Exception as e:
@@ -1293,6 +1282,7 @@ class InterviewSchedulingAgent:
                 'job_title': job_title,
                 'scheduled_display': scheduled_display,
             }
+            context.update(candidate_mail.who_hires(interview))
             message = render_to_string('recruitment_agent/emails/interview_cancelled.txt', context)
             html_message = render_to_string('recruitment_agent/emails/interview_cancelled.html', context)
             from_email = self._clean_email_header((getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com') or '').strip())
@@ -1300,7 +1290,7 @@ class InterviewSchedulingAgent:
             if not to_email:
                 print("⚠ Cancellation email skipped: no candidate email for interview", interview.id)
                 return False
-            send_mail(subject, message, from_email, [to_email], html_message=html_message, fail_silently=False)
+            candidate_mail.send(subject, message, html_message, to_email, interview=interview)
             print(f"✓ Cancellation email sent to candidate: {to_email} (interview {interview.id})")
             return True
         except Exception as e:
@@ -1308,7 +1298,7 @@ class InterviewSchedulingAgent:
             self._log_error("cancellation_email_error", {"interview_id": interview.id, "error": str(e)})
             return False
 
-    def send_rejection_email(self, candidate_name: str, candidate_email: str, job_title: str) -> bool:
+    def send_rejection_email(self, candidate_name: str, candidate_email: str, job_title: str, job=None) -> bool:
         """Send a respectful 'application update' (rejection) email to a candidate.
         Works without an Interview object — sent whenever a candidate is rejected,
         whether or not they ever had an interview."""
@@ -1324,11 +1314,12 @@ class InterviewSchedulingAgent:
             context = {
                 'candidate_name': (candidate_name or 'Candidate').strip() or 'Candidate',
                 'job_title': job_title or 'the position',
+                **candidate_mail.who_hires(job=job),
             }
             message = render_to_string('recruitment_agent/emails/application_rejected.txt', context)
             html_message = render_to_string('recruitment_agent/emails/application_rejected.html', context)
             from_email = self._clean_email_header((getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com') or '').strip())
-            send_mail(subject, message, from_email, [to_email], html_message=html_message, fail_silently=False)
+            candidate_mail.send(subject, message, html_message, to_email, job=job)
             print(f"✓ Rejection email sent to candidate: {to_email}")
             return True
         except Exception as e:
@@ -1407,6 +1398,7 @@ class InterviewSchedulingAgent:
             
             print("\n📝 Rendering email templates...")
             try:
+                context.update(candidate_mail.who_hires(interview))
                 message = render_to_string('recruitment_agent/emails/interview_followup.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_followup.html', context)
                 print("✓ Templates rendered successfully")
@@ -1414,6 +1406,7 @@ class InterviewSchedulingAgent:
                 print(f"❌ ERROR: Template rendering failed: {template_error}")
                 # Fallback to reminder template if followup template doesn't exist
                 try:
+                    context.update(candidate_mail.who_hires(interview))
                     message = render_to_string('recruitment_agent/emails/interview_reminder.txt', context)
                     html_message = render_to_string('recruitment_agent/emails/interview_reminder.html', context)
                     print("✓ Using fallback reminder templates")
@@ -1431,14 +1424,7 @@ class InterviewSchedulingAgent:
             print(f"   To: {to_email}")
             print(f"   Subject: {subject[:60]}...")
             try:
-                result = send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=from_email,
-                    recipient_list=[to_email],
-                    html_message=html_message,
-                    fail_silently=False,
-                )
+                result = candidate_mail.send(subject, message, html_message, to_email, interview=interview)
                 print(f"✅ Follow-up reminder email sent successfully!")
                 print(f"   Django send_mail returned: {result} (1 = success)")
                 print(f"   📧 Email should be delivered to: {to_email}")
@@ -1560,6 +1546,7 @@ class InterviewSchedulingAgent:
             
             print("\n📝 Rendering email templates...")
             try:
+                context.update(candidate_mail.who_hires(interview))
                 message = render_to_string('recruitment_agent/emails/interview_pre_reminder.txt', context)
                 html_message = render_to_string('recruitment_agent/emails/interview_pre_reminder.html', context)
                 print("✓ Templates rendered successfully")
@@ -1575,14 +1562,7 @@ class InterviewSchedulingAgent:
             
             print(f"\n🚀 Sending pre-interview reminder...")
             try:
-                send_mail(
-                    subject=subject,
-                    message=message,
-                    from_email=from_email,
-                    recipient_list=[to_email],
-                    html_message=html_message,
-                    fail_silently=False,
-                )
+                candidate_mail.send(subject, message, html_message, to_email, interview=interview)
                 print("✅ Pre-interview reminder sent successfully!")
                 print("="*60 + "\n")
             except Exception as send_error:
