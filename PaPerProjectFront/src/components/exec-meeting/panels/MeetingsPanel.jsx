@@ -14,6 +14,7 @@ import { CARD_STYLE, ROW_STYLE, statusBadge, EmptyState, fmtUtc, FilterBar, Pagi
 import HoverTip from '@/components/common/HoverTip';
 import { AllMembersPanel } from '../AllMembersPanel';
 import { useToast } from '@/components/ui/use-toast';
+import execMeetingService from '@/services/execMeetingService';
 
 const MEETING_STATUS_OPTIONS = [
   { value: 'scheduled', label: 'Scheduled' },
@@ -183,6 +184,22 @@ export const MeetingsPanel = ({
 
   const openMeeting = Array.isArray(meetings) ? meetings.find(x => x.id === openMeetingId) : null;
 
+  // A meeting this login is invited to (CO-65): it can only reply. Only the organiser opens, edits or manages it.
+  const REPLIES = { accepted: 'You accepted', rejected: 'You declined', tentative: 'You said maybe', counter_proposed: 'You suggested another time' };
+  const [replying, setReplying] = useState(null);
+  const reply = async (m, response) => {
+    setReplying(m.id);
+    try {
+      await execMeetingService.respondToMeeting(m.id, response);
+      toast({ title: response === 'accepted' ? 'Accepted' : 'Declined', description: `${m.organizer_name || 'The organiser'} is told.` });
+      loadMeetings();
+    } catch (e) {
+      toast({ title: 'Reply not sent', description: e?.message, variant: 'destructive' });
+    } finally {
+      setReplying(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -244,6 +261,46 @@ export const MeetingsPanel = ({
         <div className="rounded-2xl" style={CARD_STYLE}>
           {meetings.map(m => {
             const isFocused = String(focusMeetingId) === String(m.id);
+            if (m.mine === false) {
+              return (
+                <div key={m.id} ref={el => { rowRefs.current[m.id] = el; }} style={ROW_STYLE} data-testid={`invited-meeting-${m.id}`}
+                     className={isFocused ? 'ring-2 ring-inset ring-violet-500/70 bg-violet-500/[0.06] transition-all' : 'transition-all'}>
+                  <div className="flex flex-wrap items-center gap-4 px-4 py-3">
+                    <div className="rounded-lg p-2 bg-sky-500/20 flex-shrink-0">
+                      <CalendarClock className="h-4 w-4 text-sky-300" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm font-medium truncate">{m.title}</p>
+                      <p className="text-white/40 text-xs">
+                        {fmtUtc(m.scheduled_at)}{m.duration_minutes ? ` · ${m.duration_minutes}min` : ''} · Invited by {m.organizer_name || 'a colleague'}
+                      </p>
+                      {m.description && <p className="text-white/50 text-xs mt-1 truncate">{m.description}</p>}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {statusBadge(m.status)}
+                      {m.meeting_link && (
+                        <a href={m.meeting_link} target="_blank" rel="noopener noreferrer" className="text-xs text-violet-400 hover:text-violet-300">Join</a>
+                      )}
+                      {m.my_response && m.my_response !== 'pending' && (
+                        <span className="text-xs text-white/50">{REPLIES[m.my_response] || m.my_response}</span>
+                      )}
+                      {m.status === 'scheduled' && (
+                        <>
+                          <Button size="sm" variant="outline" disabled={replying === m.id || m.my_response === 'accepted'}
+                                  onClick={() => reply(m, 'accepted')} className="h-7 gap-1 text-xs">
+                            <Check className="h-3.5 w-3.5" /> Accept
+                          </Button>
+                          <Button size="sm" variant="ghost" disabled={replying === m.id || m.my_response === 'rejected'}
+                                  onClick={() => reply(m, 'rejected')} className="h-7 gap-1 text-xs text-white/60">
+                            <X className="h-3.5 w-3.5" /> Decline
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div
                 key={m.id}

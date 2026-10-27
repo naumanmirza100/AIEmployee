@@ -53,6 +53,8 @@ const execMeetingService = {
   createMeeting: (payload)     => companyApi.post(`${BASE}/meetings`, payload),
   updateMeeting: (id, payload) => companyApi.patch(`${BASE}/meetings/${id}`, payload),
   deleteMeeting: (id)          => companyApi.delete(`${BASE}/meetings/${id}`),
+  // An invited login accepts or declines (CO-65): response is 'accepted', 'rejected' or 'tentative'.
+  respondToMeeting: (id, response) => companyApi.post(`${BASE}/meetings/${id}/respond`, { response }),
 
   getMeetingNotes: (meetingId)          => companyApi.get(`${BASE}/meetings/${meetingId}/notes`),
   generateNotes:   (meetingId, payload) => companyApi.post(`${BASE}/meetings/${meetingId}/notes`, payload),

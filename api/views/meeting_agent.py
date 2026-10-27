@@ -755,7 +755,7 @@ def _is_weekend(due_date):
         return False
 
 
-def _serialize_meeting(meeting, include_participants=False):
+def _serialize_meeting(meeting, include_participants=False, viewer=None):
     data = {
         'id': meeting.id,
         'title': meeting.title,
@@ -772,6 +772,12 @@ def _serialize_meeting(meeting, include_participants=False):
         'organizer_name': meeting.organizer.full_name if hasattr(meeting, 'organizer') else '',
         'created_at': meeting.created_at.isoformat(),
     }
+    if viewer is not None:
+        # An invited login sees the meeting too (CO-65); `mine` tells the screen it may only reply to it.
+        data['mine'] = meeting.organizer_id == viewer.id
+        if not data['mine']:
+            mine = meeting.participants.filter(company_user=viewer).first()
+            data['my_response'] = mine.response if mine else None
     if include_participants:
         data['participants'] = [
             {
@@ -1054,7 +1060,11 @@ def meeting_list(request):
         search = (request.query_params.get('search') or '').strip()
         date_filter = (request.query_params.get('date') or '').strip()
         participant_id = (request.query_params.get('participant') or '').strip()
-        qs = ExecutiveMeeting.objects.filter(organizer=company_user).select_related('organizer')
+        # Meetings it arranged and meetings it is invited to. An invitee only got an email telling it to log in,
+        # and then could not find the meeting (CO-65).
+        qs = (ExecutiveMeeting.objects
+              .filter(models.Q(organizer=company_user) | models.Q(participants__company_user=company_user))
+              .distinct().select_related('organizer'))
         if status_filter:
             qs = qs.filter(status=status_filter)
         if search:
@@ -1076,7 +1086,7 @@ def meeting_list(request):
             except (ValueError, TypeError):
                 pass
         page_items, meta = _paginate(qs, request)
-        data = [_serialize_meeting(m) for m in page_items]
+        data = [_serialize_meeting(m, viewer=company_user) for m in page_items]
         return Response({'status': 'success', 'meetings': data, 'count': len(data), 'pagination': meta})
 
     # POST — manual create
@@ -1168,10 +1178,19 @@ def meeting_filter_users(request):
 def meeting_detail(request, meeting_id):
     """Get, update, or delete a meeting."""
     company_user = request.user
-    meeting = get_object_or_404(ExecutiveMeeting, id=meeting_id, organizer=company_user)
+    meeting = get_object_or_404(
+        ExecutiveMeeting.objects.filter(
+            models.Q(organizer=company_user) | models.Q(participants__company_user=company_user)).distinct(),
+        id=meeting_id)
 
     if request.method == 'GET':
-        return Response({'status': 'success', 'meeting': _serialize_meeting(meeting, include_participants=True)})
+        return Response({'status': 'success', 'meeting': _serialize_meeting(meeting, include_participants=True,
+                                                                            viewer=company_user)})
+    if meeting.organizer_id != company_user.id:
+        who = meeting.organizer.full_name or meeting.organizer.email
+        return Response({'status': 'error', 'code': 'organizer_only', 'message': (
+            f'Only {who}, who arranged this meeting, can change or cancel it. You can accept or decline it.')},
+            status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'PATCH':
         updatable = ['title', 'description', 'agenda', 'meeting_link',
