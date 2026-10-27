@@ -318,6 +318,8 @@ urlpatterns = [
     re_path(r'^company/my-work/?$', my_work.company_my_work, name='company_my_work'),  # GET
     re_path(r'^user/my-work/?$', my_work.user_my_work, name='user_my_work'),  # GET
     # What each dashboard login hears about, in the bell and by email (core/notification_settings.py).
+    re_path(r'^company/notification-settings/chat-webhooks/?$', notification_settings.chat_webhooks,
+            name='company_chat_webhooks'),  # GET/PATCH/POST (CO-64)
     re_path(r'^company/notification-settings/?$', notification_settings.company_notification_settings,
             name='company_notification_settings'),  # GET/PATCH
     # The company's dashboard logins and their roles (api/views/company_logins.py).

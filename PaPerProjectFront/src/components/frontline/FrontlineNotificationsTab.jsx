@@ -280,8 +280,8 @@ export function FrontlineNotificationsTab() {
                       webhook config; if it isn't set, notifications fall back
                       to email. */}
                   <SelectItem value="email">Email</SelectItem>
-                  <SelectItem value="slack">Slack (uses PM webhook)</SelectItem>
-                  <SelectItem value="teams">Microsoft Teams (uses PM webhook)</SelectItem>
+                  <SelectItem value="slack">Slack</SelectItem>
+                  <SelectItem value="teams">Microsoft Teams</SelectItem>
                   <SelectItem value="sms" disabled>SMS — coming soon</SelectItem>
                   <SelectItem value="in_app" disabled>In-App — coming soon</SelectItem>
                 </SelectContent>

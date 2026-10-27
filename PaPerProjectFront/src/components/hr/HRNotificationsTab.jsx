@@ -414,8 +414,7 @@ export default function HRNotificationsTab() {
                   )}
                   {(dialog.tpl.channel === 'slack' || dialog.tpl.channel === 'teams') && (
                     <div className="text-[10px] text-amber-300/90 mt-1">
-                      Needs <code className="px-1 rounded bg-white/[0.06]">hr_{dialog.tpl.channel}_webhook_url</code> set on the Company.
-                      Sends will fail-quiet with a log line until that's configured.
+                      Posted to the channel set under <a href="/company/settings/notifications" className="underline">Notification settings › Slack and Microsoft Teams</a> (the company's owner or an admin sets it).
                     </div>
                   )}
                 </div>
