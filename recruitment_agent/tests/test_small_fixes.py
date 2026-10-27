@@ -118,3 +118,32 @@ class JobWithoutKeywordsTests(TestCase):
         invite.assert_not_called()
         self.assertEqual(result['interview_error'], 'No job requirements to match against')
         self.assertEqual(CVRecord.objects.get().qualification_decision, 'INTERVIEW')    # the score is kept
+
+
+class ExperienceYearsTests(TestCase):
+    """CO-182: years of experience far too low for real CVs ('a team of 4 developers' was 4 days)."""
+
+    def years(self, experience):
+        from unittest import mock as _mock
+        agent = SummarizationAgent(groq_client=_mock.Mock(), log_service=_mock.Mock())
+        return agent._estimate_total_experience_years(experience)
+
+    def test_jobs_with_dates_count_from_start_to_end(self):
+        self.assertEqual(self.years([
+            {'company': 'Systems Ltd', 'role': 'Senior Developer', 'start_date': 'Jan 2019', 'end_date': 'Jan 2023',
+             'description': 'Led a team of 4 developers and managed 3 modules of the payments API.'},
+            {'company': 'Arbisoft', 'role': 'Developer', 'start_date': 'Jan 2016', 'end_date': 'Jan 2019',
+             'description': 'Built a website and a service.'},
+        ]), 7.0)
+
+    def test_overlapping_jobs_count_once(self):
+        self.assertEqual(self.years([
+            {'company': 'A', 'role': 'Developer', 'start_date': '2018-01-01', 'end_date': '2020-01-01'},
+            {'company': 'B', 'role': 'Mentor', 'start_date': '2019-01-01', 'end_date': '2020-01-01'},
+        ]), 2.0)
+
+    def test_projects_use_the_stated_length_and_nothing_is_guessed_for_a_bare_job(self):
+        self.assertEqual(self.years([
+            {'company': '', 'role': 'Freelance developer', 'description': 'A shop site, built in 6 months.'},
+            {'company': 'Acme', 'role': 'Accountant', 'description': 'Monthly closing.'},
+        ]), 0.5)

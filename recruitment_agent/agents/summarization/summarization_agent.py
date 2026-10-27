@@ -593,66 +593,67 @@ class SummarizationAgent:
 
     def _estimate_total_experience_years(self, experience: Any) -> Optional[float]:
         """
-        Calculate total experience years based on actual work duration.
-        
-        Priority:
-        1. If duration is explicitly mentioned in description (e.g., "3 months", "6 months"), use that
-        2. If not, estimate based on project type and complexity from description
-        3. If no description, fall back to date range calculation (but only if dates are close together)
-        
-        This prevents overestimating experience when someone worked on small projects spread over years.
+        Total years of experience, from the CV's dates first (CO-182).
+
+        It looked for "a number and d / mo / y" anywhere first, so "led a team of 4 developers" made the job 4 days and
+        "managed 3 modules" 3 months, then guessed from words, and counted any other job as 2 months: most real CVs
+        came out far too low. Now:
+          1. A job with a start date counts from start to end (or to today), and jobs that overlap count once.
+          2. An entry that looks like a project (no employer, or freelance / project work) uses a duration stated in
+             whole words ("3 months", "2 years"), else the old estimate from its wording, so three small projects
+             over six years are not six years of experience.
+          3. Anything else with no dates and no stated duration adds nothing; there is no default.
         """
         if not experience or not isinstance(experience, list):
             return None
-        
-        import re
-        total_months = 0
-        
+
+        now = datetime.utcnow()
+        spans, other_months = [], 0.0
         for item in experience:
             if not isinstance(item, dict):
                 continue
-            
             description = str(item.get("description", "")).lower()
-            role = str(item.get("role", "")).lower()
+            role = str(item.get("role", "") or item.get("title", "")).lower()
             company = str(item.get("company", "")).lower()
-            
-            # PRIORITY 1: Check if duration is explicitly mentioned in description
-            duration_months = self._extract_duration_from_text(description + " " + role + " " + company)
-            
-            if duration_months is not None:
-                # Use explicit duration
-                total_months += duration_months
-                continue
-            
-            # PRIORITY 2: Estimate based on project type and complexity
-            estimated_months = self._estimate_project_duration(description, role)
-            
-            if estimated_months is not None:
-                total_months += estimated_months
-                continue
-            
-            # PRIORITY 3: Fall back to date range, but only if dates are close (within 2 years)
-            # This handles full-time jobs where dates are meaningful
+            project_like = (not company.strip() or any(word in f"{role} {company}" for word in
+                                                       ("freelance", "freelancer", "self-employed", "project")))
             start = self._parse_date(item.get("start_date"))
             end_raw = item.get("end_date")
-            now = datetime.utcnow()
-            end = self._parse_date(end_raw) if end_raw and str(end_raw).lower() != "present" else now
-            
-            if start and end:
-                date_months = max(0, (end.year - start.year) * 12 + (end.month - start.month))
-                # Only use date range if it's reasonable (not a huge gap)
-                # If date range is > 24 months, it's likely a gap - estimate conservatively
-                if date_months <= 24:
-                    total_months += date_months
-                else:
-                    # Large gap - estimate based on role type (likely part-time/freelance)
-                    estimated = self._estimate_from_role_type(role, description, date_months)
-                    total_months += estimated
-        
-        if total_months == 0:
+            ongoing = not end_raw or str(end_raw).strip().lower() in ("present", "current", "now", "ongoing", "till date")
+            end = now if ongoing else self._parse_date(end_raw)
+
+            if start and end and end >= start and not project_like:
+                spans.append((start, end))
+                continue
+            stated = self._extract_duration_from_text(f"{description} {role}")
+            if stated is not None:
+                other_months += stated
+                continue
+            if project_like:
+                if start and end and end >= start:
+                    months = (end.year - start.year) * 12 + (end.month - start.month)
+                    other_months += months if months <= 24 else self._estimate_from_role_type(role, description, months)
+                    continue
+                estimated = self._estimate_project_duration(description, role)
+                if estimated is not None:
+                    other_months += estimated
+
+        # Overlapping jobs count once.
+        dated_months = 0
+        merged = []
+        for start, end in sorted(spans):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        for start, end in merged:
+            dated_months += max(0, (end.year - start.year) * 12 + (end.month - start.month))
+
+        total_months = dated_months + other_months
+        if total_months <= 0:
             return None
         return round(total_months / 12.0, 2)
-    
+
     def _reduce_cv_size(self, parsed_cv: Dict[str, Any]) -> Dict[str, Any]:
         """
         Reduce CV data size to avoid exceeding token limits.
@@ -698,12 +699,12 @@ class SummarizationAgent:
         if not text:
             return None
         
-        # Patterns for duration extraction
+        # Whole words only: "4 developers" is not 4 days, nor "3 modules" 3 months (CO-182).
         patterns = [
-            (r'(\d+)\s*(?:month|months|mo|mos)', 1),  # "3 months", "6 months"
-            (r'(\d+)\s*(?:year|years|yr|yrs|y)', 12),  # "1 year", "2 years"
-            (r'(\d+)\s*(?:week|weeks|wk|wks)', 0.25),  # "4 weeks" = 1 month
-            (r'(\d+)\s*(?:day|days|d)', 0.033),  # "30 days" = 1 month
+            (r'\b(\d+(?:\.\d+)?)\s*(?:months?|mos?)\b', 1),      # "3 months"
+            (r'\b(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\b', 12),      # "2 years"
+            (r'\b(\d+(?:\.\d+)?)\s*(?:weeks?|wks?)\b', 0.25),    # "4 weeks" = 1 month
+            (r'\b(\d+(?:\.\d+)?)\s*days?\b', 0.033),              # "30 days" = 1 month
         ]
         
         for pattern, multiplier in patterns:
