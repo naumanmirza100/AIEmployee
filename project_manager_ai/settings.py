@@ -1212,6 +1212,13 @@ CELERY_BEAT_SCHEDULE = {
         'options': {'expires': 6 * 3600},
     },
 
+    # Overdue tasks (CO-62): each person told once, the morning after a task's due date - daily, 04:00 UTC
+    'tell-overdue-tasks': {
+        'task': 'project_manager_agent.tell_overdue_tasks',
+        'schedule': _crontab(hour=4, minute=0),
+        'options': {'expires': 6 * 3600},
+    },
+
     # Recurring tasks generator (T-F2) - runs daily
     # Materialises new Task records from TaskRecurrence rows whose next_run_date <= today
     'generate-recurring-tasks': {

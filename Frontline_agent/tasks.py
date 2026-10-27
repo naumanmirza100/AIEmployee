@@ -1178,6 +1178,11 @@ def escalate_near_breach_tickets():
             _run_notification_triggers(ticket.company_id, 'ticket_near_breach', ticket)
         except Exception:
             logger.exception("escalate_near_breach_tickets: notification trigger failed for ticket %s", ticket.id)
+        try:
+            from Frontline_agent.alerts import ticket_near_deadline
+            ticket_near_deadline(ticket, now)
+        except Exception:
+            logger.exception("escalate_near_breach_tickets: alert failed for ticket %s", ticket.id)
         escalated += 1
 
     if audit_rows:
